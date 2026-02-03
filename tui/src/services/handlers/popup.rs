@@ -836,3 +836,131 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
         }
     }
 }
+
+// ========== Message Action Popup Handlers ==========
+
+/// Close the message action popup
+pub fn handle_message_action_popup_close(state: &mut AppState) {
+    state.show_message_action_popup = false;
+    state.message_action_popup_selected = 0;
+    state.message_action_popup_position = None;
+    state.message_action_target_message_id = None;
+    state.message_action_target_text = None;
+}
+
+/// Navigate within the message action popup
+pub fn handle_message_action_popup_navigate(state: &mut AppState, direction: i32) {
+    let num_actions = crate::services::message_action_popup::MessageAction::all().len();
+    if num_actions == 0 {
+        return;
+    }
+
+    if direction < 0 {
+        if state.message_action_popup_selected > 0 {
+            state.message_action_popup_selected -= 1;
+        } else {
+            state.message_action_popup_selected = num_actions - 1;
+        }
+    } else {
+        state.message_action_popup_selected =
+            (state.message_action_popup_selected + 1) % num_actions;
+    }
+}
+
+/// Execute the selected action in the message action popup
+pub fn handle_message_action_popup_execute(state: &mut AppState) {
+    use crate::services::message_action_popup::{MessageAction, get_selected_action};
+    use crate::services::text_selection::copy_to_clipboard;
+    use crate::services::toast::Toast;
+
+    let Some(action) = get_selected_action(state) else {
+        handle_message_action_popup_close(state);
+        return;
+    };
+
+    match action {
+        MessageAction::CopyMessage => {
+            // Copy the message text to clipboard
+            if let Some(text) = &state.message_action_target_text {
+                match copy_to_clipboard(text) {
+                    Ok(()) => {
+                        state.toast = Some(Toast::success("Copied!"));
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to copy to clipboard: {}", e);
+                        state.toast = Some(Toast::error("Copy failed"));
+                    }
+                }
+            }
+        }
+        MessageAction::RevertToMessage => {
+            // Revert: remove all messages after the target message and revert file changes
+            if let Some(target_id) = state.message_action_target_message_id {
+                // Find the index of the target message
+                if let Some(target_idx) = state.messages.iter().position(|m| m.id == target_id) {
+                    // Remove all messages after the target message
+                    state.messages.truncate(target_idx + 1);
+
+                    // Revert all file changes
+                    use crate::services::changeset::FileState;
+
+                    // Clone the files to avoid borrow issues
+                    let files_to_revert: Vec<_> = state
+                        .changeset
+                        .files_in_order()
+                        .into_iter()
+                        .filter(|f| {
+                            f.state != FileState::Reverted
+                                && (f.state != FileState::Deleted || f.backup_path.is_some())
+                        })
+                        .map(|f| (f.path.clone(), f.state, f.clone()))
+                        .collect();
+
+                    let mut reverted_count = 0;
+                    for (path, old_state, file) in files_to_revert {
+                        if crate::services::changeset::Changeset::revert_file(
+                            &file,
+                            &state.session_id,
+                        )
+                        .is_ok()
+                        {
+                            // Update state based on what happened
+                            if let Some(tracked) = state.changeset.files.get_mut(&path) {
+                                if !std::path::Path::new(&path).exists() {
+                                    tracked.state = FileState::Deleted;
+                                } else {
+                                    match old_state {
+                                        FileState::Deleted => tracked.state = FileState::Created,
+                                        FileState::Removed => tracked.state = FileState::Modified,
+                                        FileState::Created => tracked.state = FileState::Deleted,
+                                        _ => tracked.state = FileState::Reverted,
+                                    }
+                                }
+                            }
+                            reverted_count += 1;
+                        }
+                    }
+
+                    // Clear todos
+                    state.todos.clear();
+
+                    // Invalidate message cache
+                    invalidate_message_lines_cache(state);
+
+                    // Show success message
+                    let message = if reverted_count > 0 {
+                        format!(
+                            "Reverted to message and undid {} file changes",
+                            reverted_count
+                        )
+                    } else {
+                        "Reverted to message".to_string()
+                    };
+                    state.toast = Some(Toast::success(&message));
+                }
+            }
+        }
+    }
+
+    handle_message_action_popup_close(state);
+}

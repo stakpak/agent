@@ -141,7 +141,13 @@ pub enum InputEvent {
     ToggleSidePanel,
     SidePanelNextSection,
     SidePanelToggleSection,
+
+    // Mouse events
     MouseClick(u16, u16),
+    MouseDragStart(u16, u16),
+    MouseDrag(u16, u16),
+    MouseDragEnd(u16, u16),
+    MouseMove(u16, u16),
 
     // Board tasks events
     RefreshBoardTasks,

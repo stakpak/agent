@@ -142,6 +142,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
+    // Store message area y offset for click detection
+    state.message_area_y = message_area.y;
+
     render_messages(
         f,
         state,
@@ -223,10 +226,80 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
+    // Render message action popup
+    if state.show_message_action_popup {
+        crate::services::message_action_popup::render_message_action_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render toast notification (highest z-index, always on top)
+    render_toast(f, state);
+}
+
+/// Render toast notification in top-right corner
+fn render_toast(f: &mut Frame, state: &mut AppState) {
+    // Check and clear expired toast
+    if let Some(toast) = &state.toast
+        && toast.is_expired()
+    {
+        state.toast = None;
+        return;
+    }
+
+    let Some(_toast) = &state.toast else {
+        return;
+    };
+
+    let text = "Copied to clipboard!";
+    let padding_x = 2;
+    let border_width = 1; // Left border using "▌"
+    let text_width = text.len() + (padding_x * 2);
+    let screen = f.area();
+
+    // Box dimensions
+    let box_width = (border_width + text_width) as u16;
+    let box_height = 3u16; // padding top + text + padding bottom
+
+    // Position in top-right corner with some margin
+    let x = screen.width.saturating_sub(box_width + 2);
+    let y = 1;
+
+    let area = Rect::new(x, y, box_width, box_height);
+
+    // Build lines: empty line, text line, empty line (vertically centered)
+    let padding_str = " ".repeat(text_width);
+    let text_line = format!("{:^width$}", text, width = text_width);
+
+    let lines = vec![
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(padding_str.clone(), Style::default().bg(Color::Black)),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(
+                text_line,
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Black)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(padding_str, Style::default().bg(Color::Black)),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines);
+
+    // Clear background and render toast
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(paragraph, area);
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -265,6 +338,12 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         state.scroll.min(max_scroll)
     };
 
+    // Debug: show area position
+    eprintln!(
+        "[RenderDebug] area.x={}, area.y={}, area.width={}, area.height={}, scroll={}",
+        area.x, area.y, area.width, area.height, scroll
+    );
+
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
 
@@ -276,6 +355,88 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
+
+    // Apply hover highlighting for user messages
+    // Use state.scroll (not local scroll) to match selection handler behavior
+    let visible_lines = if let Some(hover_row) = state.hover_row {
+        // Subtract 1 to account for visual offset (same as selection click handling)
+        let hover_row_adjusted = (hover_row as usize).saturating_sub(1);
+        let row_in_message_area = hover_row_adjusted.saturating_sub(state.message_area_y as usize);
+
+        // Check if hover is within message area
+        if row_in_message_area < height {
+            // Use state.scroll to match how selection calculates absolute_line
+            let absolute_line = state.scroll + row_in_message_area;
+
+            // Debug logging for hover
+            eprintln!(
+                "[HoverDebug] hover_row={}, adjusted={}, msg_area_y={}, row_in_area={}, state.scroll={}, render_scroll={}, absolute_line={}, map={:?}",
+                hover_row,
+                hover_row_adjusted,
+                state.message_area_y,
+                row_in_message_area,
+                state.scroll,
+                scroll,
+                absolute_line,
+                state
+                    .line_to_message_map
+                    .iter()
+                    .map(|(s, e, _, _, _)| (*s, *e))
+                    .collect::<Vec<_>>()
+            );
+
+            // Check if this line is a user message
+            let is_user_message =
+                state
+                    .line_to_message_map
+                    .iter()
+                    .any(|(start, end, _, is_user, _)| {
+                        *is_user && absolute_line >= *start && absolute_line < *end
+                    });
+
+            if is_user_message {
+                // Highlight this line with subtle dark background
+                visible_lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        if i == row_in_message_area {
+                            Line::from(
+                                line.spans
+                                    .into_iter()
+                                    .map(|span| {
+                                        ratatui::text::Span::styled(
+                                            span.content,
+                                            span.style.bg(Color::Indexed(240)).fg(Color::White),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        } else {
+                            line
+                        }
+                    })
+                    .collect()
+            } else {
+                visible_lines
+            }
+        } else {
+            visible_lines
+        }
+    } else {
+        visible_lines
+    };
+
+    // Apply selection highlighting if active
+    let visible_lines = if state.selection.active {
+        crate::services::text_selection::apply_selection_highlight(
+            visible_lines,
+            &state.selection,
+            scroll,
+        )
+    } else {
+        visible_lines
+    };
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
@@ -392,6 +553,9 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
         width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
+
+    // Store the content area for mouse click handling
+    state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);
