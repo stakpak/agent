@@ -135,12 +135,12 @@ allowed_tools = ["stakpak__view"]
         assert!(
             discovery
                 .allowed_tools
-                .contains(&"stakpak__run_command".to_string())
+                .contains(&"stakpak__view".to_string())
         );
         assert!(
             discovery
                 .allowed_tools
-                .contains(&"stakpak__view".to_string())
+                .contains(&"stakpak__search_docs".to_string())
         );
     }
 }
