@@ -10,11 +10,10 @@ use uuid::Uuid;
 
 pub mod client;
 pub mod error;
+pub mod local;
 pub mod models;
 pub mod stakpak;
-
-// Internal modules (not re-exported directly)
-pub(crate) mod local;
+pub mod storage;
 
 // Re-export unified AgentClient as the primary client
 pub use client::{
@@ -23,6 +22,15 @@ pub use client::{
 
 // Re-export Model types from stakai
 pub use stakai::{Model, ModelCost, ModelLimit};
+
+// Re-export storage types
+pub use storage::{
+    BoxedSessionStorage, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
+    CreateSessionRequest as StorageCreateSessionRequest, CreateSessionResult, ListCheckpointsQuery,
+    ListCheckpointsResult, ListSessionsQuery, ListSessionsResult, LocalStorage, Session,
+    SessionStats, SessionStatus, SessionStorage, SessionSummary, SessionVisibility, StakpakStorage,
+    StorageError, UpdateSessionRequest as StorageUpdateSessionRequest,
+};
 
 /// Find a model by ID string
 ///
@@ -78,8 +86,13 @@ pub fn find_model(model_str: &str, use_stakpak: bool) -> Option<Model> {
     })
 }
 
+/// Unified agent provider trait.
+///
+/// Extends `SessionStorage` so that any `AgentProvider` can also manage
+/// sessions and checkpoints.  This avoids passing two separate trait
+/// objects through the CLI call-chain.
 #[async_trait]
-pub trait AgentProvider: Send + Sync {
+pub trait AgentProvider: SessionStorage + Send + Sync {
     // Account
     async fn get_my_account(&self) -> Result<GetMyAccountResponse, String>;
     async fn get_billing_info(
@@ -100,22 +113,13 @@ pub trait AgentProvider: Send + Sync {
     ) -> Result<CreateRuleBookResponse, String>;
     async fn delete_rulebook(&self, uri: &str) -> Result<(), String>;
 
-    // Agent Sessions
-    async fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, String>;
-    async fn get_agent_session(&self, session_id: Uuid) -> Result<AgentSession, String>;
-    async fn get_agent_session_stats(&self, session_id: Uuid) -> Result<AgentSessionStats, String>;
-    async fn get_agent_checkpoint(&self, checkpoint_id: Uuid) -> Result<RunAgentOutput, String>;
-    async fn get_agent_session_latest_checkpoint(
-        &self,
-        session_id: Uuid,
-    ) -> Result<RunAgentOutput, String>;
-
     // Chat
     async fn chat_completion(
         &self,
         model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
+        session_id: Option<Uuid>,
     ) -> Result<ChatCompletionResponse, String>;
     async fn chat_completion_stream(
         &self,
@@ -123,6 +127,7 @@ pub trait AgentProvider: Send + Sync {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         headers: Option<HeaderMap>,
+        session_id: Option<Uuid>,
     ) -> Result<
         (
             std::pin::Pin<

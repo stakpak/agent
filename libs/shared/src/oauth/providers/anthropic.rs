@@ -43,7 +43,9 @@ impl AnthropicProvider {
 
     /// Create an API key from OAuth tokens (for "console" method)
     async fn create_api_key(&self, access_token: &str) -> OAuthResult<String> {
-        let client = reqwest::Client::new();
+        let client =
+            crate::tls_client::create_tls_client(crate::tls_client::TlsClientConfig::default())
+                .unwrap_or_else(|_| reqwest::Client::new());
         let response = client
             .post("https://api.anthropic.com/api/oauth/claude_cli/create_api_key")
             .header("authorization", format!("Bearer {}", access_token))

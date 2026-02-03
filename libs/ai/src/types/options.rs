@@ -2,6 +2,7 @@
 
 use super::Headers;
 use super::cache::CacheControl;
+use super::cache_strategy::CacheStrategy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -43,6 +44,39 @@ pub struct GenerateOptions {
     /// Custom HTTP headers
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<Headers>,
+
+    /// Session ID for request correlation and caching
+    ///
+    /// For OpenAI: Used as `prompt_cache_key` to improve cache routing
+    /// For other providers: Used for logging/telemetry correlation
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::GenerateOptions;
+    ///
+    /// let options = GenerateOptions::default()
+    ///     .with_session_id("session-12345");
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+
+    /// Caching strategy for this request
+    ///
+    /// Controls how cache breakpoints are applied. Defaults to `CacheStrategy::Auto`
+    /// which applies provider-optimized caching.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{GenerateOptions, CacheStrategy};
+    ///
+    /// // Disable caching for this request
+    /// let options = GenerateOptions::default()
+    ///     .with_cache_strategy(CacheStrategy::None);
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_strategy: Option<CacheStrategy>,
 }
 
 impl GenerateOptions {
@@ -101,6 +135,38 @@ impl GenerateOptions {
             .get_or_insert_with(Headers::new)
             .insert(key, value);
         self
+    }
+
+    /// Set session ID for caching and correlation
+    ///
+    /// For OpenAI, this can be used as the `prompt_cache_key` which improves
+    /// cache hit rates by influencing request routing.
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Set caching strategy
+    ///
+    /// Override the default automatic caching behavior.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{GenerateOptions, CacheStrategy};
+    ///
+    /// // Custom Anthropic caching: only cache system, 3 tail messages
+    /// let options = GenerateOptions::default()
+    ///     .with_cache_strategy(CacheStrategy::anthropic(false, true, 3));
+    /// ```
+    pub fn with_cache_strategy(mut self, strategy: CacheStrategy) -> Self {
+        self.cache_strategy = Some(strategy);
+        self
+    }
+
+    /// Get the effective cache strategy (defaults to Auto if not set)
+    pub fn effective_cache_strategy(&self) -> CacheStrategy {
+        self.cache_strategy.clone().unwrap_or_default()
     }
 }
 

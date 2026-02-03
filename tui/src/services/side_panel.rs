@@ -2,9 +2,8 @@
 //!
 //! This module handles rendering the side panel with its four sections:
 //! - Context: Token usage, credits, session time, model
-//! - Todos: Task list parsed from task.md or agent-generated
+//! - Tasks: Task list from agent-board cards
 //! - Changeset: Files modified with edit history
-//! - Todos: Task list parsed from task.md or agent-generated
 
 use crate::app::AppState;
 use crate::services::changeset::{SidePanelSection, TodoStatus};
@@ -55,9 +54,9 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .get(&SidePanelSection::Billing)
         .copied()
         .unwrap_or(false);
-    let todos_collapsed = state
+    let tasks_collapsed = state
         .side_panel_section_collapsed
-        .get(&SidePanelSection::Todos)
+        .get(&SidePanelSection::Tasks)
         .copied()
         .unwrap_or(false);
     let changeset_collapsed = state
@@ -69,7 +68,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let context_height = if context_collapsed {
         collapsed_height
     } else {
-        5 // Header + Tokens + Model + Provider
+        6 // Header + Tokens + Model + Provider + Profile
     };
 
     // Billing section is hidden when billing_info is None (local mode)
@@ -81,10 +80,10 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         4 // Header + Plan + Credits
     };
 
-    // Calculate todo content width for wrapping
-    let todo_content_width = padded_area.width.saturating_sub(10) as usize; // Accounts for LEFT_PADDING + symbol + spacing
+    // Calculate task content width for wrapping
+    let task_content_width = padded_area.width.saturating_sub(10) as usize; // Accounts for LEFT_PADDING + symbol + spacing
 
-    let todos_height = if todos_collapsed {
+    let tasks_height = if tasks_collapsed {
         collapsed_height
     } else if state.todos.is_empty() {
         3 // Header + "No tasks" + blank line
@@ -92,11 +91,11 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         // Calculate total lines needed including wrapped lines
         let mut total_lines = 1; // Header
         for todo in &state.todos {
-            let wrapped_lines = wrap_text(&todo.text, todo_content_width);
+            let wrapped_lines = wrap_text(&todo.text, task_content_width);
             total_lines += wrapped_lines.len().max(1);
         }
         total_lines += 1; // blank line spacing
-        (total_lines as u16).min(15) // Increase max to accommodate wrapping
+        (total_lines as u16).min(30) // Allow more items to be visible
     };
 
     let changeset_height = if changeset_collapsed {
@@ -111,7 +110,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .constraints([
             Constraint::Length(context_height),
             Constraint::Length(billing_height),
-            Constraint::Length(todos_height),
+            Constraint::Length(tasks_height),
             Constraint::Length(changeset_height),
             Constraint::Min(0),                // Remaining space
             Constraint::Length(footer_height), // Footer
@@ -128,14 +127,14 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .insert(SidePanelSection::Billing, chunks[1]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Todos, chunks[2]);
+        .insert(SidePanelSection::Tasks, chunks[2]);
     state
         .side_panel_areas
         .insert(SidePanelSection::Changeset, chunks[3]);
 
     render_context_section(f, state, chunks[0], context_collapsed);
     render_billing_section(f, state, chunks[1], billing_collapsed);
-    render_todos_section(f, state, chunks[2], todos_collapsed);
+    render_tasks_section(f, state, chunks[2], tasks_collapsed);
     render_changeset_section(f, state, chunks[3], changeset_collapsed);
     render_footer_section(f, state, chunks[5]);
 }
@@ -232,6 +231,13 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     };
     lines.push(make_row("Provider", provider, Color::DarkGray));
 
+    // Profile
+    lines.push(make_row(
+        "Profile",
+        state.current_profile_name.clone(),
+        Color::DarkGray,
+    ));
+
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);
 }
@@ -307,20 +313,22 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     f.render_widget(paragraph, area);
 }
 
-/// Render the Todos section
-fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_focus == SidePanelSection::Todos;
+/// Render the Tasks section
+fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
+    let focused = state.side_panel_focus == SidePanelSection::Tasks;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
-    let count = if state.todos.is_empty() {
+    let progress = if let Some(ref p) = state.task_progress {
+        format!(" ({}/{})", p.completed, p.total)
+    } else if state.todos.is_empty() {
         String::new()
     } else {
         format!(" ({})", state.todos.len())
     };
 
     let header = Line::from(Span::styled(
-        format!("{}{} Todos{}", LEFT_PADDING, collapse_indicator, count),
+        format!("{}{} Tasks{}", LEFT_PADDING, collapse_indicator, progress),
         header_style,
     ));
 
@@ -340,38 +348,91 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
-        // Calculate available width for todo text (after LEFT_PADDING + symbol + spaces)
-        let prefix_width = LEFT_PADDING.len() + 6; // "  [x] " = 6 chars
-        let content_width = (area.width as usize).saturating_sub(prefix_width + 2);
+        use crate::services::changeset::TodoItemType;
+
+        // Calculate available width for todo text
+        let card_prefix_width = LEFT_PADDING.len() + 6; // "  [x] " = 6 chars
+        let checklist_prefix_width = LEFT_PADDING.len() + 9; // "     └ [x] " = 9 chars
+        let card_content_width = (area.width as usize).saturating_sub(card_prefix_width + 2);
+        let checklist_content_width =
+            (area.width as usize).saturating_sub(checklist_prefix_width + 2);
 
         for todo in &state.todos {
             let (symbol, symbol_color, text_color) = match todo.status {
-                TodoStatus::Done => ("[x]", Color::Green, Color::Reset),
-                TodoStatus::InProgress => ("[/]", Color::Yellow, Color::Reset),
-                TodoStatus::Pending => ("[ ]", Color::DarkGray, Color::DarkGray),
+                TodoStatus::Done => ("✓", Color::Green, Color::DarkGray),
+                TodoStatus::InProgress => ("◐", Color::Yellow, Color::Reset),
+                TodoStatus::Pending => ("○", Color::DarkGray, Color::DarkGray),
             };
 
-            // Wrap the todo text
-            let wrapped_lines = wrap_text(&todo.text, content_width);
+            match todo.item_type {
+                TodoItemType::Card => {
+                    // Card: bold with status symbol
+                    let wrapped_lines = wrap_text(&todo.text, card_content_width);
 
-            for (i, line_text) in wrapped_lines.iter().enumerate() {
-                if i == 0 {
-                    // First line includes the symbol
+                    for (i, line_text) in wrapped_lines.iter().enumerate() {
+                        if i == 0 {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{}  {} ", LEFT_PADDING, symbol),
+                                    Style::default().fg(symbol_color),
+                                ),
+                                Span::styled(
+                                    line_text.clone(),
+                                    Style::default().fg(text_color).add_modifier(Modifier::BOLD),
+                                ),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}    ", LEFT_PADDING), Style::default()),
+                                Span::styled(
+                                    line_text.clone(),
+                                    Style::default().fg(text_color).add_modifier(Modifier::BOLD),
+                                ),
+                            ]));
+                        }
+                    }
+                }
+                TodoItemType::ChecklistItem => {
+                    // Checklist item: indented with tree connector
+                    let wrapped_lines = wrap_text(&todo.text, checklist_content_width);
+
+                    for (i, line_text) in wrapped_lines.iter().enumerate() {
+                        if i == 0 {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{}     └ ", LEFT_PADDING),
+                                    Style::default().fg(Color::DarkGray),
+                                ),
+                                Span::styled(
+                                    format!("{} ", symbol),
+                                    Style::default().fg(symbol_color),
+                                ),
+                                Span::styled(line_text.clone(), Style::default().fg(text_color)),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{}         ", LEFT_PADDING),
+                                    Style::default(),
+                                ),
+                                Span::styled(line_text.clone(), Style::default().fg(text_color)),
+                            ]));
+                        }
+                    }
+                }
+                TodoItemType::CollapsedIndicator => {
+                    // Collapsed indicator: italic, dimmed, shows count
                     lines.push(Line::from(vec![
                         Span::styled(
-                            format!("{}  {} ", LEFT_PADDING, symbol),
-                            Style::default().fg(symbol_color),
+                            format!("{}     ⋮ ", LEFT_PADDING),
+                            Style::default().fg(Color::DarkGray),
                         ),
-                        Span::styled(line_text.clone(), Style::default().fg(text_color)),
-                    ]));
-                } else {
-                    // Continuation lines are indented to align with the text
-                    lines.push(Line::from(vec![
                         Span::styled(
-                            format!("{}      ", LEFT_PADDING), // Same indent as after symbol
-                            Style::default().fg(Color::Reset),
+                            todo.text.clone(),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
                         ),
-                        Span::styled(line_text.clone(), Style::default().fg(text_color)),
                     ]));
                 }
             }
@@ -572,29 +633,17 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer section with version and profile
-fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
+/// Render the footer section with version and shortcuts
+fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
     let mut lines = Vec::new();
 
     let version = env!("CARGO_PKG_VERSION");
-    let profile = &state.current_profile_name;
-    let available_width = area.width as usize;
 
-    // Line 1: Version (left) and Profile (right)
-    let left_part = format!("{}v{}", LEFT_PADDING, version);
-    let right_part = format!("profile {} ", profile);
-    let total_content = left_part.len() + right_part.len();
-    let spacing = available_width.saturating_sub(total_content).max(1);
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("{}v{}", LEFT_PADDING, version),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::raw(" ".repeat(spacing)),
-        Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-        Span::styled(profile, Style::default().fg(Color::Reset)),
-    ]));
+    // Line 1: Version (left)
+    lines.push(Line::from(vec![Span::styled(
+        format!("{}v{}", LEFT_PADDING, version),
+        Style::default().fg(Color::DarkGray),
+    )]));
 
     // Empty line between version/profile and shortcuts
     lines.push(Line::from(""));

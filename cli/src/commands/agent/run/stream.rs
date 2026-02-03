@@ -19,19 +19,19 @@ use uuid::Uuid;
 ///
 /// This distinction is important because some providers (like Anthropic via StakAI adapter)
 /// send multiple tool calls with the same index but different IDs.
-struct ToolCallAccumulator {
+pub struct ToolCallAccumulator {
     tool_calls: Vec<ToolCall>,
 }
 
 impl ToolCallAccumulator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tool_calls: Vec::new(),
         }
     }
 
     /// Process a tool call delta and accumulate it into the appropriate tool call.
-    fn process_delta(&mut self, delta: &ToolCallDelta) {
+    pub fn process_delta(&mut self, delta: &ToolCallDelta) {
         let delta_id = delta.id.as_deref().filter(|id| !id.is_empty());
         let delta_func = delta.function.as_ref();
 
@@ -93,7 +93,7 @@ impl ToolCallAccumulator {
     }
 
     /// Get the accumulated tool calls, filtering out empty placeholders.
-    fn into_tool_calls(self) -> Vec<ToolCall> {
+    pub fn into_tool_calls(self) -> Vec<ToolCall> {
         self.tool_calls
             .into_iter()
             .filter(|tc| !tc.id.is_empty())
@@ -153,6 +153,11 @@ pub async fn process_responses_stream(
 
                     // Send usage to TUI for display immediately when we receive it
                     send_input_event(input_tx, InputEvent::StreamUsage(usage.clone())).await?;
+                }
+
+                // Skip chunks with no choices (e.g., usage-only events)
+                if response.choices.is_empty() {
+                    continue;
                 }
 
                 let delta = &response.choices[0].delta;
@@ -282,6 +287,187 @@ mod tests {
             usage: None,
             metadata: None,
         }
+    }
+
+    fn create_content_response(content: &str) -> ChatCompletionStreamResponse {
+        ChatCompletionStreamResponse {
+            id: "test".to_string(),
+            object: "chat.completion.chunk".to_string(),
+            created: 0,
+            model: "test-model".to_string(),
+            choices: vec![ChatCompletionStreamChoice {
+                index: 0,
+                delta: ChatMessageDelta {
+                    role: None,
+                    content: Some(content.to_string()),
+                    tool_calls: None,
+                },
+                finish_reason: None,
+            }],
+            usage: None,
+            metadata: None,
+        }
+    }
+
+    fn create_usage_only_response() -> ChatCompletionStreamResponse {
+        ChatCompletionStreamResponse {
+            id: "test".to_string(),
+            object: "chat.completion.chunk".to_string(),
+            created: 0,
+            model: "".to_string(),
+            choices: vec![], // Empty choices — usage-only event
+            usage: Some(LLMTokenUsage {
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                total_tokens: 150,
+                prompt_tokens_details: None,
+            }),
+            metadata: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_choices_does_not_panic() {
+        // This is the exact scenario that caused the index-out-of-bounds panic:
+        // Some providers send a final event with usage data but no choices.
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses = vec![
+            Ok(create_content_response("Hello")),
+            Ok(create_usage_only_response()), // Empty choices — was panicking
+        ];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        // Content should still be accumulated from the first chunk
+        let content = response.choices[0]
+            .message
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string();
+        assert_eq!(content, "Hello");
+        // Usage from the empty-choices event should still be captured
+        assert_eq!(response.usage.prompt_tokens, 100);
+        assert_eq!(response.usage.completion_tokens, 50);
+        assert_eq!(response.usage.total_tokens, 150);
+    }
+
+    #[tokio::test]
+    async fn test_only_usage_events_no_content() {
+        // Stream with only usage events and no content at all
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses = vec![Ok(create_usage_only_response())];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.choices.len(), 1);
+        assert!(response.choices[0].message.content.is_none());
+        assert!(response.choices[0].message.tool_calls.is_none());
+        assert_eq!(response.usage.total_tokens, 150);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_empty_choices_interspersed() {
+        // Multiple empty-choices events interspersed with content
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses = vec![
+            Ok(create_usage_only_response()),
+            Ok(create_content_response("Hello")),
+            Ok(create_usage_only_response()),
+            Ok(create_content_response(" World")),
+            Ok(create_usage_only_response()),
+        ];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        let content = response.choices[0]
+            .message
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string();
+        assert_eq!(content, "Hello World");
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream() {
+        // Completely empty stream — no events at all
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses: Vec<Result<ChatCompletionStreamResponse, ApiStreamError>> = vec![];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        // Should have one choice with empty content
+        assert_eq!(response.choices.len(), 1);
+        assert!(response.choices[0].message.content.is_none());
+        assert!(response.choices[0].message.tool_calls.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_content_accumulation_across_chunks() {
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses = vec![
+            Ok(create_content_response("Hello")),
+            Ok(create_content_response(", ")),
+            Ok(create_content_response("world")),
+            Ok(create_content_response("!")),
+        ];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        let content = response.choices[0]
+            .message
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string();
+        assert_eq!(content, "Hello, world!");
+    }
+
+    #[tokio::test]
+    async fn test_stream_error_propagated() {
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+
+        let responses: Vec<Result<ChatCompletionStreamResponse, ApiStreamError>> = vec![
+            Ok(create_content_response("start")),
+            Err(ApiStreamError::Unknown("connection lost".to_string())),
+        ];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let result = process_responses_stream(test_stream, &input_tx).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

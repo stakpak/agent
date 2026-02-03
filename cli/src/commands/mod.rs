@@ -11,6 +11,7 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod board;
 pub mod mcp;
 pub mod warden;
 
@@ -154,6 +155,13 @@ pub enum Commands {
         volume: Vec<String>,
         #[command(subcommand)]
         command: Option<warden::WardenCommands>,
+    },
+    /// Task board for tracking complex work (cards, checklists, comments)
+    /// Run `stakpak board --help` for available commands.
+    Board {
+        /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Update Stakpak Agent to the latest version
     Update,
@@ -436,6 +444,9 @@ impl Commands {
                     }
                 }
             }
+            Commands::Board { args } => {
+                board::run_board(args).await?;
+            }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
             }
@@ -443,6 +454,13 @@ impl Commands {
                 auth_command.run(config).await?;
             }
             Commands::Acp { system_prompt_file } => {
+                // Force auto-update before starting ACP session (no prompt)
+                use crate::utils::check_update::force_auto_update;
+                if let Err(e) = force_auto_update().await {
+                    // Log error but continue - don't block ACP if update check fails
+                    eprintln!("Update check failed: {}", e);
+                }
+
                 let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {
                     match std::fs::read_to_string(system_prompt_file_path) {
                         Ok(content) => {

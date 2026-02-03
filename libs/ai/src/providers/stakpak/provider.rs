@@ -1,18 +1,19 @@
 //! Stakpak provider implementation
-//!
-//! Stakpak provides an OpenAI-compatible API, so we reuse the OpenAI
-//! conversion and streaming logic.
 
-use super::types::StakpakProviderConfig;
+use super::stream::create_stream;
+use super::types::{StakpakProviderConfig, StakpakResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::providers::openai::convert::{from_openai_response, to_openai_request};
-use crate::providers::openai::stream::create_stream;
-use crate::providers::openai::types::ChatCompletionResponse;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
+use crate::providers::openai::convert::to_openai_request;
+use crate::providers::tls::create_platform_tls_client;
+use crate::types::{
+    FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
+    InputTokenDetails, Model, OutputTokenDetails, ResponseContent, ToolCall, Usage,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
+use serde_json::json;
 
 /// Stakpak provider
 ///
@@ -29,7 +30,7 @@ impl StakpakProvider {
             return Err(Error::MissingApiKey("stakpak".to_string()));
         }
 
-        let client = Client::new();
+        let client = create_platform_tls_client()?;
         Ok(Self { config, client })
     }
 
@@ -61,7 +62,7 @@ impl Provider for StakpakProvider {
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}/v1/chat/completions", self.config.base_url);
 
-        // Stakpak uses OpenAI-compatible API, reuse OpenAI conversion
+        // Stakpak uses OpenAI-compatible API for requests
         let openai_req = to_openai_request(&request, false);
 
         let headers = self.build_headers(request.options.headers.as_ref());
@@ -83,8 +84,8 @@ impl Provider for StakpakProvider {
             )));
         }
 
-        let openai_resp: ChatCompletionResponse = response.json().await?;
-        from_openai_response(openai_resp)
+        let resp: StakpakResponse = response.json().await?;
+        from_stakpak_response(resp)
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
@@ -153,4 +154,96 @@ impl Provider for StakpakProvider {
 
         Ok(models)
     }
+}
+
+/// Convert Stakpak response to SDK response
+fn from_stakpak_response(resp: StakpakResponse) -> Result<GenerateResponse> {
+    let choice = resp
+        .choices
+        .first()
+        .ok_or_else(|| Error::invalid_response("No choices in response"))?;
+
+    let content = parse_stakpak_message(&choice.message)?;
+
+    let finish_reason = match choice.finish_reason.as_deref() {
+        Some("stop") => FinishReason::with_raw(FinishReasonKind::Stop, "stop"),
+        Some("length") => FinishReason::with_raw(FinishReasonKind::Length, "length"),
+        Some("tool_calls") => FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_calls"),
+        Some("content_filter") => {
+            FinishReason::with_raw(FinishReasonKind::ContentFilter, "content_filter")
+        }
+        Some(raw) => FinishReason::with_raw(FinishReasonKind::Other, raw),
+        None => FinishReason::other(),
+    };
+
+    let prompt_tokens = resp.usage.prompt_tokens;
+    let completion_tokens = resp.usage.completion_tokens;
+
+    // Extract cache tokens from Stakpak's response format
+    let details = resp.usage.prompt_tokens_details.as_ref();
+    let cache_read = details.and_then(|d| d.cache_read_input_tokens).unwrap_or(0);
+    let cache_write = details
+        .and_then(|d| d.cache_write_input_tokens)
+        .unwrap_or(0);
+
+    let usage = Usage::with_details(
+        InputTokenDetails {
+            total: Some(prompt_tokens),
+            no_cache: Some(
+                prompt_tokens
+                    .saturating_sub(cache_read)
+                    .saturating_sub(cache_write),
+            ),
+            cache_read: (cache_read > 0).then_some(cache_read),
+            cache_write: (cache_write > 0).then_some(cache_write),
+        },
+        OutputTokenDetails {
+            total: Some(completion_tokens),
+            text: None,
+            reasoning: None,
+        },
+        Some(serde_json::to_value(&resp.usage).unwrap_or_default()),
+    );
+
+    Ok(GenerateResponse {
+        content,
+        usage,
+        finish_reason,
+        metadata: Some(json!({
+            "id": resp.id,
+            "model": resp.model,
+            "created": resp.created,
+            "object": resp.object,
+        })),
+        warnings: None,
+    })
+}
+
+/// Parse Stakpak message content
+fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<ResponseContent>> {
+    let mut content = Vec::new();
+
+    // Handle text content
+    if let Some(content_value) = &msg.content
+        && let Some(text) = content_value.as_str()
+        && !text.is_empty()
+    {
+        content.push(ResponseContent::Text {
+            text: text.to_string(),
+        });
+    }
+
+    // Handle tool calls
+    if let Some(tool_calls) = &msg.tool_calls {
+        for tc in tool_calls {
+            content.push(ResponseContent::ToolCall(ToolCall {
+                id: tc.id.clone(),
+                name: tc.function.name.clone(),
+                arguments: serde_json::from_str(&tc.function.arguments)
+                    .unwrap_or_else(|_| json!({})),
+            }));
+        }
+    }
+
+    Ok(content)
 }

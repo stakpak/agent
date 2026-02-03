@@ -17,6 +17,16 @@
 //! | `gen_ai.usage.input_tokens` | Prompt tokens |
 //! | `gen_ai.usage.output_tokens` | Completion tokens |
 //! | `gen_ai.response.finish_reasons` | Array of finish reasons |
+//!
+//! ## Non-Standard Attributes
+//!
+//! The following attributes are NOT part of the official OTel GenAI semantic conventions
+//! but are useful for tracking provider-specific cache token usage:
+//!
+//! | Attribute | Description |
+//! |-----------|-------------|
+//! | `gen_ai.usage.cache_read_input_tokens` | Tokens read from cache (cache hit) |
+//! | `gen_ai.usage.cache_write_input_tokens` | Tokens written to cache (cache miss) |
 
 use crate::types::{ContentPart, GenerateResponse, Message, ResponseContent, Role, Tool};
 use std::collections::HashMap;

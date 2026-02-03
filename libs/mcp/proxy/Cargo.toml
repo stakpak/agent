@@ -17,5 +17,7 @@ rmcp = { workspace = true }
 tracing = { workspace = true }
 toml = { workspace = true }
 reqwest = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }

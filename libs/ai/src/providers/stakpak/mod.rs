@@ -4,6 +4,7 @@
 //! This provider routes inference requests through Stakpak's infrastructure.
 
 mod provider;
+mod stream;
 mod types;
 
 pub use provider::StakpakProvider;

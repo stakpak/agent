@@ -17,6 +17,8 @@ rmcp = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
 reqwest = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"

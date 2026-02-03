@@ -1,7 +1,4 @@
 use crate::agent::run::helpers::system_message;
-use crate::commands::agent::run::checkpoint::{
-    extract_checkpoint_id_from_messages, get_checkpoint_messages,
-};
 use crate::commands::agent::run::helpers::{
     add_agents_md, add_local_context, add_rulebooks, add_subagents, tool_result, user_message,
 };
@@ -11,7 +8,9 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
+use stakpak_api::{
+    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
+};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
@@ -97,41 +96,37 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         client_config = client_config.with_recovery_model(recovery_model.clone());
     }
 
-    let client: Box<dyn AgentProvider> = Box::new(
-        AgentClient::new(client_config)
-            .await
-            .map_err(|e| format!("Failed to create client: {}", e))?,
-    );
+    let client = AgentClient::new(client_config)
+        .await
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    let mut current_session_id: Option<Uuid> = None;
+    let mut current_checkpoint_id: Option<Uuid> = None;
 
     // Load checkpoint messages if provided
-    if let Some(checkpoint_id) = config.checkpoint_id {
+    if let Some(checkpoint_id_str) = config.checkpoint_id {
         let checkpoint_start = Instant::now();
-        let mut checkpoint_messages =
-            get_checkpoint_messages(client.as_ref(), &checkpoint_id).await?;
-        llm_response_time += checkpoint_start.elapsed();
 
-        // Append checkpoint_id to the last assistant message if present
-        if let Some(last_message) = checkpoint_messages.iter_mut().rev().find(|message| {
-            message.role != stakpak_shared::models::integrations::openai::Role::User
-                && message.role != stakpak_shared::models::integrations::openai::Role::Tool
-        }) && last_message.role == stakpak_shared::models::integrations::openai::Role::Assistant
-        {
-            last_message.content = Some(
-                stakpak_shared::models::integrations::openai::MessageContent::String(format!(
-                    "{}\n<checkpoint_id>{}</checkpoint_id>",
-                    last_message.content.as_ref().unwrap_or(
-                        &stakpak_shared::models::integrations::openai::MessageContent::String(
-                            String::new()
-                        )
-                    ),
-                    checkpoint_id
-                )),
-            );
+        // Parse checkpoint UUID
+        let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str)
+            .map_err(|_| format!("Invalid checkpoint ID: {}", checkpoint_id_str))?;
+
+        // Get checkpoint with session info
+        match client.get_checkpoint(checkpoint_uuid).await {
+            Ok(checkpoint) => {
+                current_session_id = Some(checkpoint.session_id);
+                current_checkpoint_id = Some(checkpoint_uuid);
+                chat_messages.extend(checkpoint.state.messages);
+            }
+            Err(e) => {
+                return Err(format!("Failed to get checkpoint: {}", e));
+            }
         }
-        chat_messages.extend(checkpoint_messages);
+
+        llm_response_time += checkpoint_start.elapsed();
         print!(
             "{}",
-            renderer.render_info(&format!("Resuming from checkpoint ({})", checkpoint_id))
+            renderer.render_info(&format!("Resuming from checkpoint ({})", checkpoint_id_str))
         );
     }
 
@@ -176,8 +171,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
 
-    let mut current_session_id: Option<Uuid> = None;
-
     loop {
         step += 1;
         if step > max_steps {
@@ -198,6 +191,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 config.model.clone(),
                 chat_messages.clone(),
                 Some(tools.clone()),
+                current_session_id,
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -228,12 +222,17 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
         chat_messages.push(response.choices[0].message.clone());
 
-        if current_session_id.is_none()
-            && let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages)
-            && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
-            && let Ok(checkpoint_with_session) = client.get_agent_checkpoint(checkpoint_uuid).await
-        {
-            current_session_id = Some(checkpoint_with_session.session.id);
+        // Get session_id and checkpoint_id from the response
+        // response.id is the checkpoint_id created by chat_completion
+        if let Ok(checkpoint_uuid) = Uuid::parse_str(&response.id) {
+            current_checkpoint_id = Some(checkpoint_uuid);
+
+            // Get session_id from checkpoint if we don't have it yet
+            if current_session_id.is_none()
+                && let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await
+            {
+                current_session_id = Some(checkpoint.session_id);
+            }
         }
 
         let tool_calls = response.choices[0].message.tool_calls.as_ref();
@@ -343,13 +342,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         }
     }
 
-    // Extract final checkpoint if available
-    let latest_checkpoint = chat_messages
-        .iter()
-        .rev()
-        .find(|m| m.role == stakpak_shared::models::integrations::openai::Role::Assistant)
-        .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
-
     let elapsed = start_time.elapsed();
     let tool_execution_time = elapsed.saturating_sub(llm_response_time);
 
@@ -416,7 +408,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     }
 
     // Save checkpoint to file if available
-    if let Some(checkpoint_id) = &latest_checkpoint {
+    if let Some(checkpoint_id) = current_checkpoint_id {
         match LocalStore::write_session_data("checkpoint", checkpoint_id.to_string().as_str()) {
             Ok(path) => {
                 print!(
@@ -432,11 +424,19 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 );
             }
         }
+
+        // Print resume command
+        println!("\nTo resume, run:\nstakpak -c {}\n", checkpoint_id);
     } else {
         print!(
             "{}",
             renderer.render_info("No checkpoint available to save")
         );
+    }
+
+    // Print session ID if available
+    if let Some(session_id) = current_session_id {
+        println!("Session ID: {}", session_id);
     }
 
     // Gracefully shutdown MCP server and proxy

@@ -6,8 +6,8 @@
 
 // Sub-modules
 pub(crate) mod context_managers;
-pub mod db;
 pub mod hooks;
+pub mod storage;
 
 #[cfg(test)]
 mod tests;

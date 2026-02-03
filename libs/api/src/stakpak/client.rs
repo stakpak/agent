@@ -9,19 +9,21 @@ use super::{
     StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, models::*,
 };
 use crate::models::{
-    CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook, RuleBook,
+    CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
+    ListRulebooksResponse, RuleBook,
 };
-use reqwest::{Client as ReqwestClient, Response, header};
+use reqwest::{Response, header};
 use rmcp::model::Content;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use stakpak_shared::models::billing::BillingResponse;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use uuid::Uuid;
 
 /// Client for Stakpak's non-inference APIs
 #[derive(Clone, Debug)]
 pub struct StakpakApiClient {
-    client: ReqwestClient,
+    client: reqwest::Client,
     base_url: String,
 }
 
@@ -56,11 +58,11 @@ impl StakpakApiClient {
                 .map_err(|e| e.to_string())?,
         );
 
-        let client = ReqwestClient::builder()
-            .default_headers(headers)
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = create_tls_client(
+            TlsClientConfig::default()
+                .with_headers(headers)
+                .with_timeout(std::time::Duration::from_secs(300)),
+        )?;
 
         Ok(Self {
             client,
@@ -248,12 +250,20 @@ impl StakpakApiClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        self.handle_response(response).await
+
+        let response = self.handle_response_error(response).await?;
+        let value: Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<ListRulebooksResponse>(value) {
+            Ok(response) => Ok(response.results),
+            Err(e) => Err(format!("Failed to deserialize rulebooks response: {}", e)),
+        }
     }
 
     /// Get a rulebook by URI
     pub async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
-        let url = format!("{}/v1/rules/{}", self.base_url, uri);
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
         let response = self
             .client
             .get(&url)
@@ -281,7 +291,8 @@ impl StakpakApiClient {
 
     /// Delete a rulebook
     pub async fn delete_rulebook(&self, uri: &str) -> Result<(), String> {
-        let url = format!("{}/v1/rules/{}", self.base_url, uri);
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
         let response = self
             .client
             .delete(&url)
@@ -298,7 +309,7 @@ impl StakpakApiClient {
     /// Search documentation
     pub async fn search_docs(&self, req: &SearchDocsRequest) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "paks-search-docs".to_string(),
+            name: "search_docs".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -307,7 +318,7 @@ impl StakpakApiClient {
     /// Search memory
     pub async fn search_memory(&self, req: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "memory-search".to_string(),
+            name: "search_memory".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -334,7 +345,7 @@ impl StakpakApiClient {
         req: &SlackReadMessagesRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-read-messages".to_string(),
+            name: "slack_read_messages".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -346,7 +357,7 @@ impl StakpakApiClient {
         req: &SlackReadRepliesRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-read-replies".to_string(),
+            name: "slack_read_replies".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -358,7 +369,7 @@ impl StakpakApiClient {
         req: &SlackSendMessageRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-send-message".to_string(),
+            name: "slack_send_message".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await

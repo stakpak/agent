@@ -6,6 +6,7 @@ use super::stream::create_stream;
 use super::types::{AnthropicConfig, AnthropicResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
+use crate::providers::tls::create_platform_tls_client;
 use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -30,7 +31,7 @@ impl AnthropicProvider {
             return Err(Error::MissingApiKey("anthropic".to_string()));
         }
 
-        let client = Client::new();
+        let client = create_platform_tls_client()?;
         Ok(Self { config, client })
     }
 
@@ -70,7 +71,7 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, false)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, false)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
@@ -100,7 +101,7 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, true)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, true)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),

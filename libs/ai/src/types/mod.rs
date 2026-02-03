@@ -1,6 +1,7 @@
 //! Core types for the AI SDK
 
 mod cache;
+mod cache_strategy;
 mod cache_validator;
 mod headers;
 mod message;
@@ -12,6 +13,7 @@ mod stream;
 
 // Cache control types
 pub use cache::{CacheControl, CacheWarning, CacheWarningType, PromptCacheRetention};
+pub use cache_strategy::{AnthropicCacheConfig, CacheStrategy};
 pub use cache_validator::{CacheContext, CacheControlValidator};
 
 // Headers

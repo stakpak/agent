@@ -882,6 +882,30 @@ impl From<ChatMessage> for LLMMessage {
             }
         }
 
+        // Handle tool result messages: when role is Tool and tool_call_id is present,
+        // convert the content to a ToolResult content part. This is the generic
+        // intermediate representation - each provider's conversion layer handles
+        // the specifics (e.g., Anthropic converts to user role with tool_result blocks)
+        if chat_message.role == Role::Tool
+            && let Some(tool_call_id) = chat_message.tool_call_id
+        {
+            // Extract content as string for the tool result
+            let content_str = content_parts
+                .iter()
+                .filter_map(|p| match p {
+                    LLMMessageTypedContent::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Replace content with a single ToolResult
+            content_parts = vec![LLMMessageTypedContent::ToolResult {
+                tool_use_id: tool_call_id,
+                content: content_str,
+            }];
+        }
+
         LLMMessage {
             role: chat_message.role.to_string(),
             content: if content_parts.is_empty() {
@@ -1001,6 +1025,133 @@ mod tests {
         match &chat_message.content {
             Some(MessageContent::String(text)) => assert_eq!(text, "Hello, world!"),
             _ => panic!("Expected string content"),
+        }
+    }
+
+    #[test]
+    fn test_chat_message_to_llm_message_tool_result() {
+        // Test that Tool role messages with tool_call_id are converted to ToolResult content
+        // This is critical for Anthropic compatibility - the provider layer converts
+        // role="tool" to role="user" with tool_result content blocks
+        let chat_message = ChatMessage {
+            role: Role::Tool,
+            content: Some(MessageContent::String("Tool execution result".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: Some("toolu_01Abc123".to_string()),
+            usage: None,
+            ..Default::default()
+        };
+
+        let llm_message: LLMMessage = chat_message.into();
+
+        // Role should be preserved as "tool" - provider layer handles conversion
+        assert_eq!(llm_message.role, "tool");
+
+        // Content should be a ToolResult with the tool_call_id
+        match &llm_message.content {
+            LLMMessageContent::List(parts) => {
+                assert_eq!(parts.len(), 1, "Should have exactly one content part");
+                match &parts[0] {
+                    LLMMessageTypedContent::ToolResult {
+                        tool_use_id,
+                        content,
+                    } => {
+                        assert_eq!(tool_use_id, "toolu_01Abc123");
+                        assert_eq!(content, "Tool execution result");
+                    }
+                    _ => panic!("Expected ToolResult content part, got {:?}", parts[0]),
+                }
+            }
+            _ => panic!(
+                "Expected List content with ToolResult, got {:?}",
+                llm_message.content
+            ),
+        }
+    }
+
+    #[test]
+    fn test_chat_message_to_llm_message_tool_result_empty_content() {
+        // Test tool result with empty content
+        let chat_message = ChatMessage {
+            role: Role::Tool,
+            content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: Some("toolu_02Xyz789".to_string()),
+            usage: None,
+            ..Default::default()
+        };
+
+        let llm_message: LLMMessage = chat_message.into();
+
+        assert_eq!(llm_message.role, "tool");
+        match &llm_message.content {
+            LLMMessageContent::List(parts) => {
+                assert_eq!(parts.len(), 1);
+                match &parts[0] {
+                    LLMMessageTypedContent::ToolResult {
+                        tool_use_id,
+                        content,
+                    } => {
+                        assert_eq!(tool_use_id, "toolu_02Xyz789");
+                        assert_eq!(content, ""); // Empty content
+                    }
+                    _ => panic!("Expected ToolResult content part"),
+                }
+            }
+            _ => panic!("Expected List content with ToolResult"),
+        }
+    }
+
+    #[test]
+    fn test_chat_message_to_llm_message_assistant_with_tool_calls() {
+        // Test that assistant messages with tool_calls are converted correctly
+        let chat_message = ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String(
+                "I'll help you with that.".to_string(),
+            )),
+            name: None,
+            tool_calls: Some(vec![ToolCall {
+                id: "call_abc123".to_string(),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location": "Paris"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            usage: None,
+            ..Default::default()
+        };
+
+        let llm_message: LLMMessage = chat_message.into();
+
+        assert_eq!(llm_message.role, "assistant");
+        match &llm_message.content {
+            LLMMessageContent::List(parts) => {
+                assert_eq!(parts.len(), 2, "Should have text and tool call");
+
+                // First part should be text
+                match &parts[0] {
+                    LLMMessageTypedContent::Text { text } => {
+                        assert_eq!(text, "I'll help you with that.");
+                    }
+                    _ => panic!("Expected Text content part first"),
+                }
+
+                // Second part should be tool call
+                match &parts[1] {
+                    LLMMessageTypedContent::ToolCall { id, name, args } => {
+                        assert_eq!(id, "call_abc123");
+                        assert_eq!(name, "get_weather");
+                        assert_eq!(args["location"], "Paris");
+                    }
+                    _ => panic!("Expected ToolCall content part second"),
+                }
+            }
+            _ => panic!("Expected List content"),
         }
     }
 }
