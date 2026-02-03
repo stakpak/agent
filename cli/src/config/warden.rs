@@ -20,6 +20,8 @@ impl WardenConfig {
             volumes: vec![
                 "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
                 "~/.stakpak/auth.toml:/home/agent/.stakpak/auth.toml:ro".to_string(),
+                "~/.stakpak/data/local.db:/home/agent/.stakpak/data/local.db".to_string(),
+                "~/.agent-board/data.db:/home/agent/.agent-board/data.db".to_string(),
                 "./:/agent:ro".to_string(),
                 "./.stakpak:/agent/.stakpak".to_string(),
                 "~/.aws:/home/agent/.aws:ro".to_string(),
