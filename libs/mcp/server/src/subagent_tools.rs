@@ -2,8 +2,8 @@ use std::path::Path;
 
 use crate::tool_container::ToolContainer;
 use rmcp::{
-    ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool,
-    tool_router,
+    ErrorData as McpError, RoleServer, handler::server::wrapper::Parameters, model::*, schemars,
+    service::RequestContext, tool, tool_router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -58,21 +58,24 @@ The subagent runs asynchronously in the background. This tool returns immediatel
     )]
     pub async fn subagent_task(
         &self,
+        ctx: RequestContext<RoleServer>,
         Parameters(TaskRequest {
             description,
             prompt,
             subagent_type,
         }): Parameters<TaskRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let subagent_command = match self.build_subagent_command(&prompt, &subagent_type) {
-            Ok(command) => command,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "COMMAND_BUILD_FAILED: Failed to build subagent command: {}",
-                    e
-                ))]));
-            }
-        };
+        let session_id = self.get_session_id(&ctx);
+        let subagent_command =
+            match self.build_subagent_command(&prompt, &subagent_type, session_id.as_deref()) {
+                Ok(command) => command,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "COMMAND_BUILD_FAILED: Failed to build subagent command: {}",
+                        e
+                    ))]));
+                }
+            };
 
         // Start the subagent as a background task using existing task manager
         let task_info = match self
@@ -99,6 +102,7 @@ The subagent runs asynchronously in the background. This tool returns immediatel
         &self,
         prompt: &str,
         subagent_type: &str,
+        session_id: Option<&str>,
     ) -> Result<String, McpError> {
         let subagent_config = if let Some(subagent_configs) = self.get_subagent_configs() {
             subagent_configs.get_config(subagent_type)
@@ -113,19 +117,24 @@ The subagent runs asynchronously in the background. This tool returns immediatel
         })?;
 
         let prompt_filename = format!("prompt_{}.txt", Uuid::new_v4());
-        let prompt_file_path = LocalStore::write_session_data(
-            Path::new("subagents")
+        let prompt_subpath = match session_id {
+            Some(sid) => Path::new(sid)
+                .join("subagents")
                 .join(&prompt_filename)
                 .to_string_lossy()
-                .as_ref(),
-            prompt,
-        )
-        .map_err(|e| {
-            McpError::internal_error(
-                "Failed to create prompt file",
-                Some(json!({"error": e.to_string()})),
-            )
-        })?;
+                .to_string(),
+            None => Path::new("subagents")
+                .join(&prompt_filename)
+                .to_string_lossy()
+                .to_string(),
+        };
+        let prompt_file_path =
+            LocalStore::write_session_data(&prompt_subpath, prompt).map_err(|e| {
+                McpError::internal_error(
+                    "Failed to create prompt file",
+                    Some(json!({"error": e.to_string()})),
+                )
+            })?;
 
         let mut command = format!(
             r#"stakpak -a --prompt-file {} --max-steps {}"#,
