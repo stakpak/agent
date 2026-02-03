@@ -533,7 +533,8 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 if api_key.is_empty() {
                     continue;
                 }
-                let mut stakpak_config = StakpakProviderConfig::new(api_key.clone());
+                let mut stakpak_config = StakpakProviderConfig::new(api_key.clone())
+                    .with_user_agent(format!("Stakpak/{}", env!("CARGO_PKG_VERSION")));
                 if let Some(endpoint) = api_endpoint {
                     stakpak_config = stakpak_config.with_base_url(endpoint.clone());
                 }

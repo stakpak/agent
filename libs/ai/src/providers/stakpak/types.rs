@@ -12,6 +12,8 @@ pub struct StakpakProviderConfig {
     pub api_key: String,
     /// Base URL (default: https://apiv2.stakpak.dev)
     pub base_url: String,
+    /// User-Agent header (e.g., "Stakpak/1.0.0")
+    pub user_agent: Option<String>,
 }
 
 impl StakpakProviderConfig {
@@ -20,6 +22,7 @@ impl StakpakProviderConfig {
         Self {
             api_key: api_key.into(),
             base_url: "https://apiv2.stakpak.dev".to_string(),
+            user_agent: None,
         }
     }
 
@@ -28,11 +31,21 @@ impl StakpakProviderConfig {
         self.base_url = base_url.into();
         self
     }
+
+    /// Set User-Agent header
+    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+        self.user_agent = Some(user_agent.into());
+        self
+    }
 }
 
 impl Default for StakpakProviderConfig {
     fn default() -> Self {
-        Self::new(std::env::var("STAKPAK_API_KEY").unwrap_or_else(|_| String::new()))
+        Self {
+            api_key: std::env::var("STAKPAK_API_KEY").unwrap_or_else(|_| String::new()),
+            base_url: "https://apiv2.stakpak.dev".to_string(),
+            user_agent: None,
+        }
     }
 }
 
