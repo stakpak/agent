@@ -62,71 +62,12 @@ impl LocalStorage {
         Ok(storage)
     }
 
-    /// Initialize database schema
-    ///
-    /// This creates tables if they don't exist and migrates old schema to new schema.
-    /// Old schema had: sessions(agent_id), checkpoints(status, execution_depth)
-    /// New schema has: sessions(status, cwd), checkpoints(state required)
+    /// Initialize database schema by running migrations
     async fn init_schema(&self) -> Result<(), StorageError> {
         let conn = self.conn.lock().await;
-
-        // Create sessions table (compatible with both old and new schema)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS sessions (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    agent_id TEXT,
-                    visibility TEXT NOT NULL DEFAULT 'PRIVATE',
-                    status TEXT DEFAULT 'ACTIVE',
-                    cwd TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )",
-            (),
-        )
-        .await
-        .map_err(|e| StorageError::Internal(e.to_string()))?;
-
-        // Create checkpoints table (compatible with both old and new schema)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS checkpoints (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    status TEXT,
-                    execution_depth INTEGER,
-                    parent_id TEXT,
-                    state TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY(session_id) REFERENCES sessions(id),
-                    FOREIGN KEY(parent_id) REFERENCES checkpoints(id)
-                )",
-            (),
-        )
-        .await
-        .map_err(|e| StorageError::Internal(e.to_string()))?;
-
-        // Migrate old schema: add missing columns if they don't exist
-        // These will silently fail if columns already exist, which is fine
-        let _ = conn
-            .execute(
-                "ALTER TABLE sessions ADD COLUMN status TEXT DEFAULT 'ACTIVE'",
-                (),
-            )
-            .await;
-        let _ = conn
-            .execute("ALTER TABLE sessions ADD COLUMN cwd TEXT", ())
-            .await;
-
-        // Create index for faster lookups
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_checkpoints_session_id ON checkpoints(session_id)",
-            (),
-        )
-        .await
-        .map_err(|e| StorageError::Internal(e.to_string()))?;
-
-        Ok(())
+        super::migrations::run_migrations(&conn)
+            .await
+            .map_err(StorageError::Internal)
     }
 
     /// Get connection reference (locked)
