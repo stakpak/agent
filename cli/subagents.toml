@@ -1,6 +1,6 @@
 [subagents.DiscoveryAgent]
 description = """
-Fast Research and Discovery agent with read-only tools. 
+Fast Research and Discovery agent with read-only tools.
 Perfect for tasks requiring filesystem exploration, knowledge base search, and web research.
 Delagate research and discovery tasks to this agent.
 """
@@ -15,42 +15,41 @@ allowed_tools = [
     "stakpak__paks__get_pak_content",
 ]
 
-[subagents.SandboxDiscoveryAgent]
-description = """
-Research and Discovery agent with safe command execution in an isolated read-only environment. 
-Perfect for tasks requiring system inspection, file analysis, or running diagnostic commands while maintaining safety.
-Includes read-only access to cloud credentials (AWS, GCP, Azure, DigitalOcean) and your working directory.
-This agent is slower than the regular DiscoveryAgent, but can run read-only commands.
-"""
-model = "eco"
-max_steps = 30
-allowed_tools = [
-    "stakpak__run_command",
-    "stakpak__view",
-    "stakpak__search_docs",
-    "stakpak__search_memory",
-    "stakpak__read_rulebook",
-    "stakpak__paks__search_paks",
-    "stakpak__paks__get_pak_content",
-]
+# [subagents.SandboxDiscoveryAgent]
+# description = """
+# Research and Discovery agent with safe command execution in an isolated read-only environment.
+# Perfect for tasks requiring system inspection, file analysis, or running diagnostic commands while maintaining safety.
+# Includes read-only access to cloud credentials (AWS, GCP, Azure, DigitalOcean) and your working directory.
+# This agent is slower than the regular DiscoveryAgent, but can run read-only commands.
+# """
+# model = "eco"
+# max_steps = 30
+# allowed_tools = [
+#     "stakpak__run_command",
+#     "stakpak__view",
+#     "stakpak__search_docs",
+#     "stakpak__search_memory",
+#     "stakpak__read_rulebook",
+#     "stakpak__paks__search_paks",
+#     "stakpak__paks__get_pak_content",
+# ]
 
-[subagents.SandboxDiscoveryAgent.warden]
-enabled = true
-volumes = [
-    # stakpak config
-    "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro",
-    "~/.stakpak/data/local.db:/home/agent/.stakpak/data/local.db",
-    "~/.agent-board/data.db:/home/agent/.agent-board/data.db",
+# [subagents.SandboxDiscoveryAgent.warden]
+# enabled = true
+# volumes = [
+#     # stakpak config
+#     "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro",
+#     "~/.stakpak/data/local.db:/home/agent/.stakpak/data/local.db",
+#     "~/.agent-board/data.db:/home/agent/.agent-board/data.db",
 
-    # working directory
-    "./:/agent:ro",
-    "./.stakpak:/agent/.stakpak",
+#     # working directory
+#     "./:/agent:ro",
+#     "./.stakpak:/agent/.stakpak",
 
-    # cloud credentials
-    "~/.aws:/home/agent/.aws:ro",
-    "~/.config/gcloud:/home/agent/.config/gcloud:ro",
-    "~/.digitalocean:/home/agent/.digitalocean:ro",
-    "~/.azure:/home/agent/.azure:ro",
-    "~/.kube:/home/agent/.kube:ro",
-]
-
+#     # cloud credentials
+#     "~/.aws:/home/agent/.aws:ro",
+#     "~/.config/gcloud:/home/agent/.config/gcloud:ro",
+#     "~/.digitalocean:/home/agent/.digitalocean:ro",
+#     "~/.azure:/home/agent/.azure:ro",
+#     "~/.kube:/home/agent/.kube:ro",
+# ]
