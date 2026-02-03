@@ -52,6 +52,10 @@ impl Provider for StakpakProvider {
         headers.insert("Authorization", format!("Bearer {}", self.config.api_key));
         headers.insert("Content-Type", "application/json");
 
+        if let Some(user_agent) = &self.config.user_agent {
+            headers.insert("User-Agent", user_agent.clone());
+        }
+
         if let Some(custom) = custom_headers {
             headers.merge_with(custom);
         }
