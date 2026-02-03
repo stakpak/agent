@@ -37,6 +37,8 @@ pub struct McpInitConfig {
     pub enable_mtls: bool,
     /// Subagent configurations
     pub subagent_configs: Option<SubagentConfigs>,
+    /// Optional list of allowed tool names (filters tools if specified)
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 impl Default for McpInitConfig {
@@ -47,6 +49,7 @@ impl Default for McpInitConfig {
             enabled_tools: EnabledToolsConfig { slack: false },
             enable_mtls: true,
             subagent_configs: None,
+            allowed_tools: None,
         }
     }
 }
@@ -328,7 +331,12 @@ pub async fn initialize_mcp_server_and_tools(
         .await
         .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-    let tools = convert_tools_with_filter(&mcp_tools, app_config.allowed_tools.as_ref());
+    // Use allowed_tools from mcp_config if provided, otherwise fall back to app_config
+    let allowed_tools_ref = mcp_config
+        .allowed_tools
+        .as_ref()
+        .or(app_config.allowed_tools.as_ref());
+    let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_ref);
 
     Ok(McpInitResult {
         client: mcp_client,

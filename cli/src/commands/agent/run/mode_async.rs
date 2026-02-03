@@ -58,6 +58,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         enabled_tools: config.enabled_tools.clone(),
         enable_mtls: config.enable_mtls,
         subagent_configs: config.subagent_configs.clone(),
+        allowed_tools: config.allowed_tools.clone(),
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;
@@ -65,16 +66,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let server_shutdown_tx = mcp_init_result.server_shutdown_tx;
     let proxy_shutdown_tx = mcp_init_result.proxy_shutdown_tx;
 
-    // Filter tools if allowed_tools is specified
-    let tools = if let Some(allowed) = &config.allowed_tools {
-        mcp_init_result
-            .tools
-            .into_iter()
-            .filter(|t| allowed.contains(&t.function.name))
-            .collect()
-    } else {
-        mcp_init_result.tools
-    };
+    // Tools are already filtered by initialize_mcp_server_and_tools
+    let tools = mcp_init_result.tools;
 
     // Build unified AgentClient config
     let providers = ctx.get_llm_provider_config();
