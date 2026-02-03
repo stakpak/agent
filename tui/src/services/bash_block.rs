@@ -889,15 +889,17 @@ pub fn render_styled_header_and_borders(
 /// Render file diff for full screen popup - shows diff lines with context
 /// Uses the same diff-only approach as the TUI view for consistency
 /// Returns None if there's no diff to show (e.g., old_str not found)
+/// The `result` parameter can be provided to extract the starting line number from the diff output.
 pub fn render_file_diff_full(
     tool_call: &ToolCall,
     terminal_width: usize,
     do_show: Option<bool>,
+    result: Option<&str>,
 ) -> Option<Vec<Line<'static>>> {
     // Get diff lines - use the truncated version which starts from first change
     // but we'll show all diff lines without truncation for the full screen view
     let (_truncated_diff_lines, full_diff_lines) =
-        render_file_diff_block_from_args(tool_call, terminal_width);
+        render_file_diff_block_from_args(tool_call, terminal_width, result);
 
     let title: String = get_command_type_name(tool_call);
 
@@ -1029,9 +1031,14 @@ pub fn render_markdown_block(
 /// Render str_replace/create results - clean diff view without borders
 /// Uses the same approach as fullscreen popup for consistency
 /// Returns None if there's no diff (fallback to standard result rendering)
-pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Option<Vec<Line<'static>>> {
+/// The `result` parameter can be provided to extract the starting line number from the diff output.
+pub fn render_diff_result_block(
+    tool_call: &ToolCall,
+    width: usize,
+    result: Option<&str>,
+) -> Option<Vec<Line<'static>>> {
     // Use the same clean diff rendering as the fullscreen popup
-    render_file_diff_full(tool_call, width, Some(true))
+    render_file_diff_full(tool_call, width, Some(true), result)
 }
 
 pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
@@ -1078,7 +1085,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             );
         }
 
-        if let Some(diff_lines) = render_diff_result_block(&tool_call, width) {
+        if let Some(diff_lines) = render_diff_result_block(&tool_call, width, Some(&result)) {
             return diff_lines;
         }
         // Fall through to standard result rendering if no diff
@@ -1977,8 +1984,9 @@ pub fn render_run_command_block(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Border color: DarkGray for error/cancelled/rejected/skipped states, Gray otherwise
+    // Border color: Cyan for pending (preview), DarkGray for error/cancelled/rejected/skipped, Gray otherwise
     let border_color = match state {
+        RunCommandState::Pending => Color::Cyan,
         RunCommandState::Error
         | RunCommandState::Cancelled
         | RunCommandState::Rejected

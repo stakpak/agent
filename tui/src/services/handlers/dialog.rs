@@ -157,6 +157,9 @@ pub fn handle_esc(
         let _ = cancel_tx.send(());
     }
 
+    let was_streaming = state.is_streaming;
+    let was_dialog_open = state.is_dialog_open;
+    let was_shell_mode = state.show_shell_mode;
     state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
@@ -218,9 +221,6 @@ pub fn handle_esc(
                     is_collapsed: None,
                 });
             }
-            // Invalidate cache and scroll to bottom to show the updated block
-            crate::services::message::invalidate_message_lines_cache(state);
-            state.stay_at_bottom = true;
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -279,6 +279,12 @@ pub fn handle_esc(
             super::shell::background_shell_session(state);
         }
     } else {
+        // No dialog, no shell — if streaming was active, this is a cancellation.
+        // Mark cancel_requested so late streaming events that are already queued
+        // in the channel get dropped instead of re-creating content.
+        if was_streaming {
+            state.cancel_requested = true;
+        }
         state.text_area.set_text("");
     }
 
@@ -286,6 +292,14 @@ pub fn handle_esc(
         m.id != state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.pending_bash_message_id.unwrap_or_default()
     });
+
+    // Invalidate cache and scroll to bottom when something was actually
+    // cancelled/rejected (dialog open, shell resolved, or streaming interrupted).
+    // Skip for idle ESC (just clearing text or closing a popup/dropdown).
+    if was_streaming || was_dialog_open || was_shell_mode {
+        crate::services::message::invalidate_message_lines_cache(state);
+        state.stay_at_bottom = true;
+    }
 }
 
 /// Handle show confirmation dialog event
@@ -371,6 +385,9 @@ pub fn handle_show_confirmation_dialog(
         ));
     }
     state.pending_bash_message_id = Some(message_id);
+
+    // Invalidate cache so the new message gets rendered
+    invalidate_message_lines_cache(state);
 
     state.dialog_command = Some(tool_call.clone());
     // Only set is_dialog_open if NOT using the new approval bar flow
@@ -467,16 +484,15 @@ pub fn handle_show_confirmation_dialog(
     if !tool_calls.is_empty() && state.toggle_approved_message {
         let was_empty = state.approval_bar.actions().is_empty();
 
-        // Only add tools that aren't already in the bar
+        // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
-            let already_in_bar = state
-                .approval_bar
-                .actions()
-                .iter()
-                .any(|a| a.tool_call.id == tc.id);
-            if !already_in_bar {
-                state.approval_bar.add_action(tc);
-            }
+            state.approval_bar.add_action(tc);
+        }
+
+        // If this is the first time showing the approval bar, scroll to show the tool call
+        if was_empty && !state.approval_bar.actions().is_empty() {
+            state.scroll_to_last_message_start = true;
+            state.stay_at_bottom = false;
         }
 
         // If we just added tools to an empty bar, the first one's pending block

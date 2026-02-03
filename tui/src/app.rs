@@ -56,7 +56,13 @@ pub struct AppState {
     pub messages: Vec<Message>,
     pub scroll: usize,
     pub scroll_to_bottom: bool,
+    pub scroll_to_last_message_start: bool,
     pub stay_at_bottom: bool,
+    /// Counter to block stay_at_bottom for N frames (used when scroll_to_last_message_start needs to persist)
+    pub block_stay_at_bottom_frames: u8,
+    /// When scroll is locked, this stores how many lines from the end we want to show at top of viewport
+    /// This allows us to maintain relative position even as total_lines changes
+    pub scroll_lines_from_end: Option<usize>,
     pub content_changed_while_scrolled_up: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
@@ -89,6 +95,8 @@ pub struct AppState {
     pub shell_popup_visible: bool,
     pub shell_popup_expanded: bool,
     pub shell_popup_scroll: usize,
+    /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
+    pub needs_terminal_clear: bool,
     pub shell_cursor_visible: bool,
     pub shell_cursor_blink_timer: u8,
     pub active_shell_command: Option<ShellCommand>,
@@ -117,6 +125,9 @@ pub struct AppState {
     pub streaming_tool_result_id: Option<Uuid>,
     pub completed_tool_calls: std::collections::HashSet<Uuid>,
     pub is_streaming: bool,
+    /// When true, cancellation has been requested (ESC pressed) but the final ToolResult
+    /// hasn't arrived yet. Late StreamToolResult/StreamAssistantMessage events should be ignored.
+    pub cancel_requested: bool,
     pub latest_tool_call: Option<ToolCall>,
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
@@ -306,7 +317,10 @@ impl AppState {
             messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
+            scroll_to_last_message_start: false,
             stay_at_bottom: true,
+            block_stay_at_bottom_frames: 0,
+            scroll_lines_from_end: None,
             content_changed_while_scrolled_up: false,
             helpers: helpers.clone(),
             show_helper_dropdown: false,
@@ -331,6 +345,7 @@ impl AppState {
             shell_popup_visible: false,
             shell_popup_expanded: false,
             shell_popup_scroll: 0,
+            needs_terminal_clear: false,
             shell_cursor_visible: true,
             shell_cursor_blink_timer: 0,
             active_shell_command: None,
@@ -364,6 +379,7 @@ impl AppState {
             file_search_tx: Some(file_search_tx),
             file_search_rx: Some(result_rx),
             is_streaming: false,
+            cancel_requested: false,
             interactive_commands: crate::constants::INTERACTIVE_COMMANDS
                 .iter()
                 .map(|s| s.to_string())

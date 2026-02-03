@@ -191,13 +191,48 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                       // Calculate actual message area dimensions (same as view.rs)
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1)
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
+                       let margin_height: u16 = 2;
+                       let dropdown_showing = state.show_helper_dropdown
+                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.filtered_files.is_empty());
+                       let hint_height = if dropdown_showing { 0 } else { margin_height };
+
+                       // Account for approval bar height (will be shown after this tool call)
+                       // The approval bar will be visible, so input and dropdown are hidden
+                       let approval_bar_height = state.approval_bar.calculate_height().max(7); // Use expected height
+
+                       let outer_chunks = ratatui::layout::Layout::default()
+                           .direction(ratatui::layout::Direction::Vertical)
+                           .constraints([
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading
+                               ratatui::layout::Constraint::Length(0), // shell popup
+                               ratatui::layout::Constraint::Length(approval_bar_height), // approval bar
+                               ratatui::layout::Constraint::Length(0), // input (hidden when approval bar visible)
+                               ratatui::layout::Constraint::Length(0), // dropdown (hidden when approval bar visible)
+                               ratatui::layout::Constraint::Length(hint_height), // hint
+                           ])
+                           .split(term_rect);
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
+                       let message_area_height = outer_chunks[0].height as usize;
+
+                       crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_file_search_results();
                        terminal.draw(|f| view(f, &mut state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        clear_streaming_tool_results(&mut state);
+
+                       // Clear cancel_requested now that the final result has arrived
+                       state.cancel_requested = false;
 
                        // For run_command, also remove any message that matches the tool call ID
                        // (handles case where streaming message uses tool_call_id directly)
@@ -227,7 +262,9 @@ pub async fn run_tui(
                                    // TUI: Show diff result block with yellow border (is_collapsed: None)
                                    state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                                   // Use render_full_content_message which stores the full ToolCallResult including the result
+                                   // (needed for extracting line numbers from the diff output)
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                "run_command_task" => {
                                    // TUI: bordered result block (is_collapsed: None)
@@ -556,6 +593,11 @@ pub async fn run_tui(
            }
         if should_quit {
             break;
+        }
+        // Check if terminal clear was requested (e.g., after shell popup closes)
+        if state.needs_terminal_clear {
+            state.needs_terminal_clear = false;
+            emergency_clear_and_redraw(&mut terminal, &mut state)?;
         }
         state.poll_file_search_results();
         state.update_session_empty_status();

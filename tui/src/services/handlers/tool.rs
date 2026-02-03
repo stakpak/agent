@@ -26,6 +26,11 @@ pub fn handle_stream_tool_result(
         return None;
     }
 
+    // Ignore late streaming events after cancellation was requested
+    if state.cancel_requested {
+        return None;
+    }
+
     // Check for interactive stall notification
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
@@ -266,11 +271,17 @@ pub fn handle_toggle_approval_status(state: &mut AppState) {
 /// Handle approval bar next tab event
 pub fn handle_approval_popup_next_tab(state: &mut AppState) {
     state.approval_bar.select_next();
+    // Scroll to show the beginning of the tool call block
+    state.scroll_to_last_message_start = true;
+    state.stay_at_bottom = false;
 }
 
 /// Handle approval bar prev tab event
 pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
     state.approval_bar.select_prev();
+    // Scroll to show the beginning of the tool call block
+    state.scroll_to_last_message_start = true;
+    state.stay_at_bottom = false;
 }
 
 /// Handle approval bar toggle approval event
