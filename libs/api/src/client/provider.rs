@@ -374,6 +374,13 @@ impl AgentProvider for AgentClient {
                             }
                         }
                         StreamMessage::Delta(delta) => {
+                            // Extract usage from Usage delta variant
+                            let usage = if let GenerationDelta::Usage { usage } = &delta {
+                                Some(usage.clone())
+                            } else {
+                                None
+                            };
+
                             yield Ok(ChatCompletionStreamResponse {
                                 id: ctx.request_id.to_string(),
                                 object: "chat.completion.chunk".to_string(),
@@ -384,7 +391,7 @@ impl AgentProvider for AgentClient {
                                     delta: delta.into(),
                                     finish_reason: None,
                                 }],
-                                usage: ctx.state.llm_output.as_ref().map(|u| u.usage.clone()),
+                                usage,
                                 metadata: None,
                             })
                         }
