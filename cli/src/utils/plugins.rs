@@ -15,6 +15,7 @@ pub struct PluginConfig {
     pub version: Option<String>,
     pub repo: Option<String>,
     pub owner: Option<String>,
+    pub version_arg: Option<String>,
 }
 
 /// Get the path to a plugin, downloading it if necessary
@@ -26,31 +27,42 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         version: config.version,
         repo: config.repo,
         owner: config.owner,
+        version_arg: config.version_arg,
     };
 
-    // Get the target version from the server
+    // Get the target version from the server or GitHub
     let target_version = match config.version.clone() {
         Some(version) => version,
-        None => match get_latest_version(&config).await {
-            Ok(version) => version,
-            Err(e) => {
-                eprintln!(
-                    "Warning: Failed to check latest version for {}: {}",
-                    config.name, e
-                );
-                // Continue with existing logic if version check fails
-                return get_plugin_path_without_version_check(&config).await;
+        None => {
+            let latest = if let (Some(owner), Some(repo)) = (&config.owner, &config.repo) {
+                get_latest_github_release_version(owner, repo).await
+            } else {
+                get_latest_version(&config).await
+            };
+
+            match latest {
+                Ok(version) => version,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to check latest version for {}: {}",
+                        config.name, e
+                    );
+                    // Continue with existing logic if version check fails
+                    return get_plugin_path_without_version_check(&config).await;
+                }
             }
-        },
+        }
     };
 
     // First check if plugin is available in PATH
-    if let Ok(system_version) = get_version_from_command(&config.name, &config.name) {
+    if let Ok(system_version) =
+        get_version_from_command(&config.name, &config.name, config.version_arg.as_deref())
+    {
         if is_same_version(&system_version, &target_version) {
             return config.name.clone();
         } else {
             println!(
-                "{} v{} is outdated (target: v{}), checking plugins directory...",
+                "{} {} is outdated (target: {}), checking plugins directory...",
                 config.name, system_version, target_version
             );
         }
@@ -58,13 +70,14 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
 
     // Check if plugin already exists in plugins directory
     if let Ok(existing_path) = get_existing_plugin_path(&config.name)
-        && let Ok(current_version) = get_version_from_command(&existing_path, &config.name)
+        && let Ok(current_version) =
+            get_version_from_command(&existing_path, &config.name, config.version_arg.as_deref())
     {
         if is_same_version(&current_version, &target_version) {
             return existing_path;
         } else {
             println!(
-                "{} {} is outdated (target: v{}), updating...",
+                "{} {} is outdated (target: {}), updating...",
                 config.name, current_version, target_version
             );
         }
@@ -74,7 +87,7 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
     match download_and_install_plugin(&config).await {
         Ok(path) => {
             println!(
-                "Successfully installed {} v{} -> {}",
+                "Successfully installed {} {} -> {}",
                 config.name, target_version, path
             );
             path
@@ -119,14 +132,19 @@ async fn get_plugin_path_without_version_check(config: &PluginConfig) -> String 
 }
 
 /// Get version by running a command (can be plugin name or path)
-fn get_version_from_command(command: &str, display_name: &str) -> Result<String, String> {
+fn get_version_from_command(
+    command: &str,
+    display_name: &str,
+    version_arg: Option<&str>,
+) -> Result<String, String> {
+    let arg = version_arg.unwrap_or("version");
     let output = Command::new(command)
-        .arg("version")
+        .arg(arg)
         .output()
-        .map_err(|e| format!("Failed to run {} version command: {}", display_name, e))?;
+        .map_err(|e| format!("Failed to run {} {} command: {}", display_name, arg, e))?;
 
     if !output.status.success() {
-        return Err(format!("{} version command failed", display_name));
+        return Err(format!("{} {} command failed", display_name, arg));
     }
 
     let version_output = String::from_utf8_lossy(&output.stdout);
@@ -137,19 +155,34 @@ fn get_version_from_command(command: &str, display_name: &str) -> Result<String,
     }
 
     // Extract version from output like "warden v0.1.7 (https://github.com/stakpak/agent)"
-    // Split by whitespace and take the second part (the version)
-    let parts: Vec<&str> = full_output.split_whitespace().collect();
-    if parts.len() >= 2 {
-        Ok(parts[1].to_string())
-    } else {
-        // Fallback to full output if parsing fails
-        Ok(full_output.to_string())
-    }
+    // Split by whitespace and find the part that looks like a version
+    let version = full_output
+        .split_whitespace()
+        .find(|s| {
+            s.starts_with('v')
+                || s.chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+        })
+        .map(|s| s.to_string())
+        .or_else(|| {
+            // Fallback to the second part if none start with 'v' or digit
+            let parts: Vec<&str> = full_output.split_whitespace().collect();
+            if parts.len() >= 2 {
+                Some(parts[1].to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| full_output.to_string());
+
+    Ok(version)
 }
 
 /// Check if a plugin is available in the system PATH
 pub fn is_plugin_available(plugin_name: &str) -> bool {
-    get_version_from_command(plugin_name, plugin_name).is_ok()
+    get_version_from_command(plugin_name, plugin_name, None).is_ok()
 }
 
 /// Fetch the latest version from the remote server
@@ -326,12 +359,12 @@ pub fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool)
     let download_url = if config.base_url.contains("github.com") {
         if config.version.is_none() {
             format!(
-                "{}//releases/latest/download/{}-{}.{}",
+                "{}/releases/latest/download/{}-{}.{}",
                 config.base_url, config.name, current_target, extension
             )
         } else {
             format!(
-                "{}//releases/download/{}/{}-{}.{}",
+                "{}/releases/download/{}/{}-{}.{}",
                 config.base_url,
                 config.version.clone().unwrap(),
                 config.name,
