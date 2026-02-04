@@ -7,6 +7,7 @@ use agent_client_protocol::{
 };
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
+use stakpak_api::storage::CreateSessionRequest;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use stakpak_api::{Model, ModelLimit};
 use stakpak_mcp_client::McpClient;
@@ -1713,25 +1714,56 @@ impl acp::Agent for StakpakAcpAgent {
             ));
         }
 
-        let temp_session_id = Uuid::new_v4();
-        let session_id = acp::SessionId::new(temp_session_id.to_string());
-
-        // Track the current session ID
-        self.current_session_id.set(Some(temp_session_id));
-
-        // Clear message history for new session
-        {
+        // Clear message history for new session and keep system message
+        let system_message = {
             let mut messages = self.messages.lock().await;
-            //copy system message if exists
             let system_message = messages
                 .iter()
                 .find(|msg| msg.role == Role::System)
                 .cloned();
             messages.clear();
-            if let Some(system_message) = system_message {
-                messages.push(system_message);
+            if let Some(ref sys_msg) = system_message {
+                messages.push(sys_msg.clone());
             }
-        }
+            system_message
+        };
+
+        // Create a cloud session to get a real session ID
+        let client = self.client.read().await.clone();
+        let initial_messages = if let Some(sys_msg) = system_message {
+            vec![sys_msg]
+        } else {
+            vec![crate::commands::agent::run::helpers::user_message(
+                "New session".to_string(),
+            )]
+        };
+
+        let cwd = args.cwd.to_str().map(|s| s.to_string()).unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        });
+
+        // Use project folder name as session title
+        let title = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| format!("ACP: {}", n))
+            .unwrap_or_else(|| "ACP Session".to_string());
+
+        let session_request = CreateSessionRequest::new(title, initial_messages).with_cwd(cwd);
+
+        let cloud_session = client.create_session(&session_request).await.map_err(|e| {
+            log::error!("Failed to create cloud session: {}", e);
+            acp::Error::internal_error().data(format!("Failed to create session: {}", e))
+        })?;
+
+        let session_id = acp::SessionId::new(cloud_session.session_id.to_string());
+
+        // Track the current session ID (now using the cloud session ID)
+        self.current_session_id.set(Some(cloud_session.session_id));
+
+        log::info!("Created cloud session: {}", cloud_session.session_id);
 
         // Get available models for model selection
         let model_state = self.get_session_model_state().await;
@@ -2208,7 +2240,13 @@ mod tests {
 
         assert_eq!(model_info.model_id.0.as_ref(), "claude-sonnet-4-5-20250514");
         assert_eq!(model_info.name, "Claude Sonnet 4.5");
-        assert!(model_info.description.as_ref().unwrap().contains("anthropic"));
+        assert!(
+            model_info
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("anthropic")
+        );
     }
 
     #[test]
@@ -2355,21 +2393,22 @@ mod tests {
         let models = vec![
             ModelInfo::new("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5")
                 .description("Provider: stakpak".to_string()),
-            ModelInfo::new("openai/gpt-4o", "GPT-4o")
-                .description("Provider: stakpak".to_string()),
+            ModelInfo::new("openai/gpt-4o", "GPT-4o").description("Provider: stakpak".to_string()),
         ];
 
         let model_state = SessionModelState::new("anthropic/claude-sonnet-4-5", models);
 
-        let response =
-            acp::NewSessionResponse::new(acp::SessionId::new("test-session-123"))
-                .models(model_state);
+        let response = acp::NewSessionResponse::new(acp::SessionId::new("test-session-123"))
+            .models(model_state);
 
         let json = serde_json::to_string_pretty(&response).unwrap();
         println!("NewSessionResponse JSON:\n{}", json);
 
         // Verify the JSON contains models
-        assert!(json.contains("\"models\""), "JSON should contain models field");
+        assert!(
+            json.contains("\"models\""),
+            "JSON should contain models field"
+        );
         assert!(
             json.contains("\"currentModelId\""),
             "JSON should contain currentModelId"
