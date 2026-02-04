@@ -941,6 +941,16 @@ pub async fn run_interactive(
                     Ok(response) => {
                         messages.push(response.choices[0].message.clone());
 
+                        if let Some(session_id) = response
+                            .metadata
+                            .as_ref()
+                            .and_then(|meta| meta.get("session_id"))
+                            .and_then(|value| value.as_str())
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        {
+                            current_session_id = Some(session_id);
+                        }
+
                         // Accumulate usage from response
                         total_session_usage.prompt_tokens += response.usage.prompt_tokens;
                         total_session_usage.completion_tokens += response.usage.completion_tokens;

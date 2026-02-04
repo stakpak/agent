@@ -10,6 +10,7 @@ use crate::models::*;
 use crate::storage::{
     CreateCheckpointRequest as StorageCreateCheckpointRequest,
     CreateSessionRequest as StorageCreateSessionRequest,
+    UpdateSessionRequest as StorageUpdateSessionRequest,
 };
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -664,26 +665,8 @@ impl AgentClient {
             });
         }
 
-        // Create new session
-        // Generate title with fallback - don't fail session creation if title generation fails
-        let title = match self.generate_session_title(messages).await {
-            Ok(title) => title,
-            Err(_) => {
-                // Extract first few words from user message as fallback title
-                messages
-                    .iter()
-                    .find(|m| m.role == Role::User)
-                    .and_then(|m| m.content.as_ref())
-                    .map(|c| {
-                        let text = c.to_string();
-                        text.split_whitespace()
-                            .take(5)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .unwrap_or_else(|| "New Session".to_string())
-            }
-        };
+        // Create new session with a fast local title.
+        let fallback_title = Self::fallback_session_title(messages);
 
         // Get current working directory
         let cwd = std::env::current_dir()
@@ -691,7 +674,8 @@ impl AgentClient {
             .map(|p| p.to_string_lossy().to_string());
 
         // Create session via storage trait
-        let mut session_request = StorageCreateSessionRequest::new(title, messages.to_vec());
+        let mut session_request =
+            StorageCreateSessionRequest::new(fallback_title.clone(), messages.to_vec());
         if let Some(cwd) = cwd {
             session_request = session_request.with_cwd(cwd);
         }
@@ -702,11 +686,44 @@ impl AgentClient {
             .await
             .map_err(|e| e.to_string())?;
 
+        // Generate a better title asynchronously and update the session when ready.
+        let client = self.clone();
+        let messages_for_title = messages.to_vec();
+        let session_id = result.session_id;
+        tokio::spawn(async move {
+            if let Ok(title) = client.generate_session_title(&messages_for_title).await {
+                let trimmed = title.trim();
+                if !trimmed.is_empty() && trimmed != fallback_title {
+                    let request =
+                        StorageUpdateSessionRequest::new().with_title(trimmed.to_string());
+                    let _ = client
+                        .session_storage
+                        .update_session(session_id, &request)
+                        .await;
+                }
+            }
+        });
+
         Ok(SessionInfo {
             session_id: result.session_id,
             checkpoint_id: result.checkpoint.id,
             checkpoint_created_at: result.checkpoint.created_at,
         })
+    }
+
+    fn fallback_session_title(messages: &[ChatMessage]) -> String {
+        messages
+            .iter()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.content.as_ref())
+            .map(|c| {
+                let text = c.to_string();
+                text.split_whitespace()
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_else(|| "New Session".to_string())
     }
 
     /// Save a new checkpoint for the current session
