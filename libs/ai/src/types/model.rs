@@ -21,6 +21,9 @@ pub struct Model {
     pub cost: Option<ModelCost>,
     /// Token limits
     pub limit: ModelLimit,
+    /// Release date (YYYY-MM-DD format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
 }
 
 impl Model {
@@ -40,6 +43,7 @@ impl Model {
             reasoning,
             cost,
             limit,
+            release_date: None,
         }
     }
 
@@ -53,6 +57,7 @@ impl Model {
             reasoning: false,
             cost: None,
             limit: ModelLimit::default(),
+            release_date: None,
         }
     }
 

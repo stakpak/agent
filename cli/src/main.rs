@@ -24,7 +24,7 @@ use commands::{
         run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
     },
 };
-use config::AppConfig;
+use config::{AppConfig, ModelsCache};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agents_md::discover_agents_md;
 use utils::check_update::{auto_update, check_update};
@@ -246,6 +246,14 @@ async fn main() {
                     if !has_stakpak_key && !has_provider_keys {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
+
+                    // Initialize models cache in background (fetch if missing/stale)
+                    let cache_task = tokio::spawn(async {
+                        if let Err(e) = ModelsCache::get().await {
+                            tracing::warn!("Failed to load models cache: {}", e);
+                        }
+                    });
+
                     let local_context = analyze_local_context(&config).await.ok();
 
                     let agents_md = if cli.ignore_agents_md {
@@ -428,71 +436,69 @@ async fn main() {
                     let auto_approve = config.auto_approve.clone();
                     let default_model = config.get_default_model();
 
-                    match use_async_mode {
+                    let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
-                        true => match agent::run::run_async(
-                            config,
-                            RunAsyncConfig {
-                                prompt,
-                                verbose: cli.verbose,
-                                checkpoint_id: cli.checkpoint_id,
-                                local_context,
-                                redact_secrets: !cli.disable_secret_redaction,
-                                privacy_mode: cli.privacy_mode,
-                                rulebooks,
-                                subagent_configs,
-                                max_steps,
-                                output_format: cli.output_format,
-                                enable_mtls: !cli.disable_mcp_mtls,
-                                allowed_tools,
-                                system_prompt,
-                                enabled_tools: EnabledToolsConfig {
-                                    slack: cli.enable_slack_tools,
+                        true => {
+                            agent::run::run_async(
+                                config,
+                                RunAsyncConfig {
+                                    prompt,
+                                    verbose: cli.verbose,
+                                    checkpoint_id: cli.checkpoint_id,
+                                    local_context,
+                                    redact_secrets: !cli.disable_secret_redaction,
+                                    privacy_mode: cli.privacy_mode,
+                                    rulebooks,
+                                    subagent_configs,
+                                    max_steps,
+                                    output_format: cli.output_format,
+                                    enable_mtls: !cli.disable_mcp_mtls,
+                                    allowed_tools,
+                                    system_prompt,
+                                    enabled_tools: EnabledToolsConfig {
+                                        slack: cli.enable_slack_tools,
+                                    },
+                                    model: default_model.clone(),
+                                    agents_md: agents_md.clone(),
                                 },
-                                model: default_model.clone(),
-                                agents_md: agents_md.clone(),
-                            },
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                eprintln!("Ops! something went wrong: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
+                            )
+                            .await
+                        }
 
                         // Interactive mode: run in TUI
-                        false => match agent::run::run_interactive(
-                            config,
-                            RunInteractiveConfig {
-                                checkpoint_id: cli.checkpoint_id,
-                                local_context,
-                                redact_secrets: !cli.disable_secret_redaction,
-                                privacy_mode: cli.privacy_mode,
-                                rulebooks,
-                                subagent_configs,
-                                enable_mtls: !cli.disable_mcp_mtls,
-                                is_git_repo: gitignore::is_git_repo(),
-                                study_mode: cli.study_mode,
-                                system_prompt,
-                                allowed_tools,
-                                auto_approve,
-                                enabled_tools: EnabledToolsConfig {
-                                    slack: cli.enable_slack_tools,
+                        false => {
+                            agent::run::run_interactive(
+                                config,
+                                RunInteractiveConfig {
+                                    checkpoint_id: cli.checkpoint_id,
+                                    local_context,
+                                    redact_secrets: !cli.disable_secret_redaction,
+                                    privacy_mode: cli.privacy_mode,
+                                    rulebooks,
+                                    subagent_configs,
+                                    enable_mtls: !cli.disable_mcp_mtls,
+                                    is_git_repo: gitignore::is_git_repo(),
+                                    study_mode: cli.study_mode,
+                                    system_prompt,
+                                    allowed_tools,
+                                    auto_approve,
+                                    enabled_tools: EnabledToolsConfig {
+                                        slack: cli.enable_slack_tools,
+                                    },
+                                    model: default_model,
+                                    agents_md,
                                 },
-                                model: default_model,
-                                agents_md,
-                            },
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                eprintln!("Ops! something went wrong: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
+                            )
+                            .await
+                        }
+                    };
+
+                    // Cancel background cache task on exit
+                    cache_task.abort();
+
+                    if let Err(e) = result {
+                        eprintln!("Ops! something went wrong: {}", e);
+                        std::process::exit(1);
                     }
                 }
             }

@@ -34,56 +34,67 @@ pub use storage::{
 
 /// Find a model by ID string
 ///
-/// Parses the model string and searches the catalog:
-/// - If format is "provider/model_id", searches within that provider
-/// - If no provider prefix, searches all providers by model ID
+/// Parses the model string and searches the model cache:
+/// - Format "provider/model_id" searches within that specific provider
+/// - Plain "model_id" searches all providers
 ///
-/// When `use_stakpak` is true, the returned model will have provider set to "stakpak"
-/// for routing through the Stakpak API.
-///
-/// Returns None if the model is not found in any catalog.
+/// When `use_stakpak` is true, the model is transformed for Stakpak API routing.
 pub fn find_model(model_str: &str, use_stakpak: bool) -> Option<Model> {
-    use stakai::providers::{anthropic, gemini, openai};
+    const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
 
-    // Split on first '/' to check for provider prefix
-    let (provider_prefix, model_id) = if let Some(idx) = model_str.find('/') {
-        let (prefix, rest) = model_str.split_at(idx);
-        (Some(prefix), &rest[1..]) // Skip the '/'
+    let (provider_hint, model_id) = parse_model_string(model_str);
+
+    // Search with provider hint first, then fall back to searching all
+    let model = provider_hint
+        .and_then(|p| find_in_provider(p, model_id))
+        .or_else(|| {
+            PROVIDERS
+                .iter()
+                .find_map(|&p| find_in_provider(p, model_id))
+        })?;
+
+    Some(if use_stakpak {
+        transform_for_stakpak(model)
     } else {
-        (None, model_str)
-    };
-
-    // Search for the model
-    let found_model = match provider_prefix {
-        Some("anthropic") => anthropic::models::get_model(model_id),
-        Some("openai") => openai::models::get_model(model_id),
-        Some("google") | Some("gemini") => gemini::models::get_model(model_id),
-        Some(_) => None, // Unknown provider prefix, will search all below
-        None => None,
-    };
-
-    // If not found with prefix, or no prefix given, search all providers
-    let found_model = found_model.or_else(|| {
-        anthropic::models::get_model(model_id)
-            .or_else(|| openai::models::get_model(model_id))
-            .or_else(|| gemini::models::get_model(model_id))
-    });
-
-    // Adjust the model for Stakpak routing if needed
-    found_model.map(|mut m| {
-        if use_stakpak {
-            // Prefix the ID with the original provider for Stakpak routing
-            let provider_for_id = match m.provider.as_str() {
-                "anthropic" => "anthropic",
-                "openai" => "openai",
-                "google" => "google",
-                _ => &m.provider,
-            };
-            m.id = format!("{}/{}", provider_for_id, m.id);
-            m.provider = "stakpak".into();
-        }
-        m
+        model
     })
+}
+
+/// Parse "provider/model_id" or plain "model_id"
+fn parse_model_string(s: &str) -> (Option<&str>, &str) {
+    match s.find('/') {
+        Some(idx) => {
+            let provider = &s[..idx];
+            let model_id = &s[idx + 1..];
+            let normalized = match provider {
+                "gemini" => "google",
+                p => p,
+            };
+            (Some(normalized), model_id)
+        }
+        None => (None, s),
+    }
+}
+
+/// Find a model by ID within a specific provider
+fn find_in_provider(provider_id: &str, model_id: &str) -> Option<Model> {
+    stakai::load_models_for_provider(provider_id)
+        .ok()?
+        .into_iter()
+        .find(|m| m.id == model_id)
+}
+
+/// Transform a model for Stakpak API routing
+fn transform_for_stakpak(model: Model) -> Model {
+    Model {
+        id: format!("{}/{}", model.provider, model.id),
+        provider: "stakpak".into(),
+        name: model.name,
+        reasoning: model.reasoning,
+        cost: model.cost,
+        limit: model.limit,
+        release_date: model.release_date,
+    }
 }
 
 /// Unified agent provider trait.

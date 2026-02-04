@@ -865,42 +865,42 @@ pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) 
     state.available_models = models;
 
     // Pre-select current model if available
-    if let Some(current) = &state.current_model {
-        if let Some(idx) = state
+    if let Some(current) = &state.current_model
+        && let Some(idx) = state
             .available_models
             .iter()
             .position(|m| m.id == current.id)
-        {
-            state.model_switcher_selected = idx;
-        }
+    {
+        state.model_switcher_selected = idx;
     }
 }
 
 /// Handle model switcher select event
 pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if state.show_model_switcher && !state.available_models.is_empty() {
-        if state.model_switcher_selected < state.available_models.len() {
-            let selected_model = state.available_models[state.model_switcher_selected].clone();
+    if state.show_model_switcher
+        && !state.available_models.is_empty()
+        && state.model_switcher_selected < state.available_models.len()
+    {
+        let selected_model = state.available_models[state.model_switcher_selected].clone();
 
-            // Don't switch if already on this model
-            if state
-                .current_model
-                .as_ref()
-                .is_some_and(|m| m.id == selected_model.id)
-            {
-                state.show_model_switcher = false;
-                return;
-            }
-
-            // Update current model
-            state.current_model = Some(selected_model.clone());
-
-            // Close the switcher
+        // Don't switch if already on this model
+        if state
+            .current_model
+            .as_ref()
+            .is_some_and(|m| m.id == selected_model.id)
+        {
             state.show_model_switcher = false;
-
-            // Send request to switch model
-            let _ = output_tx.try_send(OutputEvent::SwitchToModel(selected_model.clone()));
+            return;
         }
+
+        // Update current model
+        state.current_model = Some(selected_model.clone());
+
+        // Close the switcher
+        state.show_model_switcher = false;
+
+        // Send request to switch model
+        let _ = output_tx.try_send(OutputEvent::SwitchToModel(selected_model.clone()));
     }
 }
 

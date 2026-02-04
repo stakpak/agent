@@ -47,6 +47,7 @@ thiserror = { workspace = true }
 bytes = "1"
 pin-project = "1"
 uuid = { workspace = true }
+dirs = "5"
 
 # Tracing (optional, feature-gated)
 tracing = { version = "0.1", optional = true }

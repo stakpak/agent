@@ -2,7 +2,6 @@
 
 pub mod convert;
 mod error;
-pub mod models;
 mod provider;
 pub mod stream;
 pub mod types;

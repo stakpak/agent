@@ -46,6 +46,14 @@ pub mod tracing;
 // Re-export commonly used types
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
+pub use registry::{
+    ProviderRegistry,
+    models_dev::{
+        DEFAULT_CACHE_PATH, MODELS_DEV_URL, ProviderInfo, fetch_models_dev,
+        filter_configured_providers, get_available_models, load_available_models,
+        load_models_for_provider, load_models_for_provider_from_path, parse_models_dev,
+    },
+};
 pub use types::{
     // Cache control types
     AnthropicCacheConfig,

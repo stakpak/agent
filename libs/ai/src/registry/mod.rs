@@ -1,5 +1,7 @@
 //! Provider registry for runtime provider management
 
+pub mod models_dev;
+
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::types::Model;

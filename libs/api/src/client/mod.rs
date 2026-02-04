@@ -226,9 +226,7 @@ impl AgentClient {
         };
 
         // 6. Setup hook registry with context management hooks
-        let mut hook_registry = config
-            .hook_registry
-            .unwrap_or_else(|| HookRegistry::default());
+        let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {

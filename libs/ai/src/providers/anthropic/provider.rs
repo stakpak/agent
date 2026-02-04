@@ -1,7 +1,6 @@
 //! Anthropic provider implementation
 
 use super::convert::{from_anthropic_response_with_warnings, to_anthropic_request};
-use super::models;
 use super::stream::create_stream;
 use super::types::{AnthropicConfig, AnthropicResponse};
 use crate::error::{Error, Result};
@@ -60,13 +59,13 @@ impl Provider for AnthropicProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<Model>> {
-        // Return static model definitions with full metadata
-        Ok(models::models())
+        // Load from models.dev cache
+        crate::registry::models_dev::load_models_for_provider("anthropic")
     }
 
     async fn get_model(&self, id: &str) -> Result<Option<Model>> {
-        // Use static lookup for efficiency
-        Ok(models::get_model(id))
+        let models = crate::registry::models_dev::load_models_for_provider("anthropic")?;
+        Ok(models.into_iter().find(|m| m.id == id))
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {

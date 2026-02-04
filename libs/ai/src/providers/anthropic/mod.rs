@@ -1,7 +1,6 @@
 //! Anthropic provider module
 
 mod convert;
-pub mod models;
 mod provider;
 mod stream;
 mod types;

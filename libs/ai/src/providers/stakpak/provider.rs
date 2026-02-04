@@ -115,45 +115,27 @@ impl Provider for StakpakProvider {
 
     async fn list_models(&self) -> Result<Vec<Model>> {
         // Stakpak routes to other providers, so aggregate models from them
-        // with stakpak/ prefix for routing
-        use crate::providers::{anthropic, gemini, openai};
+        // with stakpak/{provider}/ prefix for routing
+        use crate::registry::models_dev::load_models_for_provider;
+
+        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
 
         let mut models = Vec::new();
 
-        // Add Anthropic models with stakpak/anthropic/ prefix
-        for model in anthropic::models::models() {
-            models.push(Model {
-                id: format!("anthropic/{}", model.id),
-                name: model.name,
-                provider: "stakpak".into(),
-                reasoning: model.reasoning,
-                cost: model.cost,
-                limit: model.limit,
-            });
-        }
-
-        // Add OpenAI models with stakpak/openai/ prefix
-        for model in openai::models::models() {
-            models.push(Model {
-                id: format!("openai/{}", model.id),
-                name: model.name,
-                provider: "stakpak".into(),
-                reasoning: model.reasoning,
-                cost: model.cost,
-                limit: model.limit,
-            });
-        }
-
-        // Add Gemini models with stakpak/google/ prefix
-        for model in gemini::models::models() {
-            models.push(Model {
-                id: format!("google/{}", model.id),
-                name: model.name,
-                provider: "stakpak".into(),
-                reasoning: model.reasoning,
-                cost: model.cost,
-                limit: model.limit,
-            });
+        for provider_id in PROVIDERS {
+            if let Ok(provider_models) = load_models_for_provider(provider_id) {
+                for model in provider_models {
+                    models.push(Model {
+                        id: format!("{}/{}", provider_id, model.id),
+                        name: model.name,
+                        provider: "stakpak".into(),
+                        reasoning: model.reasoning,
+                        cost: model.cost,
+                        limit: model.limit,
+                        release_date: model.release_date,
+                    });
+                }
+            }
         }
 
         Ok(models)
@@ -255,39 +237,39 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
 /// Parse Stakpak API error and return user-friendly message
 fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
     // Try to parse as JSON error
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text) {
-        if let Some(error) = json.get("error") {
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
-            let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text)
+        && let Some(error) = json.get("error")
+    {
+        let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
+        let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-            // Check for insufficient credits
-            if message.contains("Exceeded credits") || message.contains("balance is") {
-                return format!(
-                    "Insufficient credits. Please top up your Stakpak account at https://app.stakpak.dev/settings/billing. {}",
-                    message
-                );
-            }
+        // Check for insufficient credits
+        if message.contains("Exceeded credits") || message.contains("balance is") {
+            return format!(
+                "Insufficient credits. Please top up your Stakpak account at https://app.stakpak.dev/settings/billing. {}",
+                message
+            );
+        }
 
-            // Check for rate limit
-            if error_type == "rate_limit_error" || status_code == 429 {
-                return format!(
-                    "Rate limited. Please wait a moment and try again. {}",
-                    message
-                );
-            }
+        // Check for rate limit
+        if error_type == "rate_limit_error" || status_code == 429 {
+            return format!(
+                "Rate limited. Please wait a moment and try again. {}",
+                message
+            );
+        }
 
-            // Check for authentication errors
-            if error_type == "authentication_error" || status_code == 401 {
-                return format!(
-                    "Authentication failed. Please check your API key. {}",
-                    message
-                );
-            }
+        // Check for authentication errors
+        if error_type == "authentication_error" || status_code == 401 {
+            return format!(
+                "Authentication failed. Please check your API key. {}",
+                message
+            );
+        }
 
-            // Return the message if we have one
-            if !message.is_empty() {
-                return message.to_string();
-            }
+        // Return the message if we have one
+        if !message.is_empty() {
+            return message.to_string();
         }
     }
 

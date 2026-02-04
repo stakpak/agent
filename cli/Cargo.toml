@@ -15,6 +15,7 @@ stakpak-mcp-client = { workspace = true }
 stakpak-mcp-proxy = { workspace = true }
 stakpak-tui = { workspace = true }
 stakpak-shared = { workspace = true }
+stakai = { path = "../libs/ai" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }

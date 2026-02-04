@@ -1,7 +1,6 @@
 //! Gemini provider implementation
 
 use super::convert::{from_gemini_response, to_gemini_request};
-use super::models;
 use super::stream::create_stream;
 use super::types::{GeminiConfig, GeminiResponse};
 use crate::error::{Error, Result};
@@ -132,12 +131,12 @@ impl Provider for GeminiProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<Model>> {
-        // Return static model definitions with full metadata
-        Ok(models::models())
+        // Load from models.dev cache (uses "google" as provider ID)
+        crate::registry::models_dev::load_models_for_provider("google")
     }
 
     async fn get_model(&self, id: &str) -> Result<Option<Model>> {
-        // Use static lookup for efficiency
-        Ok(models::get_model(id))
+        let models = crate::registry::models_dev::load_models_for_provider("google")?;
+        Ok(models.into_iter().find(|m| m.id == id))
     }
 }

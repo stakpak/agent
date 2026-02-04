@@ -543,54 +543,53 @@ impl AgentProvider for AgentClient {
     // =========================================================================
 
     async fn list_models(&self) -> Vec<stakai::Model> {
-        // Return all known static models directly
-        // No network calls - this should always be fast
-        use stakai::providers::{anthropic, gemini, openai};
+        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
 
-        let mut models = Vec::new();
+        let use_stakpak = self.has_stakpak();
+        let mut all_models = Vec::new();
 
-        // When using Stakpak API, models are routed through Stakpak
-        if self.has_stakpak() {
-            // Add all models with stakpak routing prefix
-            for model in anthropic::models::models() {
-                models.push(stakai::Model {
-                    id: format!("anthropic/{}", model.id),
-                    name: model.name,
-                    provider: "stakpak".into(),
-                    reasoning: model.reasoning,
-                    cost: model.cost,
-                    limit: model.limit,
-                });
-            }
-            for model in openai::models::models() {
-                models.push(stakai::Model {
-                    id: format!("openai/{}", model.id),
-                    name: model.name,
-                    provider: "stakpak".into(),
-                    reasoning: model.reasoning,
-                    cost: model.cost,
-                    limit: model.limit,
-                });
-            }
-            for model in gemini::models::models() {
-                models.push(stakai::Model {
-                    id: format!("google/{}", model.id),
-                    name: model.name,
-                    provider: "stakpak".into(),
-                    reasoning: model.reasoning,
-                    cost: model.cost,
-                    limit: model.limit,
-                });
-            }
-        } else {
-            // Direct provider access - return models grouped by provider
-            models.extend(anthropic::models::models());
-            models.extend(openai::models::models());
-            models.extend(gemini::models::models());
+        for &provider_id in PROVIDERS {
+            let mut models = load_and_transform_models(provider_id, use_stakpak);
+            sort_models_by_recency(&mut models);
+            all_models.extend(models);
         }
 
+        all_models
+    }
+}
+
+/// Load models for a provider from cache, optionally transforming for Stakpak routing
+fn load_and_transform_models(provider_id: &str, use_stakpak: bool) -> Vec<stakai::Model> {
+    let models = stakai::load_models_for_provider(provider_id).unwrap_or_default();
+
+    if use_stakpak {
+        models
+            .into_iter()
+            .map(|m| stakai::Model {
+                id: format!("{}/{}", provider_id, m.id),
+                provider: "stakpak".into(),
+                name: m.name,
+                reasoning: m.reasoning,
+                cost: m.cost,
+                limit: m.limit,
+                release_date: m.release_date,
+            })
+            .collect()
+    } else {
         models
     }
+}
+
+/// Sort models by release_date descending (newest first)
+fn sort_models_by_recency(models: &mut [stakai::Model]) {
+    models.sort_by(|a, b| {
+        match (&b.release_date, &a.release_date) {
+            (Some(b_date), Some(a_date)) => b_date.cmp(a_date),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b.id.cmp(&a.id), // Fallback to ID descending
+        }
+    });
 }
 
 // =============================================================================
