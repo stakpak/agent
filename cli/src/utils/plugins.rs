@@ -1,11 +1,11 @@
-pub use flate2::read::GzDecoder;
-pub use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
-pub use std::fs;
-pub use std::io::Cursor;
-pub use std::path::{Path, PathBuf};
-pub use std::process::{Command, Stdio};
-pub use tar::Archive;
-pub use zip::ZipArchive;
+use flate2::read::GzDecoder;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
+use std::fs;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use tar::Archive;
+use zip::ZipArchive;
 
 /// Configuration for a plugin download
 pub struct PluginConfig {
@@ -13,6 +13,8 @@ pub struct PluginConfig {
     pub base_url: String,
     pub targets: Vec<String>,
     pub version: Option<String>,
+    pub repo: Option<String>,
+    pub owner: Option<String>,
 }
 
 /// Get the path to a plugin, downloading it if necessary
@@ -22,6 +24,8 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         base_url: config.base_url.trim_end_matches('/').to_string(), // Remove trailing slash
         targets: config.targets,
         version: config.version,
+        repo: config.repo,
+        owner: config.owner,
     };
 
     // Get the target version from the server
@@ -176,21 +180,45 @@ async fn get_latest_version(config: &PluginConfig) -> Result<String, String> {
     Ok(version_text.trim().to_string())
 }
 
+/// Fetch the latest version from GitHub releases
+pub async fn get_latest_github_release_version(owner: &str, repo: &str) -> Result<String, String> {
+    let client = create_tls_client(TlsClientConfig::default())?;
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
+
+    let response = client
+        .get(url)
+        .header("User-Agent", "stakpak-cli")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch latest release version: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub API returned: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub response: {}", e))?;
+
+    json["tag_name"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "No tag_name in release".to_string())
+}
+
 /// Compare two version strings
-fn is_same_version(current: &str, latest: &str) -> bool {
+pub fn is_same_version(current: &str, latest: &str) -> bool {
     let current_clean = current.strip_prefix('v').unwrap_or(current);
     let latest_clean = latest.strip_prefix('v').unwrap_or(latest);
 
     current_clean == latest_clean
 }
 
-/// Check if plugin binary already exists in plugins directory and get its version
-fn get_existing_plugin_path(plugin_name: &str) -> Result<String, String> {
-    let home_dir =
-        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
-
-    let stakpak_dir = PathBuf::from(&home_dir).join(".stakpak");
-    let plugins_dir = stakpak_dir.join("plugins");
+/// Check if plugin binary already exists in plugins directory
+pub fn get_existing_plugin_path(plugin_name: &str) -> Result<String, String> {
+    let plugins_dir = get_plugins_dir()?;
 
     // Determine the expected binary name based on OS
     let binary_name = if cfg!(windows) {
@@ -212,12 +240,8 @@ fn get_existing_plugin_path(plugin_name: &str) -> Result<String, String> {
 }
 
 /// Download and install plugin binary to ~/.stakpak/plugins
-async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, String> {
-    let home_dir =
-        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
-
-    let stakpak_dir = PathBuf::from(&home_dir).join(".stakpak");
-    let plugins_dir = stakpak_dir.join("plugins");
+pub async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, String> {
+    let plugins_dir = get_plugins_dir()?;
 
     // Create directories if they don't exist
     fs::create_dir_all(&plugins_dir)
@@ -228,6 +252,7 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
 
     let plugin_path = plugins_dir.join(&binary_name);
 
+    eprintln!("Downloading {} plugin from {}", config.name, download_url);
     println!("Downloading {} plugin...", config.name);
 
     // Download the archive
@@ -275,17 +300,10 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
 
 /// Determine download URL and binary name based on OS and architecture
 pub fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool), String> {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
+    let (platform, arch) = get_platform_suffix()?; // linux x86_64
 
     // Determine the current platform target
-    let current_target = match (os, arch) {
-        ("linux", "x86_64") => "linux-x86_64",
-        ("macos", "x86_64") => "darwin-x86_64",
-        ("macos", "aarch64") => "darwin-aarch64",
-        ("windows", "x86_64") => "windows-x86_64",
-        _ => return Err(format!("Unsupported platform: {} {}", os, arch)),
-    };
+    let current_target = format!("{}-{}", platform, arch); // linux-x86_64
 
     // Check if this target is supported by the plugin
     if !config.targets.contains(&current_target.to_string()) {
@@ -302,16 +320,35 @@ pub fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool)
         (config.name.clone(), false)
     };
 
-    // Construct download URL
     let extension = if is_zip { "zip" } else { "tar.gz" };
-    let download_url = format!(
-        "{}/{}/{}-{}.{}",
-        config.base_url,
-        config.version.clone().unwrap_or("latest".to_string()),
-        config.name,
-        current_target,
-        extension
-    );
+
+    // TODO: remove heuristic once provider/template-based downloads are introduced
+    let download_url = if config.base_url.contains("github.com") {
+        if config.version.is_none() {
+            format!(
+                "{}//releases/latest/download/{}-{}.{}",
+                config.base_url, config.name, current_target, extension
+            )
+        } else {
+            format!(
+                "{}//releases/download/{}/{}-{}.{}",
+                config.base_url,
+                config.version.clone().unwrap(),
+                config.name,
+                current_target,
+                extension
+            )
+        }
+    } else {
+        format!(
+            "{}/{}/{}-{}.{}",
+            config.base_url,
+            config.version.clone().unwrap_or("latest".to_string()),
+            config.name,
+            current_target,
+            extension
+        )
+    };
 
     Ok((download_url, binary_name, is_zip))
 }
@@ -395,4 +432,51 @@ pub fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> 
     }
 
     Ok(())
+}
+
+pub fn get_home_dir() -> Result<String, String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "HOME/USERPROFILE environment variable not set".to_string())
+}
+
+pub fn get_plugins_dir() -> Result<PathBuf, String> {
+    let home_dir = get_home_dir()?;
+    Ok(PathBuf::from(&home_dir).join(".stakpak").join("plugins"))
+}
+
+pub fn get_platform_suffix() -> Result<(&'static str, &'static str), String> {
+    let platform = match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "darwin",
+        "windows" => "windows",
+        os => return Err(format!("Unsupported OS: {}", os)),
+    };
+
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "aarch64",
+        arch => return Err(format!("Unsupported architecture: {}", arch)),
+    };
+
+    Ok((platform, arch))
+}
+
+pub fn execute_plugin_command(mut cmd: Command, plugin_name: String) -> Result<(), String> {
+    cmd.stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .stdin(Stdio::inherit());
+
+    let status = cmd
+        .status()
+        .map_err(|e| format!("Failed to execute {} command: {}", plugin_name, e))?;
+
+    if !status.success() {
+        return Err(format!(
+            "{} command failed with status: {}",
+            plugin_name, status
+        ));
+    }
+
+    std::process::exit(status.code().unwrap_or(1));
 }

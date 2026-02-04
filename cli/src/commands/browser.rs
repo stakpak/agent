@@ -1,48 +1,60 @@
-use crate::commands::plugin_utils::{
-    Plugin, download_plugin_from_github, execute_plugin_command, get_latest_github_release_version,
-    get_plugin_existing_path, is_version_match,
+use crate::utils::plugins::{
+    PluginConfig, download_and_install_plugin, execute_plugin_command, get_existing_plugin_path,
+    get_latest_github_release_version, is_same_version,
 };
 use std::process::Command;
 
-const BROWSER: Plugin = Plugin {
-    plugin_name: "agent-tab",
-    repo_owner: "stakpak",
-    repo_name: "tab",
-    artifact_prefix: "agent-tab",
-    binary_name: if cfg!(windows) {
-        "agent-tab.exe"
-    } else {
-        "agent-tab"
-    },
-};
+fn get_browser_config() -> PluginConfig {
+    PluginConfig {
+        name: "agent-tab".to_string(),
+        base_url: "https://github.com/stakpak/tab".to_string(),
+        targets: vec![
+            "linux-x86_64".to_string(),
+            "darwin-x86_64".to_string(),
+            "darwin-aarch64".to_string(),
+            "windows-x86_64".to_string(),
+        ],
+        version: None,
+        repo: Some("tab".to_string()),
+        owner: Some("stakpak".to_string()),
+    }
+}
 
-const DAEMON: Plugin = Plugin {
-    plugin_name: "agent-tab-daemon",
-    repo_owner: "stakpak",
-    repo_name: "tab",
-    artifact_prefix: "agent-tab-daemon",
-    binary_name: if cfg!(windows) {
-        "agent-tab-daemon.exe"
-    } else {
-        "agent-tab-daemon"
-    },
-};
+fn get_daemon_config() -> PluginConfig {
+    PluginConfig {
+        name: "agent-tab-daemon".to_string(),
+        base_url: "https://github.com/stakpak/tab".to_string(),
+        targets: vec![
+            "linux-x86_64".to_string(),
+            "darwin-x86_64".to_string(),
+            "darwin-aarch64".to_string(),
+            "windows-x86_64".to_string(),
+        ],
+        version: None,
+        repo: Some("tab".to_string()),
+        owner: Some("stakpak".to_string()),
+    }
+}
 
 pub async fn run_browser(args: Vec<String>) -> Result<(), String> {
+    let config = get_browser_config();
+
     let browser_path = get_browser_plugin_path().await;
     let mut cmd = Command::new(&browser_path);
     cmd.args(&args);
-    execute_plugin_command(cmd, BROWSER.binary_name.to_string())
+    execute_plugin_command(cmd, config.name)
 }
 
 fn get_browser_version(path: &str) -> Result<String, String> {
+    let config = get_browser_config();
+
     let output = std::process::Command::new(path)
         .arg("version")
         .output()
-        .map_err(|e| format!("Failed to run {} version: {}", BROWSER.binary_name, e))?;
+        .map_err(|e| format!("Failed to run {} version: {}", config.name, e))?;
 
     if !output.status.success() {
-        return Err(format!("{} version command failed", BROWSER.binary_name));
+        return Err(format!("{} version command failed", config.name));
     }
 
     let version_output = String::from_utf8_lossy(&output.stdout);
@@ -62,28 +74,32 @@ fn get_browser_version(path: &str) -> Result<String, String> {
 }
 
 fn get_daemon_version(path: &str) -> Result<String, String> {
+    let config = get_daemon_config();
+
     let output = std::process::Command::new(path)
         .arg("--version")
         .output()
-        .map_err(|e| format!("Failed to run {}: {}", DAEMON.plugin_name, e))?;
+        .map_err(|e| format!("Failed to run {}: {}", config.name, e))?;
 
     if !output.status.success() {
-        return Err(format!("{} version command failed", DAEMON.plugin_name));
+        return Err(format!("{} version command failed", config.name));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 async fn ensure_daemon_downloaded(version: Option<&str>) {
-    if let Ok(existing_path) = get_plugin_existing_path(DAEMON.binary_name.to_string()).await {
+    let config = get_daemon_config();
+
+    if let Ok(existing_path) = get_existing_plugin_path(&config.name) {
         if let Some(target) = version {
             if let Ok(current) = get_daemon_version(&existing_path) {
-                if is_version_match(&current, target) {
+                if is_same_version(&current, target) {
                     return;
                 }
                 println!(
                     "{} {} is outdated (target: {}), updating...",
-                    DAEMON.binary_name, current, target
+                    config.name, current, target
                 );
             }
         } else {
@@ -91,35 +107,26 @@ async fn ensure_daemon_downloaded(version: Option<&str>) {
         }
     }
 
-    match download_plugin_from_github(
-        DAEMON.repo_owner,
-        DAEMON.repo_name,
-        DAEMON.artifact_prefix,
-        DAEMON.binary_name,
-        version,
-    )
-    .await
-    {
+    match download_and_install_plugin(&config).await {
         Ok(path) => {
             let version_str = version.map(|v| format!("{} ", v)).unwrap_or_default();
             println!(
                 "Successfully installed {} {}-> {}",
-                DAEMON.binary_name, version_str, path
+                config.name, version_str, path
             );
         }
-        Err(e) => eprintln!("Failed to download {}: {}", DAEMON.binary_name, e),
+        Err(e) => eprintln!("Failed to download {}: {}", config.name, e),
     }
 }
 
 async fn get_browser_plugin_path() -> String {
-    let existing = get_plugin_existing_path(BROWSER.binary_name.to_string())
-        .await
-        .ok();
+    let config = get_browser_config();
+    let existing = get_existing_plugin_path(&config.name).ok();
     let current_version = existing.as_ref().and_then(|p| get_browser_version(p).ok());
 
     let latest_version = get_latest_github_release_version(
-        BROWSER.repo_owner.to_string(),
-        BROWSER.repo_name.to_string(),
+        config.owner.as_deref().unwrap_or_default(),
+        config.repo.as_deref().unwrap_or_default(),
     )
     .await;
 
@@ -127,35 +134,27 @@ async fn get_browser_plugin_path() -> String {
         match latest_version {
             Ok(target_version) => {
                 if let Some(ref current) = current_version {
-                    if is_version_match(current, &target_version) {
+                    if is_same_version(current, &target_version) {
                         ensure_daemon_downloaded(Some(&target_version)).await;
                         return path.clone();
                     }
                     println!(
                         "{} {} is outdated (target: {}), updating...",
-                        BROWSER.binary_name, current, target_version
+                        config.name, current, target_version
                     );
                 }
 
-                match download_plugin_from_github(
-                    BROWSER.repo_owner,
-                    BROWSER.repo_name,
-                    BROWSER.artifact_prefix,
-                    BROWSER.binary_name,
-                    Some(&target_version),
-                )
-                .await
-                {
+                match download_and_install_plugin(&config).await {
                     Ok(new_path) => {
                         println!(
                             "Successfully installed {} {} -> {}",
-                            BROWSER.binary_name, target_version, new_path
+                            config.name, target_version, new_path
                         );
                         ensure_daemon_downloaded(Some(&target_version)).await;
                         return new_path;
                     }
                     Err(e) => {
-                        eprintln!("Failed to update {}: {}", BROWSER.binary_name, e);
+                        eprintln!("Failed to update {}: {}", config.name, e);
                         eprintln!("Using existing version");
                         ensure_daemon_downloaded(Some(&target_version)).await;
                         return path.clone();
@@ -171,49 +170,31 @@ async fn get_browser_plugin_path() -> String {
 
     // No existing installation - must download
     match latest_version {
-        Ok(target_version) => {
-            match download_plugin_from_github(
-                BROWSER.repo_owner,
-                BROWSER.repo_name,
-                BROWSER.artifact_prefix,
-                BROWSER.binary_name,
-                Some(&target_version),
-            )
-            .await
-            {
-                Ok(path) => {
-                    println!(
-                        "Successfully installed {} {} -> {}",
-                        BROWSER.plugin_name, target_version, path
-                    );
-                    ensure_daemon_downloaded(Some(&target_version)).await;
-                    path
-                }
-                Err(e) => {
-                    eprintln!("Failed to download {}: {}", BROWSER.plugin_name, e);
-                    BROWSER.binary_name.to_string()
-                }
+        Ok(target_version) => match download_and_install_plugin(&config).await {
+            Ok(path) => {
+                println!(
+                    "Successfully installed {} {} -> {}",
+                    config.name, target_version, path
+                );
+                ensure_daemon_downloaded(Some(&target_version)).await;
+                path
             }
-        }
+            Err(e) => {
+                eprintln!("Failed to download {}: {}", config.name, e);
+                config.name.to_string()
+            }
+        },
         Err(e) => {
             eprintln!("Warning: Failed to check version: {}", e);
-            match download_plugin_from_github(
-                BROWSER.repo_owner,
-                BROWSER.repo_name,
-                BROWSER.artifact_prefix,
-                BROWSER.binary_name,
-                None,
-            )
-            .await
-            {
+            match download_and_install_plugin(&config).await {
                 Ok(path) => {
-                    println!("Successfully installed {} -> {}", BROWSER.plugin_name, path);
+                    println!("Successfully installed {} -> {}", config.name, path);
                     ensure_daemon_downloaded(None).await;
                     path
                 }
                 Err(e) => {
-                    eprintln!("Failed to download {}: {}", BROWSER.plugin_name, e);
-                    BROWSER.binary_name.to_string()
+                    eprintln!("Failed to download {}: {}", config.name, e);
+                    config.name.to_string()
                 }
             }
         }

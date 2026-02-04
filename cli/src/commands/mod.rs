@@ -14,7 +14,6 @@ pub mod auto_update;
 pub mod board;
 pub mod browser;
 pub mod mcp;
-pub mod plugin_utils;
 pub mod warden;
 
 pub use auth::AuthCommands;

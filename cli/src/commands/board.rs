@@ -1,43 +1,47 @@
-use crate::commands::plugin_utils::{
-    Plugin, download_plugin_from_github, execute_plugin_command, get_latest_github_release_version,
-    get_plugin_existing_path, is_version_match,
+use crate::utils::plugins::{
+    PluginConfig, download_and_install_plugin, execute_plugin_command, get_existing_plugin_path,
+    get_latest_github_release_version, is_same_version,
 };
 use std::process::Command;
 
-const BOARD: Plugin = Plugin {
-    plugin_name: "agent-board",
-    repo_owner: "stakpak",
-    repo_name: "agent-board",
-    artifact_prefix: "agent-board",
-    binary_name: if cfg!(windows) {
-        "agent-board.exe"
-    } else {
-        "agent-board"
-    },
-};
+fn get_board_plugin_config() -> PluginConfig {
+    PluginConfig {
+        name: "agent-board".to_string(),
+        base_url: "https://github.com/stakpak/agent-board".to_string(),
+        targets: vec![
+            "linux-x86_64".to_string(),
+            "windows-x86_64".to_string(),
+            "darwin-x86_64".to_string(),
+            "darwin-aarch64".to_string(),
+        ],
+        version: None,
+        repo: Some("agent-board".to_string()),
+        owner: Some("stakpak".to_string()),
+    }
+}
 
 /// Pass-through to agent-board plugin. All args after 'board' are forwarded directly.
 /// Run `stakpak board --help` for available commands.
 pub async fn run_board(args: Vec<String>) -> Result<(), String> {
+    let plugin_config = get_board_plugin_config();
+
     let board_path = get_board_plugin_path().await;
     let mut cmd = Command::new(board_path);
     cmd.args(&args);
-    execute_plugin_command(cmd, BOARD.plugin_name.to_string())
+    execute_plugin_command(cmd, plugin_config.name)
 }
 
 async fn get_board_plugin_path() -> String {
-    // Check if we have an existing installation first
-    let existing = get_plugin_existing_path(BOARD.binary_name.to_string())
-        .await
-        .ok();
+    let config = get_board_plugin_config();
+    let existing = get_existing_plugin_path(&config.name).ok();
 
     let current_version = existing
         .as_ref()
         .and_then(|path| get_board_version(path).ok());
 
     let latest_version = get_latest_github_release_version(
-        BOARD.repo_owner.to_string(),
-        BOARD.repo_name.to_string(),
+        config.owner.as_deref().unwrap_or_default(),
+        config.repo.as_deref().unwrap_or_default(),
     )
     .await;
 
@@ -47,30 +51,22 @@ async fn get_board_plugin_path() -> String {
         match latest_version {
             Ok(target_version) => {
                 if let Some(ref current) = current_version {
-                    if is_version_match(current, &target_version) {
+                    if is_same_version(current, &target_version) {
                         // Already up to date, use existing
                         return path.clone();
                     }
                     println!(
                         "{} {} is outdated (target: {}), updating...",
-                        BOARD.plugin_name, current, target_version
+                        &config.name, current, target_version
                     );
                 }
 
                 // Need to update - download new version
-                match download_plugin_from_github(
-                    BOARD.repo_owner,
-                    BOARD.repo_name,
-                    BOARD.artifact_prefix,
-                    BOARD.binary_name,
-                    None,
-                )
-                .await
-                {
+                match download_and_install_plugin(&config).await {
                     Ok(new_path) => {
                         println!(
                             "Successfully installed {} {} -> {}",
-                            BOARD.plugin_name, target_version, new_path
+                            config.name, target_version, new_path
                         );
                         return new_path;
                     }
@@ -90,48 +86,30 @@ async fn get_board_plugin_path() -> String {
 
     // No existing installation - must download
     match latest_version {
-        Ok(target_version) => {
-            match download_plugin_from_github(
-                BOARD.repo_owner,
-                BOARD.repo_name,
-                BOARD.artifact_prefix,
-                BOARD.binary_name,
-                None,
-            )
-            .await
-            {
-                Ok(path) => {
-                    println!(
-                        "Successfully installed agent-board {} -> {}",
-                        target_version, path
-                    );
-                    path
-                }
-                Err(e) => {
-                    eprintln!("Failed to download agent-board: {}", e);
-                    "agent-board".to_string()
-                }
+        Ok(target_version) => match download_and_install_plugin(&config).await {
+            Ok(path) => {
+                println!(
+                    "Successfully installed agent-board {} -> {}",
+                    target_version, path
+                );
+                path
             }
-        }
+            Err(e) => {
+                eprintln!("Failed to download agent-board: {}", e);
+                "agent-board".to_string()
+            }
+        },
         Err(e) => {
             // Try download anyway (uses /latest/ URL)
             eprintln!("Warning: Failed to check version: {}", e);
-            match download_plugin_from_github(
-                BOARD.repo_owner,
-                BOARD.repo_name,
-                BOARD.artifact_prefix,
-                BOARD.binary_name,
-                None,
-            )
-            .await
-            {
+            match download_and_install_plugin(&config).await {
                 Ok(path) => {
                     println!("Successfully installed agent-board -> {}", path);
                     path
                 }
                 Err(e) => {
                     eprintln!("Failed to download agent-board: {}", e);
-                    "agent-board".to_string()
+                    config.name.clone()
                 }
             }
         }
@@ -139,13 +117,15 @@ async fn get_board_plugin_path() -> String {
 }
 
 fn get_board_version(path: &str) -> Result<String, String> {
+    let config = get_board_plugin_config();
+
     let output = std::process::Command::new(path)
         .arg("version")
         .output()
-        .map_err(|e| format!("Failed to run agent-board version: {}", e))?;
+        .map_err(|e| format!("Failed to run {} version: {}", config.name, e))?;
 
     if !output.status.success() {
-        return Err("agent-board version command failed".to_string());
+        return Err(format!("{} version command failed", config.name));
     }
 
     let version_output = String::from_utf8_lossy(&output.stdout);

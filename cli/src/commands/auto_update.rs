@@ -257,6 +257,8 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
         base_url: base_url.to_string(),
         targets: vec![target.to_string()],
         version: Some(version.clone()),
+        repo: Some("agent".to_string()),
+        owner: Some("stakpak".to_string()),
     };
 
     // 3. Get current executable path
