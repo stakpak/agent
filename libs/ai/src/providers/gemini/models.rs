@@ -19,8 +19,12 @@ pub fn models() -> Vec<Model> {
 }
 
 /// Get a Gemini model by ID
+/// Get a Gemini model by ID
+/// Supports both exact match and prefix match (e.g., "gemini-2.5-pro" matches "gemini-2.5-pro-preview")
 pub fn get_model(id: &str) -> Option<Model> {
-    models().into_iter().find(|m| m.id == id)
+    models()
+        .into_iter()
+        .find(|m| m.id == id || m.id.starts_with(&format!("{}-", id)))
 }
 
 /// Get the default model for Gemini

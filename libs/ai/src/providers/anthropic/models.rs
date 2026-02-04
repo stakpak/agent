@@ -13,8 +13,11 @@ pub fn models() -> Vec<Model> {
 }
 
 /// Get an Anthropic model by ID
+/// Supports both exact match and prefix match (e.g., "claude-opus-4-5" matches "claude-opus-4-5-20251101")
 pub fn get_model(id: &str) -> Option<Model> {
-    models().into_iter().find(|m| m.id == id)
+    models()
+        .into_iter()
+        .find(|m| m.id == id || m.id.starts_with(&format!("{}-", id)))
 }
 
 /// Get the default model for Anthropic

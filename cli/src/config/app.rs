@@ -797,7 +797,7 @@ impl AppConfig {
             .as_ref()
             .or(self.smart_model.as_ref())
             .map(|s| s.as_str())
-            .unwrap_or("claude-opus-4-5-20251101");
+            .unwrap_or("claude-opus-4-5");
 
         // Search the model catalog
         stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {

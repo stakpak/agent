@@ -20,8 +20,12 @@ pub fn models() -> Vec<Model> {
 }
 
 /// Get an OpenAI model by ID
+/// Get an OpenAI model by ID
+/// Supports both exact match and prefix match (e.g., "gpt-5" matches "gpt-5-2025-08-07")
 pub fn get_model(id: &str) -> Option<Model> {
-    models().into_iter().find(|m| m.id == id)
+    models()
+        .into_iter()
+        .find(|m| m.id == id || m.id.starts_with(&format!("{}-", id)))
 }
 
 /// Get the default model for OpenAI

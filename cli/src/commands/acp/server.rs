@@ -157,7 +157,7 @@ impl StakpakAcpAgent {
             models.into_iter().next().unwrap_or_else(|| {
                 // Fallback default: Claude Opus via Stakpak
                 Model::new(
-                    "anthropic/claude-opus-4-5-20251101",
+                    "anthropic/claude-opus-4-5",
                     "Claude Opus 4.5",
                     "stakpak",
                     true,
@@ -1141,12 +1141,13 @@ impl StakpakAcpAgent {
         session_id: &acp::SessionId,
     ) -> Result<ChatCompletionResponse, String> {
         let mut stream = Box::pin(stream);
+        let current_model = self.model.read().await;
 
         let mut chat_completion_response = ChatCompletionResponse {
             id: "".to_string(),
             object: "".to_string(),
             created: 0,
-            model: "claude-sonnet-4-5".to_string(),
+            model: current_model.id.clone(),
             choices: vec![],
             usage: LLMTokenUsage {
                 prompt_tokens: 0,
@@ -2264,7 +2265,7 @@ mod tests {
     #[test]
     fn test_model_to_acp_model_info_with_provider_prefix() {
         let model = Model::new(
-            "anthropic/claude-opus-4-5-20251101",
+            "anthropic/claude-opus-4-5",
             "Claude Opus 4.5",
             "stakpak",
             true,
@@ -2274,10 +2275,7 @@ mod tests {
 
         let model_info = StakpakAcpAgent::model_to_acp_model_info(&model);
 
-        assert_eq!(
-            model_info.model_id.0.as_ref(),
-            "anthropic/claude-opus-4-5-20251101"
-        );
+        assert_eq!(model_info.model_id.0.as_ref(), "anthropic/claude-opus-4-5");
         assert_eq!(model_info.name, "Claude Opus 4.5");
         assert!(model_info.description.as_ref().unwrap().contains("stakpak"));
     }
