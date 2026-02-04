@@ -355,22 +355,16 @@ pub fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool)
 
     let extension = if is_zip { "zip" } else { "tar.gz" };
 
-    // TODO: remove heuristic once provider/template-based downloads are introduced
     let download_url = if config.base_url.contains("github.com") {
-        if config.version.is_none() {
-            format!(
+        match &config.version {
+            Some(version) => format!(
+                "{}/releases/download/{}/{}-{}.{}",
+                config.base_url, version, config.name, current_target, extension
+            ),
+            None => format!(
                 "{}/releases/latest/download/{}-{}.{}",
                 config.base_url, config.name, current_target, extension
-            )
-        } else {
-            format!(
-                "{}/releases/download/{}/{}-{}.{}",
-                config.base_url,
-                config.version.clone().unwrap(),
-                config.name,
-                current_target,
-                extension
-            )
+            ),
         }
     } else {
         format!(
