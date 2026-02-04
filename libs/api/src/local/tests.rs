@@ -887,4 +887,78 @@ mod tests {
         assert!(stats.total_time_saved_seconds.is_none());
         assert!(stats.tools_usage.is_empty());
     }
+
+    // =========================================================================
+    // Migration tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_migrations_applied() {
+        let storage = create_test_storage().await;
+        let conn = storage.connection().lock().await;
+
+        let version = crate::local::migrations::current_version(&conn)
+            .await
+            .unwrap();
+        assert_eq!(version, 2, "All migrations should be applied");
+
+        let status = crate::local::migrations::status(&conn).await.unwrap();
+        assert_eq!(status.applied, vec![1, 2]);
+        assert!(status.pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_migration_rollback() {
+        let storage = create_test_storage().await;
+        let conn = storage.connection().lock().await;
+
+        // Should be at version 2
+        let version = crate::local::migrations::current_version(&conn)
+            .await
+            .unwrap();
+        assert_eq!(version, 2);
+
+        // Rollback to version 1
+        let rolled_back = crate::local::migrations::rollback_last(&conn)
+            .await
+            .unwrap();
+        assert_eq!(rolled_back, Some(2));
+
+        let version = crate::local::migrations::current_version(&conn)
+            .await
+            .unwrap();
+        assert_eq!(version, 1);
+
+        // Rollback to version 0
+        let rolled_back = crate::local::migrations::rollback_last(&conn)
+            .await
+            .unwrap();
+        assert_eq!(rolled_back, Some(1));
+
+        let version = crate::local::migrations::current_version(&conn)
+            .await
+            .unwrap();
+        assert_eq!(version, 0);
+
+        // Re-apply all
+        let applied = crate::local::migrations::apply_all(&conn).await.unwrap();
+        assert_eq!(applied, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_migration_rollback_to_version() {
+        let storage = create_test_storage().await;
+        let conn = storage.connection().lock().await;
+
+        // Rollback to version 1 (keeps 1, removes 2)
+        let rolled_back = crate::local::migrations::rollback_to(&conn, 1)
+            .await
+            .unwrap();
+        assert_eq!(rolled_back, vec![2]);
+
+        let version = crate::local::migrations::current_version(&conn)
+            .await
+            .unwrap();
+        assert_eq!(version, 1);
+    }
 }
