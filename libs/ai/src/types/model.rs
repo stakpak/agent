@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Unified model representation across all providers
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Model {
     /// Model identifier sent to the API (e.g., "claude-sonnet-4-5-20250929")
     pub id: String,
@@ -80,19 +80,6 @@ impl Model {
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
-    }
-}
-
-impl Default for Model {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            provider: String::new(),
-            reasoning: false,
-            cost: None,
-            limit: ModelLimit::default(),
-        }
     }
 }
 

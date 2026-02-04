@@ -1,7 +1,10 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
 use crate::commands::agent::run::stream::ToolCallAccumulator;
 use crate::config::AppConfig;
-use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
+use agent_client_protocol::{
+    self as acp, Client as AcpClient, ModelInfo, SessionModelState, SessionNotification,
+    SetSessionModelRequest, SetSessionModelResponse,
+};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
@@ -58,6 +61,48 @@ pub struct StakpakAcpAgent {
 }
 
 impl StakpakAcpAgent {
+    /// Convert internal Model to ACP ModelInfo
+    fn model_to_acp_model_info(model: &Model) -> ModelInfo {
+        ModelInfo::new(model.id.clone(), model.name.clone())
+            .description(format!("Provider: {}", model.provider))
+    }
+
+    /// Get available models as ACP SessionModelState
+    async fn get_session_model_state(&self) -> SessionModelState {
+        let client = self.client.read().await;
+        let current_model = self.model.read().await;
+
+        let available_models = client.list_models().await;
+        log::debug!(
+            "Available models for ACP: {} models, current: {}",
+            available_models.len(),
+            current_model.id
+        );
+
+        let acp_models: Vec<ModelInfo> = available_models
+            .iter()
+            .map(Self::model_to_acp_model_info)
+            .collect();
+
+        // Ensure currentModelId matches one of the availableModels
+        // If the current model isn't in the list, use the first available model
+        let current_model_id = if available_models.iter().any(|m| m.id == current_model.id) {
+            current_model.id.clone()
+        } else if let Some(first_model) = available_models.first() {
+            log::debug!(
+                "Current model '{}' not in available models, using '{}'",
+                current_model.id,
+                first_model.id
+            );
+            first_model.id.clone()
+        } else {
+            // Fallback if no models available
+            current_model.id.clone()
+        };
+
+        SessionModelState::new(current_model_id, acp_models)
+    }
+
     pub async fn new(
         config: AppConfig,
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
@@ -1688,7 +1733,10 @@ impl acp::Agent for StakpakAcpAgent {
             }
         }
 
-        Ok(acp::NewSessionResponse::new(session_id))
+        // Get available models for model selection
+        let model_state = self.get_session_model_state().await;
+
+        Ok(acp::NewSessionResponse::new(session_id).models(model_state))
     }
 
     async fn load_session(
@@ -1707,8 +1755,11 @@ impl acp::Agent for StakpakAcpAgent {
         // Track the loaded session ID
         self.current_session_id.set(Some(session_uuid));
 
+        // Get available models for model selection
+        let model_state = self.get_session_model_state().await;
+
         log::info!("Loaded session: {}", session_id_str);
-        Ok(acp::LoadSessionResponse::new())
+        Ok(acp::LoadSessionResponse::new().models(model_state))
     }
 
     async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {
@@ -1757,8 +1808,9 @@ impl acp::Agent for StakpakAcpAgent {
 
         let client = self.client.read().await.clone();
         let model = self.model.read().await.clone();
+        let session_id = self.current_session_id.get();
         let (stream, _request_id) = client
-            .chat_completion_stream(model, messages, tools_option.clone(), None, None)
+            .chat_completion_stream(model, messages, tools_option.clone(), None, session_id)
             .await
             .map_err(|e| {
                 log::error!("Chat completion stream failed: {e}");
@@ -1938,13 +1990,14 @@ impl acp::Agent for StakpakAcpAgent {
 
                 let client = self.client.read().await.clone();
                 let model = self.model.read().await.clone();
+                let session_id = self.current_session_id.get();
                 let (follow_up_stream, _request_id) = client
                     .chat_completion_stream(
                         model,
                         current_messages.clone(),
                         tools_option.clone(),
                         None,
-                        None,
+                        session_id,
                     )
                     .await
                     .map_err(|e| {
@@ -2063,11 +2116,49 @@ impl acp::Agent for StakpakAcpAgent {
 
         Ok(())
     }
+
+    async fn set_session_model(
+        &self,
+        args: SetSessionModelRequest,
+    ) -> Result<SetSessionModelResponse, acp::Error> {
+        log::info!("Received set_session_model request: {:?}", args);
+
+        let model_id_str = args.model_id.0.to_string();
+
+        // Get available models from the client
+        let client = self.client.read().await;
+        let available_models = client.list_models().await;
+
+        // Find the requested model
+        let selected_model = available_models
+            .into_iter()
+            .find(|m| m.id == model_id_str)
+            .ok_or_else(|| {
+                log::error!("Model not found: {}", model_id_str);
+                acp::Error::invalid_params().data(format!("Model not found: {}", model_id_str))
+            })?;
+
+        // Update the current model
+        {
+            let mut model = self.model.write().await;
+            *model = selected_model.clone();
+        }
+
+        log::info!(
+            "Model switched to: {} ({})",
+            selected_model.name,
+            selected_model.id
+        );
+
+        Ok(SetSessionModelResponse::new())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::commands::acp::tool_names;
+    use stakpak_api::ModelLimit;
     use test_case::test_case;
 
     // Per ACP spec, agents MUST check client capabilities before delegating fs operations.
@@ -2098,5 +2189,247 @@ mod tests {
             "tool={} (read={}, write={}), caps(r={}, w={}) => delegate={}",
             tool_name, is_read_tool, is_write_tool, client_reads, client_writes, should_delegate
         );
+    }
+
+    // Model selection tests
+
+    #[test]
+    fn test_model_to_acp_model_info_basic() {
+        let model = Model::new(
+            "claude-sonnet-4-5-20250514",
+            "Claude Sonnet 4.5",
+            "anthropic",
+            true,
+            None,
+            ModelLimit::default(),
+        );
+
+        let model_info = StakpakAcpAgent::model_to_acp_model_info(&model);
+
+        assert_eq!(model_info.model_id.0.as_ref(), "claude-sonnet-4-5-20250514");
+        assert_eq!(model_info.name, "Claude Sonnet 4.5");
+        assert!(model_info.description.as_ref().unwrap().contains("anthropic"));
+    }
+
+    #[test]
+    fn test_model_to_acp_model_info_custom_model() {
+        let model = Model::custom("gpt-4o", "openai");
+
+        let model_info = StakpakAcpAgent::model_to_acp_model_info(&model);
+
+        assert_eq!(model_info.model_id.0.as_ref(), "gpt-4o");
+        // Custom models use ID as name
+        assert_eq!(model_info.name, "gpt-4o");
+        assert!(model_info.description.as_ref().unwrap().contains("openai"));
+    }
+
+    #[test]
+    fn test_model_to_acp_model_info_with_provider_prefix() {
+        let model = Model::new(
+            "anthropic/claude-opus-4-5-20251101",
+            "Claude Opus 4.5",
+            "stakpak",
+            true,
+            None,
+            ModelLimit::default(),
+        );
+
+        let model_info = StakpakAcpAgent::model_to_acp_model_info(&model);
+
+        assert_eq!(
+            model_info.model_id.0.as_ref(),
+            "anthropic/claude-opus-4-5-20251101"
+        );
+        assert_eq!(model_info.name, "Claude Opus 4.5");
+        assert!(model_info.description.as_ref().unwrap().contains("stakpak"));
+    }
+
+    #[test]
+    fn test_session_model_state_creation() {
+        let models = vec![
+            Model::new(
+                "claude-sonnet-4-5",
+                "Claude Sonnet 4.5",
+                "anthropic",
+                true,
+                None,
+                ModelLimit::default(),
+            ),
+            Model::new(
+                "gpt-4o",
+                "GPT-4o",
+                "openai",
+                false,
+                None,
+                ModelLimit::default(),
+            ),
+        ];
+
+        let acp_models: Vec<ModelInfo> = models
+            .iter()
+            .map(StakpakAcpAgent::model_to_acp_model_info)
+            .collect();
+
+        let state = SessionModelState::new("claude-sonnet-4-5", acp_models);
+
+        assert_eq!(state.current_model_id.0.as_ref(), "claude-sonnet-4-5");
+        assert_eq!(state.available_models.len(), 2);
+        assert_eq!(
+            state.available_models[0].model_id.0.as_ref(),
+            "claude-sonnet-4-5"
+        );
+        assert_eq!(state.available_models[1].model_id.0.as_ref(), "gpt-4o");
+    }
+
+    #[test]
+    fn test_find_model_by_id() {
+        let models = vec![
+            Model::new(
+                "claude-sonnet-4-5",
+                "Claude Sonnet 4.5",
+                "anthropic",
+                true,
+                None,
+                ModelLimit::default(),
+            ),
+            Model::new(
+                "gpt-4o",
+                "GPT-4o",
+                "openai",
+                false,
+                None,
+                ModelLimit::default(),
+            ),
+            Model::new(
+                "gemini-2.0-flash",
+                "Gemini 2.0 Flash",
+                "google",
+                false,
+                None,
+                ModelLimit::default(),
+            ),
+        ];
+
+        // Find existing model
+        let found = models.iter().find(|m| m.id == "gpt-4o");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "GPT-4o");
+
+        // Find non-existing model
+        let not_found = models.iter().find(|m| m.id == "non-existent-model");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_model_selection_with_provider_prefixed_ids() {
+        // Models with stakpak provider prefix format
+        let models = vec![
+            Model::new(
+                "anthropic/claude-sonnet-4-5-20250514",
+                "Claude Sonnet 4.5",
+                "stakpak",
+                true,
+                None,
+                ModelLimit::default(),
+            ),
+            Model::new(
+                "openai/gpt-4o",
+                "GPT-4o",
+                "stakpak",
+                false,
+                None,
+                ModelLimit::default(),
+            ),
+        ];
+
+        let model_id = "anthropic/claude-sonnet-4-5-20250514";
+        let found = models.iter().find(|m| m.id == model_id);
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Claude Sonnet 4.5");
+        assert_eq!(found.unwrap().provider, "stakpak");
+    }
+
+    #[test]
+    fn test_new_session_response_serialization_with_models() {
+        let models = vec![
+            ModelInfo::new("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5")
+                .description("Provider: stakpak".to_string()),
+            ModelInfo::new("openai/gpt-4o", "GPT-4o")
+                .description("Provider: stakpak".to_string()),
+        ];
+
+        let model_state = SessionModelState::new("anthropic/claude-sonnet-4-5", models);
+
+        let response =
+            acp::NewSessionResponse::new(acp::SessionId::new("test-session-123"))
+                .models(model_state);
+
+        let json = serde_json::to_string_pretty(&response).unwrap();
+        println!("NewSessionResponse JSON:\n{}", json);
+
+        // Verify the JSON contains models
+        assert!(json.contains("\"models\""), "JSON should contain models field");
+        assert!(
+            json.contains("\"currentModelId\""),
+            "JSON should contain currentModelId"
+        );
+        assert!(
+            json.contains("\"availableModels\""),
+            "JSON should contain availableModels"
+        );
+        assert!(
+            json.contains("\"anthropic/claude-sonnet-4-5\""),
+            "JSON should contain model ID"
+        );
+        assert!(
+            json.contains("\"Claude Sonnet 4.5\""),
+            "JSON should contain model name"
+        );
+    }
+
+    #[test]
+    fn test_current_model_must_match_available_models() {
+        // Simulate the logic from get_session_model_state
+        let available_models = vec![
+            Model::new(
+                "anthropic/claude-sonnet-4-5-20250929",
+                "Claude Sonnet 4.5",
+                "stakpak",
+                true,
+                None,
+                ModelLimit::default(),
+            ),
+            Model::new(
+                "openai/gpt-4o",
+                "GPT-4o",
+                "stakpak",
+                false,
+                None,
+                ModelLimit::default(),
+            ),
+        ];
+
+        // Case 1: Current model matches available
+        let current_model_id = "anthropic/claude-sonnet-4-5-20250929";
+        let resolved_id = if available_models.iter().any(|m| m.id == current_model_id) {
+            current_model_id.to_string()
+        } else if let Some(first) = available_models.first() {
+            first.id.clone()
+        } else {
+            current_model_id.to_string()
+        };
+        assert_eq!(resolved_id, "anthropic/claude-sonnet-4-5-20250929");
+
+        // Case 2: Current model doesn't match - should fallback to first
+        let current_model_id = "some-unknown-model";
+        let resolved_id = if available_models.iter().any(|m| m.id == current_model_id) {
+            current_model_id.to_string()
+        } else if let Some(first) = available_models.first() {
+            first.id.clone()
+        } else {
+            current_model_id.to_string()
+        };
+        assert_eq!(resolved_id, "anthropic/claude-sonnet-4-5-20250929");
     }
 }
