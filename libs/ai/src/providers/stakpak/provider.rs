@@ -82,10 +82,10 @@ impl Provider for StakpakProvider {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!(
-                "Stakpak API error {}: {}",
-                status, error_text
-            )));
+
+            // Parse error for user-friendly messages
+            let friendly_error = parse_stakpak_error(&error_text, status.as_u16());
+            return Err(Error::provider_error(friendly_error));
         }
 
         let resp: StakpakResponse = response.json().await?;
@@ -217,4 +217,47 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
     }
 
     Ok(content)
+}
+
+/// Parse Stakpak API error and return user-friendly message
+fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
+    // Try to parse as JSON error
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text)
+        && let Some(error) = json.get("error")
+    {
+        let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
+        let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        // Check for insufficient credits
+        if message.contains("Exceeded credits") || message.contains("balance is") {
+            return format!(
+                "Insufficient credits. Please top up your Stakpak account at https://app.stakpak.dev/settings/billing. {}",
+                message
+            );
+        }
+
+        // Check for rate limit
+        if error_type == "rate_limit_error" || status_code == 429 {
+            return format!(
+                "Rate limited. Please wait a moment and try again. {}",
+                message
+            );
+        }
+
+        // Check for authentication errors
+        if error_type == "authentication_error" || status_code == 401 {
+            return format!(
+                "Authentication failed. Please check your API key. {}",
+                message
+            );
+        }
+
+        // Return the message if we have one
+        if !message.is_empty() {
+            return message.to_string();
+        }
+    }
+
+    // Fallback to raw error
+    format!("Stakpak API error {}: {}", status_code, error_text)
 }
