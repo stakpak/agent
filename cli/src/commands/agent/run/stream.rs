@@ -122,6 +122,7 @@ pub async fn process_responses_stream(
         system_fingerprint: None,
         metadata: None,
     };
+    let mut response_metadata: Option<serde_json::Value> = None;
 
     let mut llm_model: Option<LLMModel> = None;
 
@@ -153,6 +154,9 @@ pub async fn process_responses_stream(
 
                     // Send usage to TUI for display immediately when we receive it
                     send_input_event(input_tx, InputEvent::StreamUsage(usage.clone())).await?;
+                }
+                if let Some(metadata) = &response.metadata {
+                    response_metadata = Some(metadata.clone());
                 }
 
                 // Skip chunks with no choices (e.g., usage-only events)
@@ -239,6 +243,7 @@ pub async fn process_responses_stream(
         finish_reason: FinishReason::Stop,
         logprobs: None,
     });
+    chat_completion_response.metadata = response_metadata;
 
     // End stream processing loading when stream completes
     send_input_event(
