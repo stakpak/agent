@@ -658,6 +658,27 @@ impl AgentClient {
                 .active_checkpoint
                 .ok_or_else(|| format!("Session {} has no active checkpoint", session_id))?;
 
+            // If the session still has the default title, generate a better one in the background.
+            if session.title.trim().is_empty() || session.title == "New Session" {
+                let client = self.clone();
+                let messages_for_title = messages.to_vec();
+                let session_id = session.id;
+                let existing_title = session.title.clone();
+                tokio::spawn(async move {
+                    if let Ok(title) = client.generate_session_title(&messages_for_title).await {
+                        let trimmed = title.trim();
+                        if !trimmed.is_empty() && trimmed != existing_title {
+                            let request =
+                                StorageUpdateSessionRequest::new().with_title(trimmed.to_string());
+                            let _ = client
+                                .session_storage
+                                .update_session(session_id, &request)
+                                .await;
+                        }
+                    }
+                });
+            }
+
             return Ok(SessionInfo {
                 session_id: session.id,
                 checkpoint_id: checkpoint.id,
