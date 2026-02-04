@@ -13,9 +13,9 @@ use futures::StreamExt;
 use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
-    Model, OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions,
-    Tool, ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
-    registry::ProviderRegistry,
+    Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
+    StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
+    providers::anthropic::AnthropicConfig as StakaiAnthropicConfig, registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -273,13 +273,16 @@ pub fn to_stakai_provider_options(
                 });
 
                 Some(ProviderOptions::OpenAI(OpenAIOptions {
-                    reasoning_effort,
-                    reasoning_summary: None,
+                    api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
+                        reasoning_effort,
+                        reasoning_summary: None,
+                        session_id: None,
+                        service_tier: None,
+                        cache_retention: None,
+                    })),
                     system_message_mode: None,
                     store: None,
                     user: None,
-                    prompt_cache_key: None,
-                    prompt_cache_retention: None,
                 }))
             } else {
                 None
@@ -312,13 +315,16 @@ pub fn to_stakai_provider_options(
                     }
                 });
                 Some(ProviderOptions::OpenAI(OpenAIOptions {
-                    reasoning_effort,
-                    reasoning_summary: None,
+                    api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
+                        reasoning_effort,
+                        reasoning_summary: None,
+                        session_id: None,
+                        service_tier: None,
+                        cache_retention: None,
+                    })),
                     system_message_mode: None,
                     store: None,
                     user: None,
-                    prompt_cache_key: None,
-                    prompt_cache_retention: None,
                 }))
             } else {
                 opts.google.as_ref().map(|google| {
@@ -1466,7 +1472,11 @@ mod tests {
 
         assert!(result.is_some());
         if let Some(ProviderOptions::OpenAI(openai)) = result {
-            assert_eq!(openai.reasoning_effort, Some(ReasoningEffort::High));
+            if let Some(OpenAIApiConfig::Responses(config)) = openai.api_config {
+                assert_eq!(config.reasoning_effort, Some(ReasoningEffort::High));
+            } else {
+                panic!("Expected Responses API config");
+            }
         } else {
             panic!("Expected OpenAI provider options");
         }

@@ -70,6 +70,7 @@ pub use types::{
     CacheStrategy,
     CacheWarning,
     CacheWarningType,
+    CompletionsConfig,
     ContentPart,
     ContentPartProviderOptions,
     // Response types
@@ -90,6 +91,7 @@ pub use types::{
     Model,
     ModelCost,
     ModelLimit,
+    OpenAIApiConfig,
     OpenAIOptions,
     OutputTokenDetails,
     PromptCacheRetention,
@@ -98,6 +100,7 @@ pub use types::{
     ReasoningSummary,
     ResponseContent,
     ResponseWarning,
+    ResponsesConfig,
     Role,
     StreamEvent,
     SystemMessageMode,

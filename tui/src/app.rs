@@ -3,7 +3,7 @@ mod types;
 
 pub use events::{InputEvent, OutputEvent};
 use stakai::Model;
-use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
+use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::approval_bar::ApprovalBar;
@@ -199,7 +199,6 @@ pub struct AppState {
     pub auto_approve_manager: AutoApproveManager,
     pub allowed_tools: Option<Vec<String>>,
     pub model: Model,
-    pub llm_model: Option<LLMModel>,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
 
@@ -471,7 +470,6 @@ impl AppState {
             },
             context_usage_percent: 0,
             model,
-            llm_model: None,
 
             // Side panel initialization
             show_side_panel: false,

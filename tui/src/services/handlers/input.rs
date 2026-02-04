@@ -16,7 +16,6 @@ use crate::services::helper_block::{
 use crate::services::message::{BubbleColors, Message, MessageContent};
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::llm::LLMTokenUsage;
-use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -657,12 +656,9 @@ fn handle_input_submitted(
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
-        let context_info = state
-            .llm_model
-            .as_ref()
-            .map(|model| model.context_info())
-            .unwrap_or_default();
-        let max_tokens = context_info.max_tokens as u32;
+        // Use current_model if set (from streaming), otherwise use default model
+        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let max_tokens = active_model.limit.context as u32;
 
         let capped_tokens = state.current_message_usage.total_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);

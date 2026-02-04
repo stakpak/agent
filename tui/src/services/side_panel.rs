@@ -202,9 +202,9 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         lines.push(make_row(
             "Tokens",
             format!(
-                "{} / {}K ({}%)",
+                "{} / {} ({}%)",
                 format_tokens(tokens),
-                max_tokens / 1000,
+                format_tokens(max_tokens),
                 percentage
             ),
             Color::White,

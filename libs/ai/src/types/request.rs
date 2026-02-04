@@ -91,16 +91,65 @@ impl ThinkingOptions {
     }
 }
 
-/// OpenAI-specific provider options
+/// OpenAI API configuration - encapsulates API-specific settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "api_type", rename_all = "lowercase")]
+pub enum OpenAIApiConfig {
+    /// Chat Completions API (/chat/completions)
+    Completions(CompletionsConfig),
+    /// Responses API (/responses)
+    Responses(ResponsesConfig),
+}
+
+impl Default for OpenAIApiConfig {
+    fn default() -> Self {
+        OpenAIApiConfig::Completions(CompletionsConfig::default())
+    }
+}
+
+/// Configuration for OpenAI Chat Completions API
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct OpenAIOptions {
-    /// Reasoning effort for o1/o3/o4 models
+pub struct CompletionsConfig {
+    /// Manual prompt cache key for better cache hit rates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+
+    /// Cache retention policy for prompt caching.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_retention: Option<PromptCacheRetention>,
+}
+
+/// Configuration for OpenAI Responses API
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ResponsesConfig {
+    /// Reasoning effort for reasoning models (o1/o3/o4/gpt-5)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
 
     /// Reasoning summary mode
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_summary: Option<ReasoningSummary>,
+
+    /// Session ID for cache routing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+
+    /// Service tier (e.g., "flex", "priority")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+
+    /// Cache retention ("short" or "long")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_retention: Option<String>,
+}
+
+/// OpenAI-specific provider options
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OpenAIOptions {
+    /// API configuration (Completions or Responses)
+    /// Defaults to Completions if not specified
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_config: Option<OpenAIApiConfig>,
 
     /// Controls how system messages are handled.
     /// - `system`: Pass as system-level instruction (default for non-reasoning models)
@@ -116,31 +165,35 @@ pub struct OpenAIOptions {
     /// User identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+}
 
-    /// Manual prompt cache key for better cache hit rates.
-    ///
-    /// OpenAI automatically caches prompts >= 1024 tokens. Use this to
-    /// provide a stable identifier that helps optimize cache hits.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use stakai::{OpenAIOptions, ProviderOptions};
-    ///
-    /// let opts = OpenAIOptions {
-    ///     prompt_cache_key: Some("my-session-123".into()),
-    ///     ..Default::default()
-    /// };
-    /// ```
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_key: Option<String>,
+impl OpenAIOptions {
+    /// Create options for Completions API
+    pub fn completions() -> Self {
+        Self {
+            api_config: Some(OpenAIApiConfig::Completions(CompletionsConfig::default())),
+            ..Default::default()
+        }
+    }
 
-    /// Cache retention policy for prompt caching.
-    ///
-    /// - `InMemory` (default): Standard caching (~5-60 min depending on load)
-    /// - `Extended24h`: Extended 24-hour caching (GPT-5.1+ only)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_retention: Option<PromptCacheRetention>,
+    /// Create options for Responses API
+    pub fn responses() -> Self {
+        Self {
+            api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig::default())),
+            ..Default::default()
+        }
+    }
+
+    /// Create options for Responses API with reasoning effort
+    pub fn responses_with_reasoning(effort: ReasoningEffort) -> Self {
+        Self {
+            api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
+                reasoning_effort: Some(effort),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
 }
 
 /// Controls how system messages are handled in OpenAI requests

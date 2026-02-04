@@ -32,8 +32,9 @@ pub use options::{
 
 // Request types
 pub use request::{
-    AnthropicOptions, GenerateRequest, GoogleOptions, OpenAIOptions, ProviderOptions,
-    ReasoningEffort, ReasoningSummary, SystemMessageMode, ThinkingOptions,
+    AnthropicOptions, CompletionsConfig, GenerateRequest, GoogleOptions, OpenAIApiConfig,
+    OpenAIOptions, ProviderOptions, ReasoningEffort, ReasoningSummary, ResponsesConfig,
+    SystemMessageMode, ThinkingOptions,
 };
 
 // Response types

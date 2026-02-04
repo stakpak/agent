@@ -3,7 +3,7 @@ use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::{
     integrations::openai::{ToolCall, ToolCallResult, ToolCallResultProgress},
-    llm::{LLMModel, LLMTokenUsage},
+    llm::LLMTokenUsage,
 };
 use uuid::Uuid;
 
@@ -136,7 +136,7 @@ pub enum InputEvent {
     TotalUsage(LLMTokenUsage),
 
     // Model events
-    StreamModel(LLMModel),
+    StreamModel(Model),
 
     // Model switcher events
     ShowModelSwitcher,

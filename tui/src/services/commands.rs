@@ -27,7 +27,6 @@ use ratatui::{
 };
 
 use stakpak_shared::models::llm::LLMTokenUsage;
-use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
@@ -591,12 +590,9 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
-    let max_tokens = context_info.max_tokens as u32;
+    // Use current_model if set (from streaming), otherwise use default model
+    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
         (total_tokens as f64 / max_tokens as f64) * 100.0

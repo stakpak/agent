@@ -16,7 +16,7 @@ use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use crate::storage::SessionStorage;
 
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
-use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
+use stakpak_shared::models::llm::{LLMProviderConfig, ProviderConfig};
 use stakpak_shared::models::stakai_adapter::StakAIClient;
 use std::sync::Arc;
 
@@ -28,11 +28,11 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Default)]
 pub struct ModelOptions {
     /// Primary model for complex tasks
-    pub smart_model: Option<LLMModel>,
+    pub smart_model: Option<String>,
     /// Economy model for simpler tasks
-    pub eco_model: Option<LLMModel>,
+    pub eco_model: Option<String>,
     /// Fallback model when primary providers fail
-    pub recovery_model: Option<LLMModel>,
+    pub recovery_model: Option<String>,
 }
 
 /// Default Stakpak API endpoint
@@ -220,9 +220,9 @@ impl AgentClient {
 
         // 5. Parse model options
         let model_options = ModelOptions {
-            smart_model: config.smart_model.map(LLMModel::from),
-            eco_model: config.eco_model.map(LLMModel::from),
-            recovery_model: config.recovery_model.map(LLMModel::from),
+            smart_model: config.smart_model,
+            eco_model: config.eco_model,
+            recovery_model: config.recovery_model,
         };
 
         // 6. Setup hook registry with context management hooks

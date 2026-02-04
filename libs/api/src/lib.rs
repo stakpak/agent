@@ -78,10 +78,26 @@ fn parse_model_string(s: &str) -> (Option<&str>, &str) {
 
 /// Find a model by ID within a specific provider
 fn find_in_provider(provider_id: &str, model_id: &str) -> Option<Model> {
-    stakai::load_models_for_provider(provider_id)
-        .ok()?
-        .into_iter()
-        .find(|m| m.id == model_id)
+    let models = stakai::load_models_for_provider(provider_id).ok()?;
+
+    // Try exact match first
+    if let Some(model) = models.iter().find(|m| m.id == model_id) {
+        return Some(model.clone());
+    }
+
+    // Try prefix match (e.g., "gpt-5.2-2026-01-15" matches catalog's "gpt-5.2")
+    // Find the longest matching prefix
+    let mut best_match: Option<&Model> = None;
+    let mut best_len = 0;
+
+    for model in &models {
+        if model_id.starts_with(&model.id) && model.id.len() > best_len {
+            best_match = Some(model);
+            best_len = model.id.len();
+        }
+    }
+
+    best_match.cloned()
 }
 
 /// Transform a model for Stakpak API routing
