@@ -14,6 +14,7 @@ pub mod auto_update;
 pub mod board;
 pub mod browser;
 pub mod mcp;
+pub mod plugin_utils;
 pub mod warden;
 
 pub use auth::AuthCommands;
@@ -456,7 +457,7 @@ impl Commands {
                 board::run_board(args).await?;
             }
             Commands::Browser { args } => {
-                browser::run_tab(args).await?;
+                browser::run_browser(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;

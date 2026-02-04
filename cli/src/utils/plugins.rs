@@ -1,11 +1,11 @@
-use flate2::read::GzDecoder;
-use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
-use std::fs;
-use std::io::Cursor;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use tar::Archive;
-use zip::ZipArchive;
+pub use flate2::read::GzDecoder;
+pub use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
+pub use std::fs;
+pub use std::io::Cursor;
+pub use std::path::{Path, PathBuf};
+pub use std::process::{Command, Stdio};
+pub use tar::Archive;
+pub use zip::ZipArchive;
 
 /// Configuration for a plugin download
 pub struct PluginConfig {
