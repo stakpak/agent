@@ -424,7 +424,7 @@ pub struct SlackReadRepliesRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SlackSendMessageRequest {
     pub channel: String,
-    pub mrkdwn_text: String,
+    pub markdown_text: String,
     pub thread_ts: Option<String>,
 }
 
