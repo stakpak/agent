@@ -1,12 +1,13 @@
 use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
+use stakai::Model;
 use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::{
     integrations::openai::{
         ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
         FinishReason, FunctionCall, MessageContent, Role, ToolCall, ToolCallDelta,
     },
-    llm::{LLMModel, LLMTokenUsage},
+    llm::LLMTokenUsage,
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
@@ -122,8 +123,9 @@ pub async fn process_responses_stream(
         system_fingerprint: None,
         metadata: None,
     };
+    let mut response_metadata: Option<serde_json::Value> = None;
 
-    let mut llm_model: Option<LLMModel> = None;
+    let mut current_model: Option<Model> = None;
 
     let mut chat_message = ChatMessage {
         role: Role::Assistant,
@@ -154,6 +156,9 @@ pub async fn process_responses_stream(
                     // Send usage to TUI for display immediately when we receive it
                     send_input_event(input_tx, InputEvent::StreamUsage(usage.clone())).await?;
                 }
+                if let Some(metadata) = &response.metadata {
+                    response_metadata = Some(metadata.clone());
+                }
 
                 // Skip chunks with no choices (e.g., usage-only events)
                 if response.choices.is_empty() {
@@ -162,20 +167,20 @@ pub async fn process_responses_stream(
 
                 let delta = &response.choices[0].delta;
                 if !response.model.is_empty() {
-                    let current_model: LLMModel = response.model.clone().into();
-                    match &llm_model {
-                        Some(model) => {
-                            if *model != current_model {
-                                llm_model = Some(current_model.clone());
-                                send_input_event(input_tx, InputEvent::StreamModel(current_model))
-                                    .await?;
-                            }
-                        }
-                        None => {
-                            llm_model = Some(current_model.clone());
-                            send_input_event(input_tx, InputEvent::StreamModel(current_model))
-                                .await?;
-                        }
+                    // Look up the model in the catalog to get proper display name
+                    // Use false for use_stakpak since the response already has the resolved model ID
+                    let model = stakpak_api::find_model(&response.model, false)
+                        .unwrap_or_else(|| Model::custom(response.model.clone(), "unknown"));
+
+                    // Only send event if model changed
+                    let should_send = match &current_model {
+                        Some(existing) => existing.id != model.id,
+                        None => true,
+                    };
+
+                    if should_send {
+                        current_model = Some(model.clone());
+                        send_input_event(input_tx, InputEvent::StreamModel(model)).await?;
                     }
                 }
 
@@ -183,9 +188,9 @@ pub async fn process_responses_stream(
                     id: response.id.clone(),
                     object: response.object.clone(),
                     created: response.created,
-                    model: llm_model
-                        .clone()
-                        .map(|model| model.to_string())
+                    model: current_model
+                        .as_ref()
+                        .map(|m| m.id.clone())
                         .unwrap_or_default(),
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
@@ -239,6 +244,7 @@ pub async fn process_responses_stream(
         finish_reason: FinishReason::Stop,
         logprobs: None,
     });
+    chat_completion_response.metadata = response_metadata;
 
     // End stream processing loading when stream completes
     send_input_event(

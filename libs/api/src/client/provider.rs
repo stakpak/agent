@@ -10,21 +10,21 @@ use crate::models::*;
 use crate::storage::{
     CreateCheckpointRequest as StorageCreateCheckpointRequest,
     CreateSessionRequest as StorageCreateSessionRequest,
+    UpdateSessionRequest as StorageUpdateSessionRequest,
 };
 use async_trait::async_trait;
 use futures_util::Stream;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
+use stakai::Model;
 use stakpak_shared::hooks::{HookContext, LifecycleEvent};
-use stakpak_shared::models::integrations::anthropic::AnthropicModel;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
+    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, Role, Tool,
 };
 use stakpak_shared::models::llm::{
-    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMStreamInput,
+    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMStreamInput,
 };
-use stakpak_shared::models::stakai_adapter::get_stakai_model_string;
 use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -177,7 +177,7 @@ impl AgentProvider for AgentClient {
 
     async fn chat_completion(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         session_id: Option<Uuid>,
@@ -235,7 +235,7 @@ impl AgentProvider for AgentClient {
                 .state
                 .llm_input
                 .as_ref()
-                .map(|llm_input| llm_input.model.clone().to_string())
+                .map(|llm_input| llm_input.model.id.clone())
                 .unwrap_or_default(),
             choices: vec![ChatCompletionChoice {
                 index: 0,
@@ -260,7 +260,7 @@ impl AgentProvider for AgentClient {
 
     async fn chat_completion_stream(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         _headers: Option<HeaderMap>,
@@ -374,6 +374,13 @@ impl AgentProvider for AgentClient {
                             }
                         }
                         StreamMessage::Delta(delta) => {
+                            // Extract usage from Usage delta variant
+                            let usage = if let GenerationDelta::Usage { usage } = &delta {
+                                Some(usage.clone())
+                            } else {
+                                None
+                            };
+
                             yield Ok(ChatCompletionStreamResponse {
                                 id: ctx.request_id.to_string(),
                                 object: "chat.completion.chunk".to_string(),
@@ -384,7 +391,7 @@ impl AgentProvider for AgentClient {
                                     delta: delta.into(),
                                     finish_reason: None,
                                 }],
-                                usage: ctx.state.llm_output.as_ref().map(|u| u.usage.clone()),
+                                usage,
                                 metadata: None,
                             })
                         }
@@ -523,7 +530,7 @@ impl AgentProvider for AgentClient {
         if let Some(api) = &self.stakpak_api {
             api.slack_send_message(&crate::stakpak::SlackSendMessageRequest {
                 channel: input.channel.clone(),
-                mrkdwn_text: input.mrkdwn_text.clone(),
+                markdown_text: input.markdown_text.clone(),
                 thread_ts: input.thread_ts.clone(),
             })
             .await
@@ -531,6 +538,59 @@ impl AgentProvider for AgentClient {
             Err("Slack integration requires Stakpak API key".to_string())
         }
     }
+
+    // =========================================================================
+    // Models
+    // =========================================================================
+
+    async fn list_models(&self) -> Vec<stakai::Model> {
+        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
+
+        let use_stakpak = self.has_stakpak();
+        let mut all_models = Vec::new();
+
+        for &provider_id in PROVIDERS {
+            let mut models = load_and_transform_models(provider_id, use_stakpak);
+            sort_models_by_recency(&mut models);
+            all_models.extend(models);
+        }
+
+        all_models
+    }
+}
+
+/// Load models for a provider from cache, optionally transforming for Stakpak routing
+fn load_and_transform_models(provider_id: &str, use_stakpak: bool) -> Vec<stakai::Model> {
+    let models = stakai::load_models_for_provider(provider_id).unwrap_or_default();
+
+    if use_stakpak {
+        models
+            .into_iter()
+            .map(|m| stakai::Model {
+                id: format!("{}/{}", provider_id, m.id),
+                provider: "stakpak".into(),
+                name: m.name,
+                reasoning: m.reasoning,
+                cost: m.cost,
+                limit: m.limit,
+                release_date: m.release_date,
+            })
+            .collect()
+    } else {
+        models
+    }
+}
+
+/// Sort models by release_date descending (newest first)
+fn sort_models_by_recency(models: &mut [stakai::Model]) {
+    models.sort_by(|a, b| {
+        match (&b.release_date, &a.release_date) {
+            (Some(b_date), Some(a_date)) => b_date.cmp(a_date),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b.id.cmp(&a.id), // Fallback to ID descending
+        }
+    });
 }
 
 // =============================================================================
@@ -650,6 +710,27 @@ impl AgentClient {
                 .active_checkpoint
                 .ok_or_else(|| format!("Session {} has no active checkpoint", session_id))?;
 
+            // If the session still has the default title, generate a better one in the background.
+            if session.title.trim().is_empty() || session.title == "New Session" {
+                let client = self.clone();
+                let messages_for_title = messages.to_vec();
+                let session_id = session.id;
+                let existing_title = session.title.clone();
+                tokio::spawn(async move {
+                    if let Ok(title) = client.generate_session_title(&messages_for_title).await {
+                        let trimmed = title.trim();
+                        if !trimmed.is_empty() && trimmed != existing_title {
+                            let request =
+                                StorageUpdateSessionRequest::new().with_title(trimmed.to_string());
+                            let _ = client
+                                .session_storage
+                                .update_session(session_id, &request)
+                                .await;
+                        }
+                    }
+                });
+            }
+
             return Ok(SessionInfo {
                 session_id: session.id,
                 checkpoint_id: checkpoint.id,
@@ -657,26 +738,8 @@ impl AgentClient {
             });
         }
 
-        // Create new session
-        // Generate title with fallback - don't fail session creation if title generation fails
-        let title = match self.generate_session_title(messages).await {
-            Ok(title) => title,
-            Err(_) => {
-                // Extract first few words from user message as fallback title
-                messages
-                    .iter()
-                    .find(|m| m.role == Role::User)
-                    .and_then(|m| m.content.as_ref())
-                    .map(|c| {
-                        let text = c.to_string();
-                        text.split_whitespace()
-                            .take(5)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .unwrap_or_else(|| "New Session".to_string())
-            }
-        };
+        // Create new session with a fast local title.
+        let fallback_title = Self::fallback_session_title(messages);
 
         // Get current working directory
         let cwd = std::env::current_dir()
@@ -684,7 +747,8 @@ impl AgentClient {
             .map(|p| p.to_string_lossy().to_string());
 
         // Create session via storage trait
-        let mut session_request = StorageCreateSessionRequest::new(title, messages.to_vec());
+        let mut session_request =
+            StorageCreateSessionRequest::new(fallback_title.clone(), messages.to_vec());
         if let Some(cwd) = cwd {
             session_request = session_request.with_cwd(cwd);
         }
@@ -695,11 +759,44 @@ impl AgentClient {
             .await
             .map_err(|e| e.to_string())?;
 
+        // Generate a better title asynchronously and update the session when ready.
+        let client = self.clone();
+        let messages_for_title = messages.to_vec();
+        let session_id = result.session_id;
+        tokio::spawn(async move {
+            if let Ok(title) = client.generate_session_title(&messages_for_title).await {
+                let trimmed = title.trim();
+                if !trimmed.is_empty() && trimmed != fallback_title {
+                    let request =
+                        StorageUpdateSessionRequest::new().with_title(trimmed.to_string());
+                    let _ = client
+                        .session_storage
+                        .update_session(session_id, &request)
+                        .await;
+                }
+            }
+        });
+
         Ok(SessionInfo {
             session_id: result.session_id,
             checkpoint_id: result.checkpoint.id,
             checkpoint_created_at: result.checkpoint.created_at,
         })
+    }
+
+    fn fallback_session_title(messages: &[ChatMessage]) -> String {
+        messages
+            .iter()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.content.as_ref())
+            .map(|c| {
+                let text = c.to_string();
+                text.split_whitespace()
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_else(|| "New Session".to_string())
     }
 
     /// Save a new checkpoint for the current session
@@ -812,31 +909,15 @@ impl AgentClient {
 
     /// Generate a title for a new session
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        let llm_model = if let Some(eco_model) = &self.model_options.eco_model {
-            eco_model.clone()
-        } else {
-            // Try to find a suitable model
-            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-        };
-
-        // If Stakpak is available, route through it
-        let model = if self.has_stakpak() {
-            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-haiku-4-5")
-            let model_str = get_stakai_model_string(&llm_model);
-            // Extract display name from the last segment for UI
-            let display_name = model_str
-                .rsplit('/')
-                .next()
-                .unwrap_or(&model_str)
-                .to_string();
-            LLMModel::Custom {
-                provider: "stakpak".to_string(),
-                model: model_str,
-                name: Some(display_name),
-            }
-        } else {
-            llm_model
-        };
+        // Use a default haiku model for title generation
+        let model = Model::new(
+            "claude-haiku-4-5-20250929",
+            "Claude Haiku 4.5",
+            "anthropic",
+            false,
+            None,
+            stakai::ModelLimit::default(),
+        );
 
         let llm_messages = vec![
             LLMMessage {

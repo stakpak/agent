@@ -8,7 +8,7 @@ use crate::providers::openai::convert::to_openai_request;
 use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
-    InputTokenDetails, OutputTokenDetails, ResponseContent, ToolCall, Usage,
+    InputTokenDetails, Model, OutputTokenDetails, ResponseContent, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -52,6 +52,10 @@ impl Provider for StakpakProvider {
         headers.insert("Authorization", format!("Bearer {}", self.config.api_key));
         headers.insert("Content-Type", "application/json");
 
+        if let Some(user_agent) = &self.config.user_agent {
+            headers.insert("User-Agent", user_agent.clone());
+        }
+
         if let Some(custom) = custom_headers {
             headers.merge_with(custom);
         }
@@ -78,10 +82,10 @@ impl Provider for StakpakProvider {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!(
-                "Stakpak API error {}: {}",
-                status, error_text
-            )));
+
+            // Parse error for user-friendly messages
+            let friendly_error = parse_stakpak_error(&error_text, status.as_u16());
+            return Err(Error::provider_error(friendly_error));
         }
 
         let resp: StakpakResponse = response.json().await?;
@@ -109,17 +113,32 @@ impl Provider for StakpakProvider {
         create_stream(event_source).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Stakpak supports routing to various providers
-        Ok(vec![
-            "anthropic/claude-sonnet-4-5-20250929".to_string(),
-            "anthropic/claude-haiku-4-5-20250929".to_string(),
-            "anthropic/claude-opus-4-5-20250929".to_string(),
-            "openai/gpt-5".to_string(),
-            "openai/gpt-5-mini".to_string(),
-            "google/gemini-2.5-flash".to_string(),
-            "google/gemini-2.5-pro".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Stakpak routes to other providers, so aggregate models from them
+        // with stakpak/{provider}/ prefix for routing
+        use crate::registry::models_dev::load_models_for_provider;
+
+        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
+
+        let mut models = Vec::new();
+
+        for provider_id in PROVIDERS {
+            if let Ok(provider_models) = load_models_for_provider(provider_id) {
+                for model in provider_models {
+                    models.push(Model {
+                        id: format!("{}/{}", provider_id, model.id),
+                        name: model.name,
+                        provider: "stakpak".into(),
+                        reasoning: model.reasoning,
+                        cost: model.cost,
+                        limit: model.limit,
+                        release_date: model.release_date,
+                    });
+                }
+            }
+        }
+
+        Ok(models)
     }
 }
 
@@ -213,4 +232,47 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
     }
 
     Ok(content)
+}
+
+/// Parse Stakpak API error and return user-friendly message
+fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
+    // Try to parse as JSON error
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text)
+        && let Some(error) = json.get("error")
+    {
+        let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
+        let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        // Check for insufficient credits
+        if message.contains("Exceeded credits") || message.contains("balance is") {
+            return format!(
+                "Insufficient credits. Please top up your Stakpak account at https://app.stakpak.dev/settings/billing. {}",
+                message
+            );
+        }
+
+        // Check for rate limit
+        if error_type == "rate_limit_error" || status_code == 429 {
+            return format!(
+                "Rate limited. Please wait a moment and try again. {}",
+                message
+            );
+        }
+
+        // Check for authentication errors
+        if error_type == "authentication_error" || status_code == 401 {
+            return format!(
+                "Authentication failed. Please check your API key. {}",
+                message
+            );
+        }
+
+        // Return the message if we have one
+        if !message.is_empty() {
+            return message.to_string();
+        }
+    }
+
+    // Fallback to raw error
+    format!("Stakpak API error {}: {}", status_code, error_text)
 }

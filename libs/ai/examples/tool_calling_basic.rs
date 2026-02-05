@@ -8,7 +8,7 @@
 //! - Getting the final response
 
 use serde_json::json;
-use stakai::{ContentPart, GenerateRequest, Inference, Message, Role, Tool};
+use stakai::{ContentPart, GenerateRequest, Inference, Message, Model, Role, Tool};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Create initial request with the user query and tool
     let mut request = GenerateRequest::new(
-        "gpt-4o-mini",
+        Model::custom("gpt-4o-mini", "openai"),
         vec![Message::new(
             Role::User,
             "What's the weather like in Tokyo, Japan?",
@@ -101,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )],
     ));
 
-    let mut request_with_result = GenerateRequest::new("gpt-4o-mini", messages);
+    let mut request_with_result =
+        GenerateRequest::new(Model::custom("gpt-4o-mini", "openai"), messages);
     request_with_result.options = request_with_result.options.add_tool(
         Tool::function("get_weather", "Get the current weather for a location").parameters(json!({
             "type": "object",

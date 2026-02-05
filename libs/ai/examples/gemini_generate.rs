@@ -1,6 +1,6 @@
 //! Example: Basic Gemini generation
 
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gemini-2.0-flash-exp",
+        Model::custom("gemini-2.0-flash-exp", "google"),
         vec![
             Message::new(Role::System, "You are a knowledgeable science teacher."),
             Message::new(Role::User, "What causes the northern lights?"),

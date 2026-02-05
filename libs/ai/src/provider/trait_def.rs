@@ -1,7 +1,7 @@
 //! Provider trait definition
 
 use crate::error::Result;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 
 /// Trait for AI provider implementations
@@ -20,8 +20,13 @@ pub trait Provider: Send + Sync {
     /// Generate a streaming response
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream>;
 
-    /// List available models (optional)
-    async fn list_models(&self) -> Result<Vec<String>> {
+    /// List available models with full metadata
+    async fn list_models(&self) -> Result<Vec<Model>> {
         Ok(vec![])
+    }
+
+    /// Get a specific model by ID (default implementation)
+    async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        Ok(self.list_models().await?.into_iter().find(|m| m.id == id))
     }
 }

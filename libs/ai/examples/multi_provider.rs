@@ -1,6 +1,6 @@
 //! Example: Comparing responses from multiple providers
 
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -8,7 +8,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let question = "What is the meaning of life?";
 
-    let mut request = GenerateRequest::new("gpt-4", vec![Message::new(Role::User, question)]);
+    let mut request = GenerateRequest::new(
+        Model::custom("gpt-4", "openai"),
+        vec![Message::new(Role::User, question)],
+    );
     request.options.temperature = Some(0.7);
     request.options.max_tokens = Some(200);
 
@@ -16,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "=".repeat(80));
 
     // Try OpenAI
-    request.model = "gpt-4".to_string();
+    request.model = Model::custom("gpt-4", "openai");
     if let Ok(response) = client.generate(&request).await {
         println!("\n🤖 OpenAI GPT-4:");
         println!("{}", response.text());
@@ -24,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Try Anthropic
-    request.model = "claude-3-5-sonnet-20241022".to_string();
+    request.model = Model::custom("claude-3-5-sonnet-20241022", "anthropic");
     if let Ok(response) = client.generate(&request).await {
         println!("\n🤖 Anthropic Claude:");
         println!("{}", response.text());
@@ -32,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Try Gemini
-    request.model = "gemini-2.0-flash-exp".to_string();
+    request.model = Model::custom("gemini-2.0-flash-exp", "google");
     if let Ok(response) = client.generate(&request).await {
         println!("\n🤖 Google Gemini:");
         println!("{}", response.text());

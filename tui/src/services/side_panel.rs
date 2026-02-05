@@ -14,7 +14,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 
 /// Left padding for content inside the side panel
 const LEFT_PADDING: &str = "  ";
@@ -183,19 +182,17 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         ])
     };
 
-    // Token usage
-    let tokens = state.current_message_usage.total_tokens;
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|m| m.context_info())
-        .unwrap_or_default();
-    let max_tokens = context_info.max_tokens as u32;
+    // Get the active model (current_model if set, otherwise default model)
+    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
 
-    // Show N/A when no content yet (tokens == 0)
+    // Token usage - use current message's prompt_tokens for context window utilization
+    // (prompt_tokens represents the actual context size, not accumulated across messages)
+    let tokens = state.current_message_usage.prompt_tokens;
+    let max_tokens = active_model.limit.context as u32;
+
+    // Show tokens info
     if tokens == 0 {
         lines.push(make_row("Tokens", "N/A".to_string(), Color::DarkGray));
-        lines.push(make_row("Model", "N/A".to_string(), Color::DarkGray));
     } else {
         let percentage = if max_tokens > 0 {
             ((tokens as f64 / max_tokens as f64) * 100.0).round() as u32
@@ -206,36 +203,34 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         lines.push(make_row(
             "Tokens",
             format!(
-                "{} / {}K ({}%)",
+                "{} / {} ({}%)",
                 format_tokens(tokens),
-                max_tokens / 1000,
+                format_tokens(max_tokens),
                 percentage
             ),
             Color::White,
         ));
-
-        // Model name
-        let model_name = state
-            .llm_model
-            .as_ref()
-            .map(|m| m.model_name())
-            .unwrap_or_else(|| state.agent_model.to_string());
-
-        // Truncate model name if needed, assuming label len ~10 ("   Model:")
-        let avail_for_model = area.width as usize - 10;
-        let truncated_model = truncate_string(&model_name, avail_for_model);
-
-        lines.push(make_row("Model", truncated_model, Color::Cyan));
     }
 
-    // Provider - show subscription, auth provider, or config provider
-    let provider_value = match &state.auth_display_info {
-        (_, Some(_), Some(subscription)) => subscription.clone(),
-        (_, Some(auth_provider), None) => auth_provider.clone(),
-        (Some(config_provider), None, None) => config_provider.clone(),
-        _ => "Remote".to_string(),
+    // Model name - from active model
+    let model_name = &active_model.name;
+
+    // Truncate model name if needed, assuming label len ~10 ("   Model:")
+    let avail_for_model = area.width as usize - 10;
+    let truncated_model = truncate_string(model_name, avail_for_model);
+
+    lines.push(make_row("Model", truncated_model, Color::Cyan));
+
+    // Provider - from active model (capitalized)
+    let provider = {
+        let p = &active_model.provider;
+        let mut chars = p.chars();
+        match chars.next() {
+            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            None => String::new(),
+        }
     };
-    lines.push(make_row("Provider", provider_value, Color::DarkGray));
+    lines.push(make_row("Provider", provider, Color::DarkGray));
 
     // Profile
     lines.push(make_row(

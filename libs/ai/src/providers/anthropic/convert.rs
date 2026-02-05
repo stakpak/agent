@@ -81,7 +81,7 @@ pub fn to_anthropic_request(
     let max_tokens = req
         .options
         .max_tokens
-        .unwrap_or_else(|| infer_max_tokens(&req.model));
+        .unwrap_or_else(|| infer_max_tokens(&req.model.id));
 
     // Convert tool_choice to Anthropic format
     let tool_choice = req.options.tool_choice.as_ref().map(|choice| match choice {
@@ -110,7 +110,7 @@ pub fn to_anthropic_request(
 
     Ok(AnthropicConversionResult {
         request: AnthropicRequest {
-            model: req.model.clone(),
+            model: req.model.id.clone(),
             messages,
             max_tokens,
             system,
@@ -159,15 +159,15 @@ fn build_system_content_with_caching(
     if is_oauth {
         let mut blocks = vec![];
 
-        // Add Claude Code prefix with ephemeral cache
+        // Add Claude Code prefix with 1-hour cache
         blocks.push(AnthropicSystemBlock {
             type_: "text".to_string(),
             text: CLAUDE_CODE_SYSTEM_PREFIX.to_string(),
-            cache_control: Some(AnthropicCacheControl::ephemeral()),
+            cache_control: Some(AnthropicCacheControl::ephemeral_with_ttl("1h")),
         });
         // Count this as a cache breakpoint
         validator.validate(
-            Some(&crate::types::CacheControl::ephemeral()),
+            Some(&crate::types::CacheControl::ephemeral_with_ttl("1h")),
             CacheContext::system_message(),
         );
 
@@ -177,10 +177,10 @@ fn build_system_content_with_caching(
             if let Some(text) = msg.text() {
                 let is_last = i == msg_count - 1;
 
-                // Use explicit cache or auto-cache last
+                // Use explicit cache or auto-cache last with 1-hour TTL
                 let cache_control = msg.cache_control().cloned().or_else(|| {
                     if is_last && auto_cache_last {
-                        Some(crate::types::CacheControl::ephemeral())
+                        Some(crate::types::CacheControl::ephemeral_with_ttl("1h"))
                     } else {
                         None
                     }
@@ -219,10 +219,10 @@ fn build_system_content_with_caching(
             let text = msg.text()?;
             let is_last = i == msg_count - 1;
 
-            // Use explicit cache or auto-cache last
+            // Use explicit cache or auto-cache last with 1-hour TTL
             let cache_control = msg.cache_control().cloned().or_else(|| {
                 if is_last && auto_cache_last {
-                    Some(crate::types::CacheControl::ephemeral())
+                    Some(crate::types::CacheControl::ephemeral_with_ttl("1h"))
                 } else {
                     None
                 }
@@ -267,10 +267,10 @@ fn build_tools_with_caching(
         .map(|(i, tool)| {
             let is_last = i == len - 1;
 
-            // Use explicit cache_control if set, otherwise auto-cache last tool
+            // Use explicit cache_control if set, otherwise auto-cache last tool with 1h TTL
             let cache_control = tool.cache_control().cloned().or_else(|| {
                 if is_last && auto_cache_last {
-                    Some(crate::types::CacheControl::ephemeral())
+                    Some(crate::types::CacheControl::ephemeral_with_ttl("1h"))
                 } else {
                     None
                 }

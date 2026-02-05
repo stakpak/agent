@@ -1,12 +1,15 @@
 //! OpenAI provider implementation
 
-use super::convert::{from_openai_response, to_openai_request};
-use super::stream::create_stream;
-use super::types::{ChatCompletionResponse, OpenAIConfig};
+use super::convert::{
+    from_openai_response, from_responses_response, is_responses_api, to_openai_request,
+    to_responses_request,
+};
+use super::stream::{create_completions_stream, create_responses_stream};
+use super::types::{ChatCompletionResponse, OpenAIConfig, ResponsesResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::tls::create_platform_tls_client;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
@@ -62,56 +65,100 @@ impl Provider for OpenAIProvider {
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
-        let url = format!("{}/chat/completions", self.config.base_url);
-        let openai_req = to_openai_request(&request, false);
-
         let headers = self.build_headers(request.options.headers.as_ref());
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers.to_reqwest_headers())
-            .json(&openai_req)
-            .send()
-            .await?;
+        if is_responses_api(&request) {
+            let url = format!("{}/responses", self.config.base_url);
+            let responses_req = to_responses_request(&request, false);
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!(
-                "OpenAI API error {}: {}",
-                status, error_text
-            )));
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers.to_reqwest_headers())
+                .json(&responses_req)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                return Err(Error::provider_error(format!(
+                    "OpenAI Responses API error {}: {}",
+                    status, error_text
+                )));
+            }
+
+            let responses_resp: ResponsesResponse = response.json().await?;
+            from_responses_response(responses_resp)
+        } else {
+            let url = format!("{}/chat/completions", self.config.base_url);
+            let openai_req = to_openai_request(&request, false);
+
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers.to_reqwest_headers())
+                .json(&openai_req)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                return Err(Error::provider_error(format!(
+                    "OpenAI API error {}: {}",
+                    status, error_text
+                )));
+            }
+
+            let openai_resp: ChatCompletionResponse = response.json().await?;
+            from_openai_response(openai_resp)
         }
-
-        let openai_resp: ChatCompletionResponse = response.json().await?;
-        from_openai_response(openai_resp)
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
-        let url = format!("{}/chat/completions", self.config.base_url);
-        let openai_req = to_openai_request(&request, true);
-
         let headers = self.build_headers(request.options.headers.as_ref());
 
-        let req_builder = self
-            .client
-            .post(&url)
-            .headers(headers.to_reqwest_headers())
-            .json(&openai_req);
+        if is_responses_api(&request) {
+            let url = format!("{}/responses", self.config.base_url);
+            let responses_req = to_responses_request(&request, true);
 
-        let event_source = EventSource::new(req_builder)
-            .map_err(|e| Error::stream_error(format!("Failed to create event source: {}", e)))?;
+            let req_builder = self
+                .client
+                .post(&url)
+                .headers(headers.to_reqwest_headers())
+                .json(&responses_req);
 
-        create_stream(event_source).await
+            let event_source = EventSource::new(req_builder).map_err(|e| {
+                Error::stream_error(format!("Failed to create event source: {}", e))
+            })?;
+
+            create_responses_stream(event_source).await
+        } else {
+            let url = format!("{}/chat/completions", self.config.base_url);
+            let openai_req = to_openai_request(&request, true);
+
+            let req_builder = self
+                .client
+                .post(&url)
+                .headers(headers.to_reqwest_headers())
+                .json(&openai_req);
+
+            let event_source = EventSource::new(req_builder).map_err(|e| {
+                Error::stream_error(format!("Failed to create event source: {}", e))
+            })?;
+
+            create_completions_stream(event_source).await
+        }
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Simplified - in production, call /v1/models endpoint
-        Ok(vec![
-            "gpt-4".to_string(),
-            "gpt-4-turbo-preview".to_string(),
-            "gpt-3.5-turbo".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Load from models.dev cache
+        crate::registry::models_dev::load_models_for_provider("openai")
+    }
+
+    async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        let models = crate::registry::models_dev::load_models_for_provider("openai")?;
+        Ok(models.into_iter().find(|m| m.id == id))
     }
 }

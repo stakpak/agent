@@ -5,6 +5,7 @@ mod cache_strategy;
 mod cache_validator;
 mod headers;
 mod message;
+mod model;
 mod options;
 mod request;
 mod response;
@@ -31,8 +32,9 @@ pub use options::{
 
 // Request types
 pub use request::{
-    AnthropicOptions, GenerateRequest, GoogleOptions, OpenAIOptions, ProviderOptions,
-    ReasoningEffort, ReasoningSummary, SystemMessageMode, ThinkingOptions,
+    AnthropicOptions, CompletionsConfig, GenerateRequest, GoogleOptions, OpenAIApiConfig,
+    OpenAIOptions, ProviderOptions, ReasoningEffort, ReasoningSummary, ResponsesConfig,
+    SystemMessageMode, ThinkingOptions,
 };
 
 // Response types
@@ -43,3 +45,6 @@ pub use response::{
 
 // Stream types
 pub use stream::{GenerateStream, StreamEvent};
+
+// Model types
+pub use model::{Model, ModelCost, ModelLimit};

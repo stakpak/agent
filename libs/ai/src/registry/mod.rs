@@ -1,7 +1,10 @@
 //! Provider registry for runtime provider management
 
+pub mod models_dev;
+
 use crate::error::{Error, Result};
 use crate::provider::Provider;
+use crate::types::Model;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -41,6 +44,34 @@ impl ProviderRegistry {
     /// Check if a provider is registered
     pub fn has_provider(&self, id: &str) -> bool {
         self.providers.contains_key(id)
+    }
+
+    /// Get all models from all configured providers
+    pub async fn models(&self) -> Result<Vec<Model>> {
+        let mut all_models = Vec::new();
+        for provider in self.providers.values() {
+            all_models.extend(provider.list_models().await?);
+        }
+        Ok(all_models)
+    }
+
+    /// Find a model by ID across all configured providers
+    pub async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        for provider in self.providers.values() {
+            if let Some(model) = provider.get_model(id).await? {
+                return Ok(Some(model));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get all models from a specific provider
+    pub async fn models_for_provider(&self, provider_id: &str) -> Result<Vec<Model>> {
+        if let Some(provider) = self.providers.get(provider_id) {
+            provider.list_models().await
+        } else {
+            Err(Error::ProviderNotFound(provider_id.to_string()))
+        }
     }
 }
 

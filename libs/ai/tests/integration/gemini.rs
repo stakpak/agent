@@ -3,7 +3,7 @@
 //! Run with: cargo test --test integration -- --ignored
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, Message, Role, StreamEvent};
+use stakai::{GenerateRequest, Inference, Message, Model, Role, StreamEvent};
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
@@ -11,7 +11,7 @@ async fn test_gemini_generate() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gemini-2.5-flash-lite-preview-09-2025",
+        Model::custom("gemini-2.5-flash-lite-preview-09-2025", "google"),
         vec![Message {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
@@ -36,7 +36,7 @@ async fn test_gemini_streaming() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gemini-2.5-flash-lite-preview-09-2025",
+        Model::custom("gemini-2.5-flash-lite-preview-09-2025", "google"),
         vec![Message {
             role: Role::User,
             content: "Count from 1 to 3".into(),

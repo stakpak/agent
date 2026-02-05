@@ -15,14 +15,14 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use stakai::{Inference, GenerateRequest, Message, Role};
+//! use stakai::{Inference, GenerateRequest, Message, Model, Role};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Inference::new();
 //!
 //!     let request = GenerateRequest::new(
-//!         "gpt-4",
+//!         Model::custom("gpt-4", "openai"),
 //!         vec![Message::new(Role::User, "What is Rust?")]
 //!     );
 //!
@@ -46,6 +46,14 @@ pub mod tracing;
 // Re-export commonly used types
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
+pub use registry::{
+    ProviderRegistry,
+    models_dev::{
+        DEFAULT_CACHE_PATH, MODELS_DEV_URL, ProviderInfo, fetch_models_dev,
+        filter_configured_providers, get_available_models, load_available_models,
+        load_models_for_provider, load_models_for_provider_from_path, parse_models_dev,
+    },
+};
 pub use types::{
     // Cache control types
     AnthropicCacheConfig,
@@ -62,6 +70,7 @@ pub use types::{
     CacheStrategy,
     CacheWarning,
     CacheWarningType,
+    CompletionsConfig,
     ContentPart,
     ContentPartProviderOptions,
     // Response types
@@ -78,6 +87,11 @@ pub use types::{
     Message,
     MessageContent,
     MessageProviderOptions,
+    // Model types
+    Model,
+    ModelCost,
+    ModelLimit,
+    OpenAIApiConfig,
     OpenAIOptions,
     OutputTokenDetails,
     PromptCacheRetention,
@@ -86,6 +100,7 @@ pub use types::{
     ReasoningSummary,
     ResponseContent,
     ResponseWarning,
+    ResponsesConfig,
     Role,
     StreamEvent,
     SystemMessageMode,
