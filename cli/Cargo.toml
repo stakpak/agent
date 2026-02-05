@@ -51,6 +51,13 @@ async-trait = { workspace = true }
 base64 = "0.22"
 dirs = "5.0"
 semver = "1.0"
+croner = "3.0"
+humantime-serde = "1.1"
+humantime = "2.1"
+thiserror = "2.0"
+libsql = "0.9.29"
+tokio-cron-scheduler = "0.15"
+which = "7.0"
 
 [dev-dependencies]
 tempfile = "3"

@@ -12,10 +12,12 @@ pub mod agent;
 pub mod auth;
 pub mod auto_update;
 pub mod board;
+pub mod daemon;
 pub mod mcp;
 pub mod warden;
 
 pub use auth::AuthCommands;
+pub use daemon::DaemonCommands;
 pub use mcp::McpCommands;
 
 /// Frontmatter structure for rulebook metadata
@@ -165,6 +167,9 @@ pub enum Commands {
     },
     /// Update Stakpak Agent to the latest version
     Update,
+    /// Run the autonomous agent daemon with scheduled triggers
+    #[command(subcommand)]
+    Daemon(DaemonCommands),
 }
 
 async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
@@ -212,6 +217,7 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
+                | Commands::Daemon(_)
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -449,6 +455,52 @@ impl Commands {
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
+            }
+            Commands::Daemon(daemon_command) => {
+                use crate::commands::daemon::commands::{
+                    DaemonCommands, DescribeResource, GetResource, fire_trigger, init_config,
+                    prune_history, resume_run, run_daemon, show_history, show_run, show_status,
+                    show_trigger, stop_daemon,
+                };
+                match daemon_command {
+                    DaemonCommands::Run => {
+                        run_daemon().await?;
+                    }
+                    DaemonCommands::Stop => {
+                        stop_daemon().await?;
+                    }
+                    DaemonCommands::Status => {
+                        show_status().await?;
+                    }
+                    DaemonCommands::Get { resource } => match resource {
+                        GetResource::Triggers => {
+                            show_status().await?; // Status already shows triggers
+                        }
+                        GetResource::Runs { trigger, limit } => {
+                            show_history(trigger.as_deref(), Some(limit)).await?;
+                        }
+                    },
+                    DaemonCommands::Describe { resource } => match resource {
+                        DescribeResource::Trigger { name } => {
+                            show_trigger(&name).await?;
+                        }
+                        DescribeResource::Run { id } => {
+                            show_run(id).await?;
+                        }
+                    },
+                    DaemonCommands::Fire { trigger, dry_run } => {
+                        fire_trigger(&trigger, dry_run).await?;
+                    }
+                    DaemonCommands::Resume { run_id, force } => {
+                        resume_run(run_id, force).await?;
+                    }
+                    DaemonCommands::Prune { days } => {
+                        prune_history(days).await?;
+                    }
+                    DaemonCommands::Init { force } => {
+                        init_config(force).await?;
+                    }
+                }
             }
             Commands::Auth(auth_command) => {
                 auth_command.run(config).await?;
