@@ -1,4 +1,4 @@
-[subagents.DiscoveryAgent]
+[subagents.ReadOnlyAgent]
 description = """
 Fast Research and Discovery agent with read-only tools.
 Perfect for tasks requiring filesystem exploration, knowledge base search, and web research.
