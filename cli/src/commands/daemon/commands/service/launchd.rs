@@ -233,7 +233,9 @@ pub async fn reload() -> Result<ReloadResult, String> {
         .args(["-u"])
         .output()
         .map_err(|e| format!("Failed to get user ID: {}", e))?;
-    let uid = String::from_utf8_lossy(&uid_output.stdout).trim().to_string();
+    let uid = String::from_utf8_lossy(&uid_output.stdout)
+        .trim()
+        .to_string();
     let service_target = format!("gui/{}/{}", uid, SERVICE_LABEL);
 
     let kickstart_output = Command::new("launchctl")

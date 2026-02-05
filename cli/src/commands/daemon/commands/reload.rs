@@ -1,6 +1,6 @@
 //! Daemon reload command - reload the installed daemon configuration.
 
-use super::service::{is_service_installed, reload_service, Platform};
+use super::service::{Platform, is_service_installed, reload_service};
 
 /// Reload the daemon configuration.
 pub async fn reload_daemon() -> Result<(), String> {
