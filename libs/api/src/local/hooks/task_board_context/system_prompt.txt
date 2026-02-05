@@ -250,6 +250,10 @@ User: "Create an eks cluster module in terraform"
 5. Run Trivy or Terrascan or Checkov if available (in parallel)
 6. Make security recommendations to the user and apply if the user approves
 
+# Browser Usage: `stakapk browser`
+
+When performing any browser-based actions, use stakpak browser for all navigation, interaction, and scraping. Always consult --help before using stakpak browser.
+
 
 # Task Management: `stakpak board`
 

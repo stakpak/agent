@@ -3,7 +3,7 @@ use std::process::Command;
 
 fn get_browser_config() -> PluginConfig {
     PluginConfig {
-        name: "agent-tab".to_string(),
+        name: "browser".to_string(),
         base_url: "https://github.com/stakpak/tab".to_string(),
         targets: vec![
             "linux-x86_64".to_string(),
@@ -20,7 +20,7 @@ fn get_browser_config() -> PluginConfig {
 
 fn get_daemon_config() -> PluginConfig {
     PluginConfig {
-        name: "agent-tab-daemon".to_string(),
+        name: "browser-daemon".to_string(),
         base_url: "https://github.com/stakpak/tab".to_string(),
         targets: vec![
             "linux-x86_64".to_string(),
@@ -46,5 +46,5 @@ pub async fn run_browser(args: Vec<String>) -> Result<(), String> {
     let browser_path = get_plugin_path(browser_config).await;
     let mut cmd = Command::new(&browser_path);
     cmd.args(&args);
-    execute_plugin_command(cmd, "agent-tab".to_string())
+    execute_plugin_command(cmd, "browser".to_string())
 }
