@@ -159,6 +159,7 @@ pub enum Commands {
     },
     /// Task board for tracking complex work (cards, checklists, comments)
     /// Run `stakpak board --help` for available commands.
+    #[command(disable_help_flag = true)]
     Board {
         /// Arguments to pass to the board plugin
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -166,6 +167,7 @@ pub enum Commands {
     },
     /// Browser automation CLI - control a real browser from the command line
     /// Run `stakpak browser --help` for available commands.
+    #[command(disable_help_flag = true)]
     Browser {
         /// Arguments to pass to the browser plugin
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
