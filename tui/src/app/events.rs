@@ -1,8 +1,9 @@
 use ratatui::style::Color;
+use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::{
-    integrations::openai::{AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress},
-    llm::{LLMModel, LLMTokenUsage},
+    integrations::openai::{ToolCall, ToolCallResult, ToolCallResultProgress},
+    llm::LLMTokenUsage,
 };
 use uuid::Uuid;
 
@@ -135,7 +136,13 @@ pub enum InputEvent {
     TotalUsage(LLMTokenUsage),
 
     // Model events
-    StreamModel(LLMModel),
+    StreamModel(Model),
+
+    // Model switcher events
+    ShowModelSwitcher,
+    AvailableModelsLoaded(Vec<Model>),
+    ModelSwitcherSelect,
+    ModelSwitcherCancel,
 
     // Side panel events
     ToggleSidePanel,
@@ -168,5 +175,6 @@ pub enum OutputEvent {
     RequestRulebookUpdate(Vec<String>),
     RequestCurrentRulebooks,
     RequestTotalUsage,
-    SwitchModel(AgentModel),
+    RequestAvailableModels,
+    SwitchToModel(Model),
 }

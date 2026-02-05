@@ -47,6 +47,7 @@ pub fn update(
             | InputEvent::ProfileSwitchFailed(_)
             | InputEvent::RulebooksLoaded(_)
             | InputEvent::CurrentRulebooksLoaded(_)
+            | InputEvent::AvailableModelsLoaded(_)
             | InputEvent::Quit
             | InputEvent::AttemptQuit => {
                 // Allow these events through
@@ -103,6 +104,41 @@ pub fn update(
             InputEvent::MouseClick(col, row) => {
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
                 return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
+
+    // Intercept keys for Model Switcher Popup
+    if state.show_model_switcher {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_model_switcher_cancel(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                // Navigate up in model list
+                if state.model_switcher_selected > 0 {
+                    state.model_switcher_selected -= 1;
+                }
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                // Navigate down in model list
+                if state.model_switcher_selected < state.available_models.len().saturating_sub(1) {
+                    state.model_switcher_selected += 1;
+                }
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_model_switcher_select(state, output_tx);
+                return;
+            }
+            InputEvent::AvailableModelsLoaded(_) => {
+                // Let this fall through to the main handler
             }
             _ => {
                 // Consume other events to prevent side effects
@@ -628,6 +664,20 @@ pub fn update(
         }
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
+        }
+
+        // Model switcher handlers
+        InputEvent::ShowModelSwitcher => {
+            popup::handle_show_model_switcher(state, output_tx);
+        }
+        InputEvent::AvailableModelsLoaded(models) => {
+            popup::handle_available_models_loaded(state, models);
+        }
+        InputEvent::ModelSwitcherSelect => {
+            popup::handle_model_switcher_select(state, output_tx);
+        }
+        InputEvent::ModelSwitcherCancel => {
+            popup::handle_model_switcher_cancel(state);
         }
 
         // Side panel handlers

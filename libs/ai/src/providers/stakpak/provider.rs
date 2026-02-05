@@ -8,7 +8,7 @@ use crate::providers::openai::convert::to_openai_request;
 use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
-    InputTokenDetails, OutputTokenDetails, ResponseContent, ToolCall, Usage,
+    InputTokenDetails, Model, OutputTokenDetails, ResponseContent, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -113,17 +113,32 @@ impl Provider for StakpakProvider {
         create_stream(event_source).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Stakpak supports routing to various providers
-        Ok(vec![
-            "anthropic/claude-sonnet-4-5-20250929".to_string(),
-            "anthropic/claude-haiku-4-5-20250929".to_string(),
-            "anthropic/claude-opus-4-5-20250929".to_string(),
-            "openai/gpt-5".to_string(),
-            "openai/gpt-5-mini".to_string(),
-            "google/gemini-2.5-flash".to_string(),
-            "google/gemini-2.5-pro".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Stakpak routes to other providers, so aggregate models from them
+        // with stakpak/{provider}/ prefix for routing
+        use crate::registry::models_dev::load_models_for_provider;
+
+        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
+
+        let mut models = Vec::new();
+
+        for provider_id in PROVIDERS {
+            if let Ok(provider_models) = load_models_for_provider(provider_id) {
+                for model in provider_models {
+                    models.push(Model {
+                        id: format!("{}/{}", provider_id, model.id),
+                        name: model.name,
+                        provider: "stakpak".into(),
+                        reasoning: model.reasoning,
+                        cost: model.cost,
+                        limit: model.limit,
+                        release_date: model.release_date,
+                    });
+                }
+            }
+        }
+
+        Ok(models)
     }
 }
 

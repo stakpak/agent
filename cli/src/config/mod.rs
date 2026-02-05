@@ -6,9 +6,11 @@
 //! - Rulebook filtering
 //! - Warden (runtime security) settings
 //! - Authentication and credential resolution
+//! - Models cache from models.dev
 
 mod app;
 mod file;
+pub mod models_cache;
 mod profile;
 mod rulebook;
 mod types;
@@ -20,6 +22,7 @@ mod tests;
 // Re-export public types
 pub use app::AppConfig;
 pub use file::ConfigFile;
+pub use models_cache::ModelsCache;
 pub use profile::ProfileConfig;
 pub use types::ProviderType;
 

@@ -7,18 +7,15 @@ use crate::local::context_managers::ContextManager;
 use crate::local::context_managers::task_board_context_manager::{
     TaskBoardContextManager, TaskBoardContextManagerOptions,
 };
-use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
 
 const SYSTEM_PROMPT: &str = include_str!("./system_prompt.txt");
 
 pub struct TaskBoardContextHook {
-    pub model_set: ModelSet,
     pub context_manager: TaskBoardContextManager,
 }
 
 pub struct TaskBoardContextHookOptions {
-    pub model_options: ModelOptions,
     pub history_action_message_size_limit: Option<usize>,
     pub history_action_message_keep_last_n: Option<usize>,
     pub history_action_result_keep_last_n: Option<usize>,
@@ -26,8 +23,6 @@ pub struct TaskBoardContextHookOptions {
 
 impl TaskBoardContextHook {
     pub fn new(options: TaskBoardContextHookOptions) -> Self {
-        let model_set: ModelSet = options.model_options.into();
-
         let context_manager = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             history_action_message_size_limit: options
                 .history_action_message_size_limit
@@ -40,10 +35,7 @@ impl TaskBoardContextHook {
                 .unwrap_or(50),
         });
 
-        Self {
-            model_set,
-            context_manager,
-        }
+        Self { context_manager }
     }
 }
 
@@ -55,7 +47,7 @@ define_hook!(
             return Ok(HookAction::Continue);
         }
 
-        let model = self.model_set.get_model(&ctx.state.agent_model);
+        let model = ctx.state.active_model.clone();
 
         let tools = ctx
             .state

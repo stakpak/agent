@@ -19,12 +19,12 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
-use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, models::ListRuleBook};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
 
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
+    ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
@@ -122,7 +122,7 @@ pub struct RunInteractiveConfig {
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
-    pub model: AgentModel,
+    pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
 }
 
@@ -183,8 +183,8 @@ pub async fn run_interactive(
         });
         let editor_command = ctx.editor.clone();
 
-        let model_clone = model.clone();
         let auth_display_info_for_tui = ctx.get_auth_display_info();
+        let model_for_tui = model.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -200,7 +200,7 @@ pub async fn run_interactive(
                 allowed_tools.as_ref(),
                 current_profile_for_tui,
                 rulebook_config_for_tui,
-                model_clone,
+                model_for_tui,
                 editor_command,
                 auth_display_info_for_tui,
             )
@@ -365,7 +365,7 @@ pub async fn run_interactive(
 
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
-                    OutputEvent::SwitchModel(new_model) => {
+                    OutputEvent::SwitchToModel(new_model) => {
                         model = new_model;
                         continue;
                     }
@@ -907,6 +907,16 @@ pub async fn run_interactive(
                         send_input_event(
                             &input_tx,
                             InputEvent::TotalUsage(total_session_usage.clone()),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    OutputEvent::RequestAvailableModels => {
+                        // Load available models from the provider registry
+                        let available_models = client.list_models().await;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::AvailableModelsLoaded(available_models),
                         )
                         .await?;
                         continue;

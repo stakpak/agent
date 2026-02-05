@@ -213,38 +213,6 @@ impl std::fmt::Display for OpenAIModel {
     }
 }
 
-/// Agent model type (smart/eco/recovery)
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub enum AgentModel {
-    #[serde(rename = "smart")]
-    #[default]
-    Smart,
-    #[serde(rename = "eco")]
-    Eco,
-    #[serde(rename = "recovery")]
-    Recovery,
-}
-
-impl std::fmt::Display for AgentModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentModel::Smart => write!(f, "smart"),
-            AgentModel::Eco => write!(f, "eco"),
-            AgentModel::Recovery => write!(f, "recovery"),
-        }
-    }
-}
-
-impl From<String> for AgentModel {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "eco" => AgentModel::Eco,
-            "recovery" => AgentModel::Recovery,
-            _ => AgentModel::Smart,
-        }
-    }
-}
-
 // =============================================================================
 // Message Types (used by TUI)
 // =============================================================================
@@ -998,7 +966,7 @@ mod tests {
     #[test]
     fn test_serialize_basic_request() {
         let request = ChatCompletionRequest {
-            model: AgentModel::Smart.to_string(),
+            model: "gpt-4".to_string(),
             messages: vec![
                 ChatMessage {
                     role: Role::System,
@@ -1040,7 +1008,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"smart\""));
+        assert!(json.contains("\"model\":\"gpt-4\""));
         assert!(json.contains("\"messages\":["));
         assert!(json.contains("\"role\":\"system\""));
     }

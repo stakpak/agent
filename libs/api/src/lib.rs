@@ -4,7 +4,7 @@ use models::*;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
+    ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
 };
 use uuid::Uuid;
 
@@ -20,6 +20,9 @@ pub use client::{
     AgentClient, AgentClientConfig, DEFAULT_STAKPAK_ENDPOINT, ModelOptions, StakpakConfig,
 };
 
+// Re-export Model types from stakai
+pub use stakai::{Model, ModelCost, ModelLimit};
+
 // Re-export storage types
 pub use storage::{
     BoxedSessionStorage, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
@@ -28,6 +31,87 @@ pub use storage::{
     SessionStats, SessionStatus, SessionStorage, SessionSummary, SessionVisibility, StakpakStorage,
     StorageError, UpdateSessionRequest as StorageUpdateSessionRequest,
 };
+
+/// Find a model by ID string
+///
+/// Parses the model string and searches the model cache:
+/// - Format "provider/model_id" searches within that specific provider
+/// - Plain "model_id" searches all providers
+///
+/// When `use_stakpak` is true, the model is transformed for Stakpak API routing.
+pub fn find_model(model_str: &str, use_stakpak: bool) -> Option<Model> {
+    const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
+
+    let (provider_hint, model_id) = parse_model_string(model_str);
+
+    // Search with provider hint first, then fall back to searching all
+    let model = provider_hint
+        .and_then(|p| find_in_provider(p, model_id))
+        .or_else(|| {
+            PROVIDERS
+                .iter()
+                .find_map(|&p| find_in_provider(p, model_id))
+        })?;
+
+    Some(if use_stakpak {
+        transform_for_stakpak(model)
+    } else {
+        model
+    })
+}
+
+/// Parse "provider/model_id" or plain "model_id"
+fn parse_model_string(s: &str) -> (Option<&str>, &str) {
+    match s.find('/') {
+        Some(idx) => {
+            let provider = &s[..idx];
+            let model_id = &s[idx + 1..];
+            let normalized = match provider {
+                "gemini" => "google",
+                p => p,
+            };
+            (Some(normalized), model_id)
+        }
+        None => (None, s),
+    }
+}
+
+/// Find a model by ID within a specific provider
+fn find_in_provider(provider_id: &str, model_id: &str) -> Option<Model> {
+    let models = stakai::load_models_for_provider(provider_id).ok()?;
+
+    // Try exact match first
+    if let Some(model) = models.iter().find(|m| m.id == model_id) {
+        return Some(model.clone());
+    }
+
+    // Try prefix match (e.g., "gpt-5.2-2026-01-15" matches catalog's "gpt-5.2")
+    // Find the longest matching prefix
+    let mut best_match: Option<&Model> = None;
+    let mut best_len = 0;
+
+    for model in &models {
+        if model_id.starts_with(&model.id) && model.id.len() > best_len {
+            best_match = Some(model);
+            best_len = model.id.len();
+        }
+    }
+
+    best_match.cloned()
+}
+
+/// Transform a model for Stakpak API routing
+fn transform_for_stakpak(model: Model) -> Model {
+    Model {
+        id: format!("{}/{}", model.provider, model.id),
+        provider: "stakpak".into(),
+        name: model.name,
+        reasoning: model.reasoning,
+        cost: model.cost,
+        limit: model.limit,
+        release_date: model.release_date,
+    }
+}
 
 /// Unified agent provider trait.
 ///
@@ -59,14 +143,14 @@ pub trait AgentProvider: SessionStorage + Send + Sync {
     // Chat
     async fn chat_completion(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         session_id: Option<Uuid>,
     ) -> Result<ChatCompletionResponse, String>;
     async fn chat_completion_stream(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         headers: Option<HeaderMap>,
@@ -102,4 +186,7 @@ pub trait AgentProvider: SessionStorage + Send + Sync {
         &self,
         input: &SlackSendMessageRequest,
     ) -> Result<Vec<Content>, String>;
+
+    // Models
+    async fn list_models(&self) -> Vec<Model>;
 }

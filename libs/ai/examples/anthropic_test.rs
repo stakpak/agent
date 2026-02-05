@@ -1,6 +1,6 @@
 //! Test Anthropic provider
 
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-3-5-sonnet-20241022",
+        Model::custom("claude-3-5-sonnet-20241022", "anthropic"),
         vec![Message::new(
             Role::User,
             "What is the capital of France? Answer in one word.",

@@ -8,7 +8,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.is_pasting {
@@ -49,16 +48,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
         f.render_widget(shortcuts_widget, area);
     } else if !state.is_dialog_open && state.input().is_empty() {
-        let context_info = state
-            .llm_model
-            .as_ref()
-            .map(|model| model.context_info())
-            .unwrap_or_default();
-        let max_tokens = context_info.max_tokens as u32;
-        let high_cost_warning =
-            state.total_session_usage.total_tokens >= (max_tokens as f64 * 0.9) as u32;
-        let approaching_max = (state.total_session_usage.total_tokens as f64 / max_tokens as f64)
-            >= context_info.approach_warning_threshold;
+        // Use current_model if set (from streaming), otherwise use default model
+        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let max_tokens = active_model.limit.context as u32;
+        // Use current message's prompt_tokens for context window warnings
+        // (prompt_tokens represents the actual context size, not accumulated across messages)
+        let current_context = state.current_message_usage.prompt_tokens;
+        let high_cost_warning = current_context >= (max_tokens as f64 * 0.9) as u32;
+        let approaching_max = (current_context as f64 / max_tokens as f64) >= 0.8; // Default threshold
 
         {
             #[cfg(unix)]

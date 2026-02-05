@@ -223,6 +223,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
+    // Render model switcher
+    if state.show_model_switcher {
+        crate::services::model_switcher::render_model_switcher_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);

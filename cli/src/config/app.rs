@@ -54,6 +54,8 @@ pub struct AppConfig {
     pub eco_model: Option<String>,
     /// Recovery model name
     pub recovery_model: Option<String>,
+    /// New unified model field (replaces smart/eco/recovery model selection)
+    pub model: Option<String>,
     /// Unique ID for anonymous telemetry
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
@@ -162,6 +164,7 @@ impl AppConfig {
             smart_model: profile_config.smart_model,
             eco_model: profile_config.eco_model,
             recovery_model: profile_config.recovery_model,
+            model: profile_config.model,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
@@ -776,6 +779,47 @@ impl AppConfig {
 
         (config_provider, None, None)
     }
+
+    /// Get the default Model from config
+    ///
+    /// Uses the `model` field if set, otherwise falls back to `smart_model`,
+    /// and finally to a default Claude Opus model.
+    ///
+    /// Searches the model catalog by ID. If the model string has a provider
+    /// prefix (e.g., "anthropic/claude-opus-4-5"), it searches within that
+    /// provider first. Otherwise, it searches all providers.
+    pub fn get_default_model(&self) -> stakpak_api::Model {
+        let use_stakpak = self.api_key.is_some();
+
+        // Priority: model > smart_model > default
+        let model_str = self
+            .model
+            .as_ref()
+            .or(self.smart_model.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or("claude-opus-4-5");
+
+        // Search the model catalog
+        stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {
+            // Model not found in catalog - create a custom model
+            // Extract provider from prefix if present
+            let (provider, model_id) = if let Some(idx) = model_str.find('/') {
+                let (prefix, rest) = model_str.split_at(idx);
+                (prefix, &rest[1..])
+            } else {
+                ("anthropic", model_str) // Default to anthropic
+            };
+
+            let final_provider = if use_stakpak { "stakpak" } else { provider };
+            let final_id = if use_stakpak {
+                format!("{}/{}", provider, model_id)
+            } else {
+                model_id.to_string()
+            };
+
+            stakpak_api::Model::custom(final_id, final_provider)
+        })
+    }
 }
 
 // Conversions
@@ -810,6 +854,7 @@ impl From<AppConfig> for ProfileConfig {
             eco_model: config.eco_model,
             smart_model: config.smart_model,
             recovery_model: config.recovery_model,
+            model: config.model,
         }
     }
 }

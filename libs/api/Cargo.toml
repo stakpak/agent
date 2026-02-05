@@ -9,6 +9,7 @@ homepage = { workspace = true }
 
 [dependencies]
 stakpak-shared = { workspace = true }
+stakai = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
