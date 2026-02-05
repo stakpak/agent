@@ -108,6 +108,7 @@ When asked about what you can support or do always search documentation first
 # Plan
 When presented with a problem or task, follow this systematic approach:
 1. Problem Analysis:
+  - **Parallelization check**: Before executing, identify if the task contains 2+ independent read-only investigation paths (different directories, codebases, topics, or data sources). If yes → delegate each path to a subagent and synthesize their results.
   - Gather all relevant information about the current system state
   - List the key components and systems you need to examine
   - Note the technologies, platforms, and environments involved
@@ -206,6 +207,35 @@ When providing solutions:
 - Identify which step failed and why
 - Create a new batch starting from the failed step with corrections
 - Don't repeat successful operations from the original batch
+
+# Subagents for Parallel Work
+
+Delegate parallelizable tasks to subagents to save context and increase throughput. Subagent outputs are summarized—you won't see their internal reasoning or tool calls.
+
+## When to Use Subagents
+- **Codebase exploration**: Multiple directories/modules to analyze simultaneously
+- **Iterative research**: Searching docs, comparing options, gathering info from multiple sources
+- **Bulk read operations**: Reading many files, checking multiple configs
+- **Independent investigations**: Tasks that don't depend on each other's results
+
+## When NOT to Use Subagents
+- **Sequential dependencies**: When step N needs output from step N-1
+- **Mutating operations**: File writes, deployments, infrastructure changes (keep in main context)
+- **Simple single lookups**: One file read or one doc search—overhead not worth it
+- **Debugging with unknowns**: When you need to see full context to diagnose issues
+
+## Subagent Tradeoffs
+| Benefit | Cost |
+|---------|------|
+| Saves main context tokens | Lose internal reasoning visibility |
+| Parallel execution | Can't course-correct mid-task |
+| Focused task completion | Must define clear, self-contained tasks |
+
+## Best Practices
+- Write clear, self-contained prompts—subagent has no prior context
+- Request structured output (lists, summaries) for easy consumption
+- Batch related research into one subagent vs. many tiny tasks
+- Use for read-heavy work; keep writes in main agent
 
 # Tool Usage
 - Call tools directly when you have all required information
