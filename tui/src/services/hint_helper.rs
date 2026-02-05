@@ -51,10 +51,11 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         // Use current_model if set (from streaming), otherwise use default model
         let active_model = state.current_model.as_ref().unwrap_or(&state.model);
         let max_tokens = active_model.limit.context as u32;
-        let high_cost_warning =
-            state.total_session_usage.total_tokens >= (max_tokens as f64 * 0.9) as u32;
-        let approaching_max =
-            (state.total_session_usage.total_tokens as f64 / max_tokens as f64) >= 0.8; // Default threshold
+        // Use current message's prompt_tokens for context window warnings
+        // (prompt_tokens represents the actual context size, not accumulated across messages)
+        let current_context = state.current_message_usage.prompt_tokens;
+        let high_cost_warning = current_context >= (max_tokens as f64 * 0.9) as u32;
+        let approaching_max = (current_context as f64 / max_tokens as f64) >= 0.8; // Default threshold
 
         {
             #[cfg(unix)]

@@ -83,7 +83,17 @@ fn parse_chunk(
 
     let choice = match chunk.choices.first() {
         Some(c) => c,
-        None => return Ok(Vec::new()),
+        None => {
+            // OpenAI sends usage in a final chunk with empty choices
+            // Emit the usage event if we have accumulated usage
+            if let Some(usage) = accumulated_usage.take() {
+                return Ok(vec![StreamEvent::finish(
+                    usage,
+                    FinishReason::with_raw(FinishReasonKind::Stop, "stop"),
+                )]);
+            }
+            return Ok(Vec::new());
+        }
     };
 
     let mut events = Vec::new();
@@ -420,17 +430,13 @@ fn parse_responses_event(
             let response = &event["response"];
 
             // Parse usage
+            // Note: input_tokens is the TOTAL input tokens (including cached)
+            // cached_tokens is just metadata about billing, not a reduction in token count
             if let Some(usage) = response.get("usage") {
                 let input_tokens = usage["input_tokens"].as_u64().unwrap_or(0) as u32;
                 let output_tokens = usage["output_tokens"].as_u64().unwrap_or(0) as u32;
-                let cached_tokens = usage["input_tokens_details"]["cached_tokens"]
-                    .as_u64()
-                    .unwrap_or(0) as u32;
 
-                state.usage = Some(Usage::new(
-                    input_tokens.saturating_sub(cached_tokens),
-                    output_tokens,
-                ));
+                state.usage = Some(Usage::new(input_tokens, output_tokens));
             }
 
             // Map status to finish reason

@@ -58,9 +58,18 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+}
+
+/// Options for streaming responses
+#[derive(Debug, Serialize)]
+pub struct StreamOptions {
+    /// Include usage statistics in the streaming response
+    pub include_usage: bool,
 }
 
 /// OpenAI chat message

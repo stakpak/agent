@@ -185,8 +185,9 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     // Get the active model (current_model if set, otherwise default model)
     let active_model = state.current_model.as_ref().unwrap_or(&state.model);
 
-    // Token usage - use session total and active model's context limit
-    let tokens = state.total_session_usage.total_tokens;
+    // Token usage - use current message's prompt_tokens for context window utilization
+    // (prompt_tokens represents the actual context size, not accumulated across messages)
+    let tokens = state.current_message_usage.prompt_tokens;
     let max_tokens = active_model.limit.context as u32;
 
     // Show tokens info

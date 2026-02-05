@@ -79,6 +79,15 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
         true => None,
     };
 
+    // Include usage in streaming responses
+    let stream_options = if stream {
+        Some(super::types::StreamOptions {
+            include_usage: true,
+        })
+    } else {
+        None
+    };
+
     ChatCompletionRequest {
         model: req.model.id.clone(),
         messages,
@@ -87,6 +96,7 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
         top_p: req.options.top_p,
         stop: req.options.stop_sequences.clone(),
         stream: Some(stream),
+        stream_options,
         tools,
         tool_choice,
     }

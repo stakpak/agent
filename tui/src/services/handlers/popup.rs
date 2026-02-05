@@ -862,7 +862,10 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
 
 /// Handle available models loaded event
 pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) {
-    state.available_models = models;
+    // Sort models by provider (alphabetically) to match render order in model_switcher.rs
+    let mut sorted_models = models;
+    sorted_models.sort_by(|a, b| a.provider.cmp(&b.provider));
+    state.available_models = sorted_models;
 
     // Pre-select current model if available
     if let Some(current) = &state.current_model

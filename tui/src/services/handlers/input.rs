@@ -660,7 +660,8 @@ fn handle_input_submitted(
         let active_model = state.current_model.as_ref().unwrap_or(&state.model);
         let max_tokens = active_model.limit.context as u32;
 
-        let capped_tokens = state.current_message_usage.total_tokens.min(max_tokens);
+        // Use prompt_tokens for context window utilization (actual input context size)
+        let capped_tokens = state.current_message_usage.prompt_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
