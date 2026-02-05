@@ -3,7 +3,7 @@
 //! Installs the stakpak daemon as a LaunchAgent that runs on user login.
 //! The plist is installed to ~/Library/LaunchAgents/dev.stakpak.daemon.plist
 
-use super::{InstallResult, UninstallResult, get_stakpak_binary_path};
+use super::{InstallResult, ReloadResult, UninstallResult, get_stakpak_binary_path};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -207,6 +207,77 @@ pub async fn uninstall() -> Result<UninstallResult, String> {
              Note: Log files in ~/.stakpak/daemon/logs/ were preserved.\n\
              Run history in ~/.stakpak/daemon/daemon.db was preserved.",
             plist_path.display()
+        ),
+    })
+}
+
+/// Reload the launchd service to pick up configuration changes.
+pub async fn reload() -> Result<ReloadResult, String> {
+    let plist_path = get_plist_path();
+
+    if !plist_path.exists() {
+        return Err(format!(
+            "Service not installed (plist not found at {})",
+            plist_path.display()
+        ));
+    }
+
+    if !is_loaded() {
+        return Err("Service is installed but not running. Start it first with 'launchctl load ~/Library/LaunchAgents/dev.stakpak.daemon.plist'".to_string());
+    }
+
+    // Use kickstart -k to kill and restart the service
+    // This is more reliable than stop + wait for KeepAlive
+    // gui/$(id -u) is the domain for user LaunchAgents
+    let uid_output = Command::new("id")
+        .args(["-u"])
+        .output()
+        .map_err(|e| format!("Failed to get user ID: {}", e))?;
+    let uid = String::from_utf8_lossy(&uid_output.stdout).trim().to_string();
+    let service_target = format!("gui/{}/{}", uid, SERVICE_LABEL);
+
+    let kickstart_output = Command::new("launchctl")
+        .args(["kickstart", "-k", &service_target])
+        .output()
+        .map_err(|e| format!("Failed to run launchctl kickstart: {}", e))?;
+
+    if !kickstart_output.status.success() {
+        let stderr = String::from_utf8_lossy(&kickstart_output.stderr);
+        // Fallback to stop + start if kickstart fails (older macOS)
+        let _ = Command::new("launchctl")
+            .args(["stop", SERVICE_LABEL])
+            .output();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let start_output = Command::new("launchctl")
+            .args(["start", SERVICE_LABEL])
+            .output()
+            .map_err(|e| format!("Failed to start service: {}", e))?;
+
+        if !start_output.status.success() {
+            return Err(format!(
+                "Failed to restart service. kickstart error: {}",
+                stderr
+            ));
+        }
+    }
+
+    // Wait a moment for it to restart
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Verify it restarted
+    if !is_loaded() {
+        return Err(
+            "Service stopped but did not restart. Check logs at ~/.stakpak/daemon/logs/"
+                .to_string(),
+        );
+    }
+
+    Ok(ReloadResult {
+        message: format!(
+            "Daemon restarted and configuration reloaded.\n\
+             Service label: {}\n\
+             Use 'launchctl list {}' to verify status.",
+            SERVICE_LABEL, SERVICE_LABEL
         ),
     })
 }

@@ -72,6 +72,13 @@ pub struct UninstallResult {
     pub message: String,
 }
 
+/// Result of a service reload operation.
+#[derive(Debug)]
+pub struct ReloadResult {
+    /// Human-readable message about the reload.
+    pub message: String,
+}
+
 /// Install the daemon as a system service.
 pub async fn install_service() -> Result<InstallResult, String> {
     let platform = Platform::detect();
@@ -95,6 +102,18 @@ pub async fn uninstall_service() -> Result<UninstallResult, String> {
             Err("Windows service uninstallation is not yet supported.".to_string())
         }
         Platform::Unknown => Err("Unknown platform. Cannot uninstall service.".to_string()),
+    }
+}
+
+/// Reload the daemon service configuration.
+pub async fn reload_service() -> Result<ReloadResult, String> {
+    let platform = Platform::detect();
+
+    match platform {
+        Platform::MacOS => launchd::reload().await,
+        Platform::Linux => systemd::reload().await,
+        Platform::Windows => Err("Windows service reload is not yet supported.".to_string()),
+        Platform::Unknown => Err("Unknown platform. Cannot reload service.".to_string()),
     }
 }
 

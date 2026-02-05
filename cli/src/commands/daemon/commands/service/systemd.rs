@@ -3,7 +3,7 @@
 //! Installs the stakpak daemon as a user systemd service.
 //! The service file is installed to ~/.config/systemd/user/stakpak-daemon.service
 
-use super::{InstallResult, UninstallResult, get_stakpak_binary_path};
+use super::{InstallResult, ReloadResult, UninstallResult, get_stakpak_binary_path};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -227,6 +227,55 @@ pub async fn uninstall() -> Result<UninstallResult, String> {
              Note: Log files in ~/.stakpak/daemon/logs/ were preserved.\n\
              Run history in ~/.stakpak/daemon/daemon.db was preserved.",
             service_path.display()
+        ),
+    })
+}
+
+/// Reload the systemd service to pick up configuration changes.
+pub async fn reload() -> Result<ReloadResult, String> {
+    let service_path = get_service_path();
+
+    if !service_path.exists() {
+        return Err(format!(
+            "Service not installed (service file not found at {})",
+            service_path.display()
+        ));
+    }
+
+    if !is_active() {
+        return Err(format!(
+            "Service is installed but not running. Start it first with 'systemctl --user start {}'",
+            SERVICE_NAME
+        ));
+    }
+
+    // Restart the service to reload configuration
+    // The daemon will re-read daemon.toml on startup
+    let restart_output = Command::new("systemctl")
+        .args(["--user", "restart", SERVICE_NAME])
+        .output()
+        .map_err(|e| format!("Failed to restart service: {}", e))?;
+
+    if !restart_output.status.success() {
+        let stderr = String::from_utf8_lossy(&restart_output.stderr);
+        return Err(format!("Failed to restart service: {}", stderr));
+    }
+
+    // Wait a moment and verify it's running
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    if !is_active() {
+        return Err(
+            "Service restarted but is not active. Check logs with 'journalctl --user -u stakpak-daemon'".to_string()
+        );
+    }
+
+    Ok(ReloadResult {
+        message: format!(
+            "Daemon restarted and configuration reloaded.\n\
+             Service name: {}\n\
+             Use 'systemctl --user status {}' to verify status.",
+            SERVICE_NAME, SERVICE_NAME
         ),
     })
 }

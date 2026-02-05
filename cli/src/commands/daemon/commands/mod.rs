@@ -6,6 +6,7 @@ mod history;
 mod init;
 mod install;
 mod prune;
+mod reload;
 mod resume;
 mod run;
 mod service;
@@ -21,6 +22,7 @@ pub use history::{show_history, show_run};
 pub use init::init_config;
 pub use install::install_daemon;
 pub use prune::prune_history;
+pub use reload::reload_daemon;
 pub use resume::resume_run;
 pub use run::run_daemon;
 pub use status::show_status;
@@ -83,6 +85,8 @@ pub enum DaemonCommands {
     },
     /// Uninstall daemon system service
     Uninstall,
+    /// Reload daemon configuration (restarts the service)
+    Reload,
 }
 
 /// Resources for the 'get' command.

@@ -459,8 +459,9 @@ impl Commands {
             Commands::Daemon(daemon_command) => {
                 use crate::commands::daemon::commands::{
                     DaemonCommands, DescribeResource, GetResource, fire_trigger, init_config,
-                    install_daemon, prune_history, resume_run, run_daemon, show_history, show_run,
-                    show_status, show_trigger, stop_daemon, uninstall_daemon,
+                    install_daemon, prune_history, reload_daemon, resume_run, run_daemon,
+                    show_history, show_run, show_status, show_trigger, stop_daemon,
+                    uninstall_daemon,
                 };
                 match daemon_command {
                     DaemonCommands::Run => {
@@ -505,6 +506,9 @@ impl Commands {
                     }
                     DaemonCommands::Uninstall => {
                         uninstall_daemon().await?;
+                    }
+                    DaemonCommands::Reload => {
+                        reload_daemon().await?;
                     }
                 }
             }
