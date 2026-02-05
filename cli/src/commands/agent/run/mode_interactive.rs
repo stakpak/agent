@@ -144,10 +144,24 @@ pub async fn run_interactive(
         });
 
         let input_tx_clone = input_tx.clone();
+        let mut shutdown_rx_for_progress = shutdown_tx.subscribe();
         let mcp_progress_handle = tokio::spawn(async move {
-            while let Some(progress) = mcp_progress_rx.recv().await {
-                let _ =
-                    send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
+            loop {
+                tokio::select! {
+                    maybe_progress = mcp_progress_rx.recv() => {
+                        let Some(progress) = maybe_progress else {
+                            break;
+                        };
+                        let _ = send_input_event(
+                            &input_tx_clone,
+                            InputEvent::StreamToolResult(progress),
+                        )
+                        .await;
+                    }
+                    _ = shutdown_rx_for_progress.recv() => {
+                        break;
+                    }
+                }
             }
         });
 
@@ -940,6 +954,16 @@ pub async fn run_interactive(
                 match response_result {
                     Ok(response) => {
                         messages.push(response.choices[0].message.clone());
+
+                        if let Some(session_id) = response
+                            .metadata
+                            .as_ref()
+                            .and_then(|meta| meta.get("session_id"))
+                            .and_then(|value| value.as_str())
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        {
+                            current_session_id = Some(session_id);
+                        }
 
                         // Accumulate usage from response
                         total_session_usage.prompt_tokens += response.usage.prompt_tokens;
