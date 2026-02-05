@@ -93,7 +93,9 @@ pub struct SpawnConfig {
 /// * `Err(AgentError)` - Failed to spawn or run the agent
 pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError> {
     // Find the stakpak binary
-    let binary = find_stakpak_binary()?;
+    let binary = std::env::current_exe().map_err(|e| {
+        AgentError::BinaryNotFound(format!("Failed to get current executable path: {}", e))
+    })?;
 
     debug!(
         binary = %binary.display(),
@@ -229,30 +231,6 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
             })
         }
     }
-}
-
-/// Find the stakpak binary path.
-///
-/// Searches in order:
-/// 1. Current executable's directory (for development)
-/// 2. PATH environment variable
-fn find_stakpak_binary() -> Result<std::path::PathBuf, AgentError> {
-    // First, try the current executable's directory
-    if let Ok(current_exe) = std::env::current_exe()
-        && let Some(exe_dir) = current_exe.parent()
-    {
-        let stakpak_path = exe_dir.join("stakpak");
-        if stakpak_path.exists() {
-            return Ok(stakpak_path);
-        }
-    }
-
-    // Fall back to PATH lookup
-    which::which("stakpak").map_err(|_| {
-        AgentError::BinaryNotFound(
-            "stakpak binary not found in PATH or current directory".to_string(),
-        )
-    })
 }
 
 /// Parse session ID from agent output text.
