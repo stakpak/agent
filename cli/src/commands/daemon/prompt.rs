@@ -58,7 +58,12 @@ pub fn assemble_prompt(trigger: &Trigger, check_result: Option<&CheckResult>) ->
     // Include board section if board_id is configured
     if let Some(board_id) = &trigger.board_id {
         context_lines.push(format!(
-            "Board: {}\nTrack your progress and document findings on this board.",
+            "Board: {}\n\
+            Use this board to track state across runs:\n\
+            - Check existing cards before starting new work\n\
+            - Create/update cards for ongoing tasks\n\
+            - Add comments to document findings and decisions\n\
+            - Tag cards `blocked` or `needs-human` when user input required",
             board_id
         ));
     }
@@ -137,7 +142,7 @@ mod tests {
 
         // Verify board section
         assert!(prompt.contains("Board: board_abc123"));
-        assert!(prompt.contains("Track your progress and document findings on this board."));
+        assert!(prompt.contains("Use this board to track state across runs:"));
 
         // Verify delimiters
         assert!(prompt.contains("---"));
@@ -182,7 +187,7 @@ mod tests {
 
         // Board section should NOT be included
         assert!(!prompt.contains("Board:"));
-        assert!(!prompt.contains("Track your progress"));
+        assert!(!prompt.contains("track state across runs"));
     }
 
     #[test]
