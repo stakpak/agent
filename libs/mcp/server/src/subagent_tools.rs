@@ -5,117 +5,247 @@ use rmcp::{
     ErrorData as McpError, RoleServer, handler::server::wrapper::Parameters, model::*, schemars,
     service::RequestContext, tool, tool_router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
-pub struct SubagentType(pub String);
 
-impl std::fmt::Display for SubagentType {
+/// Model selection for dynamic subagents
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubagentModel {
+    /// Fast, cost-effective model for simple tasks
+    Eco,
+    /// More capable model for complex reasoning tasks
+    Smart,
+}
+
+impl std::fmt::Display for SubagentModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        match self {
+            SubagentModel::Eco => write!(f, "eco"),
+            SubagentModel::Smart => write!(f, "smart"),
+        }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SubagentResult {
-    pub success: bool,
-    pub description: String,
-    pub agent_type: SubagentType,
-    pub steps_taken: usize,
-    pub artifacts_generated: Vec<String>,
-    pub final_response: String,
-    pub execution_time_seconds: f64,
-    pub checkpoint_id: Option<String>,
-}
-
+/// Request for creating a dynamic subagent with full control over its configuration.
+/// Based on the AOrchestra 4-tuple model: (Instruction, Context, Tools, Model)
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct TaskRequest {
+pub struct DynamicSubagentRequest {
+    /// A short (3-5 word) description of what the task accomplishes
     #[schemars(description = "A short (3-5 word) description of the task")]
     pub description: String,
-    #[schemars(description = "The task for the agent to perform")]
-    pub prompt: String,
-    #[schemars(description = "The type of specialized agent to use for this task")]
-    pub subagent_type: String,
+
+    /// The task instruction - what the subagent should do (the "I" in the 4-tuple).
+    /// Should be specific, actionable, and include success criteria.
+    #[schemars(
+        description = "The task instruction specifying what the subagent should accomplish. Be specific and include success criteria."
+    )]
+    pub instruction: String,
+
+    /// Curated context from previous work (the "C" in the 4-tuple).
+    /// Include: relevant findings, key artifacts/references, what didn't work.
+    /// Exclude: full conversation history, irrelevant tangents, raw tool outputs.
+    #[schemars(
+        description = "Curated context from previous attempts/findings. Include: relevant discoveries, key references (file paths, URLs, IDs), failed approaches to avoid. Keep concise - don't pass full history."
+    )]
+    pub context: Option<String>,
+
+    /// Tools to grant the subagent (the "T" in the 4-tuple).
+    /// Follow least-privilege: only include tools necessary for the task.
+    /// Use tool names like: stakpak__view, stakpak__run_command, stakpak__search_docs, etc.
+    #[schemars(
+        description = "Array of tool names to grant the subagent. Follow least-privilege principle - only include tools necessary for the task. Examples: stakpak__view, stakpak__run_command, stakpak__search_docs, stakpak__str_replace"
+    )]
+    pub tools: Vec<String>,
+
+    /// Model to use (the "M" in the 4-tuple).
+    /// - eco: Fast, cost-effective for simple tasks (file reading, searches)
+    /// - smart: More capable for complex reasoning, multi-step analysis
+    #[schemars(
+        description = "Model selection: 'eco' for fast/discovery/exploratory/research tasks, 'smart' for complex reasoning"
+    )]
+    pub model: SubagentModel,
+
+    /// Maximum steps the subagent can take (default: 30)
+    #[schemars(description = "Maximum steps the subagent can take (default: 30)")]
+    pub max_steps: Option<usize>,
+
+    /// Enable sandbox mode using warden container isolation.
+    /// When enabled, the subagent runs in an isolated Docker container with:
+    /// - Read-only access to the current working directory
+    /// - Read-only access to cloud credentials (AWS, GCP, Azure, etc.)
+    /// - Network isolation and security policies
+    /// Use this when the subagent needs to run potentially unsafe commands.
+    #[schemars(
+        description = "Enable sandbox mode for isolated execution. Runs subagent in a warden container with read-only filesystem access and security policies. Recommended when using run_command tool."
+    )]
+    #[serde(default)]
+    pub enable_sandbox: bool,
 }
 
 #[tool_router(router = tool_router_subagent, vis = "pub")]
 impl ToolContainer {
+    /// Create and execute a dynamic subagent with full control over its configuration.
+    /// Based on the AOrchestra 4-tuple model: (Instruction, Context, Tools, Model)
     #[tool(
-        description = "Execute a task using a specialized subagent. This tool allows you to delegate specific tasks to specialized agents based on the task type and requirements.
+        description = "Create a dynamic subagent with full control over its configuration. This implements the AOrchestra 4-tuple model (Instruction, Context, Tools, Model) for on-demand agent specialization.
 
 PARAMETERS:
-- description: A short (3-5 word) description of what the task accomplishes
-- prompt: Detailed instructions for the agent to perform the task
-- subagent_type: The type of specialized agent to use from the available options
+- description: A short (3-5 word) description of the task
+- instruction: What the subagent should do - be specific and include success criteria
+- context: (Optional) Curated context from previous work - include relevant findings, key references, failed approaches
+- tools: Array of tool names to grant (follow least-privilege - minimum required)
+- model: 'eco' for simple tasks, 'smart' for complex reasoning
+- max_steps: (Optional) Maximum steps, default 30
+- enable_sandbox: (Optional) Run in isolated warden container with security policies
 
-USAGE:
-Use this tool when you need to delegate a specific task to a specialized agent that can handle the requirements better than general-purpose processing. The subagent will execute the task according to the provided prompt and return the results.
+WHEN TO USE:
+- When you need fine-grained control over subagent capabilities
+- When passing context from previous attempts would help
+- When the pre-defined subagent types don't fit your needs
 
-The subagent runs asynchronously in the background. This tool returns immediately with a task ID that you can use to monitor progress and get results using the get_task_details and get_all_tasks tools."
+CONTEXT GUIDELINES (the key differentiator):
+Include:
+- Relevant findings from previous attempts ('Found that config is in /etc/app/config.yaml')
+- Key references discovered (file paths, URLs, IDs, names)
+- Failed approaches to avoid ('API v1 endpoint returned 404, use v2')
+- Constraints or clarifications
+
+Exclude:
+- Full conversation history (causes context degradation)
+- Raw tool outputs (summarize instead)
+- Irrelevant tangents from other subtasks
+
+TOOL SELECTION (least-privilege):
+- Read-only tasks: stakpak__view, stakpak__search_docs
+- Research tasks: stakpak__view, stakpak__search_docs, stakpak__view_web_page
+- Code changes: stakpak__view, stakpak__str_replace, stakpak__create
+- System tasks: stakpak__view, stakpak__run_command (use enable_sandbox=true for safety)
+
+SANDBOX MODE (enable_sandbox=true):
+- Runs subagent in isolated Docker container via warden
+- Read-only access to working directory and cloud credentials
+- Recommended when using run_command tool for untrusted operations
+- Adds ~5-10s startup overhead for container initialization
+
+The subagent runs asynchronously. Use get_task_details to monitor progress."
     )]
-    pub async fn subagent_task(
+    pub async fn dynamic_subagent_task(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(TaskRequest {
+        Parameters(DynamicSubagentRequest {
             description,
-            prompt,
-            subagent_type,
-        }): Parameters<TaskRequest>,
+            instruction,
+            context,
+            tools,
+            model,
+            max_steps,
+            enable_sandbox,
+        }): Parameters<DynamicSubagentRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let session_id = self.get_session_id(&ctx);
-        let subagent_command =
-            match self.build_subagent_command(&prompt, &subagent_type, session_id.as_deref()) {
-                Ok(command) => command,
-                Err(e) => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "COMMAND_BUILD_FAILED: Failed to build subagent command: {}",
-                        e
-                    ))]));
-                }
-            };
+        // Validate tools array is not empty
+        if tools.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "VALIDATION_ERROR: tools array cannot be empty. Provide at least one tool for the subagent.",
+            )]));
+        }
 
-        // Start the subagent as a background task using existing task manager
-        let task_info = match self
-            .get_task_manager()
-            .start_task(subagent_command, Some(description.clone()), None, None) // description, no timeout, no remote
-            .await
-        {
-            Ok(task_info) => task_info,
+        let session_id = self.get_session_id(&ctx);
+        let max_steps = max_steps.unwrap_or(30);
+
+        // Build the dynamic subagent command
+        let subagent_command = match self.build_dynamic_subagent_command(
+            &instruction,
+            context.as_deref(),
+            &tools,
+            &model,
+            max_steps,
+            enable_sandbox,
+            session_id.as_deref(),
+        ) {
+            Ok(command) => command,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "TASK_START_FAILED: Failed to start subagent task: {}",
+                    "COMMAND_BUILD_FAILED: Failed to build dynamic subagent command: {}",
                     e
                 ))]));
             }
         };
 
+        // Start the subagent as a background task
+        let task_info = match self
+            .get_task_manager()
+            .start_task(subagent_command, Some(description.clone()), None, None)
+            .await
+        {
+            Ok(task_info) => task_info,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "TASK_START_FAILED: Failed to start dynamic subagent task: {}",
+                    e
+                ))]));
+            }
+        };
+
+        // Format tools list for display
+        let tools_display = tools.join(", ");
+        let context_display = context
+            .as_ref()
+            .map(|c| format!("\nContext: {} chars provided", c.len()))
+            .unwrap_or_default();
+        let sandbox_display = if enable_sandbox {
+            "\nSandbox: enabled (warden isolation)"
+        } else {
+            ""
+        };
+
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "🤖 Subagent Task Started\n\nTask ID: {}\nDescription: {}\nAgent Type: {}\nStatus: {:?}\n\nThe subagent is now running in the background. Use get_task_details to monitor progress and get results.",
-            task_info.id, description, subagent_type, task_info.status
+            "🤖 Dynamic Subagent Created\n\n\
+            Task ID: {}\n\
+            Description: {}\n\
+            Model: {}\n\
+            Tools: [{}]\n\
+            Max Steps: {}{}{}\n\
+            Status: {:?}\n\n\
+            The subagent is now running in the background with the specified configuration.\n\
+            Use get_task_details to monitor progress and get results.",
+            task_info.id,
+            description,
+            model,
+            tools_display,
+            max_steps,
+            context_display,
+            sandbox_display,
+            task_info.status
         ))]))
     }
 
-    fn build_subagent_command(
+    /// Build command for dynamic subagent with full 4-tuple configuration
+    fn build_dynamic_subagent_command(
         &self,
-        prompt: &str,
-        subagent_type: &str,
+        instruction: &str,
+        context: Option<&str>,
+        tools: &[String],
+        model: &SubagentModel,
+        max_steps: usize,
+        enable_sandbox: bool,
         session_id: Option<&str>,
     ) -> Result<String, McpError> {
-        let subagent_config = if let Some(subagent_configs) = self.get_subagent_configs() {
-            subagent_configs.get_config(subagent_type)
-        } else {
-            None
-        }
-        .ok_or_else(|| {
-            McpError::internal_error(
-                "Unknown subagent type",
-                Some(json!({"subagent_type": subagent_type})),
-            )
-        })?;
+        // Combine instruction and context into the prompt
+        let full_prompt = match context {
+            Some(ctx) if !ctx.is_empty() => {
+                format!(
+                    "=== CONTEXT (from previous work) ===\n{}\n\n=== YOUR TASK ===\n{}",
+                    ctx, instruction
+                )
+            }
+            _ => instruction.to_string(),
+        };
 
+        // Write prompt to file
         let prompt_filename = format!("prompt_{}.txt", Uuid::new_v4());
         let prompt_subpath = match session_id {
             Some(sid) => Path::new(sid)
@@ -128,31 +258,28 @@ The subagent runs asynchronously in the background. This tool returns immediatel
                 .to_string_lossy()
                 .to_string(),
         };
-        let prompt_file_path =
-            LocalStore::write_session_data(&prompt_subpath, prompt).map_err(|e| {
+
+        let prompt_file_path = LocalStore::write_session_data(&prompt_subpath, &full_prompt)
+            .map_err(|e| {
                 McpError::internal_error(
                     "Failed to create prompt file",
                     Some(json!({"error": e.to_string()})),
                 )
             })?;
 
+        // Build the base stakpak command
         let mut command = format!(
-            r#"stakpak -a --prompt-file {} --max-steps {}"#,
-            prompt_file_path, subagent_config.max_steps
+            r#"stakpak -a --prompt-file {} --max-steps {} --model {}"#,
+            prompt_file_path, max_steps, model
         );
 
-        // Add model flag if specified
-        if let Some(model) = &subagent_config.model {
-            command.push_str(&format!(" --model {}", model));
-        }
-
-        for tool in &subagent_config.allowed_tools {
+        // Add each tool
+        for tool in tools {
             command.push_str(&format!(" -t {}", tool));
         }
 
-        if let Some(warden) = &subagent_config.warden
-            && warden.enabled
-        {
+        // If sandbox mode is enabled, wrap the command in warden
+        if enable_sandbox {
             let stakpak_image = format!(
                 "ghcr.io/stakpak/agent-warden:v{}",
                 env!("CARGO_PKG_VERSION")
@@ -160,14 +287,43 @@ The subagent runs asynchronously in the background. This tool returns immediatel
 
             let mut warden_command = format!("stakpak warden run --image {}", stakpak_image);
 
+            // Mount the prompt file into the container
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
-
             warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
 
-            for volume in &warden.volumes {
-                warden_command.push_str(&format!(" -v {}", volume));
+            // Add default sandbox volumes for read-only access
+            // Working directory (read-only)
+            warden_command.push_str(" -v ./:/agent:ro");
+            // Session data directory (read-write for subagent state)
+            warden_command.push_str(" -v ./.stakpak:/agent/.stakpak");
+
+            // Cloud credentials (read-only) - only mount if they exist
+            let cloud_volumes = [
+                ("~/.aws", "/home/agent/.aws:ro"),
+                ("~/.config/gcloud", "/home/agent/.config/gcloud:ro"),
+                ("~/.azure", "/home/agent/.azure:ro"),
+                ("~/.kube", "/home/agent/.kube:ro"),
+            ];
+
+            for (host_path, container_path) in cloud_volumes {
+                // Expand ~ to home directory
+                let expanded_path = if host_path.starts_with("~/") {
+                    if let Ok(home) = std::env::var("HOME") {
+                        host_path.replacen("~", &home, 1)
+                    } else {
+                        continue;
+                    }
+                } else {
+                    host_path.to_string()
+                };
+
+                // Only add volume if the path exists
+                if Path::new(&expanded_path).exists() {
+                    warden_command.push_str(&format!(" -v {}:{}", expanded_path, container_path));
+                }
             }
 
+            // Wrap the stakpak command, replacing the prompt path with the container path
             command = format!(
                 "{} '{}'",
                 warden_command,

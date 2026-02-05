@@ -14,7 +14,6 @@ use tracing::error;
 
 use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
-use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
 pub mod integrations;
@@ -126,7 +125,7 @@ pub struct MCPServerConfig {
     pub privacy_mode: bool,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
-    pub subagent_configs: Option<SubagentConfigs>,
+    pub enable_subagents: bool,
     pub certificate_chain: Arc<Option<CertificateChain>>,
 }
 
@@ -229,7 +228,7 @@ fn build_tool_container(
         ToolMode::LocalOnly => {
             let mut tool_router = ToolContainer::tool_router_local();
 
-            if config.subagent_configs.is_some() {
+            if config.enable_subagents {
                 tool_router += ToolContainer::tool_router_subagent();
             }
 
@@ -239,7 +238,6 @@ fn build_tool_container(
                 config.privacy_mode,
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
-                config.subagent_configs.clone(),
                 tool_router,
             )
         }
@@ -249,7 +247,7 @@ fn build_tool_container(
                 tool_router += ToolContainer::tool_router_slack();
             }
 
-            if config.subagent_configs.is_some() {
+            if config.enable_subagents {
                 tool_router += ToolContainer::tool_router_subagent();
             }
 
@@ -259,7 +257,6 @@ fn build_tool_container(
                 config.privacy_mode,
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
-                config.subagent_configs.clone(),
                 tool_router,
             )
         }
@@ -271,7 +268,7 @@ fn build_tool_container(
                 tool_router += ToolContainer::tool_router_slack();
             }
 
-            if config.subagent_configs.is_some() {
+            if config.enable_subagents {
                 tool_router += ToolContainer::tool_router_subagent();
             }
 
@@ -281,7 +278,6 @@ fn build_tool_container(
                 config.privacy_mode,
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
-                config.subagent_configs.clone(),
                 tool_router,
             )
         }

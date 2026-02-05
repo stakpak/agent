@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, add_subagents, refresh_billing_info,
+    add_agents_md, add_local_context, add_rulebooks, refresh_billing_info,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
@@ -27,7 +27,6 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
-use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -114,7 +113,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
-    pub subagent_configs: Option<SubagentConfigs>,
+    pub enable_subagents: bool,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
@@ -153,7 +152,7 @@ pub async fn run_interactive(
         let mut rulebooks = config.rulebooks.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
-        let subagent_configs = config.subagent_configs.clone();
+        let enable_subagents = config.enable_subagents;
         let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
@@ -268,7 +267,7 @@ pub async fn run_interactive(
                 privacy_mode,
                 enabled_tools: enabled_tools.clone(),
                 enable_mtls,
-                subagent_configs: subagent_configs.clone(),
+                enable_subagents,
                 allowed_tools: allowed_tools_for_tui.clone(),
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
@@ -403,9 +402,6 @@ pub async fn run_interactive(
                             } else {
                                 (user_input.to_string(), None::<String>)
                             };
-
-                        let (user_input, _) =
-                            add_subagents(&messages, &user_input, &subagent_configs);
 
                         let user_input = if messages.is_empty()
                             && let Some(agents_md_info) = &agents_md

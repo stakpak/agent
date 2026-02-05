@@ -1,6 +1,6 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, add_subagents, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -15,7 +15,6 @@ use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::models::llm::LLMTokenUsage;
-use stakpak_shared::models::subagent::SubagentConfigs;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -27,7 +26,7 @@ pub struct RunAsyncConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
-    pub subagent_configs: Option<SubagentConfigs>,
+    pub enable_subagents: bool,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -59,7 +58,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         privacy_mode: config.privacy_mode,
         enabled_tools: config.enabled_tools.clone(),
         enable_mtls: config.enable_mtls,
-        subagent_configs: config.subagent_configs.clone(),
+        enable_subagents: config.enable_subagents,
         allowed_tools: config.allowed_tools.clone(),
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
@@ -143,9 +142,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         } else {
             (user_input, None)
         };
-
-        let (user_input, _subagents_text) =
-            add_subagents(&chat_messages, &user_input, &config.subagent_configs);
 
         let user_input = if chat_messages.is_empty()
             && let Some(agents_md) = &config.agents_md
