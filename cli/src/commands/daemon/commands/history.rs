@@ -172,6 +172,30 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
         if let Some(checkpoint_id) = &run.agent_last_checkpoint_id {
             println!("  Checkpoint ID: {}", checkpoint_id);
         }
+
+        // Show agent output
+        if let Some(stdout) = &run.agent_stdout
+            && !stdout.trim().is_empty()
+        {
+            println!();
+            println!("\x1b[1mAgent Output\x1b[0m");
+            for line in stdout.lines() {
+                println!("  {}", line);
+            }
+        }
+
+        if let Some(stderr) = &run.agent_stderr
+            && !stderr.trim().is_empty()
+        {
+            println!();
+            println!("\x1b[1mAgent Stderr\x1b[0m");
+            for line in stderr.lines().take(50) {
+                println!("  \x1b[31m{}\x1b[0m", line);
+            }
+            if stderr.lines().count() > 50 {
+                println!("  ... ({} more lines)", stderr.lines().count() - 50);
+            }
+        }
     }
 
     // Error message

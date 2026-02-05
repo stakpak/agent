@@ -68,8 +68,8 @@ pub async fn show_status() -> Result<(), String> {
 
     println!("Triggers ({}):", config.triggers.len());
     println!(
-        "  {:<24} {:<16} {:<22} LAST RUN",
-        "NAME", "SCHEDULE", "NEXT RUN"
+        "  {:<24} {:<16} {:<14} {:<22} LAST RUN",
+        "NAME", "SCHEDULE", "PROFILE", "NEXT RUN"
     );
 
     for trigger in &config.triggers {
@@ -91,10 +91,13 @@ pub async fn show_status() -> Result<(), String> {
             .map(|(dt, status)| format!("{} ({})", format_datetime(&dt), status))
             .unwrap_or_else(|| "-".to_string());
 
+        let profile = trigger.effective_profile(&config.defaults);
+
         println!(
-            "  {:<24} {:<16} {:<22} {}",
+            "  {:<24} {:<16} {:<14} {:<22} {}",
             truncate(&trigger.name, 24),
             truncate(&trigger.schedule, 16),
+            truncate(profile, 14),
             next_run_str,
             last_run_str
         );

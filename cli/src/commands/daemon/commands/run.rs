@@ -270,6 +270,8 @@ async fn handle_trigger_event(
                         run_id,
                         RunStatus::Failed,
                         Some("Check script timed out"),
+                        None,
+                        None,
                     )
                     .await
                     .map_err(|e| format!("Failed to update run status: {}", e))?;
@@ -287,7 +289,7 @@ async fn handle_trigger_event(
                         &trigger.name,
                         &format!("Check failed (exit {})", result.exit_code.unwrap_or(-1)),
                     );
-                    db.update_run_finished(run_id, RunStatus::Failed, Some("Check script failed"))
+                    db.update_run_finished(run_id, RunStatus::Failed, Some("Check script failed"), None, None)
                         .await
                         .map_err(|e| format!("Failed to update run status: {}", e))?;
                     return Ok(());
@@ -296,7 +298,7 @@ async fn handle_trigger_event(
                 if result.skipped() {
                     info!(trigger = %trigger.name, "Check script returned skip (exit 1)");
                     print_event("skip", &trigger.name, "Skipped (check returned exit 1)");
-                    db.update_run_finished(run_id, RunStatus::Skipped, None)
+                    db.update_run_finished(run_id, RunStatus::Skipped, None, None, None)
                         .await
                         .map_err(|e| format!("Failed to update run status: {}", e))?;
                     return Ok(());
@@ -311,6 +313,8 @@ async fn handle_trigger_event(
                     run_id,
                     RunStatus::Failed,
                     Some(&format!("Check script error: {}", e)),
+                    None,
+                    None,
                 )
                 .await
                 .map_err(|e| format!("Failed to update run status: {}", e))?;
@@ -369,7 +373,19 @@ async fn handle_trigger_event(
                 )
             };
 
-            db.update_run_finished(run_id, status, error_msg.as_deref())
+            // Store agent output (truncate if too large, respecting unicode boundaries)
+            let stdout = if result.stdout.is_empty() {
+                None
+            } else {
+                Some(truncate_string(&result.stdout, 100_000))
+            };
+            let stderr = if result.stderr.is_empty() {
+                None
+            } else {
+                Some(truncate_string(&result.stderr, 100_000))
+            };
+
+            db.update_run_finished(run_id, status, error_msg.as_deref(), stdout.as_deref(), stderr.as_deref())
                 .await
                 .map_err(|e| format!("Failed to update run status: {}", e))?;
 
@@ -391,6 +407,8 @@ async fn handle_trigger_event(
                 run_id,
                 RunStatus::Failed,
                 Some(&format!("Failed to spawn agent: {}", e)),
+                None,
+                None,
             )
             .await
             .map_err(|e| format!("Failed to update run status: {}", e))?;
@@ -398,6 +416,21 @@ async fn handle_trigger_event(
     }
 
     Ok(())
+}
+
+/// Truncate a string to a maximum byte length, respecting unicode character boundaries.
+fn truncate_string(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+
+    // Find the last valid char boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    format!("{}... (truncated)", &s[..end])
 }
 
 /// Wait for SIGTERM, SIGINT, or SIGHUP signal.
@@ -552,12 +585,13 @@ fn format_relative_time(dt: &DateTime<Utc>) -> String {
     }
 }
 
-/// Truncate a string to a maximum length.
+/// Truncate a string to a maximum length, respecting unicode character boundaries.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{}...", truncated)
     }
 }
 

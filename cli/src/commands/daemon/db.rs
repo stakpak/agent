@@ -63,6 +63,8 @@ pub struct TriggerRun {
     pub agent_woken: bool,
     pub agent_session_id: Option<String>,
     pub agent_last_checkpoint_id: Option<String>,
+    pub agent_stdout: Option<String>,
+    pub agent_stderr: Option<String>,
     pub status: RunStatus,
     pub error_message: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -156,6 +158,8 @@ impl DaemonDb {
                 agent_woken INTEGER NOT NULL DEFAULT 0,
                 agent_session_id TEXT,
                 agent_last_checkpoint_id TEXT,
+                agent_stdout TEXT,
+                agent_stderr TEXT,
                 status TEXT NOT NULL,
                 error_message TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -164,6 +168,20 @@ impl DaemonDb {
         )
         .await
         .map_err(|e| DbError::Query(e.to_string()))?;
+
+        // Add agent_stdout and agent_stderr columns if they don't exist (migration)
+        let _ = conn
+            .execute(
+                "ALTER TABLE trigger_runs ADD COLUMN agent_stdout TEXT",
+                (),
+            )
+            .await;
+        let _ = conn
+            .execute(
+                "ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT",
+                (),
+            )
+            .await;
 
         // Create daemon_state table (singleton)
         conn.execute(
@@ -305,14 +323,16 @@ impl DaemonDb {
         run_id: i64,
         status: RunStatus,
         error_message: Option<&str>,
+        agent_stdout: Option<&str>,
+        agent_stderr: Option<&str>,
     ) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
         let status_str = status.to_string();
 
         conn.execute(
-            "UPDATE trigger_runs SET finished_at = ?, status = ?, error_message = ? WHERE id = ?",
-            (now.as_str(), status_str.as_str(), error_message, run_id),
+            "UPDATE trigger_runs SET finished_at = ?, status = ?, error_message = ?, agent_stdout = ?, agent_stderr = ? WHERE id = ?",
+            (now.as_str(), status_str.as_str(), error_message, agent_stdout, agent_stderr, run_id),
         )
         .await
         .map_err(|e| DbError::Query(e.to_string()))?;
@@ -328,7 +348,7 @@ impl DaemonDb {
             .query(
                 "SELECT id, trigger_name, started_at, finished_at, check_exit_code, check_stdout,
                         check_stderr, check_timed_out, agent_woken, agent_session_id,
-                        agent_last_checkpoint_id, status, error_message, created_at
+                        agent_last_checkpoint_id, agent_stdout, agent_stderr, status, error_message, created_at
                  FROM trigger_runs WHERE id = ?",
                 [run_id],
             )
@@ -349,7 +369,7 @@ impl DaemonDb {
         let mut sql =
             "SELECT id, trigger_name, started_at, finished_at, check_exit_code, check_stdout,
                               check_stderr, check_timed_out, agent_woken, agent_session_id,
-                              agent_last_checkpoint_id, status, error_message, created_at
+                              agent_last_checkpoint_id, agent_stdout, agent_stderr, status, error_message, created_at
                        FROM trigger_runs WHERE 1=1"
                 .to_string();
 
@@ -554,9 +574,11 @@ fn parse_trigger_run(row: &libsql::Row) -> Result<TriggerRun, DbError> {
     let agent_woken: i32 = row.get(8).unwrap_or(0);
     let agent_session_id: Option<String> = row.get(9).ok();
     let agent_last_checkpoint_id: Option<String> = row.get(10).ok();
-    let status: String = row.get(11).map_err(|e| DbError::Query(e.to_string()))?;
-    let error_message: Option<String> = row.get(12).ok();
-    let created_at: String = row.get(13).map_err(|e| DbError::Query(e.to_string()))?;
+    let agent_stdout: Option<String> = row.get(11).ok();
+    let agent_stderr: Option<String> = row.get(12).ok();
+    let status: String = row.get(13).map_err(|e| DbError::Query(e.to_string()))?;
+    let error_message: Option<String> = row.get(14).ok();
+    let created_at: String = row.get(15).map_err(|e| DbError::Query(e.to_string()))?;
 
     Ok(TriggerRun {
         id,
@@ -570,6 +592,8 @@ fn parse_trigger_run(row: &libsql::Row) -> Result<TriggerRun, DbError> {
         agent_woken: agent_woken != 0,
         agent_session_id,
         agent_last_checkpoint_id,
+        agent_stdout,
+        agent_stderr,
         status: status.parse().map_err(DbError::Query)?,
         error_message,
         created_at: parse_datetime(&created_at)?,
@@ -683,7 +707,7 @@ mod tests {
         );
 
         // Update finished
-        db.update_run_finished(run_id, RunStatus::Completed, None)
+        db.update_run_finished(run_id, RunStatus::Completed, None, None, None)
             .await
             .expect("Update finished failed");
 
@@ -702,7 +726,7 @@ mod tests {
         let _id3 = db.insert_run("trigger-a").await.expect("Insert failed");
 
         // Mark one as completed
-        db.update_run_finished(id1, RunStatus::Completed, None)
+        db.update_run_finished(id1, RunStatus::Completed, None, None, None)
             .await
             .expect("Update failed");
 
