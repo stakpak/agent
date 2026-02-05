@@ -16,8 +16,8 @@ use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use crate::storage::SessionStorage;
 
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
-use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
-use stakpak_shared::models::stakai_adapter::{StakAIClient, get_stakai_model_string};
+use stakpak_shared::models::llm::{LLMProviderConfig, ProviderConfig};
+use stakpak_shared::models::stakai_adapter::StakAIClient;
 use std::sync::Arc;
 
 // =============================================================================
@@ -28,11 +28,11 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Default)]
 pub struct ModelOptions {
     /// Primary model for complex tasks
-    pub smart_model: Option<LLMModel>,
+    pub smart_model: Option<String>,
     /// Economy model for simpler tasks
-    pub eco_model: Option<LLMModel>,
+    pub eco_model: Option<String>,
     /// Fallback model when primary providers fail
-    pub recovery_model: Option<LLMModel>,
+    pub recovery_model: Option<String>,
 }
 
 /// Default Stakpak API endpoint
@@ -220,9 +220,9 @@ impl AgentClient {
 
         // 5. Parse model options
         let model_options = ModelOptions {
-            smart_model: config.smart_model.map(LLMModel::from),
-            eco_model: config.eco_model.map(LLMModel::from),
-            recovery_model: config.recovery_model.map(LLMModel::from),
+            smart_model: config.smart_model,
+            eco_model: config.eco_model,
+            recovery_model: config.recovery_model,
         };
 
         // 6. Setup hook registry with context management hooks
@@ -230,11 +230,6 @@ impl AgentClient {
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {
-                model_options: crate::local::ModelOptions {
-                    smart_model: model_options.smart_model.clone(),
-                    eco_model: model_options.eco_model.clone(),
-                    recovery_model: model_options.recovery_model.clone(),
-                },
                 history_action_message_size_limit: Some(100),
                 history_action_message_keep_last_n: Some(50),
                 history_action_result_keep_last_n: Some(50),
@@ -290,50 +285,6 @@ impl AgentClient {
     /// Use this for all session and checkpoint operations.
     pub fn session_storage(&self) -> &Arc<dyn SessionStorage> {
         &self.session_storage
-    }
-
-    /// Get the model string for the given agent model type
-    ///
-    /// When Stakpak is available, routes through Stakpak provider.
-    /// Otherwise, uses direct provider.
-    pub fn get_model_string(
-        &self,
-        model: &stakpak_shared::models::integrations::openai::AgentModel,
-    ) -> LLMModel {
-        use stakpak_shared::models::integrations::openai::AgentModel;
-
-        let base_model = match model {
-            AgentModel::Smart => self.model_options.smart_model.clone().unwrap_or_else(|| {
-                LLMModel::from("anthropic/claude-sonnet-4-5-20250929".to_string())
-            }),
-            AgentModel::Eco => self.model_options.eco_model.clone().unwrap_or_else(|| {
-                LLMModel::from("anthropic/claude-haiku-4-5-20250929".to_string())
-            }),
-            AgentModel::Recovery => self
-                .model_options
-                .recovery_model
-                .clone()
-                .unwrap_or_else(|| LLMModel::from("openai/gpt-5".to_string())),
-        };
-
-        // If Stakpak is available, route through Stakpak provider
-        if self.has_stakpak() {
-            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-sonnet-4-5")
-            let model_str = get_stakai_model_string(&base_model);
-            // Extract display name from the last segment for UI
-            let display_name = model_str
-                .rsplit('/')
-                .next()
-                .unwrap_or(&model_str)
-                .to_string();
-            LLMModel::Custom {
-                provider: "stakpak".to_string(),
-                model: model_str,
-                name: Some(display_name),
-            }
-        } else {
-            base_model
-        }
     }
 }
 

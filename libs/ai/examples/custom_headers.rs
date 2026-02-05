@@ -1,13 +1,16 @@
 //! Example: Using custom headers with providers
 
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Inference::new();
 
     // Create request with custom headers using GenerateOptions
-    let mut request = GenerateRequest::new("gpt-4", vec![Message::new(Role::User, "Hello!")]);
+    let mut request = GenerateRequest::new(
+        Model::custom("gpt-4", "openai"),
+        vec![Message::new(Role::User, "Hello!")],
+    );
     request.options.max_tokens = Some(100);
     request.options = request
         .options

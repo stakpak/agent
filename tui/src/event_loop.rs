@@ -14,7 +14,8 @@ use crossterm::event::{
 };
 use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use stakpak_shared::models::integrations::openai::{AgentModel, ToolCallResultStatus};
+use stakai::Model;
+use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,7 +49,7 @@ pub async fn run_tui(
     allowed_tools: Option<&Vec<String>>,
     current_profile_name: String,
     rulebook_config: Option<RulebookConfig>,
-    agent_model: AgentModel,
+    model: Model,
     editor_command: Option<String>,
     auth_display_info: (Option<String>, Option<String>, Option<String>),
 ) -> io::Result<()> {
@@ -93,7 +94,7 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
         input_tx: Some(internal_tx.clone()),
-        agent_model,
+        model,
         editor_command,
         auth_display_info,
         board_agent_id,

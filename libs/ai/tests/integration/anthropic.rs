@@ -4,7 +4,8 @@
 
 use futures::StreamExt;
 use stakai::{
-    GenerateRequest, Inference, InferenceConfig, Message, Role, StreamEvent, Tool, ToolChoice,
+    GenerateRequest, Inference, InferenceConfig, Message, Model, Role, StreamEvent, Tool,
+    ToolChoice,
 };
 
 // =============================================================================
@@ -17,7 +18,7 @@ async fn test_anthropic_generate() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
@@ -45,7 +46,7 @@ async fn test_anthropic_generate_with_system_message() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![
             Message {
                 role: Role::System,
@@ -79,7 +80,7 @@ async fn test_anthropic_explicit_provider_prefix() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "anthropic/claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Say 'test'".into(),
@@ -108,7 +109,7 @@ async fn test_anthropic_streaming() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Count from 1 to 5".into(),
@@ -158,7 +159,7 @@ async fn test_anthropic_streaming_with_system_message() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![
             Message {
                 role: Role::System,
@@ -220,7 +221,7 @@ async fn test_anthropic_tool_calling() {
         }));
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "What's the weather in Tokyo?".into(),
@@ -272,7 +273,7 @@ async fn test_anthropic_tool_calling_streaming() {
         }));
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "What is 123 * 456?".into(),
@@ -339,7 +340,7 @@ async fn test_anthropic_custom_base_url_with_messages_suffix() {
     let client = Inference::with_config(config).expect("Failed to create client");
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Say 'URL test passed'".into(),
@@ -373,7 +374,7 @@ async fn test_anthropic_custom_base_url_without_trailing_slash() {
     let client = Inference::with_config(config).expect("Failed to create client");
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Say 'slash test passed'".into(),
@@ -403,7 +404,7 @@ async fn test_anthropic_invalid_model_error() {
     let client = Inference::new();
 
     let request = GenerateRequest::new(
-        "claude-invalid-model-12345",
+        Model::custom("claude-invalid-model-12345", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Test".into(),
@@ -425,7 +426,7 @@ async fn test_anthropic_streaming_invalid_model_error() {
     let client = Inference::new();
 
     let request = GenerateRequest::new(
-        "claude-invalid-model-12345",
+        Model::custom("claude-invalid-model-12345", "anthropic"),
         vec![Message {
             role: Role::User,
             content: "Test".into(),
@@ -473,7 +474,7 @@ async fn test_anthropic_missing_api_key_error() {
     // try to make a request that would fail
     if let Ok(client) = client_result {
         let request = GenerateRequest::new(
-            "anthropic/claude-haiku-4-5-20251001", // Explicitly use anthropic
+            Model::custom("claude-haiku-4-5-20251001", "anthropic"), // Explicitly use anthropic
             vec![Message {
                 role: Role::User,
                 content: "Test".into(),
@@ -505,7 +506,7 @@ async fn test_anthropic_multi_turn_conversation() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![
             Message {
                 role: Role::User,
@@ -554,7 +555,7 @@ async fn test_anthropic_streaming_long_response() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-haiku-4-5-20251001",
+        Model::custom("claude-haiku-4-5-20251001", "anthropic"),
         vec![Message {
             role: Role::User,
             content:
