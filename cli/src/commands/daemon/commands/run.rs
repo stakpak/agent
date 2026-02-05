@@ -289,9 +289,15 @@ async fn handle_trigger_event(
                         &trigger.name,
                         &format!("Check failed (exit {})", result.exit_code.unwrap_or(-1)),
                     );
-                    db.update_run_finished(run_id, RunStatus::Failed, Some("Check script failed"), None, None)
-                        .await
-                        .map_err(|e| format!("Failed to update run status: {}", e))?;
+                    db.update_run_finished(
+                        run_id,
+                        RunStatus::Failed,
+                        Some("Check script failed"),
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to update run status: {}", e))?;
                     return Ok(());
                 }
 
@@ -385,9 +391,15 @@ async fn handle_trigger_event(
                 Some(truncate_string(&result.stderr, 100_000))
             };
 
-            db.update_run_finished(run_id, status, error_msg.as_deref(), stdout.as_deref(), stderr.as_deref())
-                .await
-                .map_err(|e| format!("Failed to update run status: {}", e))?;
+            db.update_run_finished(
+                run_id,
+                status,
+                error_msg.as_deref(),
+                stdout.as_deref(),
+                stderr.as_deref(),
+            )
+            .await
+            .map_err(|e| format!("Failed to update run status: {}", e))?;
 
             info!(
                 trigger = %trigger.name,

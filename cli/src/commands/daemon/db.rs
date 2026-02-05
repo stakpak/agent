@@ -171,16 +171,10 @@ impl DaemonDb {
 
         // Add agent_stdout and agent_stderr columns if they don't exist (migration)
         let _ = conn
-            .execute(
-                "ALTER TABLE trigger_runs ADD COLUMN agent_stdout TEXT",
-                (),
-            )
+            .execute("ALTER TABLE trigger_runs ADD COLUMN agent_stdout TEXT", ())
             .await;
         let _ = conn
-            .execute(
-                "ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT",
-                (),
-            )
+            .execute("ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT", ())
             .await;
 
         // Create daemon_state table (singleton)

@@ -4,24 +4,29 @@
 
 mod history;
 mod init;
+mod install;
 mod prune;
 mod resume;
 mod run;
+mod service;
 mod status;
 mod stop;
 mod trigger;
+mod uninstall;
 
 use clap::Subcommand;
 
 // Re-export command functions
 pub use history::{show_history, show_run};
 pub use init::init_config;
+pub use install::install_daemon;
 pub use prune::prune_history;
 pub use resume::resume_run;
 pub use run::run_daemon;
 pub use status::show_status;
 pub use stop::stop_daemon;
 pub use trigger::{fire_trigger, show_trigger};
+pub use uninstall::uninstall_daemon;
 
 /// Daemon subcommands for managing the autonomous agent scheduler.
 #[derive(Subcommand, PartialEq, Debug)]
@@ -70,6 +75,14 @@ pub enum DaemonCommands {
         #[arg(short, long)]
         force: bool,
     },
+    /// Install daemon as a system service (launchd on macOS, systemd on Linux)
+    Install {
+        /// Reinstall even if already installed
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Uninstall daemon system service
+    Uninstall,
 }
 
 /// Resources for the 'get' command.
