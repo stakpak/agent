@@ -121,6 +121,10 @@ struct Cli {
     #[arg(long = "config")]
     config_path: Option<PathBuf>,
 
+    /// Model to use (e.g., "claude-opus-4-5", "claude-haiku-4-5", "gpt-5.2")
+    #[arg(long = "model")]
+    model: Option<String>,
+
     /// Prompt to run the agent
     prompt: Option<String>,
 
@@ -409,7 +413,7 @@ async fn main() {
 
                     let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
                     let auto_approve = config.auto_approve.clone();
-                    let default_model = config.get_default_model();
+                    let default_model = config.get_default_model(cli.model.as_deref());
 
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
