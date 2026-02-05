@@ -264,7 +264,7 @@ pub struct SlackReadRepliesRequest {
 #[derive(Debug, Serialize)]
 pub struct SlackSendMessageRequest {
     pub channel: String,
-    pub mrkdwn_text: String,
+    pub markdown_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
 }

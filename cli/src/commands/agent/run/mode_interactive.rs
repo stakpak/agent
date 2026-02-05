@@ -43,6 +43,71 @@ type ClientTaskResult = Result<
     String,
 >;
 
+async fn start_stream_processing_loading(
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) -> Result<(), String> {
+    send_input_event(
+        input_tx,
+        InputEvent::StartLoadingOperation(LoadingOperation::StreamProcessing),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+async fn end_tool_execution_loading_if_none(
+    has_result: bool,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) -> Result<(), String> {
+    if !has_result {
+        send_input_event(
+            input_tx,
+            InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Returns the IDs of tool_calls from the last assistant message that don't have corresponding tool_results.
+/// This is used to add cancelled tool_results before inserting a user message.
+fn get_unresolved_tool_call_ids(messages: &[ChatMessage]) -> Vec<String> {
+    // Find the last assistant message and check if it has tool_calls
+    if let Some(last_assistant_msg) = messages.iter().rev().find(|m| m.role == Role::Assistant)
+        && let Some(tool_calls) = &last_assistant_msg.tool_calls
+        && !tool_calls.is_empty()
+    {
+        // Collect all tool_result IDs from messages
+        let tool_result_ids: std::collections::HashSet<_> = messages
+            .iter()
+            .filter(|m| m.role == Role::Tool && m.tool_call_id.is_some())
+            .filter_map(|m| m.tool_call_id.as_ref())
+            .collect();
+
+        // Return tool_call IDs that don't have corresponding tool_results
+        return tool_calls
+            .iter()
+            .filter(|tc| !tool_result_ids.contains(&tc.id))
+            .map(|tc| tc.id.clone())
+            .collect();
+    }
+
+    Vec::new()
+}
+
+/// Checks if there are pending tool calls that don't have corresponding tool_results.
+/// This is used to prevent sending messages to the API when tool_use blocks would be orphaned,
+/// which causes Anthropic API 400 errors.
+fn has_pending_tool_calls(messages: &[ChatMessage], tools_queue: &[ToolCall]) -> bool {
+    // If there are tools in the queue waiting to be processed, we have pending tool calls
+    if !tools_queue.is_empty() {
+        return true;
+    }
+
+    // Check if there are unresolved tool_calls in the messages
+    !get_unresolved_tool_call_ids(messages).is_empty()
+}
+
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub local_context: Option<LocalContext>,
@@ -144,10 +209,24 @@ pub async fn run_interactive(
         });
 
         let input_tx_clone = input_tx.clone();
+        let mut shutdown_rx_for_progress = shutdown_tx.subscribe();
         let mcp_progress_handle = tokio::spawn(async move {
-            while let Some(progress) = mcp_progress_rx.recv().await {
-                let _ =
-                    send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
+            loop {
+                tokio::select! {
+                    maybe_progress = mcp_progress_rx.recv() => {
+                        let Some(progress) = maybe_progress else {
+                            break;
+                        };
+                        let _ = send_input_event(
+                            &input_tx_clone,
+                            InputEvent::StreamToolResult(progress),
+                        )
+                        .await;
+                    }
+                    _ = shutdown_rx_for_progress.recv() => {
+                        break;
+                    }
+                }
             }
         });
 
@@ -373,6 +452,15 @@ pub async fn run_interactive(
                                 "TOOL_CALL_CANCELLED".to_string(),
                             ));
                         }
+                        // Also add cancelled results for any tool_calls that are currently being
+                        // executed (already removed from queue but not yet resolved).
+                        // This prevents user messages from being inserted between tool_use and tool_result.
+                        for unresolved_id in get_unresolved_tool_call_ids(&messages) {
+                            messages.push(tool_result(
+                                unresolved_id,
+                                "TOOL_CALL_CANCELLED".to_string(),
+                            ));
+                        }
                         messages.push(user_msg);
 
                         // Capture telemetry when not using Stakpak API (local mode)
@@ -408,6 +496,7 @@ pub async fn run_interactive(
                         };
 
                         let mut should_stop = false;
+                        let has_result = result.is_some();
 
                         if let Some(result) = result {
                             let content_parts: Vec<String> = result
@@ -458,6 +547,7 @@ pub async fn run_interactive(
                                 ToolCallResultStatus::Success => false,
                             };
                         }
+                        end_tool_execution_loading_if_none(has_result, &input_tx).await?;
 
                         // Process next tool in queue if available
                         if !tools_queue.is_empty() {
@@ -833,6 +923,15 @@ pub async fn run_interactive(
                     }
                 }
 
+                // Skip sending to API if there are pending tool calls without tool_results
+                // This prevents Anthropic API 400 errors about orphaned tool_use blocks
+                if has_pending_tool_calls(&messages, &tools_queue) {
+                    continue;
+                }
+
+                // Start loading before we begin the LLM request/stream handshake
+                start_stream_processing_loading(&input_tx).await?;
+
                 let headers = if study_mode {
                     let mut headers = HeaderMap::new();
                     #[allow(clippy::unwrap_used)]
@@ -950,6 +1049,16 @@ pub async fn run_interactive(
                 match response_result {
                     Ok(response) => {
                         messages.push(response.choices[0].message.clone());
+
+                        if let Some(session_id) = response
+                            .metadata
+                            .as_ref()
+                            .and_then(|meta| meta.get("session_id"))
+                            .and_then(|value| value.as_str())
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        {
+                            current_session_id = Some(session_id);
+                        }
 
                         // Accumulate usage from response
                         total_session_usage.prompt_tokens += response.usage.prompt_tokens;
@@ -1212,4 +1321,353 @@ https://stakpak.dev/{}/agent-sessions/{}",
     } // End of 'profile_switch_loop
 
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test]
+    async fn start_stream_processing_emits_loading_start() {
+        let (tx, mut rx) = mpsc::channel(1);
+        start_stream_processing_loading(&tx).await.unwrap();
+
+        match rx.recv().await {
+            Some(InputEvent::StartLoadingOperation(LoadingOperation::StreamProcessing)) => {}
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn end_tool_execution_loading_if_none_emits_end() {
+        let (tx, mut rx) = mpsc::channel(1);
+        end_tool_execution_loading_if_none(false, &tx)
+            .await
+            .unwrap();
+
+        match rx.recv().await {
+            Some(InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution)) => {}
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn end_tool_execution_loading_if_none_skips_when_result_present() {
+        let (tx, mut rx) = mpsc::channel(1);
+        end_tool_execution_loading_if_none(true, &tx).await.unwrap();
+
+        let recv = timeout(Duration::from_millis(50), rx.recv()).await;
+        match recv {
+            Err(_) => {} // timeout == no event, expected
+            Ok(other) => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn get_unresolved_tool_call_ids_returns_empty_when_no_messages() {
+        let messages: Vec<ChatMessage> = vec![];
+        assert!(get_unresolved_tool_call_ids(&messages).is_empty());
+    }
+
+    #[test]
+    fn get_unresolved_tool_call_ids_returns_empty_when_no_assistant_message() {
+        let messages = vec![ChatMessage {
+            role: Role::User,
+            content: Some(MessageContent::String("hello".to_string())),
+            ..Default::default()
+        }];
+        assert!(get_unresolved_tool_call_ids(&messages).is_empty());
+    }
+
+    #[test]
+    fn get_unresolved_tool_call_ids_returns_ids_for_unresolved_calls() {
+        let tool_call = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("test".to_string())),
+            tool_calls: Some(vec![tool_call]),
+            ..Default::default()
+        }];
+
+        let unresolved = get_unresolved_tool_call_ids(&messages);
+        assert_eq!(unresolved, vec!["tool_1".to_string()]);
+    }
+
+    #[test]
+    fn get_unresolved_tool_call_ids_returns_empty_when_all_resolved() {
+        let tool_call = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("test".to_string())),
+                tool_calls: Some(vec![tool_call]),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("result".to_string())),
+                tool_call_id: Some("tool_1".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        assert!(get_unresolved_tool_call_ids(&messages).is_empty());
+    }
+
+    #[test]
+    fn get_unresolved_tool_call_ids_returns_only_unresolved() {
+        let tool_call_1 = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        let tool_call_2 = ToolCall {
+            id: "tool_2".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool_2".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("test".to_string())),
+                tool_calls: Some(vec![tool_call_1, tool_call_2]),
+                ..Default::default()
+            },
+            // Only tool_1 has a result
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("result".to_string())),
+                tool_call_id: Some("tool_1".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let unresolved = get_unresolved_tool_call_ids(&messages);
+        assert_eq!(unresolved, vec!["tool_2".to_string()]);
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_true_when_queue_not_empty() {
+        let messages: Vec<ChatMessage> = vec![];
+        let tools_queue = vec![ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        }];
+
+        assert!(has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_false_when_empty_queue_and_no_messages() {
+        let messages: Vec<ChatMessage> = vec![];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_true_when_assistant_has_unresolved_tool_calls() {
+        let tool_call = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("test".to_string())),
+            tool_calls: Some(vec![tool_call]),
+            ..Default::default()
+        }];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_false_when_all_tool_calls_have_results() {
+        let tool_call = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("test".to_string())),
+                tool_calls: Some(vec![tool_call]),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("result".to_string())),
+                tool_call_id: Some("tool_1".to_string()),
+                ..Default::default()
+            },
+        ];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_true_when_some_tool_calls_missing_results() {
+        let tool_call_1 = ToolCall {
+            id: "tool_1".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        let tool_call_2 = ToolCall {
+            id: "tool_2".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "test_tool_2".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("test".to_string())),
+                tool_calls: Some(vec![tool_call_1, tool_call_2]),
+                ..Default::default()
+            },
+            // Only tool_1 has a result, tool_2 is missing
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("result".to_string())),
+                tool_call_id: Some("tool_1".to_string()),
+                ..Default::default()
+            },
+        ];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_false_when_assistant_has_empty_tool_calls() {
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("test".to_string())),
+            tool_calls: Some(vec![]), // Empty tool_calls
+            ..Default::default()
+        }];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_returns_false_when_assistant_has_no_tool_calls() {
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("test".to_string())),
+            tool_calls: None,
+            ..Default::default()
+        }];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn has_pending_tool_calls_checks_last_assistant_message_only() {
+        let tool_call_old = ToolCall {
+            id: "tool_old".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "old_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        let tool_call_new = ToolCall {
+            id: "tool_new".to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: "new_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let messages = vec![
+            // First assistant message with unresolved tool call
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("first".to_string())),
+                tool_calls: Some(vec![tool_call_old]),
+                ..Default::default()
+            },
+            // Result for the old tool
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("old result".to_string())),
+                tool_call_id: Some("tool_old".to_string()),
+                ..Default::default()
+            },
+            // User message
+            ChatMessage {
+                role: Role::User,
+                content: Some(MessageContent::String("continue".to_string())),
+                ..Default::default()
+            },
+            // Second (last) assistant message with tool call
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String("second".to_string())),
+                tool_calls: Some(vec![tool_call_new]),
+                ..Default::default()
+            },
+            // Result for the new tool
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("new result".to_string())),
+                tool_call_id: Some("tool_new".to_string()),
+                ..Default::default()
+            },
+        ];
+        let tools_queue: Vec<ToolCall> = vec![];
+
+        // Should return false because the LAST assistant message's tool calls are resolved
+        assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
 }
