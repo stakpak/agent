@@ -344,6 +344,8 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
     };
 
     // Convert tools to OpenAI Responses API format
+    // Responses API uses flat format: { type, name, description, parameters }
+    // No "strict" field or "function" wrapper
     let tools = req.options.tools.as_ref().map(|tools| {
         tools
             .iter()
@@ -353,7 +355,6 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
                     "name": tool.function.name,
                     "description": tool.function.description,
                     "parameters": tool.function.parameters,
-                    "strict": false
                 })
             })
             .collect::<Vec<_>>()

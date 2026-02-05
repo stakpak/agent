@@ -909,15 +909,25 @@ impl AgentClient {
 
     /// Generate a title for a new session
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        // Use a default haiku model for title generation
-        let model = Model::new(
-            "claude-haiku-4-5-20250929",
-            "Claude Haiku 4.5",
-            "anthropic",
-            false,
-            None,
-            stakai::ModelLimit::default(),
-        );
+        // Pick a cheap model from the user's configured providers
+        let use_stakpak = self.stakpak.is_some();
+        let providers = self.stakai.registry().list_providers();
+        let cheap_models: &[(&str, &str)] = &[
+            ("stakpak", "claude-haiku-4-5"),
+            ("anthropic", "claude-haiku-4-5"),
+            ("openai", "gpt-4.1-mini"),
+            ("google", "gemini-2.5-flash"),
+        ];
+        let model = cheap_models
+            .iter()
+            .find_map(|(provider, model_id)| {
+                if providers.contains(&provider.to_string()) {
+                    crate::find_model(model_id, use_stakpak)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| "No model available for title generation".to_string())?;
 
         let llm_messages = vec![
             LLMMessage {

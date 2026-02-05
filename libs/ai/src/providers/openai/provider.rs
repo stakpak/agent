@@ -25,11 +25,14 @@ impl OpenAIProvider {
     ///
     /// Note: API key validation is skipped when a custom base URL is configured,
     /// as OpenAI-compatible providers like Ollama may not require authentication.
-    pub fn new(config: OpenAIConfig) -> Result<Self> {
+    pub fn new(mut config: OpenAIConfig) -> Result<Self> {
         let is_default_url = config.base_url == "https://api.openai.com/v1";
         if config.api_key.is_empty() && is_default_url {
             return Err(Error::MissingApiKey("openai".to_string()));
         }
+
+        // Normalize base_url: strip trailing slash to avoid double-slash in URL paths
+        config.base_url = config.base_url.trim_end_matches('/').to_string();
 
         let client = create_platform_tls_client()?;
         Ok(Self { config, client })
