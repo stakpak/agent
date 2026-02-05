@@ -80,7 +80,7 @@ The subagent runs asynchronously in the background. This tool returns immediatel
         // Start the subagent as a background task using existing task manager
         let task_info = match self
             .get_task_manager()
-            .start_task(subagent_command, None, None) // No timeout, no remote
+            .start_task(subagent_command, Some(description.clone()), None, None) // description, no timeout, no remote
             .await
         {
             Ok(task_info) => task_info,

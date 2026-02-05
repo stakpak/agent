@@ -2239,3 +2239,214 @@ pub fn render_run_command_block(
 
     owned_lines
 }
+
+/// Render a task wait block showing progress of background tasks
+/// Displays a bordered box with task statuses and overall progress
+pub fn render_task_wait_block(
+    task_updates: &[stakpak_shared::models::integrations::openai::TaskUpdate],
+    progress: f64,
+    target_task_ids: &[String],
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Border color - gray for all states (could differentiate later)
+    let border_color = term_color(Color::Gray);
+
+    // Check if all tasks are completed
+    let all_completed = progress >= 100.0;
+
+    // Dot color and title suffix based on progress
+    let (dot_color, title_suffix, suffix_color) = if all_completed {
+        (Color::LightGreen, "".to_string(), None)
+    } else {
+        let completed_count = task_updates
+            .iter()
+            .filter(|t| {
+                t.is_target
+                    && (t.status == "Completed"
+                        || t.status == "Failed"
+                        || t.status == "Cancelled"
+                        || t.status == "TimedOut")
+            })
+            .count();
+        let total_count = target_task_ids.len();
+        (
+            Color::Yellow,
+            format!(" - Waiting ({}/{})", completed_count, total_count),
+            Some(Color::Yellow),
+        )
+    };
+
+    // Build title
+    let base_title = "Wait for Tasks";
+    let title_text = format!("{}{}", base_title, title_suffix);
+    let title_display_len = calculate_display_width(&title_text);
+    let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
+
+    // Build title spans
+    let title_border = if let Some(color) = suffix_color {
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", base_title),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} ", title_suffix.trim_start()),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", title_text),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    // Filter to show only target tasks, sorted by status (running first, then completed)
+    let mut target_tasks: Vec<_> = task_updates.iter().filter(|t| t.is_target).collect();
+
+    // Sort: Running tasks first, then by task_id
+    target_tasks.sort_by(|a, b| {
+        let a_running = a.status == "Running" || a.status == "Pending";
+        let b_running = b.status == "Running" || b.status == "Pending";
+        match (a_running, b_running) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.task_id.cmp(&b.task_id),
+        }
+    });
+
+    // Render each task
+    for task in &target_tasks {
+        let (status_icon, status_color) = match task.status.as_str() {
+            "Running" => ("◐", Color::Yellow),
+            "Pending" => ("○", Color::DarkGray),
+            "Completed" => ("✓", Color::LightGreen),
+            "Failed" => ("✗", Color::LightRed),
+            "Cancelled" => ("⊘", Color::LightRed),
+            "TimedOut" => ("⏱", Color::LightRed),
+            _ => ("?", Color::DarkGray),
+        };
+
+        // Format duration
+        let duration_str = task
+            .duration_secs
+            .map(|d| {
+                if d < 60.0 {
+                    format!("{:.1}s", d)
+                } else {
+                    format!("{:.0}m{:.0}s", d / 60.0, d % 60.0)
+                }
+            })
+            .unwrap_or_else(|| "...".to_string());
+
+        // Truncate task_id for display (show first 8 chars)
+        let task_id_display = if task.task_id.len() > 8 {
+            format!("{}…", &task.task_id[..8])
+        } else {
+            task.task_id.clone()
+        };
+
+        // Get description or fall back to truncated task_id
+        let display_name = task
+            .description
+            .as_ref()
+            .map(|d| {
+                // Truncate description if too long
+                if d.len() > 30 {
+                    format!("{}…", &d[..30])
+                } else {
+                    d.clone()
+                }
+            })
+            .unwrap_or_else(|| task_id_display.clone());
+
+        // Build the task line: "│ ● description [duration] status │"
+        let task_content = format!("{} {} [{}]", display_name, task.status, duration_str);
+        let content_display_width = calculate_display_width(&task_content) + 2; // +2 for icon and space
+        let padding_needed = inner_width.saturating_sub(content_display_width);
+
+        let line_spans = vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" "),
+            Span::styled(
+                status_icon.to_string(),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::styled(display_name, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(
+                format!(" [{}]", duration_str),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(" {}", task.status),
+                Style::default().fg(status_color),
+            ),
+            Span::from(" ".repeat(padding_needed)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ];
+        formatted_lines.push(Line::from(line_spans));
+    }
+
+    // If no target tasks, show a message
+    if target_tasks.is_empty() {
+        let msg = "No tasks to display";
+        let padding = inner_width.saturating_sub(msg.len());
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" "),
+            Span::styled(msg.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::from(" ".repeat(padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+    }
+
+    formatted_lines.push(bottom_border);
+
+    // Add spacing marker
+    formatted_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    formatted_lines
+}

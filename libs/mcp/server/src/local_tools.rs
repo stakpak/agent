@@ -18,7 +18,9 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::models::integrations::openai::{
+    ProgressType, TaskUpdate, ToolCallResultProgress,
+};
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{
@@ -305,7 +307,7 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
         _ctx: RequestContext<RoleServer>,
         Parameters(RunCommandRequest {
             command,
-            description: _,
+            description,
             timeout,
             remote,
             password,
@@ -329,12 +331,17 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             };
 
             self.get_task_manager()
-                .start_task(actual_command, timeout_duration, Some(remote_connection))
+                .start_task(
+                    actual_command,
+                    description,
+                    timeout_duration,
+                    Some(remote_connection),
+                )
                 .await
         } else {
             // Local async command (existing logic)
             self.get_task_manager()
-                .start_task(actual_command, timeout_duration, None)
+                .start_task(actual_command, description, timeout_duration, None)
                 .await
         };
 
@@ -1196,6 +1203,9 @@ SAFETY NOTES:
                                         serde_json::to_string(&ToolCallResultProgress {
                                             id: progress_id,
                                             message: format!("{}\n", line),
+                                            progress_type: Some(ProgressType::CommandOutput),
+                                            task_updates: None,
+                                            progress: None,
                                         })
                                         .unwrap_or_default(),
                                     ),
@@ -1236,6 +1246,9 @@ SAFETY NOTES:
                                 message: Some(serde_json::to_string(&ToolCallResultProgress {
                                     id: progress_id,
                                     message: stall_msg,
+                                    progress_type: Some(ProgressType::CommandOutput),
+                                    task_updates: None,
+                                    progress: None,
                                 }).unwrap_or_default()),
                             }).await;
                         }
@@ -2667,6 +2680,9 @@ SAFETY NOTES:
         let wait_operation = async {
             loop {
                 let all_tasks = self.get_task_manager().get_all_tasks().await?;
+
+                // Calculate real progress based on completed target tasks
+                let mut completed_count = 0;
                 let mut target_tasks_completed = true;
 
                 for task_id in task_ids {
@@ -2675,25 +2691,70 @@ SAFETY NOTES:
                             stakpak_shared::task_manager::TaskStatus::Pending
                             | stakpak_shared::task_manager::TaskStatus::Running => {
                                 target_tasks_completed = false;
-                                break;
                             }
-                            _ => {}
+                            _ => {
+                                completed_count += 1;
+                            }
                         }
                     }
                 }
 
+                // Calculate progress percentage
+                let progress_pct = if task_ids.is_empty() {
+                    100.0
+                } else {
+                    (completed_count as f64 / task_ids.len() as f64) * 100.0
+                };
+
+                // Build structured task updates
+                let task_updates: Vec<TaskUpdate> = all_tasks
+                    .iter()
+                    .filter(|t| task_ids.contains(&t.id))
+                    .map(|t| {
+                        let duration_secs = t.duration.map(|d| d.as_secs_f64());
+                        let output_preview = t.output.as_ref().and_then(|o| {
+                            let lines: Vec<&str> = o.lines().collect();
+                            if lines.is_empty() {
+                                None
+                            } else {
+                                // Get last non-empty line, truncated
+                                lines.iter().rev().find(|l| !l.is_empty()).map(|l| {
+                                    if l.len() > 50 {
+                                        format!("{}...", &l[..50])
+                                    } else {
+                                        l.to_string()
+                                    }
+                                })
+                            }
+                        });
+
+                        TaskUpdate {
+                            task_id: t.id.clone(),
+                            status: format!("{:?}", t.status),
+                            description: t.description.clone(),
+                            duration_secs,
+                            output_preview,
+                            is_target: true,
+                        }
+                    })
+                    .collect();
+
+                // Also include fallback message for backwards compatibility
                 let progress_table = self.format_tasks_table(&all_tasks, task_ids);
 
                 let _ = ctx
                     .peer
                     .notify_progress(ProgressNotificationParam {
                         progress_token: ProgressToken(NumberOrString::Number(0)),
-                        progress: if target_tasks_completed { 100.0 } else { 50.0 },
+                        progress: progress_pct,
                         total: Some(100.0),
                         message: Some(
                             serde_json::to_string(&ToolCallResultProgress {
                                 id: progress_id,
                                 message: progress_table,
+                                progress_type: Some(ProgressType::TaskWait),
+                                task_updates: Some(task_updates),
+                                progress: Some(progress_pct),
                             })
                             .unwrap_or_default(),
                         ),

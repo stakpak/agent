@@ -93,6 +93,7 @@ pub struct Task {
     pub id: TaskId,
     pub status: TaskStatus,
     pub command: String,
+    pub description: Option<String>,
     pub remote_connection: Option<RemoteConnectionInfo>,
     pub output: Option<String>,
     pub error: Option<String>,
@@ -113,6 +114,7 @@ pub struct TaskInfo {
     pub id: TaskId,
     pub status: TaskStatus,
     pub command: String,
+    pub description: Option<String>,
     pub output: Option<String>,
     pub start_time: DateTime<Utc>,
     pub duration: Option<Duration>,
@@ -137,6 +139,7 @@ impl From<&Task> for TaskInfo {
             id: task.id.clone(),
             status: task.status.clone(),
             command: task.command.clone(),
+            description: task.description.clone(),
             output: task.output.clone(),
             start_time: task.start_time,
             duration,
@@ -172,6 +175,7 @@ pub enum TaskMessage {
     Start {
         id: Option<TaskId>,
         command: String,
+        description: Option<String>,
         remote_connection: Option<RemoteConnectionInfo>,
         timeout: Option<Duration>,
         response_tx: oneshot::Sender<Result<TaskId, TaskError>>,
@@ -270,13 +274,20 @@ impl TaskManager {
             TaskMessage::Start {
                 id,
                 command,
+                description,
                 remote_connection,
                 timeout,
                 response_tx,
             } => {
                 let task_id = id.unwrap_or_else(|| generate_simple_id(6));
                 let result = self
-                    .start_task(task_id.clone(), command, timeout, remote_connection)
+                    .start_task(
+                        task_id.clone(),
+                        command,
+                        description,
+                        timeout,
+                        remote_connection,
+                    )
                     .await;
                 let _ = response_tx.send(result.map(|_| task_id.clone()));
                 false
@@ -351,6 +362,7 @@ impl TaskManager {
         &mut self,
         id: TaskId,
         command: String,
+        description: Option<String>,
         timeout: Option<Duration>,
         remote_connection: Option<RemoteConnectionInfo>,
     ) -> Result<(), TaskError> {
@@ -362,6 +374,7 @@ impl TaskManager {
             id: id.clone(),
             status: TaskStatus::Running,
             command: command.clone(),
+            description,
             remote_connection: remote_connection.clone(),
             output: None,
             error: None,
@@ -743,6 +756,7 @@ impl TaskManagerHandle {
     pub async fn start_task(
         &self,
         command: String,
+        description: Option<String>,
         timeout: Option<Duration>,
         remote_connection: Option<RemoteConnectionInfo>,
     ) -> Result<TaskInfo, TaskError> {
@@ -752,6 +766,7 @@ impl TaskManagerHandle {
             .send(TaskMessage::Start {
                 id: None,
                 command: command.clone(),
+                description,
                 remote_connection: remote_connection.clone(),
                 timeout,
                 response_tx,
@@ -874,7 +889,7 @@ mod tests {
 
         // Start a background task
         let task_info = handle
-            .start_task("sleep 5".to_string(), None, None)
+            .start_task("sleep 5".to_string(), None, None, None)
             .await
             .expect("Failed to start task");
 
@@ -910,7 +925,7 @@ mod tests {
 
         // Start a long-running background task
         let task_info = handle
-            .start_task("sleep 10".to_string(), None, None)
+            .start_task("sleep 10".to_string(), None, None, None)
             .await
             .expect("Failed to start task");
 
@@ -946,7 +961,7 @@ mod tests {
 
         // Start a simple task
         let task_info = handle
-            .start_task("echo 'Hello, World!'".to_string(), None, None)
+            .start_task("echo 'Hello, World!'".to_string(), None, None, None)
             .await
             .expect("Failed to start task");
 
@@ -987,7 +1002,7 @@ mod tests {
 
         // Start a task that will fail immediately
         let result = handle
-            .start_task("nonexistent_command_12345".to_string(), None, None)
+            .start_task("nonexistent_command_12345".to_string(), None, None, None)
             .await;
 
         // Should get a TaskFailedOnStart error
@@ -1011,7 +1026,7 @@ mod tests {
 
         // Start a long-running task
         let _task_info = handle
-            .start_task("sleep 30".to_string(), None, None)
+            .start_task("sleep 30".to_string(), None, None, None)
             .await
             .expect("Failed to start task");
 
@@ -1041,7 +1056,7 @@ mod tests {
         // Start a task that writes a marker file while running
         let marker = format!("/tmp/stakpak_test_drop_{}", std::process::id());
         let task_info = handle
-            .start_task(format!("touch {} && sleep 30", marker), None, None)
+            .start_task(format!("touch {} && sleep 30", marker), None, None, None)
             .await
             .expect("Failed to start task");
 
@@ -1071,7 +1086,9 @@ mod tests {
         });
 
         // Start a task that will exit with non-zero code immediately
-        let result = handle.start_task("exit 1".to_string(), None, None).await;
+        let result = handle
+            .start_task("exit 1".to_string(), None, None, None)
+            .await;
 
         // Should get a TaskFailedOnStart error
         assert!(matches!(result, Err(TaskError::TaskFailedOnStart(_))));
