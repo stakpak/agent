@@ -63,7 +63,7 @@ pub struct SlackSendMessage {
                        Not supported: HTML, Markdown tables, headings, underline, multi-column layouts. \
                        For table-like output, use aligned monospace text in a code block. Use plain text if unsure."
     )]
-    pub mrkdwn_text: String,
+    pub markdown_text: String,
     #[schemars(
         description = "Optional Slack thread 'ts'. When provided, posts the message as a reply in that thread; otherwise posts a new top-level message."
     )]
@@ -74,7 +74,7 @@ impl From<SlackSendMessage> for ApiSlackSendMessageRequest {
     fn from(req: SlackSendMessage) -> Self {
         Self {
             channel: req.channel,
-            mrkdwn_text: req.mrkdwn_text,
+            markdown_text: req.markdown_text,
             thread_ts: req.thread_ts,
         }
     }

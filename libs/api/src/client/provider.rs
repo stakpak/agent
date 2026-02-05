@@ -531,7 +531,7 @@ impl AgentProvider for AgentClient {
         if let Some(api) = &self.stakpak_api {
             api.slack_send_message(&crate::stakpak::SlackSendMessageRequest {
                 channel: input.channel.clone(),
-                mrkdwn_text: input.mrkdwn_text.clone(),
+                markdown_text: input.markdown_text.clone(),
                 thread_ts: input.thread_ts.clone(),
             })
             .await
