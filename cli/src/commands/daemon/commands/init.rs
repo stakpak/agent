@@ -59,6 +59,12 @@ timeout = "30m"
 # Maximum time for check scripts (default: 30s)
 check_timeout = "30s"
 
+# Enable Slack tools for agent (experimental, default: false)
+# enable_slack_tools = false
+
+# Enable subagents (default: false)
+# enable_subagents = false
+
 # Trigger definitions
 # Each trigger runs on a cron schedule and optionally runs a check script first
 
@@ -87,6 +93,12 @@ This is a read-only health check.
 
 # Optional: board ID for tracking progress
 # board_id = "board_abc123"
+
+# Optional: enable Slack tools for this trigger (overrides default)
+# enable_slack_tools = true
+
+# Optional: enable subagents for this trigger (overrides default)
+# enable_subagents = true
 
 # Example: Git repository status check (read-only)
 # [[triggers]]

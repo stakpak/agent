@@ -92,6 +92,8 @@ mod tests {
             profile: Some("infrastructure".to_string()),
             board_id: Some("board_abc123".to_string()),
             timeout: Some(Duration::from_secs(1800)),
+            enable_slack_tools: None,
+            enable_subagents: None,
         }
     }
 
@@ -106,6 +108,8 @@ mod tests {
             profile: None,
             board_id: None,
             timeout: None,
+            enable_slack_tools: None,
+            enable_subagents: None,
         }
     }
 

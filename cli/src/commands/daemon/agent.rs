@@ -74,6 +74,10 @@ pub struct SpawnConfig {
     pub timeout: Duration,
     /// Working directory for the agent (optional).
     pub workdir: Option<String>,
+    /// Enable Slack tools (experimental).
+    pub enable_slack_tools: bool,
+    /// Enable subagents.
+    pub enable_subagents: bool,
 }
 
 /// Spawn the stakpak agent with the given configuration.
@@ -107,6 +111,14 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    // Add optional flags
+    if config.enable_slack_tools {
+        cmd.arg("--enable-slack-tools");
+    }
+    if config.enable_subagents {
+        cmd.arg("--enable-subagents");
+    }
 
     // Set working directory if specified
     if let Some(workdir) = &config.workdir {

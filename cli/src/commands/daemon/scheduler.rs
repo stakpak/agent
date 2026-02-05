@@ -221,6 +221,8 @@ mod tests {
             profile: None,
             board_id: None,
             timeout: None,
+            enable_slack_tools: None,
+            enable_subagents: None,
         }
     }
 

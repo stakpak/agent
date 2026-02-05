@@ -71,6 +71,14 @@ pub struct DaemonDefaults {
     /// Default timeout for check script execution.
     #[serde(default = "default_check_timeout", with = "humantime_serde")]
     pub check_timeout: Duration,
+
+    /// Enable Slack tools for agent (experimental).
+    #[serde(default)]
+    pub enable_slack_tools: bool,
+
+    /// Enable subagents for agent.
+    #[serde(default)]
+    pub enable_subagents: bool,
 }
 
 impl Default for DaemonDefaults {
@@ -79,6 +87,8 @@ impl Default for DaemonDefaults {
             profile: default_profile(),
             timeout: default_timeout(),
             check_timeout: default_check_timeout(),
+            enable_slack_tools: false,
+            enable_subagents: false,
         }
     }
 }
@@ -127,6 +137,14 @@ pub struct Trigger {
     /// Falls back to defaults.timeout if not specified.
     #[serde(default, with = "option_humantime_serde")]
     pub timeout: Option<Duration>,
+
+    /// Enable Slack tools for agent (experimental).
+    /// Falls back to defaults.enable_slack_tools if not specified.
+    pub enable_slack_tools: Option<bool>,
+
+    /// Enable subagents for agent.
+    /// Falls back to defaults.enable_subagents if not specified.
+    pub enable_subagents: Option<bool>,
 }
 
 impl Trigger {
@@ -143,6 +161,17 @@ impl Trigger {
     /// Get the effective check timeout, falling back to defaults.
     pub fn effective_check_timeout(&self, defaults: &DaemonDefaults) -> Duration {
         self.check_timeout.unwrap_or(defaults.check_timeout)
+    }
+
+    /// Get the effective enable_slack_tools, falling back to defaults.
+    pub fn effective_enable_slack_tools(&self, defaults: &DaemonDefaults) -> bool {
+        self.enable_slack_tools
+            .unwrap_or(defaults.enable_slack_tools)
+    }
+
+    /// Get the effective enable_subagents, falling back to defaults.
+    pub fn effective_enable_subagents(&self, defaults: &DaemonDefaults) -> bool {
+        self.enable_subagents.unwrap_or(defaults.enable_subagents)
     }
 }
 

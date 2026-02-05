@@ -343,6 +343,8 @@ async fn handle_trigger_event(
         profile: trigger.effective_profile(&config.defaults).to_string(),
         timeout: trigger.effective_timeout(&config.defaults),
         workdir: None,
+        enable_slack_tools: trigger.effective_enable_slack_tools(&config.defaults),
+        enable_subagents: trigger.effective_enable_subagents(&config.defaults),
     };
 
     match spawn_agent(spawn_config).await {
