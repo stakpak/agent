@@ -66,9 +66,13 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     let mut item_indices: Vec<Option<usize>> = Vec::new(); // Maps display index to model index
     let mut model_idx = 0;
 
-    // Sort providers for consistent ordering
+    // Sort providers for consistent ordering, with "stakpak" always first
     let mut providers: Vec<_> = models_by_provider.keys().collect();
-    providers.sort();
+    providers.sort_by(|a, b| match (**a == "stakpak", **b == "stakpak") {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.cmp(b),
+    });
 
     for provider in providers {
         let models = &models_by_provider[provider];
