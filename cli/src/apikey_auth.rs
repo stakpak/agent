@@ -21,7 +21,7 @@ async fn listen_for_callback(url: &str) -> String {
         let client = stakpak_shared::tls_client::create_tls_client(
             stakpak_shared::tls_client::TlsClientConfig::default(),
         )
-        .unwrap_or_else(|_| reqwest::Client::new());
+        .expect("Failed to create TLS client for API key callback");
         let response = client.get(url).send().await;
 
         match response {
