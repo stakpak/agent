@@ -142,6 +142,7 @@ mod tests {
                     name: "test_tool".to_string(),
                     arguments: "{}".to_string(),
                 },
+                metadata: None,
             }]),
             ..Default::default()
         }
@@ -238,6 +239,7 @@ mod tests {
                         name: "t".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    metadata: None,
                 }]),
                 ..Default::default()
             },
@@ -300,6 +302,7 @@ mod tests {
                         name: "t".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    metadata: None,
                 }]),
                 ..Default::default()
             },
@@ -315,6 +318,7 @@ mod tests {
                         name: "t".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    metadata: None,
                 }]),
                 ..Default::default()
             },
@@ -426,6 +430,7 @@ mod tests {
                         name: "t".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    metadata: None,
                 }]),
                 ..Default::default()
             },

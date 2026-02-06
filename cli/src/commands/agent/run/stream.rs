@@ -49,6 +49,10 @@ impl ToolCallAccumulator {
                         tool_call.function.arguments.push_str(args);
                     }
                 }
+                // Merge metadata (later deltas can carry metadata, e.g. ToolCallEnd)
+                if delta.metadata.is_some() {
+                    tool_call.metadata = delta.metadata.clone();
+                }
             }
             None => {
                 // Create new tool call
@@ -79,6 +83,7 @@ impl ToolCallAccumulator {
                     name: String::new(),
                     arguments: String::new(),
                 },
+                metadata: None,
             });
         }
 
@@ -90,6 +95,7 @@ impl ToolCallAccumulator {
                 name: func.and_then(|f| f.name.clone()).unwrap_or_default(),
                 arguments: func.and_then(|f| f.arguments.clone()).unwrap_or_default(),
             },
+            metadata: delta.metadata.clone(),
         });
     }
 
@@ -286,6 +292,7 @@ mod tests {
                         id,
                         r#type: Some("function".to_string()),
                         function: Some(FunctionCallDelta { name, arguments }),
+                        metadata: None,
                     }]),
                 },
                 finish_reason: None,
