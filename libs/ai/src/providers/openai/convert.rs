@@ -546,13 +546,25 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
         None
     };
 
+    // Reasoning models don't support temperature or top_p
+    let temperature = if is_reasoning {
+        None
+    } else {
+        req.options.temperature
+    };
+    let top_p = if is_reasoning {
+        None
+    } else {
+        req.options.top_p
+    };
+
     ResponsesRequest {
         model: req.model.id.clone(),
         input,
         instructions: None, // System message is in input array
         max_output_tokens: req.options.max_tokens,
-        temperature: req.options.temperature,
-        top_p: req.options.top_p,
+        temperature,
+        top_p,
         stream: Some(stream),
         tools,
         tool_choice,
@@ -1053,5 +1065,40 @@ mod tests {
         assert!(tool_result.is_some());
         let tool_result = tool_result.unwrap();
         assert_eq!(tool_result["call_id"], "call_123");
+    }
+
+    // =========================================================================
+    // Temperature / Top-P Filtering Tests
+    // =========================================================================
+
+    #[test]
+    fn test_responses_request_strips_temperature_for_reasoning_model() {
+        let mut req = make_request(
+            "gpt-5.2-2025-12-11",
+            Some(ProviderOptions::OpenAI(OpenAIOptions::responses())),
+        );
+        req.options.temperature = Some(0.7);
+        req.options.top_p = Some(0.9);
+
+        let responses_req = to_responses_request(&req, false);
+
+        // Reasoning models must not send temperature or top_p
+        assert!(responses_req.temperature.is_none());
+        assert!(responses_req.top_p.is_none());
+    }
+
+    #[test]
+    fn test_responses_request_keeps_temperature_for_standard_model() {
+        let mut req = make_request(
+            "gpt-4o",
+            Some(ProviderOptions::OpenAI(OpenAIOptions::responses())),
+        );
+        req.options.temperature = Some(0.7);
+        req.options.top_p = Some(0.9);
+
+        let responses_req = to_responses_request(&req, false);
+
+        assert_eq!(responses_req.temperature, Some(0.7));
+        assert_eq!(responses_req.top_p, Some(0.9));
     }
 }
