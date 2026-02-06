@@ -10,26 +10,6 @@ use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use uuid::Uuid;
 
-
-/// Model selection for dynamic subagents
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SubagentModel {
-    /// Fast, cost-effective model for simple tasks
-    Eco,
-    /// More capable model for complex reasoning tasks
-    Smart,
-}
-
-impl std::fmt::Display for SubagentModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SubagentModel::Eco => write!(f, "eco"),
-            SubagentModel::Smart => write!(f, "smart"),
-        }
-    }
-}
-
 /// Request for creating a dynamic subagent with full control over its configuration.
 /// Based on the AOrchestra 4-tuple model: (Instruction, Context, Tools, Model)
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -61,14 +41,11 @@ pub struct DynamicSubagentRequest {
     )]
     pub tools: Vec<String>,
 
-    /// Model to use (the "M" in the 4-tuple).
-    /// - eco: Fast, cost-effective for simple tasks (file reading, searches)
-    /// - smart: More capable for complex reasoning, multi-step analysis
-    #[schemars(
-        description = "Model selection: 'eco' for fast/discovery/exploratory/research tasks, 'smart' for complex reasoning"
-    )]
-    pub model: SubagentModel,
-
+    // /// Model to use (the "M" in the 4-tuple).
+    // #[schemars(
+    //     description = "Model selection: small cheap models for fast/exploratory/research tasks or large more expensive models for complex reasoning"
+    // )]
+    // pub model_id: Option<String>,
     /// Maximum steps the subagent can take (default: 30)
     #[schemars(description = "Maximum steps the subagent can take (default: 30)")]
     pub max_steps: Option<usize>,
@@ -97,8 +74,7 @@ PARAMETERS:
 - description: A short (3-5 word) description of the task
 - instruction: What the subagent should do - be specific and include success criteria
 - context: (Optional) Curated context from previous work - include relevant findings, key references, failed approaches
-- tools: Array of tool names to grant (follow least-privilege - minimum required)
-- model: 'eco' for simple tasks, 'smart' for complex reasoning
+- tools: Array of tool names to grant (follow least-privilege - minimum tools required)
 - max_steps: (Optional) Maximum steps, default 30
 - enable_sandbox: (Optional) Run in isolated warden container with security policies
 
@@ -120,10 +96,7 @@ Exclude:
 - Irrelevant tangents from other subtasks
 
 TOOL SELECTION (least-privilege):
-- Read-only tasks: stakpak__view, stakpak__search_docs
-- Research tasks: stakpak__view, stakpak__search_docs, stakpak__view_web_page
-- Code changes: stakpak__view, stakpak__str_replace, stakpak__create
-- System tasks: stakpak__view, stakpak__run_command (use enable_sandbox=true for safety)
+- Always prefer read only tools / tasks for subagents
 
 SANDBOX MODE (enable_sandbox=true):
 - Runs subagent in isolated Docker container via warden
@@ -141,7 +114,6 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             instruction,
             context,
             tools,
-            model,
             max_steps,
             enable_sandbox,
         }): Parameters<DynamicSubagentRequest>,
@@ -155,6 +127,20 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
 
         let session_id = self.get_session_id(&ctx);
         let max_steps = max_steps.unwrap_or(30);
+
+        let model = if let Some(serde_json::Value::String(model_id)) = ctx.meta.get("model_id") {
+            if model_id.contains("claude-opus-4-6") {
+                model_id.replace("opus-4-6", "haiku-4-5")
+            } else if model_id.contains("claude-opus") {
+                model_id.replace("opus", "haiku")
+            } else if model_id.contains("claude-sonnet") {
+                model_id.replace("sonnet", "haiku")
+            } else {
+                model_id.clone()
+            }
+        } else {
+            "claude-haiku-4-5".to_string()
+        };
 
         // Build the dynamic subagent command
         let subagent_command = match self.build_dynamic_subagent_command(
@@ -229,7 +215,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         instruction: &str,
         context: Option<&str>,
         tools: &[String],
-        model: &SubagentModel,
+        model: &str,
         max_steps: usize,
         enable_sandbox: bool,
         session_id: Option<&str>,

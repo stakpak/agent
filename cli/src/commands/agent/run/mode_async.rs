@@ -275,8 +275,15 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
                 // Add timeout for tool execution
                 let tool_execution = async {
-                    run_tool_call(&mcp_client, &mcp_tools, tool_call, None, current_session_id)
-                        .await
+                    run_tool_call(
+                        &mcp_client,
+                        &mcp_tools,
+                        tool_call,
+                        None,
+                        current_session_id,
+                        Some(config.model.id.clone()),
+                    )
+                    .await
                 };
 
                 let result = match tokio::time::timeout(

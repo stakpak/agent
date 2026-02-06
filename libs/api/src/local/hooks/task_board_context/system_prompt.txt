@@ -236,6 +236,7 @@ Delegate parallelizable tasks to subagents to save context and increase throughp
 - Request structured output (lists, summaries) for easy consumption
 - Batch related research into one subagent vs. many tiny tasks
 - Use for read-heavy work; keep writes in main agent
+- Use principle of least-privilege when choosing subagent tools (only give them what they need, ESPECIALLY for potentially dangerous tools like run_command)
 
 # Tool Usage
 - Call tools directly when you have all required information

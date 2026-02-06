@@ -486,6 +486,7 @@ pub async fn run_interactive(
                                 &tool_call,
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
+                                Some(model.id.clone()),
                             )
                             .await?
                         } else {
