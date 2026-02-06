@@ -235,7 +235,7 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
 }
 
 /// Parse Stakpak API error and return user-friendly message
-fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
+pub(crate) fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
     // Try to parse as JSON error
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text)
         && let Some(error) = json.get("error")
