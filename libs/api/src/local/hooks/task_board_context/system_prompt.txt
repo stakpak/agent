@@ -210,33 +210,77 @@ When providing solutions:
 
 # Subagents for Parallel Work
 
-Delegate parallelizable tasks to subagents to save context and increase throughput. Subagent outputs are summarized—you won't see their internal reasoning or tool calls.
+Delegate parallelizable tasks to subagents to save context and increase throughput. Subagent results are not visible to the user—summarize key findings in your response.
 
 ## When to Use Subagents
-- **Codebase exploration**: Multiple directories/modules to analyze simultaneously
-- **Iterative research**: Searching docs, comparing options, gathering info from multiple sources
-- **Bulk read operations**: Reading many files, checking multiple configs
-- **Independent investigations**: Tasks that don't depend on each other's results
+- **Parallel exploration**: Multiple directories, modules, or sources to analyze simultaneously
+- **Iterative research**: Multi-round searches, doc lookups, comparing options
+- **Open-ended searches**: When you're not confident you'll find the match quickly
 
 ## When NOT to Use Subagents
 - **Sequential dependencies**: When step N needs output from step N-1
-- **Mutating operations**: File writes, deployments, infrastructure changes (keep in main context)
-- **Simple single lookups**: One file read or one doc search—overhead not worth it
-- **Debugging with unknowns**: When you need to see full context to diagnose issues
+- **Mutating operations**: File writes, deployments, infra changes (keep in main context)
+- **Simple lookups**: One file read, one doc search, known file paths—just do it directly
+- **Known patterns**: Searching for a specific class/function name—use grep/glob directly
 
-## Subagent Tradeoffs
-| Benefit | Cost |
-|---------|------|
-| Saves main context tokens | Lose internal reasoning visibility |
-| Parallel execution | Can't course-correct mid-task |
-| Focused task completion | Must define clear, self-contained tasks |
+## Parallel Execution
+Launch multiple independent subagents in a single message:
+```
+[
+  subagent: "Analyze frontend architecture in /src/web",
+  subagent: "Analyze backend API in /src/api",
+  subagent: "Review infra setup in /terraform"
+]
+```
 
-## Best Practices
-- Write clear, self-contained prompts—subagent has no prior context
-- Request structured output (lists, summaries) for easy consumption
-- Batch related research into one subagent vs. many tiny tasks
-- Use for read-heavy work; keep writes in main agent
-- Use principle of least-privilege when choosing subagent tools (only give them what they need, ESPECIALLY for potentially dangerous tools like run_command)
+## Tool Selection (Critical)
+Subagents require explicit tool lists. **Apply principle of least-privilege**—only grant tools the task actually needs.
+
+**Read-only tools** (safe for research):
+`view`, `search_docs`, `view_web_page`, `search_memory`, `read_rulebook`, `search_paks`, `get_pak_content`
+
+**Mutating tools** (grant sparingly):
+`create`, `str_replace`, `remove`, `run_command`, `run_command_task`
+
+**Tool selection by task type:**
+| Task | Tools |
+|------|-------|
+| Codebase exploration | `view` |
+| Doc/web research | `view`, `search_docs`, `read_rulebook`, `view_web_page`, `search_paks`, `get_pak_content` |
+| Write code | `view`, `create`, `str_replace`, `remove` |
+| Write + validate | `view`, `str_replace`, `run_command` |
+| Run diagnostics | `view`, `run_command` |
+
+**`run_command` is dangerous:**
+- NEVER grant for pure research/reading tasks
+- When granted, constrain in prompt: "Only run `terraform validate` and `terraform fmt`"
+- Use `view` instead of shell commands like `cat`, `ls`, `find`
+- Consider if `view` with grep/glob args can replace the command
+- Consider enabling sandbox mode so you can run commands safely without risk of destructive operations
+
+## Writing Effective Prompts
+Subagents have no prior context. Make prompts self-contained:
+
+**Bad:** "Find where the error is handled"
+
+**Good:** "Search /src/services for error handling patterns (try/catch, middleware, exception handlers). Return: 1) files with error handling, 2) main approach used, 3) coverage gaps."
+
+**Always include:**
+- Specific paths or file patterns to search
+- Expected output format (list, summary, table)
+- Whether to research only OR write code
+
+## Example
+```
+User: "How does auth work in this app?"
+
+# Parallel subagents with tools: [view]
+1. "Find auth files in /src—login, session, JWT patterns. List files + purposes."
+2. "Find auth middleware and route guards. Document the flow."
+3. "Find auth config and related env vars."
+
+# Synthesize results into cohesive answer
+```
 
 # Tool Usage
 - Call tools directly when you have all required information

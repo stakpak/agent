@@ -18,12 +18,12 @@ pub struct DynamicSubagentRequest {
     #[schemars(description = "A short (3-5 word) description of the task")]
     pub description: String,
 
-    /// The task instruction - what the subagent should do (the "I" in the 4-tuple).
+    /// The task instructions - what the subagent should do (the "I" in the 4-tuple).
     /// Should be specific, actionable, and include success criteria.
     #[schemars(
-        description = "The task instruction specifying what the subagent should accomplish. Be specific and include success criteria."
+        description = "The task instructions specifying what the subagent should accomplish. Be specific and include success criteria."
     )]
-    pub instruction: String,
+    pub instructions: String,
 
     /// Curated context from previous work (the "C" in the 4-tuple).
     /// Include: relevant findings, key artifacts/references, what didn't work.
@@ -112,7 +112,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         ctx: RequestContext<RoleServer>,
         Parameters(DynamicSubagentRequest {
             description,
-            instruction,
+            instructions,
             context,
             tools,
             max_steps,
@@ -145,7 +145,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
 
         // Build the dynamic subagent command
         let subagent_command = match self.build_dynamic_subagent_command(
-            &instruction,
+            &instructions,
             context.as_deref(),
             &tools,
             &model,
@@ -214,7 +214,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
     #[allow(clippy::too_many_arguments)]
     fn build_dynamic_subagent_command(
         &self,
-        instruction: &str,
+        instructions: &str,
         context: Option<&str>,
         tools: &[String],
         model: &str,
@@ -227,10 +227,10 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             Some(ctx) if !ctx.is_empty() => {
                 format!(
                     "=== CONTEXT (from previous work) ===\n{}\n\n=== YOUR TASK ===\n{}",
-                    ctx, instruction
+                    ctx, instructions
                 )
             }
-            _ => instruction.to_string(),
+            _ => instructions.to_string(),
         };
 
         // Write prompt to file
