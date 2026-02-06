@@ -117,3 +117,9 @@ pub struct StakpakPromptTokensDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_input_tokens: Option<u32>,
 }
+
+/// Response from Stakpak `/v1/models` endpoint
+#[derive(Debug, Deserialize)]
+pub struct StakpakModelsResponse {
+    pub models: Vec<crate::types::Model>,
+}
