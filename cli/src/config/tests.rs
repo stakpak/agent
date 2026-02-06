@@ -201,6 +201,7 @@ fn resolved_profile_config_merges_all_profile_defaults() {
             anonymous_id: Some("test-user-id".into()),
             collect_telemetry: Some(true),
             editor: Some("nano".into()),
+            shell_sessions: None,
         },
     };
 

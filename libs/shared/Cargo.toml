@@ -37,10 +37,14 @@ stakai = { workspace = true }
 reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.8.0"
 itertools = "0.14.0"
+console = "0.15"
 # OAuth dependencies
 sha2 = "0.10"
 base64 = "0.22"
 urlencoding = "2.1"
+
+[target.'cfg(any(unix, windows))'.dependencies]
+portable-pty = "0.8"
 
 
 [dev-dependencies]

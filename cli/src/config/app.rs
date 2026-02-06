@@ -832,6 +832,7 @@ impl From<AppConfig> for Settings {
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
             editor: config.editor,
+            shell_sessions: None,
         }
     }
 }

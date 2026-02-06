@@ -203,6 +203,10 @@ impl ToolContainer {
     #[tool(
         description = "A system command execution tool that allows running shell commands with full system access on local or remote systems via SSH.
 
+PERSISTENT SHELL SESSIONS:
+- Commands run in persistent shell sessions where environment variables, working directory, and shell state persist across commands
+- Local commands use a default local session; remote commands use a default session per connection
+
 REMOTE EXECUTION:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
@@ -231,11 +235,83 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             private_key_path,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Use unified command execution helper
-        match self
-            .execute_command_unified(&command, timeout, remote, password, private_key_path, &ctx)
-            .await
-        {
+        // Always use persistent shell sessions
+        let timeout_duration = timeout.map(std::time::Duration::from_secs);
+
+        // Determine if this is a remote or local command and get/create appropriate session
+        let result = if let Some(ref remote_str) = remote {
+            // Remote command - get or create default remote session
+            match self
+                .get_shell_session_manager()
+                .get_or_create_default_remote_session(
+                    remote_str,
+                    password.clone(),
+                    private_key_path.clone(),
+                )
+                .await
+            {
+                Ok(session_id) => {
+                    self.execute_in_persistent_session(
+                        &session_id,
+                        &command,
+                        timeout_duration,
+                        &ctx,
+                    )
+                    .await
+                }
+                Err(e) => {
+                    // Fall back to non-persistent execution if session creation fails
+                    tracing::warn!(
+                        "Failed to create remote session, falling back to non-persistent: {}",
+                        e
+                    );
+                    self.execute_command_unified(
+                        &command,
+                        timeout,
+                        remote,
+                        password,
+                        private_key_path,
+                        &ctx,
+                    )
+                    .await
+                }
+            }
+        } else {
+            // Local command - get or create default local session
+            match self
+                .get_shell_session_manager()
+                .get_or_create_default_local_session()
+                .await
+            {
+                Ok(session_id) => {
+                    self.execute_in_persistent_session(
+                        &session_id,
+                        &command,
+                        timeout_duration,
+                        &ctx,
+                    )
+                    .await
+                }
+                Err(e) => {
+                    // Fall back to non-persistent execution if session creation fails
+                    tracing::warn!(
+                        "Failed to create local session, falling back to non-persistent: {}",
+                        e
+                    );
+                    self.execute_command_unified(
+                        &command,
+                        timeout,
+                        remote,
+                        password,
+                        private_key_path,
+                        &ctx,
+                    )
+                    .await
+                }
+            }
+        };
+
+        match result {
             Ok(mut command_result) => {
                 command_result.output =
                     match handle_large_output(&command_result.output, "command.output", 300, false)
@@ -264,6 +340,116 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                 )]))
             }
             Err(error_result) => Ok(error_result),
+        }
+    }
+
+    /// Execute a command in a persistent shell session with streaming output
+    async fn execute_in_persistent_session(
+        &self,
+        session_id: &str,
+        command: &str,
+        timeout: Option<std::time::Duration>,
+        ctx: &RequestContext<RoleServer>,
+    ) -> Result<CommandResult, CallToolResult> {
+        use rmcp::model::{NumberOrString, ProgressNotificationParam, ProgressToken};
+        use uuid::Uuid;
+
+        // Restore secrets in command before execution
+        let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
+
+        // Try streaming execution first
+        match self
+            .get_shell_session_manager()
+            .execute_in_session_streaming(session_id, &actual_command, timeout)
+            .await
+        {
+            Ok((mut rx, handle)) => {
+                let progress_id = Uuid::new_v4();
+                let mut accumulated_output = String::new();
+
+                // Stream chunks as they arrive
+                while let Some(chunk) = rx.recv().await {
+                    if !chunk.text.is_empty() {
+                        // Redact secrets in chunk before streaming
+                        let redacted_chunk = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&chunk.text, None);
+
+                        accumulated_output.push_str(&redacted_chunk);
+
+                        // Send progress notification for real-time streaming
+                        let _ = ctx
+                            .peer
+                            .notify_progress(ProgressNotificationParam {
+                                progress_token: ProgressToken(NumberOrString::Number(0)),
+                                progress: 50.0,
+                                total: Some(100.0),
+                                message: Some(
+                                    serde_json::to_string(&ToolCallResultProgress {
+                                        id: progress_id,
+                                        message: redacted_chunk,
+                                    })
+                                    .unwrap_or_default(),
+                                ),
+                            })
+                            .await;
+                    }
+
+                    if chunk.is_final {
+                        break;
+                    }
+                }
+
+                // Wait for final result
+                match handle.await {
+                    Ok(Ok(output)) => {
+                        // Use the cleaned output from the session
+                        let redacted_output = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&output.output, None);
+
+                        Ok(CommandResult {
+                            output: redacted_output,
+                            exit_code: output.exit_code.unwrap_or(0),
+                        })
+                    }
+                    Ok(Err(e)) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Command execution failed: {}", e)),
+                    ])),
+                    Err(e) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Task join error: {}", e)),
+                    ])),
+                }
+            }
+            Err(e) => {
+                // Fall back to non-streaming execution
+                tracing::warn!(
+                    "Streaming execution failed, falling back to non-streaming: {}",
+                    e
+                );
+                match self
+                    .get_shell_session_manager()
+                    .execute_in_session(session_id, &actual_command, timeout)
+                    .await
+                {
+                    Ok(output) => {
+                        let redacted_output = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&output.output, None);
+
+                        Ok(CommandResult {
+                            output: redacted_output,
+                            exit_code: output.exit_code.unwrap_or(0),
+                        })
+                    }
+                    Err(e) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Failed to execute in session: {}", e)),
+                    ])),
+                }
+            }
         }
     }
 
