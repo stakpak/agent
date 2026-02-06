@@ -1,7 +1,7 @@
 //! Stakpak provider implementation
 
 use super::stream::create_stream;
-use super::types::{StakpakProviderConfig, StakpakResponse};
+use super::types::{StakpakModelsResponse, StakpakProviderConfig, StakpakResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::openai::convert::to_openai_request;
@@ -14,6 +14,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
 use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Stakpak provider
 ///
@@ -21,6 +23,8 @@ use serde_json::json;
 pub struct StakpakProvider {
     config: StakpakProviderConfig,
     client: Client,
+    /// In-memory cache of models fetched from the API
+    models_cache: Arc<RwLock<Option<Vec<Model>>>>,
 }
 
 impl StakpakProvider {
@@ -31,12 +35,52 @@ impl StakpakProvider {
         }
 
         let client = create_platform_tls_client()?;
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            models_cache: Arc::new(RwLock::new(None)),
+        })
     }
 
     /// Create provider from environment
     pub fn from_env() -> Result<Self> {
         Self::new(StakpakProviderConfig::default())
+    }
+
+    /// Fetch models from the Stakpak `/v1/models` API endpoint
+    async fn fetch_models(&self) -> Result<Vec<Model>> {
+        let url = format!("{}/v1/models", self.config.base_url);
+        let headers = self.build_headers(None);
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(headers.to_reqwest_headers())
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            let friendly_error = parse_stakpak_error(&error_text, status.as_u16());
+            return Err(Error::provider_error(friendly_error));
+        }
+
+        let resp: StakpakModelsResponse = response.json().await?;
+
+        // Tag all models with the stakpak provider and prefix IDs with the
+        // upstream provider for routing (e.g. "anthropic/claude-sonnet-4-…")
+        let models: Vec<Model> = resp
+            .models
+            .into_iter()
+            .map(|m| Model {
+                id: format!("{}/{}", m.provider, m.id),
+                provider: "stakpak".into(),
+                ..m
+            })
+            .collect();
+
+        Ok(models)
     }
 }
 
@@ -114,28 +158,20 @@ impl Provider for StakpakProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<Model>> {
-        // Stakpak routes to other providers, so aggregate models from them
-        // with stakpak/{provider}/ prefix for routing
-        use crate::registry::models_dev::load_models_for_provider;
-
-        const PROVIDERS: &[&str] = &["anthropic", "openai" /*, "google" */];
-
-        let mut models = Vec::new();
-
-        for provider_id in PROVIDERS {
-            if let Ok(provider_models) = load_models_for_provider(provider_id) {
-                for model in provider_models {
-                    models.push(Model {
-                        id: format!("{}/{}", provider_id, model.id),
-                        name: model.name,
-                        provider: "stakpak".into(),
-                        reasoning: model.reasoning,
-                        cost: model.cost,
-                        limit: model.limit,
-                        release_date: model.release_date,
-                    });
-                }
+        // Return cached models if available
+        {
+            let cache = self.models_cache.read().await;
+            if let Some(models) = cache.as_ref() {
+                return Ok(models.clone());
             }
+        }
+
+        // Fetch from the Stakpak API and cache the result
+        let models = self.fetch_models().await?;
+
+        {
+            let mut cache = self.models_cache.write().await;
+            *cache = Some(models.clone());
         }
 
         Ok(models)
