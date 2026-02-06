@@ -68,7 +68,7 @@ RUN groupadd -r docker && usermod -aG docker agent
 # Configure sudo to allow package management
 RUN echo "# Allow agent user to manage packages" > /etc/sudoers.d/agent && \
     echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg, /usr/bin/snap" >> /etc/sudoers.d/agent && \
-    echo "agent ALL=(ALL) NOPASSWD: /usr/bin/mkdir, /usr/bin/chown, /usr/bin/chmod, /usr/bin/tar" >> /etc/sudoers.d/agent && \
+    echo 'agent ALL=(ALL) NOPASSWD: /usr/bin/mkdir -p /opt/*, /usr/bin/chown -R agent\:agent /opt/*, /usr/bin/tar -xzf * -C /opt' >> /etc/sudoers.d/agent && \
     chmod 440 /etc/sudoers.d/agent
 
 # Create directories for cloud CLIs (installed on-demand)
