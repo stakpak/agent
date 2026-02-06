@@ -118,7 +118,7 @@ impl Provider for StakpakProvider {
         // with stakpak/{provider}/ prefix for routing
         use crate::registry::models_dev::load_models_for_provider;
 
-        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
+        const PROVIDERS: &[&str] = &["anthropic", "openai" /*, "google" */];
 
         let mut models = Vec::new();
 
