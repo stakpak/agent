@@ -1387,6 +1387,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![ChatMessage {
@@ -1409,6 +1410,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![
@@ -1438,6 +1440,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
         let tool_call_2 = ToolCall {
             id: "tool_2".to_string(),
@@ -1446,6 +1449,7 @@ mod tests {
                 name: "test_tool_2".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![
@@ -1478,6 +1482,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         }];
 
         assert!(has_pending_tool_calls(&messages, &tools_queue));
@@ -1500,6 +1505,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![ChatMessage {
@@ -1522,6 +1528,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![
@@ -1552,6 +1559,7 @@ mod tests {
                 name: "test_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
         let tool_call_2 = ToolCall {
             id: "tool_2".to_string(),
@@ -1560,6 +1568,7 @@ mod tests {
                 name: "test_tool_2".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![
@@ -1617,6 +1626,7 @@ mod tests {
                 name: "old_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
         let tool_call_new = ToolCall {
             id: "tool_new".to_string(),
@@ -1625,6 +1635,7 @@ mod tests {
                 name: "new_tool".to_string(),
                 arguments: "{}".to_string(),
             },
+            metadata: None,
         };
 
         let messages = vec![

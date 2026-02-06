@@ -544,40 +544,20 @@ impl AgentProvider for AgentClient {
     // =========================================================================
 
     async fn list_models(&self) -> Vec<stakai::Model> {
-        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
-
-        let use_stakpak = self.has_stakpak();
+        // Use the provider registry which only contains providers with configured API keys.
+        // This ensures we only list models for providers the user actually has access to.
+        // Aggregate per provider so one failing provider does not hide all others.
+        let registry = self.stakai.registry();
         let mut all_models = Vec::new();
 
-        for &provider_id in PROVIDERS {
-            let mut models = load_and_transform_models(provider_id, use_stakpak);
-            sort_models_by_recency(&mut models);
-            all_models.extend(models);
+        for provider_id in registry.list_providers() {
+            if let Ok(mut models) = registry.models_for_provider(&provider_id).await {
+                all_models.append(&mut models);
+            }
         }
 
+        sort_models_by_recency(&mut all_models);
         all_models
-    }
-}
-
-/// Load models for a provider from cache, optionally transforming for Stakpak routing
-fn load_and_transform_models(provider_id: &str, use_stakpak: bool) -> Vec<stakai::Model> {
-    let models = stakai::load_models_for_provider(provider_id).unwrap_or_default();
-
-    if use_stakpak {
-        models
-            .into_iter()
-            .map(|m| stakai::Model {
-                id: format!("{}/{}", provider_id, m.id),
-                provider: "stakpak".into(),
-                name: m.name,
-                reasoning: m.reasoning,
-                cost: m.cost,
-                limit: m.limit,
-                release_date: m.release_date,
-            })
-            .collect()
-    } else {
-        models
     }
 }
 
@@ -909,15 +889,25 @@ impl AgentClient {
 
     /// Generate a title for a new session
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        // Use a default haiku model for title generation
-        let model = Model::new(
-            "claude-haiku-4-5-20250929",
-            "Claude Haiku 4.5",
-            "anthropic",
-            false,
-            None,
-            stakai::ModelLimit::default(),
-        );
+        // Pick a cheap model from the user's configured providers
+        let use_stakpak = self.stakpak.is_some();
+        let providers = self.stakai.registry().list_providers();
+        let cheap_models: &[(&str, &str)] = &[
+            ("stakpak", "claude-haiku-4-5"),
+            ("anthropic", "claude-haiku-4-5"),
+            ("openai", "gpt-4.1-mini"),
+            ("google", "gemini-2.5-flash"),
+        ];
+        let model = cheap_models
+            .iter()
+            .find_map(|(provider, model_id)| {
+                if providers.contains(&provider.to_string()) {
+                    crate::find_model(model_id, use_stakpak)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| "No model available for title generation".to_string())?;
 
         let llm_messages = vec![
             LLMMessage {

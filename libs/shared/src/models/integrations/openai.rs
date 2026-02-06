@@ -516,6 +516,9 @@ pub struct ToolCall {
     pub id: String,
     pub r#type: String,
     pub function: FunctionCall,
+    /// Opaque provider-specific metadata (e.g., Gemini thought_signature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Function call details
@@ -763,6 +766,9 @@ pub struct ToolCallDelta {
     pub id: Option<String>,
     pub r#type: Option<String>,
     pub function: Option<FunctionCallDelta>,
+    /// Opaque provider-specific metadata (e.g., Gemini thought_signature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -801,7 +807,12 @@ impl From<LLMMessage> for ChatMessage {
                                 image_url: None,
                             });
                         }
-                        LLMMessageTypedContent::ToolCall { id, name, args } => {
+                        LLMMessageTypedContent::ToolCall {
+                            id,
+                            name,
+                            args,
+                            metadata,
+                        } => {
                             tool_call_parts.push(ToolCall {
                                 id,
                                 r#type: "function".to_string(),
@@ -809,6 +820,7 @@ impl From<LLMMessage> for ChatMessage {
                                     name,
                                     arguments: args.to_string(),
                                 },
+                                metadata,
                             });
                         }
                         LLMMessageTypedContent::ToolResult { content, .. } => {
@@ -914,6 +926,7 @@ impl From<ChatMessage> for LLMMessage {
                     id: tool_call.id,
                     name: tool_call.function.name,
                     args,
+                    metadata: tool_call.metadata,
                 });
             }
         }
@@ -984,6 +997,7 @@ impl From<GenerationDelta> for ChatMessageDelta {
                         name: tool_use.name,
                         arguments: tool_use.input,
                     }),
+                    metadata: tool_use.metadata,
                 }]),
             },
             _ => ChatMessageDelta {
@@ -1156,6 +1170,7 @@ mod tests {
                     name: "get_weather".to_string(),
                     arguments: r#"{"location": "Paris"}"#.to_string(),
                 },
+                metadata: None,
             }]),
             tool_call_id: None,
             usage: None,
@@ -1179,7 +1194,7 @@ mod tests {
 
                 // Second part should be tool call
                 match &parts[1] {
-                    LLMMessageTypedContent::ToolCall { id, name, args } => {
+                    LLMMessageTypedContent::ToolCall { id, name, args, .. } => {
                         assert_eq!(id, "call_abc123");
                         assert_eq!(name, "get_weather");
                         assert_eq!(args["location"], "Paris");

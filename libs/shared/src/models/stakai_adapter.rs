@@ -48,8 +48,21 @@ fn to_stakai_content_part(part: &LLMMessageTypedContent) -> ContentPart {
             // Convert base64 image to data URI
             ContentPart::image(format!("data:{};base64,{}", source.media_type, source.data))
         }
-        LLMMessageTypedContent::ToolCall { id, name, args } => {
-            ContentPart::tool_call(id, name, args.clone())
+        LLMMessageTypedContent::ToolCall {
+            id,
+            name,
+            args,
+            metadata,
+        } => {
+            let mut part = ContentPart::tool_call(id, name, args.clone());
+            if let ContentPart::ToolCall {
+                metadata: ref mut m,
+                ..
+            } = part
+            {
+                *m = metadata.clone();
+            }
+            part
         }
         LLMMessageTypedContent::ToolResult {
             tool_use_id,
@@ -112,11 +125,13 @@ fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
             id,
             name,
             arguments,
+            metadata,
             ..
         } => LLMMessageTypedContent::ToolCall {
             id: id.clone(),
             name: name.clone(),
             args: arguments.clone(),
+            metadata: metadata.clone(),
         },
         ContentPart::ToolResult {
             tool_call_id,
@@ -169,6 +184,7 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
                 name: Some(name.clone()),
                 input: None,
                 index: 0,
+                metadata: None,
             },
         }),
         StreamEvent::ToolCallDelta { id, delta } => Some(GenerationDelta::ToolUse {
@@ -177,25 +193,30 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
                 name: None,
                 input: Some(delta.clone()),
                 index: 0,
+                metadata: None,
             },
         }),
-        StreamEvent::ToolCallEnd { id, name, .. } => {
+        StreamEvent::ToolCallEnd {
+            id, name, metadata, ..
+        } => {
             // ToolCallEnd signals completion - don't emit arguments here as they
             // were already accumulated via ToolCallDelta events. Including them
             // would cause doubling for providers like Anthropic that stream deltas.
-            // We emit name to ensure it's set (for providers like Gemini that only send ToolCallEnd).
+            // We emit name and metadata (e.g. Gemini thought_signature).
             Some(GenerationDelta::ToolUse {
                 tool_use: GenerationDeltaToolUse {
                     id: Some(id.clone()),
                     name: Some(name.clone()),
                     input: None,
                     index: 0,
+                    metadata: metadata.clone(),
                 },
             })
         }
-        StreamEvent::Finish { usage, .. } => Some(GenerationDelta::Usage {
-            usage: from_stakai_usage(usage),
-        }),
+        StreamEvent::Finish { usage, .. } => {
+            let llm_usage = from_stakai_usage(usage);
+            Some(GenerationDelta::Usage { usage: llm_usage })
+        }
         StreamEvent::Start { .. } | StreamEvent::Error { .. } => None,
     }
 }
@@ -262,7 +283,7 @@ pub fn to_stakai_provider_options(
             }
         }
         "openai" => {
-            if let Some(openai) = &opts.openai {
+            opts.openai.as_ref().map(|openai| {
                 let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
                     match e.to_lowercase().as_str() {
                         "low" => Some(ReasoningEffort::Low),
@@ -272,7 +293,7 @@ pub fn to_stakai_provider_options(
                     }
                 });
 
-                Some(ProviderOptions::OpenAI(OpenAIOptions {
+                ProviderOptions::OpenAI(OpenAIOptions {
                     api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
                         reasoning_effort,
                         reasoning_summary: None,
@@ -283,10 +304,8 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
-                }))
-            } else {
-                None
-            }
+                })
+            })
         }
         "google" | "gemini" => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
@@ -359,6 +378,7 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
                     id: tool_call.id.clone(),
                     name: tool_call.name.clone(),
                     args: tool_call.arguments.clone(),
+                    metadata: tool_call.metadata.clone(),
                 });
             }
         }
@@ -639,7 +659,6 @@ impl StakAIClient {
             .provider_options
             .as_ref()
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
-
         let request = GenerateRequest {
             model: input.model.clone(),
             messages,
@@ -684,7 +703,6 @@ impl StakAIClient {
             .provider_options
             .as_ref()
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
-
         let model_id = input.model.id.clone();
         let request = GenerateRequest {
             model: input.model.clone(),
@@ -725,6 +743,7 @@ impl StakAIClient {
                                         Some(LLMMessageTypedContent::ToolCall {
                                             args,
                                             name: existing_name,
+                                            metadata: existing_metadata,
                                             ..
                                         }) => {
                                             // Update existing tool call
@@ -744,6 +763,10 @@ impl StakAIClient {
                                                         serde_json::Value::String(input.clone());
                                                 }
                                             }
+                                            // Set metadata if provided (e.g. Gemini thought_signature from ToolCallEnd)
+                                            if tool_use.metadata.is_some() {
+                                                *existing_metadata = tool_use.metadata.clone();
+                                            }
                                         }
                                         _ => {
                                             // Create new tool call
@@ -760,6 +783,7 @@ impl StakAIClient {
                                                     id: id.clone(),
                                                     name,
                                                     args,
+                                                    metadata: None,
                                                 },
                                             );
                                         }
@@ -795,7 +819,13 @@ impl StakAIClient {
         let parsed_tool_calls: Vec<LLMMessageTypedContent> = accumulated_tool_calls
             .into_iter()
             .map(|tc| {
-                if let LLMMessageTypedContent::ToolCall { id, name, args } = tc {
+                if let LLMMessageTypedContent::ToolCall {
+                    id,
+                    name,
+                    args,
+                    metadata,
+                } = tc
+                {
                     let parsed_args = match args {
                         serde_json::Value::String(s) if !s.is_empty() => {
                             serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
@@ -806,6 +836,7 @@ impl StakAIClient {
                         id,
                         name,
                         args: parsed_args,
+                        metadata,
                     }
                 } else {
                     tc
@@ -975,6 +1006,7 @@ mod tests {
                     id: "call_abc123".to_string(),
                     name: "get_weather".to_string(),
                     args: serde_json::json!({"location": "New York", "unit": "celsius"}),
+                    metadata: None,
                 },
             ]),
         };
@@ -993,7 +1025,7 @@ mod tests {
             );
 
             // Check tool call part
-            if let LLMMessageTypedContent::ToolCall { id, name, args } = &parts[1] {
+            if let LLMMessageTypedContent::ToolCall { id, name, args, .. } = &parts[1] {
                 assert_eq!(id, "call_abc123");
                 assert_eq!(name, "get_weather");
                 assert_eq!(args["location"], "New York");
@@ -1225,6 +1257,7 @@ mod tests {
             id: "call_xyz".to_string(),
             name: "run_command".to_string(),
             arguments: serde_json::json!({"command": "ls -la"}),
+            metadata: None,
         };
 
         let delta = from_stakai_stream_event(&event);
@@ -1393,6 +1426,7 @@ mod tests {
                     id: "call_123".to_string(),
                     name: "get_weather".to_string(),
                     arguments: serde_json::json!({"location": "NYC"}),
+                    metadata: None,
                 }),
             ],
             usage: Usage::new(20, 15),
@@ -1417,7 +1451,7 @@ mod tests {
             );
 
             // Check tool call part
-            if let LLMMessageTypedContent::ToolCall { id, name, args } = &parts[1] {
+            if let LLMMessageTypedContent::ToolCall { id, name, args, .. } = &parts[1] {
                 assert_eq!(id, "call_123");
                 assert_eq!(name, "get_weather");
                 assert_eq!(args["location"], "NYC");
@@ -1480,6 +1514,28 @@ mod tests {
         } else {
             panic!("Expected OpenAI provider options");
         }
+    }
+
+    #[test]
+    fn test_provider_options_openai_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("gpt-4.1-mini", "openai");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_provider_options_custom_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("llama3.2", "ollama");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
     }
 
     #[test]
@@ -1677,6 +1733,7 @@ mod tests {
                     id: "call_001".to_string(),
                     name: "calculator".to_string(),
                     args: serde_json::json!({"expression": "2+2"}),
+                    metadata: None,
                 },
             ]),
         };

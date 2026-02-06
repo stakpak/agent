@@ -465,7 +465,13 @@ impl From<&LLMOutput> for ChatMessage {
             let calls: Vec<ToolCall> = items
                 .iter()
                 .filter_map(|item| {
-                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                    if let LLMMessageTypedContent::ToolCall {
+                        id,
+                        name,
+                        args,
+                        metadata,
+                    } = item
+                    {
                         Some(ToolCall {
                             id: id.clone(),
                             r#type: "function".to_string(),
@@ -473,6 +479,7 @@ impl From<&LLMOutput> for ChatMessage {
                                 name: name.clone(),
                                 arguments: args.to_string(),
                             },
+                            metadata: metadata.clone(),
                         })
                     } else {
                         None
