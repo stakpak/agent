@@ -55,6 +55,7 @@ pub struct DynamicSubagentRequest {
     /// - Read-only access to the current working directory
     /// - Read-only access to cloud credentials (AWS, GCP, Azure, etc.)
     /// - Network isolation and security policies
+    ///
     /// Use this when the subagent needs to run potentially unsafe commands.
     #[schemars(
         description = "Enable sandbox mode for isolated execution. Runs subagent in a warden container with read-only filesystem access and security policies. Recommended when using run_command tool."
@@ -210,6 +211,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
     }
 
     /// Build command for dynamic subagent with full 4-tuple configuration
+    #[allow(clippy::too_many_arguments)]
     fn build_dynamic_subagent_command(
         &self,
         instruction: &str,

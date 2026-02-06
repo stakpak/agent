@@ -131,7 +131,6 @@ pub fn add_rulebooks(user_input: &str, rulebooks: &[ListRuleBook]) -> (String, O
     (formatted_input, Some(rulebooks_text))
 }
 
-
 pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String> {
     if tool_calls.is_empty() {
         return None;
