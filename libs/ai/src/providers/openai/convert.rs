@@ -443,26 +443,23 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
                             ..
                         } => {
                             // Tool call IDs use format: call_id|item_id
-                            let (call_id, item_id) = if id.contains('|') {
-                                let parts: Vec<&str> = id.split('|').collect();
-                                (
-                                    parts[0].to_string(),
-                                    Some(parts.get(1).map(|s| s.to_string())).flatten(),
-                                )
+                            let call_id = if id.contains('|') {
+                                id.split('|').next().unwrap_or(id).to_string()
                             } else {
-                                (id.clone(), None)
+                                id.clone()
                             };
 
-                            let mut fc = json!({
+                            // Omit the `id` field — OpenAI pairs function_call ids with
+                            // reasoning item ids.  Without the matching reasoning item
+                            // (which requires encrypted_content round-tripping), including
+                            // the id causes a 400 "provided without its required reasoning
+                            // item" error.
+                            let fc = json!({
                                 "type": "function_call",
                                 "call_id": call_id,
                                 "name": name,
                                 "arguments": arguments.to_string()
                             });
-
-                            if let Some(item_id) = item_id {
-                                fc["id"] = json!(item_id);
-                            }
 
                             input.push(fc);
                         }

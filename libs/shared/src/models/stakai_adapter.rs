@@ -283,29 +283,29 @@ pub fn to_stakai_provider_options(
             }
         }
         "openai" => {
-            let reasoning_effort = opts
-                .openai
-                .as_ref()
-                .and_then(|openai| openai.reasoning_effort.as_ref())
-                .and_then(|e| match e.to_lowercase().as_str() {
-                    "low" => Some(ReasoningEffort::Low),
-                    "medium" => Some(ReasoningEffort::Medium),
-                    "high" => Some(ReasoningEffort::High),
-                    _ => None,
+            opts.openai.as_ref().map(|openai| {
+                let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
+                    match e.to_lowercase().as_str() {
+                        "low" => Some(ReasoningEffort::Low),
+                        "medium" => Some(ReasoningEffort::Medium),
+                        "high" => Some(ReasoningEffort::High),
+                        _ => None,
+                    }
                 });
 
-            Some(ProviderOptions::OpenAI(OpenAIOptions {
-                api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
-                    reasoning_effort,
-                    reasoning_summary: None,
-                    session_id: None,
-                    service_tier: None,
-                    cache_retention: None,
-                })),
-                system_message_mode: None,
-                store: None,
-                user: None,
-            }))
+                ProviderOptions::OpenAI(OpenAIOptions {
+                    api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
+                        reasoning_effort,
+                        reasoning_summary: None,
+                        session_id: None,
+                        service_tier: None,
+                        cache_retention: None,
+                    })),
+                    system_message_mode: None,
+                    store: None,
+                    user: None,
+                })
+            })
         }
         "google" | "gemini" => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
@@ -324,17 +324,15 @@ pub fn to_stakai_provider_options(
                     thinking,
                     effort: None,
                 }))
-            } else if opts.openai.is_some() || opts.anthropic.is_none() && opts.google.is_none() {
-                let reasoning_effort = opts
-                    .openai
-                    .as_ref()
-                    .and_then(|openai| openai.reasoning_effort.as_ref())
-                    .and_then(|e| match e.to_lowercase().as_str() {
+            } else if let Some(openai) = &opts.openai {
+                let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
+                    match e.to_lowercase().as_str() {
                         "low" => Some(ReasoningEffort::Low),
                         "medium" => Some(ReasoningEffort::Medium),
                         "high" => Some(ReasoningEffort::High),
                         _ => None,
-                    });
+                    }
+                });
                 Some(ProviderOptions::OpenAI(OpenAIOptions {
                     api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
                         reasoning_effort,
@@ -356,20 +354,6 @@ pub fn to_stakai_provider_options(
                 })
             }
         }
-    }
-}
-
-/// Return default provider options for a model when none are explicitly configured.
-/// OpenAI models default to the Responses API.
-pub fn default_provider_options(model: &Model) -> Option<ProviderOptions> {
-    match model.provider.as_str() {
-        "openai" => Some(ProviderOptions::OpenAI(OpenAIOptions {
-            api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig::default())),
-            system_message_mode: None,
-            store: None,
-            user: None,
-        })),
-        _ => None,
     }
 }
 
@@ -670,12 +654,11 @@ impl StakAIClient {
             options = options.headers(stakai_headers);
         }
 
-        // Convert provider options if present, defaulting to Responses API for OpenAI
+        // Convert provider options if present
         let provider_options = input
             .provider_options
             .as_ref()
-            .and_then(|opts| to_stakai_provider_options(opts, &input.model))
-            .or_else(|| default_provider_options(&input.model));
+            .and_then(|opts| to_stakai_provider_options(opts, &input.model));
         let request = GenerateRequest {
             model: input.model.clone(),
             messages,
@@ -715,12 +698,11 @@ impl StakAIClient {
             options = options.headers(stakai_headers);
         }
 
-        // Convert provider options if present, defaulting to Responses API for OpenAI
+        // Convert provider options if present
         let provider_options = input
             .provider_options
             .as_ref()
-            .and_then(|opts| to_stakai_provider_options(opts, &input.model))
-            .or_else(|| default_provider_options(&input.model));
+            .and_then(|opts| to_stakai_provider_options(opts, &input.model));
         let model_id = input.model.id.clone();
         let request = GenerateRequest {
             model: input.model.clone(),
@@ -1532,6 +1514,28 @@ mod tests {
         } else {
             panic!("Expected OpenAI provider options");
         }
+    }
+
+    #[test]
+    fn test_provider_options_openai_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("gpt-4.1-mini", "openai");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_provider_options_custom_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("llama3.2", "ollama");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
     }
 
     #[test]

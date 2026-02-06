@@ -1,15 +1,17 @@
 //! OpenAI provider implementation
 
 use super::convert::{
-    from_openai_response, from_responses_response, is_responses_api, to_openai_request,
-    to_responses_request,
+    from_openai_response, from_responses_response, to_openai_request, to_responses_request,
 };
 use super::stream::{create_completions_stream, create_responses_stream};
 use super::types::{ChatCompletionResponse, OpenAIConfig, ResponsesResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::tls::create_platform_tls_client;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
+use crate::types::{
+    GenerateRequest, GenerateResponse, GenerateStream, Headers, Model, OpenAIApiConfig,
+    ProviderOptions,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
@@ -21,12 +23,14 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
+    const OFFICIAL_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+
     /// Create a new OpenAI provider
     ///
     /// Note: API key validation is skipped when a custom base URL is configured,
     /// as OpenAI-compatible providers like Ollama may not require authentication.
     pub fn new(mut config: OpenAIConfig) -> Result<Self> {
-        let is_default_url = config.base_url == "https://api.openai.com/v1";
+        let is_default_url = config.base_url == Self::OFFICIAL_OPENAI_BASE_URL;
         if config.api_key.is_empty() && is_default_url {
             return Err(Error::MissingApiKey("openai".to_string()));
         }
@@ -36,6 +40,18 @@ impl OpenAIProvider {
 
         let client = create_platform_tls_client()?;
         Ok(Self { config, client })
+    }
+
+    fn should_use_responses_api(&self, request: &GenerateRequest) -> bool {
+        match request.provider_options.as_ref() {
+            Some(ProviderOptions::OpenAI(opts)) => match &opts.api_config {
+                Some(OpenAIApiConfig::Responses(_)) => true,
+                Some(OpenAIApiConfig::Completions(_)) => false,
+                None => self.config.base_url == Self::OFFICIAL_OPENAI_BASE_URL,
+            },
+            Some(_) => false,
+            None => self.config.base_url == Self::OFFICIAL_OPENAI_BASE_URL,
+        }
     }
 
     /// Create provider from environment
@@ -70,7 +86,7 @@ impl Provider for OpenAIProvider {
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let headers = self.build_headers(request.options.headers.as_ref());
 
-        if is_responses_api(&request) {
+        if self.should_use_responses_api(&request) {
             let url = format!("{}/responses", self.config.base_url);
             let responses_req = to_responses_request(&request, false);
 
@@ -122,7 +138,7 @@ impl Provider for OpenAIProvider {
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let headers = self.build_headers(request.options.headers.as_ref());
 
-        if is_responses_api(&request) {
+        if self.should_use_responses_api(&request) {
             let url = format!("{}/responses", self.config.base_url);
             let responses_req = to_responses_request(&request, true);
 
@@ -163,5 +179,54 @@ impl Provider for OpenAIProvider {
     async fn get_model(&self, id: &str) -> Result<Option<Model>> {
         let models = crate::registry::models_dev::load_models_for_provider("openai")?;
         Ok(models.into_iter().find(|m| m.id == id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{GenerateRequest, Message, OpenAIOptions, ProviderOptions, Role};
+
+    fn make_request(provider_options: Option<ProviderOptions>) -> GenerateRequest {
+        let mut req = GenerateRequest::new(
+            Model::custom("gpt-4.1-mini", "openai"),
+            vec![Message::new(Role::User, "Hello")],
+        );
+        req.provider_options = provider_options;
+        req
+    }
+
+    #[test]
+    fn test_defaults_to_responses_for_official_openai_url() {
+        let provider = OpenAIProvider::new(OpenAIConfig::new("test-key")).unwrap();
+        let req = make_request(None);
+        assert!(provider.should_use_responses_api(&req));
+    }
+
+    #[test]
+    fn test_defaults_to_completions_for_custom_openai_compatible_url() {
+        let provider = OpenAIProvider::new(
+            OpenAIConfig::new("test-key").with_base_url("http://localhost:11434/v1"),
+        )
+        .unwrap();
+        let req = make_request(None);
+        assert!(!provider.should_use_responses_api(&req));
+    }
+
+    #[test]
+    fn test_explicit_completions_overrides_official_default() {
+        let provider = OpenAIProvider::new(OpenAIConfig::new("test-key")).unwrap();
+        let req = make_request(Some(ProviderOptions::OpenAI(OpenAIOptions::completions())));
+        assert!(!provider.should_use_responses_api(&req));
+    }
+
+    #[test]
+    fn test_explicit_responses_overrides_custom_endpoint_default() {
+        let provider = OpenAIProvider::new(
+            OpenAIConfig::new("test-key").with_base_url("http://localhost:11434/v1"),
+        )
+        .unwrap();
+        let req = make_request(Some(ProviderOptions::OpenAI(OpenAIOptions::responses())));
+        assert!(provider.should_use_responses_api(&req));
     }
 }
