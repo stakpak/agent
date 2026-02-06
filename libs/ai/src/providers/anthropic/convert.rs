@@ -522,6 +522,7 @@ pub fn from_anthropic_response_with_warnings(
                 id: id.clone(),
                 name: name.clone(),
                 arguments: input.clone(),
+                metadata: None,
             })),
             _ => None,
         })

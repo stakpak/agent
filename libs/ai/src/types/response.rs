@@ -135,6 +135,10 @@ pub struct ToolCall {
     pub name: String,
     /// Arguments as JSON
     pub arguments: Value,
+    /// Opaque provider-specific metadata (e.g., Gemini thought_signature).
+    /// Must be preserved and echoed back in subsequent requests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 /// Input token details with cache information

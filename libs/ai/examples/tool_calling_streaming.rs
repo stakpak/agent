@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 id,
                 name,
                 arguments,
+                ..
             } => {
                 println!("\n✅ Tool call completed:");
                 println!("  ID: {}", id);

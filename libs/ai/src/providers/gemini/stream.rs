@@ -2,12 +2,15 @@
 
 use super::types::GeminiResponse;
 use crate::error::{Error, Result};
-use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
+use crate::types::{
+    FinishReason, FinishReasonKind, GenerateStream, InputTokenDetails, OutputTokenDetails,
+    StreamEvent, Usage,
+};
 use futures::stream::StreamExt;
 use reqwest::Response;
 
 /// Create a stream from Gemini response
-/// Gemini uses JSON streaming (not SSE) - each line is a complete JSON object
+/// Gemini uses SSE framing (`data: {json}` events).
 pub async fn create_stream(response: Response) -> Result<GenerateStream> {
     let stream = async_stream::stream! {
         let mut accumulated_usage = Usage::default();
@@ -16,9 +19,7 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
 
         let mut bytes_stream = response.bytes_stream();
         let mut line_buffer = String::new();
-        let mut json_accumulator = String::new();
-        let mut brace_depth = 0;
-        let mut in_object = false;
+        let mut current_event_data = String::new();
 
         while let Some(chunk_result) = bytes_stream.next().await {
             match chunk_result {
@@ -26,74 +27,32 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
                     let text = String::from_utf8_lossy(&chunk);
                     line_buffer.push_str(&text);
 
-                    // Process complete lines from buffer
-                    while let Some(newline_pos) = line_buffer.find('\n') {
-                        let line = line_buffer[..newline_pos].trim().to_string();
-                        line_buffer = line_buffer[newline_pos + 1..].to_string();
+                    // Yield complete lines as they arrive
+                    while let Some(pos) = line_buffer.find('\n') {
+                        let line = line_buffer[..pos].trim_end_matches('\r').to_string();
+                        line_buffer = line_buffer[pos + 1..].to_string();
 
-                        if line.is_empty() {
-                            continue;
-                        }
-
-                        for ch in line.chars() {
-                            match ch {
-                                '{' => {
-                                    brace_depth += 1;
-                                    if !in_object {
-                                        in_object = true;
-                                    }
-                                }
-                                '}' => {
-                                    brace_depth -= 1;
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if in_object {
-                            if !json_accumulator.is_empty() {
-                                json_accumulator.push('\n');
-                            }
-                            json_accumulator.push_str(&line);
-                        }
-
-                        if in_object && brace_depth == 0 {
-                            let mut json_str = json_accumulator.trim();
-
-                            if json_str.starts_with('[') {
-                                json_str = json_str[1..].trim();
-                            }
-                            if json_str.ends_with(',') {
-                                json_str = json_str[..json_str.len() - 1].trim();
-                            }
-                            if json_str.ends_with(']') {
-                                json_str = json_str[..json_str.len() - 1].trim();
-                            }
-
-                            if !json_str.is_empty() {
-                                match serde_json::from_str::<GeminiResponse>(json_str) {
-                                    Ok(gemini_resp) => {
-                                        let events = process_gemini_response(
-                                            gemini_resp,
-                                            &mut accumulated_usage,
-                                            &mut stream_id
-                                        );
-                                        for event in events {
-                                            if matches!(event, StreamEvent::Finish { .. }) {
-                                                finished_emitted = true;
-                                            }
-                                            yield Ok(event);
+                        if let Some(event_data) =
+                            process_sse_line(&line, &mut current_event_data)
+                        {
+                            match parse_sse_event_data(&event_data) {
+                                Ok(Some(resp)) => {
+                                    for event in process_gemini_response(
+                                        resp,
+                                        &mut accumulated_usage,
+                                        &mut stream_id,
+                                    ) {
+                                        if matches!(event, StreamEvent::Finish { .. }) {
+                                            finished_emitted = true;
                                         }
-                                    }
-                                    Err(e) => {
-                                        yield Err(Error::stream_error(format!("Failed to parse JSON: {}. JSON: {}", e, json_str)));
+                                        yield Ok(event);
                                     }
                                 }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    yield Err(e);
+                                }
                             }
-
-                            // Reset for next object
-                            json_accumulator.clear();
-                            in_object = false;
                         }
                     }
                 }
@@ -104,36 +63,101 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
             }
         }
 
-        let line = line_buffer.trim();
-        if !line.is_empty()
-            && (line.starts_with('{') || line.starts_with('[')) {
-                let mut json_str = line;
-                if json_str.starts_with('[') { json_str = json_str[1..].trim(); }
-                if json_str.ends_with(']') { json_str = json_str[..json_str.len()-1].trim(); }
-                if json_str.ends_with(',') { json_str = json_str[..json_str.len()-1].trim(); }
+        // Handle a final line that may not end with '\n'.
+        if !line_buffer.is_empty() {
+            let line = line_buffer.trim_end_matches('\r');
+            if let Some(event_data) = process_sse_line(line, &mut current_event_data) {
+                match parse_sse_event_data(&event_data) {
+                    Ok(Some(resp)) => {
+                        for event in process_gemini_response(
+                            resp,
+                            &mut accumulated_usage,
+                            &mut stream_id,
+                        ) {
+                            if matches!(event, StreamEvent::Finish { .. }) {
+                                finished_emitted = true;
+                            }
+                            yield Ok(event);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        yield Err(e);
+                    }
+                }
+            }
+        }
 
-                if !json_str.is_empty() && let Ok(gemini_resp) = serde_json::from_str::<GeminiResponse>(json_str) {
-                    let events = process_gemini_response(
-                        gemini_resp,
+        // Flush a trailing event if the stream closed without an empty separator line.
+        if !current_event_data.trim().is_empty() {
+            let event_data = std::mem::take(&mut current_event_data);
+            match parse_sse_event_data(&event_data) {
+                Ok(Some(resp)) => {
+                    for event in process_gemini_response(
+                        resp,
                         &mut accumulated_usage,
-                        &mut stream_id
-                    );
-                    for event in events {
+                        &mut stream_id,
+                    ) {
                         if matches!(event, StreamEvent::Finish { .. }) {
                             finished_emitted = true;
                         }
                         yield Ok(event);
                     }
                 }
+                Ok(None) => {}
+                Err(e) => {
+                    yield Err(e);
+                }
             }
+        }
 
-        // Emit final finish event if we haven't yet
         if !finished_emitted {
             yield Ok(StreamEvent::finish(accumulated_usage, FinishReason::stop()));
         }
     };
 
     Ok(GenerateStream::new(Box::pin(stream)))
+}
+
+/// Process one SSE line and return completed event data on blank-line separator.
+fn process_sse_line(line: &str, current_event_data: &mut String) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        if current_event_data.trim().is_empty() {
+            current_event_data.clear();
+            None
+        } else {
+            Some(std::mem::take(current_event_data))
+        }
+    } else if let Some(data) = trimmed.strip_prefix("data:") {
+        // Accept both "data:{json}" and "data: {json}".
+        let data = data.strip_prefix(' ').unwrap_or(data);
+        if !current_event_data.is_empty() {
+            current_event_data.push('\n');
+        }
+        current_event_data.push_str(data);
+        None
+    } else {
+        // Ignore comments/other SSE fields (event, id, retry, ...).
+        None
+    }
+}
+
+/// Parse an SSE event payload into a GeminiResponse.
+fn parse_sse_event_data(event_data: &str) -> Result<Option<GeminiResponse>> {
+    let payload = event_data.trim();
+    if payload.is_empty() || payload == "[DONE]" {
+        return Ok(None);
+    }
+
+    serde_json::from_str::<GeminiResponse>(payload)
+        .map(Some)
+        .map_err(|e| {
+            Error::stream_error(format!(
+                "Failed to parse Gemini SSE payload: {}. Payload: {}",
+                e, payload
+            ))
+        })
 }
 
 /// Process Gemini response and convert to unified StreamEvent
@@ -144,9 +168,29 @@ fn process_gemini_response(
 ) -> Vec<StreamEvent> {
     // Update usage if available
     if let Some(usage) = resp.usage_metadata {
-        accumulated_usage.prompt_tokens = usage.prompt_token_count.unwrap_or(0);
-        accumulated_usage.completion_tokens = usage.candidates_token_count.unwrap_or(0);
-        accumulated_usage.total_tokens = usage.total_token_count.unwrap_or(0);
+        let prompt_tokens = usage.prompt_token_count.unwrap_or(0);
+        let completion_tokens = usage.candidates_token_count.unwrap_or(0);
+        let cached_tokens = usage.cached_content_token_count.unwrap_or(0);
+        let reasoning_tokens = usage.thoughts_token_count;
+
+        *accumulated_usage = Usage::with_details(
+            InputTokenDetails {
+                total: Some(prompt_tokens),
+                no_cache: Some(prompt_tokens.saturating_sub(cached_tokens)),
+                cache_read: if cached_tokens > 0 {
+                    Some(cached_tokens)
+                } else {
+                    None
+                },
+                cache_write: None,
+            },
+            OutputTokenDetails {
+                total: Some(completion_tokens),
+                text: reasoning_tokens.map(|r| completion_tokens.saturating_sub(r)),
+                reasoning: reasoning_tokens,
+            },
+            Some(serde_json::to_value(&usage).unwrap_or_default()),
+        );
     }
 
     // Get first candidate
@@ -190,6 +234,11 @@ fn process_gemini_response(
         // ToolCallEnd is just a completion signal (no arguments) to avoid doubling.
         if let Some(function_call) = &part.function_call {
             let call_id = format!("call_{}", uuid::Uuid::new_v4());
+            // Preserve thought_signature from the Part level as metadata
+            let metadata = part
+                .thought_signature
+                .as_ref()
+                .map(|sig| serde_json::json!({ "thought_signature": sig }));
             events.push(StreamEvent::tool_call_start(
                 call_id.clone(),
                 function_call.name.clone(),
@@ -198,10 +247,11 @@ fn process_gemini_response(
                 call_id.clone(),
                 function_call.args.to_string(),
             ));
-            events.push(StreamEvent::tool_call_end(
+            events.push(StreamEvent::tool_call_end_with_metadata(
                 call_id,
                 function_call.name.clone(),
                 function_call.args.clone(),
+                metadata,
             ));
         }
     }
@@ -227,6 +277,37 @@ mod tests {
     };
 
     #[test]
+    fn test_process_sse_line_accepts_data_prefix_with_or_without_space() {
+        let mut buf = String::new();
+        assert!(process_sse_line(r#"data: {"a":1}"#, &mut buf).is_none());
+        assert_eq!(buf, r#"{"a":1}"#);
+
+        let mut buf_no_space = String::new();
+        assert!(process_sse_line(r#"data:{"b":2}"#, &mut buf_no_space).is_none());
+        assert_eq!(buf_no_space, r#"{"b":2}"#);
+    }
+
+    #[test]
+    fn test_process_sse_line_flushes_on_blank_separator() {
+        let mut buf = String::new();
+        assert!(process_sse_line(r#"data: {"first":1}"#, &mut buf).is_none());
+        assert!(process_sse_line(r#"data: {"second":2}"#, &mut buf).is_none());
+
+        let flushed = process_sse_line("", &mut buf).expect("expected completed event");
+        assert_eq!(flushed, "{\"first\":1}\n{\"second\":2}");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_parse_sse_event_data_returns_error_for_invalid_json() {
+        let err = parse_sse_event_data("{not-json}").expect_err("expected parse error");
+        assert!(
+            err.to_string()
+                .contains("Failed to parse Gemini SSE payload")
+        );
+    }
+
+    #[test]
     fn test_process_gemini_response_text() {
         let mut usage = Usage::default();
         let mut stream_id = String::new();
@@ -240,6 +321,7 @@ mod tests {
                         inline_data: None,
                         function_call: None,
                         function_response: None,
+                        thought_signature: None,
                     }],
                 }),
                 finish_reason: None,
@@ -276,6 +358,7 @@ mod tests {
                             args: serde_json::json!({"location": "San Francisco"}),
                         }),
                         function_response: None,
+                        thought_signature: None,
                     }],
                 }),
                 finish_reason: Some("STOP".to_string()),
@@ -338,6 +421,7 @@ mod tests {
                                 args: serde_json::json!({"location": "NYC"}),
                             }),
                             function_response: None,
+                            thought_signature: None,
                         },
                         GeminiPart {
                             text: None,
@@ -348,6 +432,7 @@ mod tests {
                                 args: serde_json::json!({"timezone": "EST"}),
                             }),
                             function_response: None,
+                            thought_signature: None,
                         },
                     ],
                 }),
@@ -405,6 +490,7 @@ mod tests {
                         inline_data: None,
                         function_call: None,
                         function_response: None,
+                        thought_signature: None,
                     }],
                 }),
                 finish_reason: Some("STOP".to_string()),
@@ -415,6 +501,7 @@ mod tests {
                 cached_content_token_count: None,
                 candidates_token_count: Some(20),
                 total_token_count: Some(30),
+                thoughts_token_count: None,
                 prompt_tokens_details: None,
                 candidates_tokens_details: None,
             }),

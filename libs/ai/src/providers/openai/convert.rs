@@ -308,6 +308,7 @@ fn parse_message_content(msg: &ChatMessage) -> Result<Vec<ResponseContent>> {
                 name: tc.function.name.clone(),
                 arguments: serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| json!({})),
+                metadata: None,
             }));
         }
     }
@@ -344,6 +345,8 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
     };
 
     // Convert tools to OpenAI Responses API format
+    // Responses API uses flat format: { type, name, description, parameters }
+    // No "strict" field or "function" wrapper
     let tools = req.options.tools.as_ref().map(|tools| {
         tools
             .iter()
@@ -353,7 +356,6 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
                     "name": tool.function.name,
                     "description": tool.function.description,
                     "parameters": tool.function.parameters,
-                    "strict": false
                 })
             })
             .collect::<Vec<_>>()
@@ -441,26 +443,23 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
                             ..
                         } => {
                             // Tool call IDs use format: call_id|item_id
-                            let (call_id, item_id) = if id.contains('|') {
-                                let parts: Vec<&str> = id.split('|').collect();
-                                (
-                                    parts[0].to_string(),
-                                    Some(parts.get(1).map(|s| s.to_string())).flatten(),
-                                )
+                            let call_id = if id.contains('|') {
+                                id.split('|').next().unwrap_or(id).to_string()
                             } else {
-                                (id.clone(), None)
+                                id.clone()
                             };
 
-                            let mut fc = json!({
+                            // Omit the `id` field — OpenAI pairs function_call ids with
+                            // reasoning item ids.  Without the matching reasoning item
+                            // (which requires encrypted_content round-tripping), including
+                            // the id causes a 400 "provided without its required reasoning
+                            // item" error.
+                            let fc = json!({
                                 "type": "function_call",
                                 "call_id": call_id,
                                 "name": name,
                                 "arguments": arguments.to_string()
                             });
-
-                            if let Some(item_id) = item_id {
-                                fc["id"] = json!(item_id);
-                            }
 
                             input.push(fc);
                         }
@@ -547,13 +546,25 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
         None
     };
 
+    // Reasoning models don't support temperature or top_p
+    let temperature = if is_reasoning {
+        None
+    } else {
+        req.options.temperature
+    };
+    let top_p = if is_reasoning {
+        None
+    } else {
+        req.options.top_p
+    };
+
     ResponsesRequest {
         model: req.model.id.clone(),
         input,
         instructions: None, // System message is in input array
         max_output_tokens: req.options.max_tokens,
-        temperature: req.options.temperature,
-        top_p: req.options.top_p,
+        temperature,
+        top_p,
         stream: Some(stream),
         tools,
         tool_choice,
@@ -592,6 +603,7 @@ pub fn from_responses_response(resp: ResponsesResponse) -> Result<GenerateRespon
                     id: call_id.clone(),
                     name: name.clone(),
                     arguments: serde_json::from_str(arguments).unwrap_or_else(|_| json!({})),
+                    metadata: None,
                 }));
             }
             ResponsesOutputItem::Reasoning { .. } => {
@@ -1053,5 +1065,40 @@ mod tests {
         assert!(tool_result.is_some());
         let tool_result = tool_result.unwrap();
         assert_eq!(tool_result["call_id"], "call_123");
+    }
+
+    // =========================================================================
+    // Temperature / Top-P Filtering Tests
+    // =========================================================================
+
+    #[test]
+    fn test_responses_request_strips_temperature_for_reasoning_model() {
+        let mut req = make_request(
+            "gpt-5.2-2025-12-11",
+            Some(ProviderOptions::OpenAI(OpenAIOptions::responses())),
+        );
+        req.options.temperature = Some(0.7);
+        req.options.top_p = Some(0.9);
+
+        let responses_req = to_responses_request(&req, false);
+
+        // Reasoning models must not send temperature or top_p
+        assert!(responses_req.temperature.is_none());
+        assert!(responses_req.top_p.is_none());
+    }
+
+    #[test]
+    fn test_responses_request_keeps_temperature_for_standard_model() {
+        let mut req = make_request(
+            "gpt-4o",
+            Some(ProviderOptions::OpenAI(OpenAIOptions::responses())),
+        );
+        req.options.temperature = Some(0.7);
+        req.options.top_p = Some(0.9);
+
+        let responses_req = to_responses_request(&req, false);
+
+        assert_eq!(responses_req.temperature, Some(0.7));
+        assert_eq!(responses_req.top_p, Some(0.9));
     }
 }

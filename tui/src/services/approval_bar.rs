@@ -542,6 +542,7 @@ mod tests {
                 name: name.to_string(),
                 arguments: args.to_string(),
             },
+            metadata: None,
         }
     }
 

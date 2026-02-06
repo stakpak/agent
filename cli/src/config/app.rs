@@ -785,18 +785,18 @@ impl AppConfig {
     /// Uses the `model` field if set, otherwise falls back to `smart_model`,
     /// and finally to a default Claude Opus model.
     ///
+    /// If `cli_override` is provided, it takes highest priority over all config values.
+    ///
     /// Searches the model catalog by ID. If the model string has a provider
     /// prefix (e.g., "anthropic/claude-opus-4-5"), it searches within that
     /// provider first. Otherwise, it searches all providers.
-    pub fn get_default_model(&self) -> stakpak_api::Model {
+    pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
         let use_stakpak = self.api_key.is_some();
 
-        // Priority: model > smart_model > default
-        let model_str = self
-            .model
-            .as_ref()
-            .or(self.smart_model.as_ref())
-            .map(|s| s.as_str())
+        // Priority: cli_override > model > smart_model > default
+        let model_str = cli_override
+            .or(self.model.as_deref())
+            .or(self.smart_model.as_deref())
             .unwrap_or("claude-opus-4-5");
 
         // Search the model catalog

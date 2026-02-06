@@ -450,6 +450,9 @@ pub enum LLMMessageTypedContent {
         name: String,
         #[serde(alias = "input")]
         args: serde_json::Value,
+        /// Opaque provider-specific metadata (e.g., Gemini thought_signature).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
     #[serde(rename = "tool_result")]
     ToolResult {
@@ -624,6 +627,9 @@ pub struct GenerationDeltaToolUse {
     pub name: Option<String>,
     pub input: Option<String>,
     pub index: usize,
+    /// Opaque provider-specific metadata (e.g., Gemini thought_signature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
