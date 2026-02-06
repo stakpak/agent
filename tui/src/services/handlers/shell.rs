@@ -1016,6 +1016,7 @@ pub fn shell_command_to_tool_call_result(
             name,
             arguments: args,
         },
+        metadata: None,
     };
     ToolCallResult {
         call,

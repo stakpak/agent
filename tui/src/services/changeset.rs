@@ -501,6 +501,7 @@ mod tests {
                         name: "stakpak__create".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    metadata: None,
                 }),
         );
 

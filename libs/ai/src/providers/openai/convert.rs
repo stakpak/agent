@@ -308,6 +308,7 @@ fn parse_message_content(msg: &ChatMessage) -> Result<Vec<ResponseContent>> {
                 name: tc.function.name.clone(),
                 arguments: serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| json!({})),
+                metadata: None,
             }));
         }
     }
@@ -593,6 +594,7 @@ pub fn from_responses_response(resp: ResponsesResponse) -> Result<GenerateRespon
                     id: call_id.clone(),
                     name: name.clone(),
                     arguments: serde_json::from_str(arguments).unwrap_or_else(|_| json!({})),
+                    metadata: None,
                 }));
             }
             ResponsesOutputItem::Reasoning { .. } => {

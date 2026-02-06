@@ -375,6 +375,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &results[0]
         {
             assert_eq!(id, "toolu_01ABC123");
@@ -495,6 +496,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &results[0]
         {
             assert_eq!(id, "toolu_first");
@@ -521,6 +523,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &results[0]
         {
             assert_eq!(id, "toolu_second");
@@ -662,6 +665,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &results[0]
         {
             assert_eq!(id, "toolu_empty");

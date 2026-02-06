@@ -45,10 +45,17 @@ impl GeminiProvider {
         } else {
             "generateContent"
         };
-        format!(
-            "{}models/{}:{}?key={}",
-            self.config.base_url, model, action, self.config.api_key
-        )
+        if stream {
+            format!(
+                "{}models/{}:{}?alt=sse&key={}",
+                self.config.base_url, model, action, self.config.api_key
+            )
+        } else {
+            format!(
+                "{}models/{}:{}?key={}",
+                self.config.base_url, model, action, self.config.api_key
+            )
+        }
     }
 }
 

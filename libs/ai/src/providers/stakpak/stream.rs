@@ -1,5 +1,6 @@
 //! Stakpak streaming implementation
 
+use super::provider::parse_stakpak_error;
 use super::types::StakpakUsage;
 use crate::error::{Error, Result};
 use crate::types::{
@@ -87,6 +88,18 @@ pub async fn create_stream(event_source: EventSource) -> Result<GenerateStream> 
                         }
                         Err(e) => yield Err(e),
                     }
+                }
+                Err(reqwest_eventsource::Error::StreamEnded) => {
+                    break;
+                }
+                Err(reqwest_eventsource::Error::InvalidStatusCode(status, response)) => {
+                    let error_body = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unable to read error body".to_string());
+                    let friendly_error = parse_stakpak_error(&error_body, status.as_u16());
+                    yield Err(Error::provider_error(friendly_error));
+                    break;
                 }
                 Err(e) => {
                     yield Err(Error::stream_error(format!("Stream error: {}", e)));

@@ -651,6 +651,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &events[0]
         {
             assert_eq!(id, "call_abc123");
@@ -722,6 +723,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &events[0]
         {
             assert_eq!(id, "call_first");
@@ -736,6 +738,7 @@ mod tests {
             id,
             name,
             arguments,
+            ..
         } = &events[1]
         {
             assert_eq!(id, "call_second");
