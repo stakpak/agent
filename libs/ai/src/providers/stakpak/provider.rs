@@ -227,6 +227,7 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
                 name: tc.function.name.clone(),
                 arguments: serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| json!({})),
+                metadata: None,
             }));
         }
     }

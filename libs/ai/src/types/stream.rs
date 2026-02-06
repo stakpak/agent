@@ -106,6 +106,7 @@ impl Stream for GenerateStream {
                     id,
                     name,
                     arguments,
+                    ..
                 } => {
                     // Update the tool call with final name and arguments
                     if let Some(tc) = this
@@ -228,6 +229,9 @@ pub enum StreamEvent {
         name: String,
         /// Complete arguments as JSON
         arguments: Value,
+        /// Opaque provider-specific metadata (e.g., Gemini thought_signature)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<Value>,
     },
 
     /// Generation finished
@@ -289,6 +293,22 @@ impl StreamEvent {
             id: id.into(),
             name: name.into(),
             arguments,
+            metadata: None,
+        }
+    }
+
+    /// Create a tool call end event with metadata
+    pub fn tool_call_end_with_metadata(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: Value,
+        metadata: Option<Value>,
+    ) -> Self {
+        Self::ToolCallEnd {
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            metadata,
         }
     }
 

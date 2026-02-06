@@ -2295,6 +2295,7 @@ mod tests {
                     name: "test".to_string(),
                     arguments: input.to_string(),
                 },
+                metadata: None,
             };
 
             let result = extract_full_command_arguments(&tool_call);

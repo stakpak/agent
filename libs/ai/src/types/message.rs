@@ -267,6 +267,10 @@ pub enum ContentPart {
         /// Provider-specific options (e.g., cache control)
         #[serde(skip_serializing_if = "Option::is_none")]
         provider_options: Option<ContentPartProviderOptions>,
+        /// Opaque provider-specific metadata (e.g., Gemini thought_signature).
+        /// Must be preserved and echoed back in subsequent requests.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
     /// Tool/function call result
     ToolResult {
@@ -318,6 +322,7 @@ impl ContentPart {
             name: name.into(),
             arguments,
             provider_options: None,
+            metadata: None,
         }
     }
 
@@ -357,12 +362,14 @@ impl ContentPart {
                 id,
                 name,
                 arguments,
+                metadata,
                 ..
             } => Self::ToolCall {
                 id,
                 name,
                 arguments,
                 provider_options,
+                metadata,
             },
             Self::ToolResult {
                 tool_call_id,
@@ -394,12 +401,14 @@ impl ContentPart {
                 id,
                 name,
                 arguments,
+                metadata,
                 ..
             } => Self::ToolCall {
                 id,
                 name,
                 arguments,
                 provider_options,
+                metadata,
             },
             Self::ToolResult {
                 tool_call_id,

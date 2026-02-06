@@ -544,40 +544,20 @@ impl AgentProvider for AgentClient {
     // =========================================================================
 
     async fn list_models(&self) -> Vec<stakai::Model> {
-        const PROVIDERS: &[&str] = &["anthropic", "openai", "google"];
-
-        let use_stakpak = self.has_stakpak();
+        // Use the provider registry which only contains providers with configured API keys.
+        // This ensures we only list models for providers the user actually has access to.
+        // Aggregate per provider so one failing provider does not hide all others.
+        let registry = self.stakai.registry();
         let mut all_models = Vec::new();
 
-        for &provider_id in PROVIDERS {
-            let mut models = load_and_transform_models(provider_id, use_stakpak);
-            sort_models_by_recency(&mut models);
-            all_models.extend(models);
+        for provider_id in registry.list_providers() {
+            if let Ok(mut models) = registry.models_for_provider(&provider_id).await {
+                all_models.append(&mut models);
+            }
         }
 
+        sort_models_by_recency(&mut all_models);
         all_models
-    }
-}
-
-/// Load models for a provider from cache, optionally transforming for Stakpak routing
-fn load_and_transform_models(provider_id: &str, use_stakpak: bool) -> Vec<stakai::Model> {
-    let models = stakai::load_models_for_provider(provider_id).unwrap_or_default();
-
-    if use_stakpak {
-        models
-            .into_iter()
-            .map(|m| stakai::Model {
-                id: format!("{}/{}", provider_id, m.id),
-                provider: "stakpak".into(),
-                name: m.name,
-                reasoning: m.reasoning,
-                cost: m.cost,
-                limit: m.limit,
-                release_date: m.release_date,
-            })
-            .collect()
-    } else {
-        models
     }
 }
 
