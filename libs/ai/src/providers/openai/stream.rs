@@ -11,7 +11,7 @@ use super::types::ChatCompletionChunk;
 use crate::error::{Error, Result};
 use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::StreamExt;
-use reqwest_eventsource::{Event, EventSource};
+use reqwest_eventsource::{self, Event, EventSource};
 
 /// Track state for each tool call during streaming
 #[derive(Debug, Clone)]
@@ -53,8 +53,22 @@ pub async fn create_completions_stream(event_source: EventSource) -> Result<Gene
                     }
                 }
                 Err(e) => {
-                    yield Err(Error::stream_error(format!("Stream error: {}", e)));
-                    break;
+                    match e {
+                        reqwest_eventsource::Error::StreamEnded => {
+                            break;
+                        }
+                        reqwest_eventsource::Error::InvalidStatusCode(status, response) => {
+                            let body = response.text().await.unwrap_or_default();
+                            yield Err(Error::provider_error(format!(
+                                "OpenAI API error {}: {}", status, body
+                            )));
+                            break;
+                        }
+                        other => {
+                            yield Err(Error::stream_error(format!("Stream error: {}", other)));
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -248,8 +262,22 @@ pub async fn create_responses_stream(event_source: EventSource) -> Result<Genera
                     }
                 }
                 Err(e) => {
-                    yield Err(Error::stream_error(format!("Stream error: {}", e)));
-                    break;
+                    match e {
+                        reqwest_eventsource::Error::StreamEnded => {
+                            break;
+                        }
+                        reqwest_eventsource::Error::InvalidStatusCode(status, response) => {
+                            let body = response.text().await.unwrap_or_default();
+                            yield Err(Error::provider_error(format!(
+                                "OpenAI Responses API error {}: {}", status, body
+                            )));
+                            break;
+                        }
+                        other => {
+                            yield Err(Error::stream_error(format!("Stream error: {}", other)));
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -470,7 +498,14 @@ fn parse_responses_event(
         }
 
         "response.failed" => {
-            return Err(Error::provider_error("Unknown error".to_string()));
+            let error_msg = event["response"]["error"]["message"]
+                .as_str()
+                .or_else(|| event["response"]["status_details"]["error"]["message"].as_str())
+                .unwrap_or("Unknown error");
+            return Err(Error::provider_error(format!(
+                "Response failed: {}",
+                error_msg
+            )));
         }
 
         _ => {

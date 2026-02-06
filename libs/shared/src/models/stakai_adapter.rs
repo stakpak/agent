@@ -283,7 +283,7 @@ pub fn to_stakai_provider_options(
             }
         }
         "openai" => {
-            if let Some(openai) = &opts.openai {
+            opts.openai.as_ref().map(|openai| {
                 let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
                     match e.to_lowercase().as_str() {
                         "low" => Some(ReasoningEffort::Low),
@@ -293,7 +293,7 @@ pub fn to_stakai_provider_options(
                     }
                 });
 
-                Some(ProviderOptions::OpenAI(OpenAIOptions {
+                ProviderOptions::OpenAI(OpenAIOptions {
                     api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig {
                         reasoning_effort,
                         reasoning_summary: None,
@@ -304,10 +304,8 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
-                }))
-            } else {
-                None
-            }
+                })
+            })
         }
         "google" | "gemini" => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
@@ -661,7 +659,6 @@ impl StakAIClient {
             .provider_options
             .as_ref()
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
-
         let request = GenerateRequest {
             model: input.model.clone(),
             messages,
@@ -706,7 +703,6 @@ impl StakAIClient {
             .provider_options
             .as_ref()
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
-
         let model_id = input.model.id.clone();
         let request = GenerateRequest {
             model: input.model.clone(),
@@ -1518,6 +1514,28 @@ mod tests {
         } else {
             panic!("Expected OpenAI provider options");
         }
+    }
+
+    #[test]
+    fn test_provider_options_openai_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("gpt-4.1-mini", "openai");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_provider_options_custom_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+        let model = Model::custom("llama3.2", "ollama");
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
     }
 
     #[test]
