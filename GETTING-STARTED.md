@@ -1,6 +1,6 @@
 # Getting Started with Stakpak CLI
 
-**The most secure agent built for operations & DevOps.** Stakpak CLI is a powerful, security-hardened tool designed for the grittiest parts of software development with enterprise-grade security features.
+**The most secure agent built for operations & DevOps** Stakpak CLI is a powerful, security-hardened tool designed for the grittiest parts of software development with enterprise-grade security features.
 
 ## 🚀 Quick Start
 

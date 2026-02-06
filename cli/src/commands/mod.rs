@@ -12,6 +12,7 @@ pub mod agent;
 pub mod auth;
 pub mod auto_update;
 pub mod board;
+pub mod browser;
 pub mod mcp;
 pub mod warden;
 
@@ -158,8 +159,17 @@ pub enum Commands {
     },
     /// Task board for tracking complex work (cards, checklists, comments)
     /// Run `stakpak board --help` for available commands.
+    #[command(disable_help_flag = true)]
     Board {
         /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Browser automation CLI - control a real browser from the command line
+    /// Run `stakpak browser --help` for available commands.
+    #[command(disable_help_flag = true)]
+    Browser {
+        /// Arguments to pass to the browser plugin
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -446,6 +456,9 @@ impl Commands {
             }
             Commands::Board { args } => {
                 board::run_board(args).await?;
+            }
+            Commands::Browser { args } => {
+                browser::run_browser(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
