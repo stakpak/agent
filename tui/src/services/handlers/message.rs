@@ -63,6 +63,10 @@ pub fn handle_stream_message(
         state
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
+
+        // Invalidate cache since messages changed
+        invalidate_message_lines_cache(state);
+
         state.text_area.set_text("");
 
         if !was_at_bottom {
@@ -74,6 +78,7 @@ pub fn handle_stream_message(
 
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
+
         if was_at_bottom {
             state.scroll = max_scroll;
             state.scroll_to_bottom = true;
