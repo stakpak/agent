@@ -183,6 +183,17 @@ fn handle_task_wait_progress(
             .map(|t| t.task_id.clone())
             .collect();
 
+        // Cache pause info for paused subagent tasks (for approval bar display)
+        for task in &task_updates {
+            if task.status == "Paused"
+                && let Some(pause_info) = &task.pause_info
+            {
+                state
+                    .subagent_pause_info
+                    .insert(task.task_id.clone(), pause_info.clone());
+            }
+        }
+
         let overall_progress = progress.progress.unwrap_or(0.0);
 
         // Use dedicated task wait block
@@ -767,6 +778,26 @@ fn update_pending_tool_display(state: &mut AppState) {
             };
 
             let msg = Message::render_run_command_block(command, None, run_state, None);
+            state.pending_bash_message_id = Some(msg.id);
+            state.messages.push(msg);
+        } else if tool_name == "resume_subagent_task" {
+            // For resume_subagent_task, use the special subagent pending block
+            let pause_info =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|args| {
+                        args.get("task_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+
+            let msg = Message::render_subagent_resume_pending_block(
+                tool_call.clone(),
+                auto_approve,
+                pause_info,
+                None,
+            );
             state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
         } else {

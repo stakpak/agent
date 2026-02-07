@@ -3,6 +3,10 @@ use crate::commands::agent::run::helpers::{
     add_agents_md, add_local_context, add_rulebooks, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
+use crate::commands::agent::run::pause::{
+    AsyncManifest, AsyncOutcome, PauseReason, PendingToolCall, ResumeInput, build_resume_hint,
+    detect_pending_tool_calls, write_pause_manifest,
+};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
@@ -13,8 +17,9 @@ use stakpak_api::{
 };
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
-use stakpak_shared::models::integrations::openai::ChatMessage;
+use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -35,16 +40,149 @@ pub struct RunAsyncConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    /// When true, respect auto-approve config and pause when tools require approval.
+    pub pause_on_approval: bool,
+    /// Resume input (tool decisions or text prompt) when resuming from a paused checkpoint.
+    pub resume_input: Option<ResumeInput>,
+    /// Auto-approve tool overrides from profile config.
+    pub auto_approve_tools: Option<Vec<String>>,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
 
-pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), String> {
+/// Simple auto-approve policy for async mode.
+/// Mirrors the TUI's AutoApprovePolicy without depending on the TUI crate.
+#[derive(Debug, Clone, PartialEq)]
+enum AsyncApprovePolicy {
+    Auto,
+    Prompt,
+    Never,
+}
+
+/// Lightweight auto-approve config for async mode.
+struct AsyncAutoApproveConfig {
+    enabled: bool,
+    default_policy: AsyncApprovePolicy,
+    tools: HashMap<String, AsyncApprovePolicy>,
+}
+
+impl AsyncAutoApproveConfig {
+    fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
+        let mut tools = HashMap::new();
+
+        // Auto-approve tools (read-only, safe):
+        for name in &[
+            "view",
+            "generate_password",
+            "search_docs",
+            "search_memory",
+            "read_rulebook",
+            "local_code_search",
+            "get_all_tasks",
+            "get_task_details",
+            "wait_for_tasks",
+        ] {
+            tools.insert(name.to_string(), AsyncApprovePolicy::Auto);
+        }
+
+        // Prompt tools (mutating, require approval):
+        for name in &[
+            "create",
+            "str_replace",
+            "generate_code",
+            "run_command",
+            "run_command_task",
+            "subagent_task",
+            "dynamic_subagent_task",
+            "cancel_task",
+            "remove",
+        ] {
+            tools.insert(name.to_string(), AsyncApprovePolicy::Prompt);
+        }
+
+        // Apply profile overrides
+        if let Some(profile_tools) = auto_approve_tools {
+            for tool_name in profile_tools {
+                tools.insert(tool_name.clone(), AsyncApprovePolicy::Auto);
+            }
+        }
+
+        // Try to load session config from disk
+        let config_path = std::path::Path::new(".stakpak/session/auto_approve.json");
+        if config_path.exists()
+            && let Ok(content) = std::fs::read_to_string(config_path)
+            && let Ok(session_config) = serde_json::from_str::<serde_json::Value>(&content)
+            && let Some(session_tools) = session_config.get("tools").and_then(|t| t.as_object())
+        {
+            for (name, policy_val) in session_tools {
+                // Don't override profile-specified tools
+                if auto_approve_tools
+                    .map(|pt| pt.contains(name))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let policy = match policy_val.as_str() {
+                    Some("Auto") => AsyncApprovePolicy::Auto,
+                    Some("Never") => AsyncApprovePolicy::Never,
+                    _ => AsyncApprovePolicy::Prompt,
+                };
+                tools.insert(name.clone(), policy);
+            }
+        }
+
+        AsyncAutoApproveConfig {
+            enabled: true,
+            default_policy: AsyncApprovePolicy::Prompt,
+            tools,
+        }
+    }
+
+    /// Strip MCP server prefix from tool name (e.g., "stakpak__run_command" -> "run_command").
+    fn strip_prefix(name: &str) -> &str {
+        if let Some(pos) = name.find("__")
+            && pos + 2 < name.len()
+        {
+            return &name[pos + 2..];
+        }
+        name
+    }
+
+    fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
+        let stripped = Self::strip_prefix(tool_name);
+        self.tools.get(stripped).unwrap_or(&self.default_policy)
+    }
+
+    fn should_auto_approve(&self, tool_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        matches!(self.get_policy(tool_name), AsyncApprovePolicy::Auto)
+    }
+
+    /// Check if any tool in the batch requires approval (Prompt or Never policy).
+    fn any_requires_approval(&self, tool_names: &[&str]) -> bool {
+        tool_names
+            .iter()
+            .any(|name| !self.should_auto_approve(name))
+    }
+}
+
+pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOutcome, String> {
     let start_time = Instant::now();
     let mut llm_response_time = std::time::Duration::new(0, 0);
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut total_usage = LLMTokenUsage::default();
     let renderer = OutputRenderer::new(config.output_format.clone(), config.verbose);
+
+    // Build auto-approve config if pause_on_approval is enabled
+    let auto_approve = if config.pause_on_approval {
+        Some(AsyncAutoApproveConfig::new(
+            config.auto_approve_tools.as_ref(),
+        ))
+    } else {
+        None
+    };
 
     print!("{}", renderer.render_title("Stakpak Agent - Async Mode"));
     print!(
@@ -95,13 +233,14 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
     let mut current_session_id: Option<Uuid> = None;
     let mut current_checkpoint_id: Option<Uuid> = None;
+    let mut prior_steps: usize = 0;
 
     // Load checkpoint messages if provided
-    if let Some(checkpoint_id_str) = config.checkpoint_id {
+    if let Some(checkpoint_id_str) = &config.checkpoint_id {
         let checkpoint_start = Instant::now();
 
         // Parse checkpoint UUID
-        let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str)
+        let checkpoint_uuid = Uuid::parse_str(checkpoint_id_str)
             .map_err(|_| format!("Invalid checkpoint ID: {}", checkpoint_id_str))?;
 
         // Get checkpoint with session info
@@ -109,6 +248,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             Ok(checkpoint) => {
                 current_session_id = Some(checkpoint.session_id);
                 current_checkpoint_id = Some(checkpoint_uuid);
+                prior_steps = checkpoint
+                    .state
+                    .messages
+                    .iter()
+                    .filter(|m| m.role == Role::Assistant)
+                    .count();
                 chat_messages.extend(checkpoint.state.messages);
             }
             Err(e) => {
@@ -123,13 +268,117 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         );
     }
 
+    // Handle resume from paused state
+    if let Some(resume_input) = &config.resume_input {
+        let pending_tool_calls = detect_pending_tool_calls(&chat_messages);
+
+        if !pending_tool_calls.is_empty() && resume_input.has_tool_decisions() {
+            // Resume with tool decisions
+            print!(
+                "{}",
+                renderer.render_info(&format!(
+                    "Resuming with tool decisions for {} pending tool call(s)",
+                    pending_tool_calls.len()
+                ))
+            );
+
+            for tool_call in &pending_tool_calls {
+                if resume_input.is_approved(&tool_call.id) {
+                    // Execute approved tool
+                    print!(
+                        "{}",
+                        renderer.render_tool_execution(
+                            &tool_call.function.name,
+                            &tool_call.function.arguments,
+                            0,
+                            1,
+                        )
+                    );
+
+                    let tool_execution = async {
+                        run_tool_call(
+                            &mcp_client,
+                            &mcp_tools,
+                            tool_call,
+                            None,
+                            current_session_id,
+                            Some(config.model.id.clone()),
+                        )
+                        .await
+                    };
+
+                    let result = match tokio::time::timeout(
+                        std::time::Duration::from_secs(60 * 60),
+                        tool_execution,
+                    )
+                    .await
+                    {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            let error_msg = format!(
+                                "Tool '{}' timed out after 60 minutes",
+                                tool_call.function.name
+                            );
+                            print!("{}", renderer.render_error(&error_msg));
+                            chat_messages.push(tool_result(tool_call.id.clone(), error_msg));
+                            continue;
+                        }
+                    };
+
+                    if let Some(result) = result {
+                        let result_content = result
+                            .content
+                            .iter()
+                            .map(|c| match c.raw.as_text() {
+                                Some(text) => text.text.clone(),
+                                None => String::new(),
+                            })
+                            .collect::<Vec<String>>()
+                            .join("\n");
+
+                        print!("{}", renderer.render_tool_result(&result_content));
+                        chat_messages.push(tool_result(tool_call.id.clone(), result_content));
+                    } else {
+                        chat_messages
+                            .push(tool_result(tool_call.id.clone(), "No result".to_string()));
+                    }
+                } else {
+                    // Reject tool
+                    print!(
+                        "{}",
+                        renderer.render_info(&format!(
+                            "Rejected tool call: {} ({})",
+                            tool_call.function.name, tool_call.id
+                        ))
+                    );
+                    chat_messages.push(tool_result(
+                        tool_call.id.clone(),
+                        "TOOL_CALL_REJECTED".to_string(),
+                    ));
+                }
+            }
+        } else if let Some(_prompt) = &resume_input.prompt {
+            // Resume with text input
+            print!("{}", renderer.render_info("Resuming with user input"));
+            // Don't add prompt here — it will be added below via the normal prompt path
+        }
+    }
+
     if let Some(system_prompt) = config.system_prompt {
         chat_messages.insert(0, system_message(system_prompt));
         print!("{}", renderer.render_info("System prompt loaded"));
     }
 
-    // Add user prompt if provided
-    if !config.prompt.is_empty() {
+    // Add user prompt if provided (and not resuming with tool decisions)
+    let should_add_prompt = if let Some(resume_input) = &config.resume_input {
+        // When resuming with tool decisions, don't add the prompt as a user message
+        // When resuming with text input, the prompt IS the resume text
+        !resume_input.has_tool_decisions()
+    } else {
+        true
+    };
+
+    if should_add_prompt && !config.prompt.is_empty() {
         let (user_input, _local_context) =
             add_local_context(&chat_messages, &config.prompt, &config.local_context, false)
                 .await
@@ -230,23 +479,28 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
         print!("{}", renderer.render_step_header(step, tool_count));
 
+        // Extract agent message content
+        let agent_message =
+            response.choices[0]
+                .message
+                .content
+                .as_ref()
+                .map(|content| match content {
+                    MessageContent::String(s) => s.clone(),
+                    MessageContent::Array(parts) => parts
+                        .iter()
+                        .filter_map(|part| part.text.as_ref())
+                        .map(|text| text.as_str())
+                        .filter(|text| !text.starts_with("<checkpoint_id>"))
+                        .collect::<Vec<&str>>()
+                        .join("\n"),
+                });
+
         // Show assistant response
-        if let Some(content) = &response.choices[0].message.content {
-            let content_str = match content {
-                stakpak_shared::models::integrations::openai::MessageContent::String(s) => {
-                    s.clone()
-                }
-                stakpak_shared::models::integrations::openai::MessageContent::Array(parts) => parts
-                    .iter()
-                    .filter_map(|part| part.text.as_ref())
-                    .map(|text| text.as_str())
-                    .filter(|text| !text.starts_with("<checkpoint_id>"))
-                    .collect::<Vec<&str>>()
-                    .join("\n"),
-            };
-            if !content_str.trim().is_empty() {
-                print!("{}", renderer.render_assistant_message(&content_str, false));
-            }
+        if let Some(content_str) = &agent_message
+            && !content_str.trim().is_empty()
+        {
+            print!("{}", renderer.render_assistant_message(content_str, false));
         }
 
         // Check if there are tool calls to execute
@@ -260,7 +514,78 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 break;
             }
 
-            // Execute all tool calls
+            // Check if pause_on_approval is enabled and any tools require approval
+            if let Some(ref auto_approve_config) = auto_approve {
+                let tool_names: Vec<&str> = tool_calls
+                    .iter()
+                    .map(|tc| tc.function.name.as_str())
+                    .collect();
+
+                if auto_approve_config.any_requires_approval(&tool_names) {
+                    // PAUSE: tools require approval
+                    let pending: Vec<PendingToolCall> =
+                        tool_calls.iter().map(PendingToolCall::from).collect();
+
+                    let checkpoint_id_str = current_checkpoint_id.map(|id| id.to_string());
+                    let session_id_str = current_session_id.map(|id| id.to_string());
+
+                    let pause_reason = PauseReason::ToolApprovalRequired {
+                        pending_tool_calls: pending,
+                    };
+
+                    let resume_hint = checkpoint_id_str
+                        .as_ref()
+                        .map(|cid| build_resume_hint(cid, &pause_reason));
+
+                    let manifest = AsyncManifest {
+                        outcome: "paused".to_string(),
+                        checkpoint_id: checkpoint_id_str.clone(),
+                        session_id: session_id_str.clone(),
+                        model: config.model.id.clone(),
+                        agent_message: agent_message.clone(),
+                        steps: step,
+                        total_steps: prior_steps + step,
+                        usage: total_usage.clone(),
+                        pause_reason: Some(pause_reason.clone()),
+                        resume_hint,
+                    };
+
+                    // Write pause manifest
+                    if let Err(e) = write_pause_manifest(&manifest) {
+                        print!(
+                            "{}",
+                            renderer
+                                .render_warning(&format!("Failed to write pause manifest: {}", e))
+                        );
+                    }
+
+                    // Output JSON to stdout if in JSON mode
+                    if config.output_format == OutputFormat::Json
+                        && let Ok(json) = serde_json::to_string_pretty(&manifest)
+                    {
+                        println!("{}", json);
+                    }
+
+                    print!(
+                        "{}",
+                        renderer.render_info("Agent paused - tools require approval")
+                    );
+
+                    // Shutdown MCP
+                    let _ = server_shutdown_tx.send(());
+                    let _ = proxy_shutdown_tx.send(());
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                    return Ok(AsyncOutcome::Paused {
+                        checkpoint_id: checkpoint_id_str,
+                        session_id: session_id_str,
+                        pause_reason,
+                        agent_message,
+                    });
+                }
+            }
+
+            // Execute all tool calls (either auto-approved or pause_on_approval is disabled)
             for (i, tool_call) in tool_calls.iter().enumerate() {
                 // Print tool start with arguments
                 print!(
@@ -342,6 +667,27 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let elapsed = start_time.elapsed();
     let tool_execution_time = elapsed.saturating_sub(llm_response_time);
 
+    // Build completion output
+    let checkpoint_id_str = current_checkpoint_id.map(|id| id.to_string());
+    let session_id_str = current_session_id.map(|id| id.to_string());
+
+    // Extract final message
+    let final_message = chat_messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Assistant)
+        .and_then(|m| m.content.as_ref())
+        .map(|content| match content {
+            MessageContent::String(s) => s.clone(),
+            MessageContent::Array(parts) => parts
+                .iter()
+                .filter_map(|part| part.text.as_ref())
+                .map(|text| text.as_str())
+                .filter(|text| !text.starts_with("<checkpoint_id>"))
+                .collect::<Vec<&str>>()
+                .join("\n"),
+        });
+
     // Use generic renderer functions to build the completion output
     print!("{}", renderer.render_section_break());
     print!("{}", renderer.render_title("Execution Summary"));
@@ -377,11 +723,30 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         )
     );
 
-    print!("{}", renderer.render_final_completion(&chat_messages));
-    println!();
+    // Output JSON completion manifest if in JSON mode
+    if config.output_format == OutputFormat::Json {
+        let manifest = AsyncManifest {
+            outcome: "completed".to_string(),
+            checkpoint_id: checkpoint_id_str.clone(),
+            session_id: session_id_str.clone(),
+            model: config.model.id.clone(),
+            agent_message: final_message.clone(),
+            steps: step,
+            total_steps: prior_steps + step,
+            usage: total_usage.clone(),
+            pause_reason: None,
+            resume_hint: None,
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&manifest) {
+            println!("{}", json);
+        }
+    } else {
+        print!("{}", renderer.render_final_completion(&chat_messages));
+        println!();
 
-    // Print token usage at the end
-    print!("{}", renderer.render_token_usage_stats(&total_usage));
+        // Print token usage at the end
+        print!("{}", renderer.render_token_usage_stats(&total_usage));
+    }
 
     // Save conversation to file
     let conversation_json = serde_json::to_string_pretty(&chat_messages).unwrap_or_default();
@@ -423,7 +788,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         }
 
         // Print resume command
-        println!("\nTo resume, run:\nstakpak -c {}\n", checkpoint_id);
+        if config.output_format != OutputFormat::Json {
+            println!("\nTo resume, run:\nstakpak -c {}\n", checkpoint_id);
+        }
     } else {
         print!(
             "{}",
@@ -432,7 +799,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     }
 
     // Print session ID if available
-    if let Some(session_id) = current_session_id {
+    if let Some(session_id) = current_session_id
+        && config.output_format != OutputFormat::Json
+    {
         println!("Session ID: {}", session_id);
     }
 
@@ -447,5 +816,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     print!("{}", renderer.render_success("Shutdown complete"));
 
-    Ok(())
+    let outcome: AsyncOutcome = AsyncOutcome::Completed {
+        checkpoint_id: checkpoint_id_str,
+        session_id: session_id_str,
+        agent_message: final_message,
+        steps: step - 1,
+    };
+
+    Ok(outcome)
 }

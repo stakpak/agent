@@ -585,6 +585,29 @@ pub struct TaskUpdate {
     /// Whether this is a target task being waited on
     #[serde(default)]
     pub is_target: bool,
+    /// Pause information for paused subagent tasks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_info: Option<TaskPauseInfo>,
+}
+
+/// Pause information for subagent tasks awaiting approval
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskPauseInfo {
+    /// The agent's message before pausing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_message: Option<String>,
+    /// Pending tool calls awaiting approval
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_tool_calls: Option<Vec<PendingToolCall>>,
+}
+
+/// A pending tool call awaiting approval
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PendingToolCall {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<serde_json::Value>,
 }
 
 // =============================================================================

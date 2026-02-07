@@ -19,7 +19,7 @@ use serde_json::json;
 use similar::TextDiff;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    ProgressType, TaskUpdate, ToolCallResultProgress,
+    PendingToolCall, ProgressType, TaskPauseInfo, TaskUpdate, ToolCallResultProgress,
 };
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
@@ -2728,6 +2728,49 @@ SAFETY NOTES:
                             }
                         });
 
+                        // Extract pause info if task is paused
+                        let pause_info = t.pause_info.as_ref().and_then(|pi| {
+                            pi.raw_output.as_ref().and_then(|raw| {
+                                // Parse the JSON output to extract agent_message and pending_tool_calls
+                                serde_json::from_str::<serde_json::Value>(raw)
+                                    .ok()
+                                    .and_then(|json| {
+                                        let agent_message = json
+                                            .get("agent_message")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+
+                                        let pending_tool_calls = json
+                                            .get("pause_reason")
+                                            .and_then(|pr| pr.get("pending_tool_calls"))
+                                            .and_then(|ptc| ptc.as_array())
+                                            .map(|arr| {
+                                                arr.iter()
+                                                    .filter_map(|tc| {
+                                                        Some(PendingToolCall {
+                                                            id: tc.get("id")?.as_str()?.to_string(),
+                                                            name: tc
+                                                                .get("name")?
+                                                                .as_str()?
+                                                                .to_string(),
+                                                            arguments: tc.get("arguments").cloned(),
+                                                        })
+                                                    })
+                                                    .collect()
+                                            });
+
+                                        if agent_message.is_some() || pending_tool_calls.is_some() {
+                                            Some(TaskPauseInfo {
+                                                agent_message,
+                                                pending_tool_calls,
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            })
+                        });
+
                         TaskUpdate {
                             task_id: t.id.clone(),
                             status: format!("{:?}", t.status),
@@ -2735,6 +2778,7 @@ SAFETY NOTES:
                             duration_secs,
                             output_preview,
                             is_target: true,
+                            pause_info,
                         }
                     })
                     .collect();

@@ -1,3 +1,4 @@
+use std::env;
 use std::path::Path;
 
 use crate::tool_container::ToolContainer;
@@ -8,6 +9,7 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
+use tracing::error;
 use uuid::Uuid;
 
 /// Request for creating a dynamic subagent with full control over its configuration.
@@ -62,6 +64,41 @@ pub struct DynamicSubagentRequest {
     )]
     #[serde(default)]
     pub enable_sandbox: bool,
+}
+
+/// Request for resuming a paused or completed subagent task.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ResumeSubagentTaskRequest {
+    #[schemars(description = "The task ID of the paused subagent task to resume")]
+    pub task_id: String,
+    #[schemars(
+        description = "Tool call IDs to approve (e.g., [\"tc_1\", \"tc_2\"]). Unspecified tool calls are rejected."
+    )]
+    pub approve: Option<Vec<String>>,
+    #[schemars(description = "Tool call IDs to explicitly reject (e.g., [\"tc_3\"])")]
+    pub reject: Option<Vec<String>>,
+    #[schemars(
+        description = "Approve all pending tool calls (overrides individual approve/reject)"
+    )]
+    pub approve_all: Option<bool>,
+    #[schemars(description = "Reject all pending tool calls")]
+    pub reject_all: Option<bool>,
+    #[schemars(
+        description = "Text input to provide when the subagent paused for input (input_required pause reason)"
+    )]
+    pub input: Option<String>,
+}
+
+/// Get the current executable path for spawning subagents
+fn get_current_exe() -> Result<String, McpError> {
+    env::current_exe()
+        .map_err(|e| {
+            McpError::internal_error(
+                "Failed to get current executable path",
+                Some(json!({"error": e.to_string()})),
+            )
+        })
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[tool_router(router = tool_router_subagent, vis = "pub")]
@@ -210,6 +247,144 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         ))]))
     }
 
+    /// Resume a paused or completed subagent task with approval decisions or follow-up input.
+    #[tool(
+        description = "Resume a paused or completed subagent task. Subagents pause when they need tool approval or user input.
+
+PARAMETERS:
+- task_id: The task ID of the paused subagent
+- approve: List of tool call IDs to approve
+- reject: List of tool call IDs to reject
+- approve_all: Approve all pending tool calls
+- reject_all: Reject all pending tool calls
+- input: Text input to continue the conversation (for input_required pauses or completed tasks)
+
+WORKFLOW:
+1. Start subagent: dynamic_subagent_task — subagents automatically pause on tool approval
+2. Monitor with get_task_details — check for status 'Paused' or 'Completed'
+3. Read pause_info.raw_output to see pending_tool_calls or the agent's message
+4. Resume with approval decisions or follow-up input
+5. The subagent continues execution from where it stopped
+
+NOTES:
+- Works on tasks with status 'Paused' or 'Completed'
+- The checkpoint ID is automatically extracted from the task's internal state
+- For tool_approval_required pauses: use approve/reject/approve_all/reject_all
+- For input_required pauses or completed tasks: use the input parameter
+- Unspecified tool calls are rejected by default"
+    )]
+    pub async fn resume_subagent_task(
+        &self,
+        Parameters(ResumeSubagentTaskRequest {
+            task_id,
+            approve,
+            reject,
+            approve_all,
+            reject_all,
+            input,
+        }): Parameters<ResumeSubagentTaskRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Look up the paused task to extract checkpoint_id from pause_info
+        let task_info = self
+            .get_task_manager()
+            .get_task_details(task_id.clone())
+            .await
+            .map_err(|e| {
+                McpError::internal_error(
+                    "Failed to get task details",
+                    Some(json!({"error": e.to_string()})),
+                )
+            })?
+            .ok_or_else(|| {
+                McpError::invalid_params("Task not found", Some(json!({"task_id": task_id})))
+            })?;
+
+        if !matches!(
+            task_info.status,
+            stakpak_shared::task_manager::TaskStatus::Paused
+                | stakpak_shared::task_manager::TaskStatus::Completed
+        ) {
+            return Ok(CallToolResult::error(vec![
+                Content::text("RESUME_TASK_ERROR"),
+                Content::text(format!(
+                    "Task '{}' cannot be resumed (status: {:?}). Only paused or completed tasks can be resumed.",
+                    task_id, task_info.status
+                )),
+            ]));
+        }
+
+        let checkpoint_id = task_info
+            .pause_info
+            .as_ref()
+            .and_then(|pi| pi.checkpoint_id.as_ref())
+            .ok_or_else(|| {
+                McpError::internal_error(
+                    "Paused task has no checkpoint ID in pause_info",
+                    Some(json!({"task_id": task_id})),
+                )
+            })?;
+
+        // Get the current executable path for resuming
+        let current_exe = get_current_exe()?;
+
+        // Build the stakpak CLI command for resuming
+        let mut command = format!("{} -a --output json -c {}", current_exe, checkpoint_id);
+
+        if approve_all.unwrap_or(false) {
+            command.push_str(" --approve-all");
+        }
+        if reject_all.unwrap_or(false) {
+            command.push_str(" --reject-all");
+        }
+        if let Some(approve_ids) = &approve {
+            for id in approve_ids {
+                command.push_str(&format!(" --approve {}", id));
+            }
+        }
+        if let Some(reject_ids) = &reject {
+            for id in reject_ids {
+                command.push_str(&format!(" --reject {}", id));
+            }
+        }
+        if let Some(input_text) = &input {
+            // Write input to a temp file and pass via --prompt-file to avoid shell escaping issues
+            let input_filename = format!("resume_input_{}.txt", Uuid::new_v4());
+            match LocalStore::write_session_data(
+                &format!("subagents/{}", input_filename),
+                input_text,
+            ) {
+                Ok(path) => {
+                    command.push_str(&format!(" --prompt-file {}", path));
+                }
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("RESUME_TASK_ERROR"),
+                        Content::text(format!("Failed to write input file: {}", e)),
+                    ]));
+                }
+            }
+        }
+
+        match self
+            .get_task_manager()
+            .resume_task(task_id.clone(), command.clone())
+            .await
+        {
+            Ok(task_info) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "🤖 Subagent Task Resumed\n\nTask ID: {}\nStatus: {:?}\n\nThe subagent is now running. Use get_task_details to monitor progress.",
+                task_info.id, task_info.status
+            ))])),
+            Err(e) => {
+                error!("Failed to resume subagent task: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("RESUME_TASK_ERROR"),
+                    Content::text(format!("Failed to resume subagent task: {}", e)),
+                ]))
+            }
+        }
+    }
+
     /// Build command for dynamic subagent with full 4-tuple configuration
     #[allow(clippy::too_many_arguments)]
     fn build_dynamic_subagent_command(
@@ -255,10 +430,13 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
                 )
             })?;
 
-        // Build the base stakpak command
+        // Get the current executable path to use for subagent
+        let current_exe = get_current_exe()?;
+
+        // Build the base stakpak command using current executable
         let mut command = format!(
-            r#"stakpak -a --prompt-file {} --max-steps {} --model {}"#,
-            prompt_file_path, max_steps, model
+            r#"{} -a --pause-on-approval --output json --prompt-file {} --max-steps {} --model {}"#,
+            current_exe, prompt_file_path, max_steps, model
         );
 
         // Add each tool
@@ -273,7 +451,8 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
                 env!("CARGO_PKG_VERSION")
             );
 
-            let mut warden_command = format!("stakpak warden run --image {}", stakpak_image);
+            let mut warden_command =
+                format!("{} warden run --image {}", current_exe, stakpak_image);
 
             // Mount the prompt file into the container
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);

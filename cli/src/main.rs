@@ -20,7 +20,10 @@ use commands::{
     Commands,
     agent::{
         self,
-        run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
+        run::{
+            AsyncOutcome, OutputFormat, ResumeInput, RunAsyncConfig, RunInteractiveConfig,
+            pause::EXIT_CODE_PAUSED,
+        },
     },
 };
 use config::{AppConfig, ModelsCache};
@@ -96,6 +99,26 @@ struct Cli {
     /// Disable subagents
     #[arg(long = "disable-subagents", default_value_t = false)]
     disable_subagents: bool,
+
+    /// Pause when tools require approval (async mode only)
+    #[arg(long = "pause-on-approval", default_value_t = false)]
+    pause_on_approval: bool,
+
+    /// Approve a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "approve", action = clap::ArgAction::Append)]
+    approve: Option<Vec<String>>,
+
+    /// Reject a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "reject", action = clap::ArgAction::Append)]
+    reject: Option<Vec<String>>,
+
+    /// Approve all pending tool calls when resuming
+    #[arg(long = "approve-all", default_value_t = false)]
+    approve_all: bool,
+
+    /// Reject all pending tool calls when resuming
+    #[arg(long = "reject-all", default_value_t = false)]
+    reject_all: bool,
 
     /// Ignore AGENTS.md files (skip discovery and injection)
     #[arg(long = "ignore-agents-md", default_value_t = false)]
@@ -383,7 +406,9 @@ async fn main() {
                     let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                         match std::fs::read_to_string(prompt_file_path) {
                             Ok(content) => {
-                                println!("📖 Reading prompt from file: {}", prompt_file_path);
+                                if cli.output_format != OutputFormat::Json {
+                                    println!("📖 Reading prompt from file: {}", prompt_file_path);
+                                }
                                 content.trim().to_string()
                             }
                             Err(e) => {
@@ -418,7 +443,7 @@ async fn main() {
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
                         true => {
-                            agent::run::run_async(
+                            let async_result = agent::run::run_async(
                                 config,
                                 RunAsyncConfig {
                                     prompt,
@@ -439,9 +464,45 @@ async fn main() {
                                     },
                                     model: default_model.clone(),
                                     agents_md: agents_md.clone(),
+                                    pause_on_approval: cli.pause_on_approval,
+                                    resume_input: if cli.approve.is_some()
+                                        || cli.reject.is_some()
+                                        || cli.approve_all
+                                        || cli.reject_all
+                                    {
+                                        Some(ResumeInput {
+                                            approved: cli
+                                                .approve
+                                                .unwrap_or_default()
+                                                .into_iter()
+                                                .collect(),
+                                            rejected: cli
+                                                .reject
+                                                .unwrap_or_default()
+                                                .into_iter()
+                                                .collect(),
+                                            approve_all: cli.approve_all,
+                                            reject_all: cli.reject_all,
+                                            prompt: None,
+                                        })
+                                    } else {
+                                        None
+                                    },
+                                    auto_approve_tools: None,
                                 },
                             )
-                            .await
+                            .await;
+
+                            // Handle AsyncOutcome → exit code
+                            match async_result {
+                                Ok(AsyncOutcome::Paused { .. }) => {
+                                    cache_task.abort();
+                                    std::process::exit(EXIT_CODE_PAUSED);
+                                }
+                                Ok(AsyncOutcome::Completed { .. }) => Ok(()),
+                                Ok(AsyncOutcome::Failed { error }) => Err(error),
+                                Err(e) => Err(e),
+                            }
                         }
 
                         // Interactive mode: run in TUI
