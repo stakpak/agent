@@ -96,6 +96,64 @@ fn get_unresolved_tool_call_ids(messages: &[ChatMessage]) -> Vec<String> {
     Vec::new()
 }
 
+/// Sanitize tool_result messages in the conversation history.
+///
+/// 1. **Deduplicates**: if the same `tool_call_id` appears in more than one
+///    `role=Tool` message, only the last one is kept (the most recent result,
+///    e.g. after a retry).
+/// 2. **Removes orphans**: any `role=Tool` message whose `tool_call_id` does
+///    not match a `tool_call` in any assistant message is removed.
+///
+/// This prevents Anthropic API 400 errors about duplicate or unexpected
+/// `tool_result` blocks.
+fn sanitize_tool_results(messages: &mut Vec<ChatMessage>) {
+    // Build a set of all tool_call IDs that actually exist in assistant messages
+    let valid_tool_call_ids: std::collections::HashSet<String> = messages
+        .iter()
+        .filter_map(|m| m.tool_calls.as_ref())
+        .flatten()
+        .map(|tc| tc.id.clone())
+        .collect();
+
+    // Track last occurrence index of each tool_call_id among Tool messages
+    let mut last_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (i, msg) in messages.iter().enumerate() {
+        if msg.role == Role::Tool
+            && let Some(id) = &msg.tool_call_id
+        {
+            last_index.insert(id.clone(), i);
+            *counts.entry(id.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let mut idx = 0;
+    messages.retain(|msg| {
+        let current_idx = idx;
+        idx += 1;
+
+        if msg.role != Role::Tool {
+            return true;
+        }
+
+        let Some(id) = &msg.tool_call_id else {
+            return true;
+        };
+
+        // Remove orphaned tool_results (no matching tool_use in any assistant message)
+        if !valid_tool_call_ids.contains(id) {
+            return false;
+        }
+
+        // Deduplicate: keep only the last occurrence
+        if counts.get(id).copied().unwrap_or(0) > 1 {
+            return last_index.get(id).copied() == Some(current_idx);
+        }
+
+        true
+    });
+}
+
 /// Checks if there are pending tool calls that don't have corresponding tool_results.
 /// This is used to prevent sending messages to the API when tool_use blocks would be orphaned,
 /// which causes Anthropic API 400 errors.
@@ -519,53 +577,68 @@ pub async fn run_interactive(
                         let has_result = result.is_some();
 
                         if let Some(result) = result {
-                            let content_parts: Vec<String> = result
-                                .content
-                                .iter()
-                                .map(|c| match c.raw.as_text() {
-                                    Some(text) => text.text.clone(),
-                                    None => String::new(),
-                                })
-                                .filter(|s| !s.is_empty())
-                                .collect();
+                            let is_cancelled =
+                                result.get_status() == ToolCallResultStatus::Cancelled;
 
-                            let result_content = if result.get_status()
-                                == ToolCallResultStatus::Error
-                                && content_parts.len() >= 2
-                            {
-                                // For error cases, preserve the original formatting
-                                let error_message = content_parts[1..].join(": ");
-                                format!("[{}] {}", content_parts[0], error_message)
-                            } else {
-                                content_parts.join("\n")
-                            };
+                            // Don't push a tool_result for cancelled tool calls
+                            // when there are no more tools queued — the retry/shell
+                            // flow will send a SendToolResult event with the final
+                            // result later.  However, if there ARE queued tools we
+                            // must record a CANCELLED placeholder so the tool_use
+                            // block is not left orphaned when the next tool completes
+                            // and triggers an API call.
+                            if is_cancelled && !tools_queue.is_empty() {
+                                messages.push(tool_result(
+                                    tool_call.clone().id,
+                                    "TOOL_CALL_CANCELLED".to_string(),
+                                ));
+                            }
+                            if !is_cancelled {
+                                let content_parts: Vec<String> = result
+                                    .content
+                                    .iter()
+                                    .map(|c| match c.raw.as_text() {
+                                        Some(text) => text.text.clone(),
+                                        None => String::new(),
+                                    })
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
 
-                            messages
-                                .push(tool_result(tool_call.clone().id, result_content.clone()));
+                                let status = result.get_status();
+                                let result_content = if status == ToolCallResultStatus::Error
+                                    && content_parts.len() >= 2
+                                {
+                                    // For error cases, preserve the original formatting
+                                    let error_message = content_parts[1..].join(": ");
+                                    format!("[{}] {}", content_parts[0], error_message)
+                                } else {
+                                    content_parts.join("\n")
+                                };
 
-                            send_input_event(
-                                &input_tx,
-                                InputEvent::ToolResult(
-                                    stakpak_shared::models::integrations::openai::ToolCallResult {
-                                        call: tool_call.clone(),
-                                        result: result_content,
-                                        status: result.get_status(),
-                                    },
-                                ),
-                            )
-                            .await?;
+                                messages.push(tool_result(
+                                    tool_call.clone().id,
+                                    result_content.clone(),
+                                ));
+
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::ToolResult(
+                                        stakpak_shared::models::integrations::openai::ToolCallResult {
+                                            call: tool_call.clone(),
+                                            result: result_content,
+                                            status,
+                                        },
+                                    ),
+                                )
+                                .await?;
+                            }
                             send_input_event(
                                 &input_tx,
                                 InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
                             )
                             .await?;
 
-                            // Continue to next tool or main loop if error
-                            should_stop = match result.get_status() {
-                                ToolCallResultStatus::Cancelled => true,
-                                ToolCallResultStatus::Error => false,
-                                ToolCallResultStatus::Success => false,
-                            };
+                            should_stop = is_cancelled;
                         }
                         end_tool_execution_loading_if_none(has_result, &input_tx).await?;
 
@@ -948,6 +1021,11 @@ pub async fn run_interactive(
                 if has_pending_tool_calls(&messages, &tools_queue) {
                     continue;
                 }
+
+                // Sanitize tool_results before sending to the API:
+                // - Remove duplicate tool_results (same tool_call_id, keep last)
+                // - Remove orphaned tool_results (no matching tool_use in any assistant message)
+                sanitize_tool_results(&mut messages);
 
                 // Start loading before we begin the LLM request/stream handshake
                 start_stream_processing_loading(&input_tx).await?;
@@ -1344,8 +1422,75 @@ https://stakpak.dev/{}/agent-sessions/{}",
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use tokio::sync::mpsc;
     use tokio::time::{Duration, timeout};
+
+    fn test_tool_call(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: format!("{}_fn", id),
+                arguments: "{}".to_string(),
+            },
+            metadata: None,
+        }
+    }
+
+    fn assistant_with_tool_calls(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("assistant".to_string())),
+            tool_calls: Some(ids.iter().map(|id| test_tool_call(id)).collect()),
+            ..Default::default()
+        }
+    }
+
+    fn tool_message(id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::Tool,
+            content: Some(MessageContent::String(content.to_string())),
+            tool_call_id: Some(id.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn assert_no_duplicate_tool_results(messages: &[ChatMessage]) {
+        let mut seen = HashSet::new();
+        for msg in messages {
+            if msg.role == Role::Tool
+                && let Some(id) = &msg.tool_call_id
+            {
+                assert!(
+                    seen.insert(id.clone()),
+                    "found duplicate tool_result for tool_call_id={}",
+                    id
+                );
+            }
+        }
+    }
+
+    fn assert_all_tool_results_match_assistant_tool_calls(messages: &[ChatMessage]) {
+        let valid_tool_calls: HashSet<_> = messages
+            .iter()
+            .filter_map(|m| m.tool_calls.as_ref())
+            .flatten()
+            .map(|tc| tc.id.clone())
+            .collect();
+
+        for msg in messages {
+            if msg.role == Role::Tool
+                && let Some(id) = &msg.tool_call_id
+            {
+                assert!(
+                    valid_tool_calls.contains(id),
+                    "found orphan tool_result with tool_call_id={}",
+                    id
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn start_stream_processing_emits_loading_start() {
@@ -1381,6 +1526,86 @@ mod tests {
             Err(_) => {} // timeout == no event, expected
             Ok(other) => panic!("unexpected event: {:?}", other),
         }
+    }
+
+    #[test]
+    fn sanitize_tool_results_deduplicates_same_tool_call_id() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["tool_1"]),
+            tool_message("tool_1", "old_result"),
+            tool_message("tool_1", "new_result"),
+        ];
+
+        sanitize_tool_results(&mut messages);
+
+        assert_no_duplicate_tool_results(&messages);
+        assert_all_tool_results_match_assistant_tool_calls(&messages);
+
+        let tool_messages: Vec<_> = messages.iter().filter(|m| m.role == Role::Tool).collect();
+        assert_eq!(tool_messages.len(), 1);
+        assert_eq!(tool_messages[0].tool_call_id.as_deref(), Some("tool_1"));
+        match &tool_messages[0].content {
+            Some(MessageContent::String(content)) => assert_eq!(content, "new_result"),
+            other => panic!("unexpected tool message content: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sanitize_tool_results_removes_orphan_tool_result() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["tool_1"]),
+            tool_message("tool_1", "ok"),
+            tool_message("tool_orphan", "orphan"),
+        ];
+
+        sanitize_tool_results(&mut messages);
+
+        assert_no_duplicate_tool_results(&messages);
+        assert_all_tool_results_match_assistant_tool_calls(&messages);
+
+        let tool_ids: Vec<_> = messages
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .filter_map(|m| m.tool_call_id.as_deref())
+            .collect();
+        assert_eq!(tool_ids, vec!["tool_1"]);
+    }
+
+    #[test]
+    fn sanitize_tool_results_handles_mixed_duplicate_and_orphan_cases() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["tool_1", "tool_2"]),
+            tool_message("tool_1", "first"),
+            tool_message("tool_orphan", "orphan"),
+            tool_message("tool_1", "latest"),
+            tool_message("tool_2", "result_2"),
+        ];
+
+        sanitize_tool_results(&mut messages);
+
+        assert_no_duplicate_tool_results(&messages);
+        assert_all_tool_results_match_assistant_tool_calls(&messages);
+
+        let tool_pairs: Vec<_> = messages
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .map(|m| {
+                let id = m.tool_call_id.clone().unwrap_or_default();
+                let content = match &m.content {
+                    Some(MessageContent::String(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                (id, content)
+            })
+            .collect();
+
+        assert_eq!(
+            tool_pairs,
+            vec![
+                ("tool_1".to_string(), "latest".to_string()),
+                ("tool_2".to_string(), "result_2".to_string()),
+            ]
+        );
     }
 
     #[test]
