@@ -3,6 +3,7 @@ debug.log
 # Stakpak local files
 Fix_rfc.md
 stakpak_FIX_ISSUE.md
+.github/issues/anthropic-400-tool-result-blocks.md
 .stakpak
 .DS_Store
 debug_acp.sh
