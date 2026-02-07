@@ -14,7 +14,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -88,12 +88,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let approval_bar_visible = state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let effective_input_height =
-        if (state.shell_popup_visible && state.shell_popup_expanded) || approval_bar_visible {
-            0
-        } else {
-            input_height
-        };
+    let input_visible =
+        !(approval_bar_visible || state.shell_popup_visible && state.shell_popup_expanded);
+    let effective_input_height = if input_visible { input_height } else { 0 };
+    let queue_count = state.pending_user_messages.len();
+    let queue_preview_height = if input_visible && queue_count > 0 {
+        // Cap at 1/4 of the screen to avoid starving the message area
+        (queue_count as u16).min(main_area.height / 4).max(1)
+    } else {
+        0
+    };
 
     // Hide dropdown when approval bar is visible
     let effective_dropdown_height = if approval_bar_visible {
@@ -102,7 +106,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         dropdown_height
     };
 
-    // Layout: [messages][loading_line][shell_popup][approval_bar][input][dropdown][hint]
+    // Layout: [messages][loading_line][shell_popup][approval_bar][queue][input][dropdown][hint]
     let effective_approval_bar_height = if approval_bar_visible {
         approval_bar_height
     } else {
@@ -114,6 +118,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
         Constraint::Length(shell_popup_height), // shell popup (0 if hidden)
         Constraint::Length(effective_approval_bar_height), // approval bar (0 if hidden)
+        Constraint::Length(queue_preview_height), // queued messages preview (0 if hidden)
         Constraint::Length(effective_input_height), // input (0 when approval bar visible)
         Constraint::Length(effective_dropdown_height), // dropdown (0 when approval bar visible)
         Constraint::Length(hint_height), // hint
@@ -127,9 +132,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let loading_area = chunks[1]; // Reserved line for loading indicator
     let shell_popup_area = chunks[2];
     let approval_bar_area = chunks[3];
-    let input_area = chunks[4];
-    let dropdown_area = chunks[5];
-    let hint_area = chunks[6];
+    let queue_preview_area = chunks[4];
+    let input_area = chunks[5];
+    let dropdown_area = chunks[6];
+    let hint_area = chunks[7];
 
     // Create padded message area for content rendering
     let padded_message_area = Rect {
@@ -179,6 +185,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         height: loading_area.height,
     };
     render_loading_indicator(f, state, padded_loading_area);
+
+    if queue_preview_height > 0 {
+        let padded_queue_area = Rect {
+            x: queue_preview_area.x + 1,
+            y: queue_preview_area.y,
+            width: queue_preview_area.width.saturating_sub(2),
+            height: queue_preview_area.height,
+        };
+        render_queue_preview_line(f, state, padded_queue_area);
+    }
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
@@ -418,4 +434,77 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Loading spinner is now shown in the hint area below input
     // This area is kept for potential future use (e.g., token count display)
     let _ = (f, state, area);
+}
+
+fn truncate_to(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        flat
+    } else {
+        let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn render_queue_preview_line(f: &mut Frame, state: &AppState, area: Rect) {
+    if area.width == 0 || area.height == 0 || state.pending_user_messages.is_empty() {
+        return;
+    }
+
+    let max_chars = (area.width as usize).saturating_sub(4); // room for "  > "
+    let mut lines: Vec<Line> = Vec::with_capacity(state.pending_user_messages.len());
+
+    for msg in state.pending_user_messages.iter() {
+        let text = if !msg.user_message_text.trim().is_empty() {
+            &msg.user_message_text
+        } else if !msg.final_input.trim().is_empty() {
+            &msg.final_input
+        } else if !msg.image_parts.is_empty() {
+            "[image]"
+        } else {
+            "(empty)"
+        };
+        let preview = truncate_to(text, max_chars);
+        lines.push(Line::from(Span::styled(
+            format!("  > {preview}"),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let widget = Paragraph::new(lines);
+    f.render_widget(widget, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_to_short_string_unchanged() {
+        assert_eq!(truncate_to("hello world", 20), "hello world");
+    }
+
+    #[test]
+    fn truncate_to_long_string_ellipsis() {
+        let out = truncate_to("this is a very long message that should be cut", 16);
+        assert!(out.ends_with('…'));
+        assert!(out.chars().count() <= 16);
+    }
+
+    #[test]
+    fn truncate_to_collapses_whitespace() {
+        assert_eq!(
+            truncate_to("hello   world\nnewline", 30),
+            "hello world newline"
+        );
+    }
+
+    #[test]
+    fn truncate_to_zero_max_returns_empty() {
+        assert_eq!(truncate_to("hello", 0), "");
+    }
 }
