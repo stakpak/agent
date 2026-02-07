@@ -1,8 +1,8 @@
 target
 debug.log
-.stakpak/session*
-
 # Stakpak local files
+Fix_rfc.md
+stakpak_FIX_ISSUE.md
 .stakpak
 .DS_Store
 debug_acp.sh

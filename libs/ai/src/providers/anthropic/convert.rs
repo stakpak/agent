@@ -300,17 +300,24 @@ fn build_tools_with_caching(
 ///
 /// Caches the last N non-system messages to maximize cache hits
 /// on subsequent requests in a conversation.
+///
+/// Also merges consecutive Tool messages into a single user message with multiple
+/// tool_result blocks, since Anthropic requires each tool_result to have a
+/// corresponding tool_use in the *immediately preceding* assistant message.
+/// Separate Tool messages would make the 2nd+ tool_result reference a user message
+/// (the previous tool result) instead of the assistant, causing API errors.
 fn build_messages_with_caching(
     messages: &[Message],
     validator: &mut CacheControlValidator,
     tail_count: usize,
 ) -> Result<Vec<AnthropicMessage>> {
     let non_system: Vec<&Message> = messages.iter().filter(|m| m.role != Role::System).collect();
+    let merged = merge_consecutive_tool_messages(&non_system);
 
-    let len = non_system.len();
+    let len = merged.len();
     let cache_start_index = len.saturating_sub(tail_count);
 
-    non_system
+    merged
         .iter()
         .enumerate()
         .map(|(i, msg)| {
@@ -318,6 +325,51 @@ fn build_messages_with_caching(
             to_anthropic_message_with_caching(msg, validator, should_auto_cache)
         })
         .collect()
+}
+
+/// Merge consecutive Tool messages into single messages.
+///
+/// Anthropic requires: each tool_result block must have a corresponding tool_use
+/// in the *previous* message. With separate Tool messages (assistant → tool_A →
+/// tool_B), the "previous" message for tool_B is tool_A (a user message with
+/// tool_result), not the assistant—causing "unexpected tool_use_id" errors.
+///
+/// We merge consecutive Tool messages so we get: assistant → user(tool_A, tool_B).
+fn merge_consecutive_tool_messages(messages: &[&Message]) -> Vec<Message> {
+    use crate::types::{ContentPart, MessageContent};
+
+    let mut result = Vec::new();
+    let mut i = 0;
+
+    while i < messages.len() {
+        let msg = messages[i];
+        if msg.role != Role::Tool {
+            result.push((*msg).clone());
+            i += 1;
+            continue;
+        }
+
+        // Collect all consecutive Tool messages and merge their tool_result parts
+        let mut tool_result_parts: Vec<ContentPart> = Vec::new();
+        while i < messages.len() && messages[i].role == Role::Tool {
+            let parts = messages[i].parts();
+            for part in parts {
+                if let ContentPart::ToolResult { .. } = &part {
+                    tool_result_parts.push(part);
+                }
+            }
+            i += 1;
+        }
+
+        if !tool_result_parts.is_empty() {
+            result.push(Message::new(
+                Role::Tool,
+                MessageContent::Parts(tool_result_parts),
+            ));
+        }
+    }
+
+    result
 }
 
 /// Convert unified message to Anthropic message with optional auto-caching
@@ -773,6 +825,70 @@ mod tests {
                 assert_eq!(s, "Hello!");
             }
             _ => panic!("Expected string content for simple user message"),
+        }
+    }
+
+    #[test]
+    fn test_consecutive_tool_messages_merged_for_anthropic() {
+        // Anthropic requires tool_results in a single user message following the assistant.
+        // Separate Tool messages cause "unexpected tool_use_id" errors because the 2nd+
+        // tool_result's "previous message" would be another tool result, not the assistant.
+        use crate::types::{GenerateRequest, MessageContent};
+        use crate::Model;
+
+        let messages = vec![
+            Message::new(
+                Role::Assistant,
+                MessageContent::Parts(vec![
+                    ContentPart::tool_call("toolu_1", "tool_a", serde_json::json!({})),
+                    ContentPart::tool_call("toolu_2", "tool_b", serde_json::json!({})),
+                ]),
+            ),
+            Message::new(
+                Role::Tool,
+                MessageContent::Parts(vec![ContentPart::tool_result(
+                    "toolu_1",
+                    serde_json::json!("result_a"),
+                )]),
+            ),
+            Message::new(
+                Role::Tool,
+                MessageContent::Parts(vec![ContentPart::tool_result(
+                    "toolu_2",
+                    serde_json::json!("result_b"),
+                )]),
+            ),
+        ];
+
+        let req = GenerateRequest::new(
+            Model::custom("claude-3-5-sonnet-20241022", "anthropic"),
+            messages,
+        );
+
+        let config = super::super::AnthropicConfig::default();
+        let result = to_anthropic_request(&req, &config, false).unwrap();
+
+        // Should have 3 messages: assistant, user (merged tool results)
+        assert_eq!(result.request.messages.len(), 2, "Consecutive tool messages should be merged");
+        assert_eq!(result.request.messages[0].role, "assistant");
+        assert_eq!(result.request.messages[1].role, "user");
+
+        // The merged user message should have 2 tool_result blocks
+        match &result.request.messages[1].content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 2, "Should have 2 tool_result blocks");
+                if let AnthropicContent::ToolResult { tool_use_id, .. } = &blocks[0] {
+                    assert_eq!(tool_use_id, "toolu_1");
+                } else {
+                    panic!("First block should be ToolResult");
+                }
+                if let AnthropicContent::ToolResult { tool_use_id, .. } = &blocks[1] {
+                    assert_eq!(tool_use_id, "toolu_2");
+                } else {
+                    panic!("Second block should be ToolResult");
+                }
+            }
+            _ => panic!("Expected Blocks content with merged tool results"),
         }
     }
 }
