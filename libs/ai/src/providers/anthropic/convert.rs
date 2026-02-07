@@ -833,8 +833,8 @@ mod tests {
         // Anthropic requires tool_results in a single user message following the assistant.
         // Separate Tool messages cause "unexpected tool_use_id" errors because the 2nd+
         // tool_result's "previous message" would be another tool result, not the assistant.
-        use crate::types::{GenerateRequest, MessageContent};
         use crate::Model;
+        use crate::types::{GenerateRequest, MessageContent};
 
         let messages = vec![
             Message::new(
@@ -869,7 +869,11 @@ mod tests {
         let result = to_anthropic_request(&req, &config, false).unwrap();
 
         // Should have 3 messages: assistant, user (merged tool results)
-        assert_eq!(result.request.messages.len(), 2, "Consecutive tool messages should be merged");
+        assert_eq!(
+            result.request.messages.len(),
+            2,
+            "Consecutive tool messages should be merged"
+        );
         assert_eq!(result.request.messages[0].role, "assistant");
         assert_eq!(result.request.messages[1].role, "user");
 
