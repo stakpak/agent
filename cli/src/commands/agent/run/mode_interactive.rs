@@ -4,8 +4,9 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
-    refresh_billing_info, tool_call_history_string, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, add_subagents, build_resume_command,
+    convert_tools_with_filter, extract_last_checkpoint_id, refresh_billing_info,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -110,6 +111,7 @@ fn has_pending_tool_calls(messages: &[ChatMessage], tools_queue: &[ToolCall]) ->
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
+    pub session_id: Option<String>,
     pub local_context: Option<LocalContext>,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
@@ -156,6 +158,7 @@ pub async fn run_interactive(
         let subagent_configs = config.subagent_configs.clone();
         let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
+        let session_id = config.session_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
         let enabled_tools = config.enabled_tools.clone();
@@ -320,7 +323,24 @@ pub async fn run_interactive(
                     send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
             }
 
-            if let Some(checkpoint_id_str) = checkpoint_id {
+            if let Some(session_id_str) = session_id {
+                let (chat_messages, tool_calls, session_id_uuid) =
+                    resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
+                        .await?;
+
+                current_session_id = Some(session_id_uuid);
+                should_update_rulebooks_on_next_message = true;
+                tools_queue.extend(tool_calls.clone());
+
+                if !tools_queue.is_empty() {
+                    send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
+                        .await?;
+                    let initial_tool_call = tools_queue.remove(0);
+                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                }
+
+                messages.extend(chat_messages);
+            } else if let Some(checkpoint_id_str) = checkpoint_id {
                 // Try to get session ID from checkpoint
                 let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str).map_err(|_| {
                     format!(
@@ -1288,18 +1308,17 @@ pub async fn run_interactive(
             .await
             .map(|account| account.username)?;
 
-        let latest_checkpoint = final_messages
-            .iter()
-            .rev()
-            .find(|m| m.role == stakpak_shared::models::integrations::openai::Role::Assistant)
-            .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
+        let resume_command = build_resume_command(
+            final_session_id,
+            extract_last_checkpoint_id(&final_messages),
+        );
 
-        if let Some(latest_checkpoint) = latest_checkpoint {
+        if let Some(resume_command) = resume_command {
             println!(
                 r#"To resume, run:
-stakpak -c {}
+{}
 "#,
-                latest_checkpoint
+                resume_command
             );
         }
 
@@ -1680,5 +1699,47 @@ mod tests {
 
         // Should return false because the LAST assistant message's tool calls are resolved
         assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn extract_last_checkpoint_id_picks_newest_assistant() {
+        let older = Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);
+        let newer = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "<checkpoint_id>{}</checkpoint_id>",
+                    older
+                ))),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("tool output".to_string())),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "<checkpoint_id>{}</checkpoint_id>",
+                    newer
+                ))),
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(extract_last_checkpoint_id(&messages), Some(newer));
+    }
+
+    #[test]
+    fn extract_last_checkpoint_id_returns_none_without_tag() {
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("no checkpoint".to_string())),
+            ..Default::default()
+        }];
+
+        assert_eq!(extract_last_checkpoint_id(&messages), None);
     }
 }
