@@ -21,7 +21,7 @@ use commands::{
     Commands,
     agent::{
         self,
-        run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
+        run::{AsyncOutcome, OutputFormat, ResumeInput, RunAsyncConfig, RunInteractiveConfig},
     },
 };
 use config::{AppConfig, ModelsCache};
@@ -97,6 +97,26 @@ struct Cli {
     /// Enable subagents
     #[arg(long = "enable-subagents", default_value_t = false)]
     enable_subagents: bool,
+
+    /// Pause when tools require approval (async mode only)
+    #[arg(long = "pause-on-approval", default_value_t = false)]
+    pause_on_approval: bool,
+
+    /// Approve a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "approve", action = clap::ArgAction::Append)]
+    approve: Option<Vec<String>>,
+
+    /// Reject a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "reject", action = clap::ArgAction::Append)]
+    reject: Option<Vec<String>>,
+
+    /// Approve all pending tool calls when resuming
+    #[arg(long = "approve-all", default_value_t = false)]
+    approve_all: bool,
+
+    /// Reject all pending tool calls when resuming
+    #[arg(long = "reject-all", default_value_t = false)]
+    reject_all: bool,
 
     /// Subagent configuration file subagents.toml
     #[arg(long = "subagent-config")]
@@ -440,10 +460,33 @@ async fn main() {
                     let auto_approve = config.auto_approve.clone();
                     let default_model = config.get_default_model(cli.model.as_deref());
 
+                    // Build resume input from CLI flags
+                    let resume_input = if cli.approve_all
+                        || cli.reject_all
+                        || cli.approve.is_some()
+                        || cli.reject.is_some()
+                    {
+                        Some(ResumeInput {
+                            approved: cli.approve.unwrap_or_default().into_iter().collect(),
+                            rejected: cli.reject.unwrap_or_default().into_iter().collect(),
+                            approve_all: cli.approve_all,
+                            reject_all: cli.reject_all,
+                            prompt: None,
+                        })
+                    } else if cli.checkpoint_id.is_some() && !prompt.is_empty() {
+                        // Resuming from checkpoint with a text prompt = input-required resume
+                        Some(ResumeInput {
+                            prompt: Some(prompt.clone()),
+                            ..Default::default()
+                        })
+                    } else {
+                        None
+                    };
+
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
                         true => {
-                            agent::run::run_async(
+                            let async_result = agent::run::run_async(
                                 config,
                                 RunAsyncConfig {
                                     prompt,
@@ -464,9 +507,24 @@ async fn main() {
                                     },
                                     model: default_model.clone(),
                                     agents_md: agents_md.clone(),
+                                    pause_on_approval: cli.pause_on_approval,
+                                    resume_input,
+                                    auto_approve_tools: auto_approve.clone(),
                                 },
                             )
-                            .await
+                            .await;
+
+                            // Handle AsyncOutcome → exit code
+                            match async_result {
+                                Ok(AsyncOutcome::Paused { .. }) => {
+                                    // Cancel background cache task on exit
+                                    cache_task.abort();
+                                    std::process::exit(10);
+                                }
+                                Ok(AsyncOutcome::Completed { .. }) => Ok(()),
+                                Ok(AsyncOutcome::Failed { error }) => Err(error),
+                                Err(e) => Err(e),
+                            }
                         }
 
                         // Interactive mode: run in TUI
