@@ -109,9 +109,7 @@ struct CacheFile {
 /// Makes an HTTP request to models.dev and returns parsed provider data.
 /// Models are filtered to only include those with tool calling support.
 pub async fn fetch_models_dev() -> Result<HashMap<String, ProviderInfo>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
+    let client = crate::providers::tls::create_platform_tls_client()
         .map_err(|e| Error::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
 
     let response = client

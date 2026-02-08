@@ -70,7 +70,7 @@ impl OAuthFlow {
 
         let client =
             crate::tls_client::create_tls_client(crate::tls_client::TlsClientConfig::default())
-                .unwrap_or_else(|_| reqwest::Client::new());
+                .expect("Failed to create TLS client for OAuth token exchange");
         let response = client
             .post(&self.config.token_url)
             .json(&serde_json::json!({
@@ -102,7 +102,7 @@ impl OAuthFlow {
     pub async fn refresh_token(&self, refresh_token: &str) -> OAuthResult<TokenResponse> {
         let client =
             crate::tls_client::create_tls_client(crate::tls_client::TlsClientConfig::default())
-                .unwrap_or_else(|_| reqwest::Client::new());
+                .expect("Failed to create TLS client for OAuth token refresh");
         let response = client
             .post(&self.config.token_url)
             .json(&serde_json::json!({
