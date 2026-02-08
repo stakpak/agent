@@ -1,25 +1,14 @@
 //! Agent spawner for daemon triggers.
 //!
 //! Spawns the stakpak agent as a child process when a trigger fires,
-//! capturing session and checkpoint information from the output.
+//! capturing session and checkpoint information from JSON output.
 
-use regex::Regex;
+use crate::commands::agent::run::pause::{AsyncManifest, PauseReason, EXIT_CODE_PAUSED};
 use std::process::Stdio;
-use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
-
-/// Regex pattern to extract session ID from agent output.
-/// Matches: "Session ID: {uuid}"
-static SESSION_ID_REGEX: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"Session ID:\s*([0-9a-fA-F-]{36})").ok());
-
-/// Regex pattern to extract checkpoint ID from agent output.
-/// Matches: "stakpak -c {uuid}" in the resume command output
-static CHECKPOINT_ID_REGEX: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"stakpak -c\s+([0-9a-fA-F-]{36})").ok());
 
 /// Result of spawning and running the agent.
 #[derive(Debug, Clone)]
@@ -32,6 +21,12 @@ pub struct AgentResult {
     pub checkpoint_id: Option<String>,
     /// Whether the agent was killed due to timeout.
     pub timed_out: bool,
+    /// Whether the agent paused (needs approval or input).
+    pub paused: bool,
+    /// Pause reason if the agent paused.
+    pub pause_reason: Option<PauseReason>,
+    /// Resume hint command if the agent paused.
+    pub resume_hint: Option<String>,
     /// Combined stdout output from the agent.
     pub stdout: String,
     /// Combined stderr output from the agent.
@@ -44,9 +39,15 @@ impl AgentResult {
         self.exit_code == Some(0)
     }
 
-    /// Returns true if the agent failed (non-zero exit or timeout).
+    /// Returns true if the agent paused (exit code 10).
+    pub fn is_paused(&self) -> bool {
+        self.paused || self.exit_code == Some(EXIT_CODE_PAUSED)
+    }
+
+    /// Returns true if the agent failed (non-zero exit, not paused, or timeout).
     pub fn failed(&self) -> bool {
-        self.timed_out || matches!(self.exit_code, Some(code) if code != 0)
+        self.timed_out
+            || matches!(self.exit_code, Some(code) if code != 0 && code != EXIT_CODE_PAUSED)
     }
 }
 
@@ -78,18 +79,21 @@ pub struct SpawnConfig {
     pub enable_slack_tools: bool,
     /// Enable subagents.
     pub enable_subagents: bool,
+    /// Pause when tools require approval instead of auto-approving.
+    pub pause_on_approval: bool,
 }
 
 /// Spawn the stakpak agent with the given configuration.
 ///
-/// The agent is run in async mode (`-a`) to completion. Output is captured
-/// and parsed for session ID and checkpoint ID.
+/// The agent is run in async mode (`-a`) with JSON output (`-o json`).
+/// Output is parsed from the JSON manifest for session ID, checkpoint ID,
+/// and pause state.
 ///
 /// # Arguments
 /// * `config` - Configuration for spawning the agent
 ///
 /// # Returns
-/// * `Ok(AgentResult)` - Agent completed (possibly with timeout)
+/// * `Ok(AgentResult)` - Agent completed (possibly with timeout or pause)
 /// * `Err(AgentError)` - Failed to spawn or run the agent
 pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError> {
     // Find the stakpak binary
@@ -104,9 +108,11 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
         "Spawning agent"
     );
 
-    // Build the command
+    // Build the command with JSON output for robust parsing
     let mut cmd = Command::new(&binary);
     cmd.arg("-a") // async mode
+        .arg("-o")
+        .arg("json") // JSON output for robust parsing
         .arg("--profile")
         .arg(&config.profile)
         .arg(&config.prompt)
@@ -120,6 +126,9 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
     }
     if config.enable_subagents {
         cmd.arg("--enable-subagents");
+    }
+    if config.pause_on_approval {
+        cmd.arg("--pause-on-approval");
     }
 
     // Set working directory if specified
@@ -140,33 +149,13 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
     let result = tokio::time::timeout(config.timeout, async {
         let mut stdout_lines = Vec::new();
         let mut stderr_lines = Vec::new();
-        let mut session_id: Option<String> = None;
-        let mut checkpoint_id: Option<String> = None;
 
-        // Read stdout line by line to capture session/checkpoint IDs
+        // Read stdout line by line
         if let Some(stdout) = stdout_handle {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
 
             while let Ok(Some(line)) = lines.next_line().await {
-                // Check for session ID
-                if let Some(regex) = SESSION_ID_REGEX.as_ref()
-                    && let Some(caps) = regex.captures(&line)
-                    && let Some(id) = caps.get(1)
-                {
-                    session_id = Some(id.as_str().to_string());
-                    debug!(session_id = %id.as_str(), "Captured session ID");
-                }
-
-                // Check for checkpoint ID
-                if let Some(regex) = CHECKPOINT_ID_REGEX.as_ref()
-                    && let Some(caps) = regex.captures(&line)
-                    && let Some(id) = caps.get(1)
-                {
-                    checkpoint_id = Some(id.as_str().to_string());
-                    debug!(checkpoint_id = %id.as_str(), "Captured checkpoint ID");
-                }
-
                 stdout_lines.push(line);
             }
         }
@@ -184,24 +173,35 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
         // Wait for the process to exit
         let status = child.wait().await;
 
-        (
-            stdout_lines.join("\n"),
-            stderr_lines.join("\n"),
-            status,
-            session_id,
-            checkpoint_id,
-        )
+        (stdout_lines.join("\n"), stderr_lines.join("\n"), status)
     })
     .await;
 
     match result {
-        Ok((stdout, stderr, status, session_id, checkpoint_id)) => {
+        Ok((stdout, stderr, status)) => {
             let exit_code = status.ok().and_then(|s| s.code());
+
+            // Try to parse JSON manifest from stdout
+            let manifest = parse_json_manifest(&stdout);
+
+            let (session_id, checkpoint_id, paused, pause_reason, resume_hint) =
+                if let Some(m) = &manifest {
+                    (
+                        m.session_id.clone(),
+                        m.checkpoint_id.clone(),
+                        m.outcome == "paused",
+                        m.pause_reason.clone(),
+                        m.resume_hint.clone(),
+                    )
+                } else {
+                    (None, None, false, None, None)
+                };
 
             info!(
                 exit_code = ?exit_code,
                 session_id = ?session_id,
                 checkpoint_id = ?checkpoint_id,
+                paused = paused,
                 "Agent completed"
             );
 
@@ -210,6 +210,9 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
                 session_id,
                 checkpoint_id,
                 timed_out: false,
+                paused,
+                pause_reason,
+                resume_hint,
                 stdout,
                 stderr,
             })
@@ -226,6 +229,9 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
                 session_id: None,
                 checkpoint_id: None,
                 timed_out: true,
+                paused: false,
+                pause_reason: None,
+                resume_hint: None,
                 stdout: String::new(),
                 stderr: String::new(),
             })
@@ -233,22 +239,28 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
     }
 }
 
-/// Parse session ID from agent output text.
-pub fn parse_session_id(output: &str) -> Option<String> {
-    SESSION_ID_REGEX
-        .as_ref()?
-        .captures(output)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
-}
+/// Parse JSON manifest from agent stdout.
+/// The manifest is the last valid JSON object in the output.
+fn parse_json_manifest(stdout: &str) -> Option<AsyncManifest> {
+    // In JSON mode, the agent outputs a single JSON object at the end
+    // Try to find and parse it by looking for lines that start with '{'
+    for line in stdout.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('{')
+            && let Ok(manifest) = serde_json::from_str::<AsyncManifest>(trimmed)
+        {
+            return Some(manifest);
+        }
+    }
 
-/// Parse checkpoint ID from agent output text.
-pub fn parse_checkpoint_id(output: &str) -> Option<String> {
-    CHECKPOINT_ID_REGEX
-        .as_ref()?
-        .captures(output)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    // Try parsing from the beginning if stdout starts with '{'
+    if stdout.trim().starts_with('{')
+        && let Ok(manifest) = serde_json::from_str::<AsyncManifest>(stdout.trim())
+    {
+        return Some(manifest);
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -256,49 +268,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_session_id() {
-        let output = r#"
-[info] Starting agent...
-Some output here
-Session ID: 550e8400-e29b-41d4-a716-446655440000
-More output
-"#;
-        let session_id = parse_session_id(output);
+    fn test_parse_json_manifest_completed() {
+        let output = r#"{"outcome":"completed","checkpoint_id":"abc12345-e29b-41d4-a716-446655440000","session_id":"550e8400-e29b-41d4-a716-446655440000","model":"claude-sonnet-4-5-20250929","agent_message":"Done!","steps":3,"total_steps":3,"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}"#;
+
+        let manifest = parse_json_manifest(output);
+        assert!(manifest.is_some());
+        let m = manifest.unwrap();
+        assert_eq!(m.outcome, "completed");
         assert_eq!(
-            session_id,
+            m.session_id,
             Some("550e8400-e29b-41d4-a716-446655440000".to_string())
         );
-    }
-
-    #[test]
-    fn test_parse_session_id_no_match() {
-        let output = "No session ID here";
-        let session_id = parse_session_id(output);
-        assert_eq!(session_id, None);
-    }
-
-    #[test]
-    fn test_parse_checkpoint_id() {
-        let output = r#"
-[success] Checkpoint abc12345-e29b-41d4-a716-446655440000 saved to /path/to/file
-
-To resume, run:
-stakpak -c abc12345-e29b-41d4-a716-446655440000
-
-Session ID: 550e8400-e29b-41d4-a716-446655440000
-"#;
-        let checkpoint_id = parse_checkpoint_id(output);
         assert_eq!(
-            checkpoint_id,
+            m.checkpoint_id,
             Some("abc12345-e29b-41d4-a716-446655440000".to_string())
         );
+        assert!(m.pause_reason.is_none());
     }
 
     #[test]
-    fn test_parse_checkpoint_id_no_match() {
-        let output = "No checkpoint here";
-        let checkpoint_id = parse_checkpoint_id(output);
-        assert_eq!(checkpoint_id, None);
+    fn test_parse_json_manifest_paused() {
+        let output = r#"{"outcome":"paused","checkpoint_id":"abc12345-e29b-41d4-a716-446655440000","session_id":"550e8400-e29b-41d4-a716-446655440000","model":"claude-sonnet-4-5-20250929","agent_message":"Need approval","steps":2,"total_steps":2,"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150},"pause_reason":{"type":"tool_approval_required","pending_tool_calls":[{"id":"call_123","name":"run_command","arguments":{"command":"ls"}}]},"resume_hint":"stakpak -c abc12345-e29b-41d4-a716-446655440000 --approve-all"}"#;
+
+        let manifest = parse_json_manifest(output);
+        assert!(manifest.is_some());
+        let m = manifest.unwrap();
+        assert_eq!(m.outcome, "paused");
+        assert!(m.pause_reason.is_some());
+        assert!(m.resume_hint.is_some());
+    }
+
+    #[test]
+    fn test_parse_json_manifest_no_match() {
+        let output = "No JSON here, just text output";
+        let manifest = parse_json_manifest(output);
+        assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn test_parse_json_manifest_with_prefix() {
+        // JSON output may have some text before it
+        let output = r#"[info] Starting...
+[info] Processing...
+{"outcome":"completed","checkpoint_id":"abc12345","session_id":"def67890","model":"test","agent_message":null,"steps":1,"total_steps":1,"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
+
+        let manifest = parse_json_manifest(output);
+        assert!(manifest.is_some());
+        assert_eq!(manifest.unwrap().outcome, "completed");
     }
 
     #[test]
@@ -308,12 +324,16 @@ Session ID: 550e8400-e29b-41d4-a716-446655440000
             session_id: Some("test-session".to_string()),
             checkpoint_id: Some("test-checkpoint".to_string()),
             timed_out: false,
+            paused: false,
+            pause_reason: None,
+            resume_hint: None,
             stdout: String::new(),
             stderr: String::new(),
         };
 
         assert!(result.success());
         assert!(!result.failed());
+        assert!(!result.is_paused());
     }
 
     #[test]
@@ -323,12 +343,16 @@ Session ID: 550e8400-e29b-41d4-a716-446655440000
             session_id: None,
             checkpoint_id: None,
             timed_out: false,
+            paused: false,
+            pause_reason: None,
+            resume_hint: None,
             stdout: String::new(),
             stderr: "Error occurred".to_string(),
         };
 
         assert!(!result.success());
         assert!(result.failed());
+        assert!(!result.is_paused());
     }
 
     #[test]
@@ -338,12 +362,37 @@ Session ID: 550e8400-e29b-41d4-a716-446655440000
             session_id: None,
             checkpoint_id: None,
             timed_out: true,
+            paused: false,
+            pause_reason: None,
+            resume_hint: None,
             stdout: String::new(),
             stderr: String::new(),
         };
 
         assert!(!result.success());
         assert!(result.failed());
+        assert!(!result.is_paused());
+    }
+
+    #[test]
+    fn test_agent_result_paused() {
+        let result = AgentResult {
+            exit_code: Some(EXIT_CODE_PAUSED),
+            session_id: Some("test-session".to_string()),
+            checkpoint_id: Some("test-checkpoint".to_string()),
+            timed_out: false,
+            paused: true,
+            pause_reason: Some(PauseReason::ToolApprovalRequired {
+                pending_tool_calls: vec![],
+            }),
+            resume_hint: Some("stakpak -c test-checkpoint --approve-all".to_string()),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+
+        assert!(!result.success());
+        assert!(!result.failed()); // Paused is not a failure
+        assert!(result.is_paused());
     }
 
     // Integration tests would require mocking the stakpak binary

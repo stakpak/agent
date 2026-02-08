@@ -20,6 +20,8 @@ pub enum RunStatus {
     Skipped,
     /// Timed out
     TimedOut,
+    /// Paused (agent needs approval or input to continue)
+    Paused,
 }
 
 impl std::fmt::Display for RunStatus {
@@ -30,6 +32,7 @@ impl std::fmt::Display for RunStatus {
             RunStatus::Failed => write!(f, "failed"),
             RunStatus::Skipped => write!(f, "skipped"),
             RunStatus::TimedOut => write!(f, "timed_out"),
+            RunStatus::Paused => write!(f, "paused"),
         }
     }
 }
@@ -44,6 +47,7 @@ impl std::str::FromStr for RunStatus {
             "failed" => Ok(RunStatus::Failed),
             "skipped" => Ok(RunStatus::Skipped),
             "timed_out" => Ok(RunStatus::TimedOut),
+            "paused" => Ok(RunStatus::Paused),
             _ => Err(format!("Unknown run status: {}", s)),
         }
     }

@@ -89,6 +89,7 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
                     RunStatus::Failed => "\x1b[31mfailed\x1b[0m",
                     RunStatus::Skipped => "\x1b[90mskipped\x1b[0m",
                     RunStatus::TimedOut => "\x1b[31mtimed out\x1b[0m",
+                    RunStatus::Paused => "\x1b[33mpaused\x1b[0m",
                 };
                 let time_str = run.started_at.format("%Y-%m-%d %H:%M:%S");
                 println!("  #{:<4} {} {}", run.id, time_str, status_str);
