@@ -536,43 +536,54 @@ pub async fn run_interactive(
                                 ));
                             }
                             if !is_cancelled {
-                                let content_parts: Vec<String> = result
-                                    .content
-                                    .iter()
-                                    .map(|c| match c.raw.as_text() {
-                                        Some(text) => text.text.clone(),
-                                        None => String::new(),
-                                    })
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-
-                                let status = result.get_status();
-                                let result_content = if status == ToolCallResultStatus::Error
-                                    && content_parts.len() >= 2
-                                {
-                                    // For error cases, preserve the original formatting
-                                    let error_message = content_parts[1..].join(": ");
-                                    format!("[{}] {}", content_parts[0], error_message)
+                                // If a CANCELLED result was already inserted for this tool_call
+                                // (e.g., user sent a message while the tool was in-flight),
+                                // skip adding the real result to avoid duplicate tool_call_ids.
+                                let already_resolved = messages.iter().any(|m| {
+                                    m.role == Role::Tool
+                                        && m.tool_call_id.as_deref() == Some(&tool_call.id)
+                                });
+                                if already_resolved {
+                                    // Skip — a CANCELLED placeholder was already inserted
                                 } else {
-                                    content_parts.join("\n")
-                                };
+                                    let content_parts: Vec<String> = result
+                                        .content
+                                        .iter()
+                                        .map(|c| match c.raw.as_text() {
+                                            Some(text) => text.text.clone(),
+                                            None => String::new(),
+                                        })
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
 
-                                messages.push(tool_result(
-                                    tool_call.clone().id,
-                                    result_content.clone(),
-                                ));
+                                    let status = result.get_status();
+                                    let result_content = if status == ToolCallResultStatus::Error
+                                        && content_parts.len() >= 2
+                                    {
+                                        // For error cases, preserve the original formatting
+                                        let error_message = content_parts[1..].join(": ");
+                                        format!("[{}] {}", content_parts[0], error_message)
+                                    } else {
+                                        content_parts.join("\n")
+                                    };
 
-                                send_input_event(
-                                    &input_tx,
-                                    InputEvent::ToolResult(
-                                        stakpak_shared::models::integrations::openai::ToolCallResult {
-                                            call: tool_call.clone(),
-                                            result: result_content,
-                                            status,
-                                        },
-                                    ),
-                                )
-                                .await?;
+                                    messages.push(tool_result(
+                                        tool_call.clone().id,
+                                        result_content.clone(),
+                                    ));
+
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ToolResult(
+                                            stakpak_shared::models::integrations::openai::ToolCallResult {
+                                                call: tool_call.clone(),
+                                                result: result_content,
+                                                status,
+                                            },
+                                        ),
+                                    )
+                                    .await?;
+                                }
                             }
                             send_input_event(
                                 &input_tx,
