@@ -300,6 +300,11 @@ fn build_tools_with_caching(
 ///
 /// Caches the last N non-system messages to maximize cache hits
 /// on subsequent requests in a conversation.
+///
+/// Auto-caching is applied **after** merging consecutive same-role messages
+/// to ensure breakpoints land on the actual final message positions. This
+/// prevents wasting breakpoints on intermediate blocks that get folded into
+/// a single merged message (e.g., multiple tool_result user messages).
 fn build_messages_with_caching(
     messages: &[Message],
     validator: &mut CacheControlValidator,
@@ -307,21 +312,74 @@ fn build_messages_with_caching(
 ) -> Result<Vec<AnthropicMessage>> {
     let non_system: Vec<&Message> = messages.iter().filter(|m| m.role != Role::System).collect();
 
-    let len = non_system.len();
-    let cache_start_index = len.saturating_sub(tail_count);
-
-    // Phase 1: Convert each message individually
+    // Phase 1: Convert each message individually (no auto-caching yet)
     let converted: Vec<AnthropicMessage> = non_system
         .iter()
-        .enumerate()
-        .map(|(i, msg)| {
-            let should_auto_cache = tail_count > 0 && i >= cache_start_index;
-            to_anthropic_message_with_caching(msg, validator, should_auto_cache)
-        })
+        .map(|msg| to_anthropic_message_with_caching(msg, validator, false))
         .collect::<Result<Vec<_>>>()?;
 
     // Phase 2: Merge consecutive same-role messages
-    Ok(merge_consecutive_messages(converted))
+    let mut merged = merge_consecutive_messages(converted);
+
+    // Phase 3: Apply tail caching to the last N *merged* messages.
+    // This ensures breakpoints are placed on the actual final message
+    // boundaries after merging, not on pre-merge positions that may
+    // end up as intermediate blocks inside a merged message.
+    if tail_count > 0 {
+        let len = merged.len();
+        let cache_start = len.saturating_sub(tail_count);
+        for msg in &mut merged[cache_start..] {
+            apply_tail_cache_to_message(msg, validator);
+        }
+    }
+
+    Ok(merged)
+}
+
+/// Apply ephemeral cache control to the last content block of a message.
+///
+/// Used for tail-caching after message merging to ensure cache breakpoints
+/// land on the actual last block of each merged message.
+fn apply_tail_cache_to_message(msg: &mut AnthropicMessage, validator: &mut CacheControlValidator) {
+    let cache = crate::types::CacheControl::ephemeral();
+    let context = if msg.role == "assistant" {
+        CacheContext::assistant_message_part()
+    } else {
+        CacheContext::user_message_part()
+    };
+
+    let Some(validated_cache) = validator.validate(Some(&cache), context) else {
+        return; // Breakpoint limit exceeded
+    };
+
+    let anthropic_cc = AnthropicCacheControl::from(&validated_cache);
+    match &mut msg.content {
+        AnthropicMessageContent::Blocks(blocks) => {
+            if let Some(last) = blocks.last_mut() {
+                set_block_cache_control(last, Some(anthropic_cc));
+            }
+        }
+        AnthropicMessageContent::String(s) => {
+            // Convert to blocks format to attach cache control
+            msg.content = AnthropicMessageContent::Blocks(vec![AnthropicContent::Text {
+                text: std::mem::take(s),
+                cache_control: Some(anthropic_cc),
+            }]);
+        }
+    }
+}
+
+/// Set cache_control on an AnthropicContent block.
+fn set_block_cache_control(block: &mut AnthropicContent, cc: Option<AnthropicCacheControl>) {
+    match block {
+        AnthropicContent::Text { cache_control, .. }
+        | AnthropicContent::ToolUse { cache_control, .. }
+        | AnthropicContent::ToolResult { cache_control, .. }
+        | AnthropicContent::Image { cache_control, .. } => *cache_control = cc,
+        AnthropicContent::Thinking { .. } | AnthropicContent::RedactedThinking { .. } => {
+            // Thinking blocks don't support cache_control
+        }
+    }
 }
 
 /// Merge consecutive messages with the same role into single messages.
@@ -1092,6 +1150,192 @@ mod tests {
             }
             assert!(matches!(&blocks[1], AnthropicContent::ToolResult { .. }));
             assert!(matches!(&blocks[2], AnthropicContent::ToolResult { .. }));
+        }
+    }
+
+    // --- apply_tail_cache_to_message tests ---
+
+    #[test]
+    fn test_apply_tail_cache_to_string_message() {
+        let mut validator = CacheControlValidator::new();
+        let mut msg = user_msg("hello");
+
+        apply_tail_cache_to_message(&mut msg, &mut validator);
+
+        // Should convert to blocks and add cache_control
+        match &msg.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    AnthropicContent::Text {
+                        text,
+                        cache_control,
+                    } => {
+                        assert_eq!(text, "hello");
+                        assert!(cache_control.is_some());
+                    }
+                    _ => panic!("Expected Text block"),
+                }
+            }
+            _ => panic!("Expected Blocks content after tail cache"),
+        }
+        assert_eq!(validator.breakpoint_count(), 1);
+    }
+
+    #[test]
+    fn test_apply_tail_cache_to_blocks_message() {
+        let mut validator = CacheControlValidator::new();
+        let mut msg = user_blocks_msg(vec![
+            tool_result_block("t1", "result1"),
+            tool_result_block("t2", "result2"),
+        ]);
+
+        apply_tail_cache_to_message(&mut msg, &mut validator);
+
+        // Only the LAST block should get cache_control
+        if let AnthropicMessageContent::Blocks(blocks) = &msg.content {
+            assert_eq!(blocks.len(), 2);
+            match &blocks[0] {
+                AnthropicContent::ToolResult { cache_control, .. } => {
+                    assert!(cache_control.is_none(), "First block should NOT be cached");
+                }
+                _ => panic!("Expected ToolResult"),
+            }
+            match &blocks[1] {
+                AnthropicContent::ToolResult { cache_control, .. } => {
+                    assert!(cache_control.is_some(), "Last block SHOULD be cached");
+                }
+                _ => panic!("Expected ToolResult"),
+            }
+        } else {
+            panic!("Expected Blocks content");
+        }
+        assert_eq!(validator.breakpoint_count(), 1);
+    }
+
+    #[test]
+    fn test_apply_tail_cache_respects_breakpoint_limit() {
+        let mut validator = CacheControlValidator::new();
+        let cache = crate::types::CacheControl::ephemeral();
+
+        // Exhaust all 4 breakpoints
+        for _ in 0..4 {
+            validator.validate(Some(&cache), CacheContext::user_message_part());
+        }
+        assert!(validator.is_at_limit());
+
+        let mut msg = user_msg("no room");
+        apply_tail_cache_to_message(&mut msg, &mut validator);
+
+        // Should remain a String (no conversion) since breakpoint was rejected
+        match &msg.content {
+            AnthropicMessageContent::String(s) => assert_eq!(s, "no room"),
+            _ => panic!("Should not convert to blocks when breakpoint limit exceeded"),
+        }
+    }
+
+    #[test]
+    fn test_tail_cache_after_merge_uses_one_breakpoint_for_merged_tool_results() {
+        // Scenario: 3 consecutive tool_result user messages merge into 1.
+        // Tail caching should use only 1 breakpoint (on the merged message),
+        // NOT 3 breakpoints (one per pre-merge message).
+        let mut validator = CacheControlValidator::new();
+
+        let mut merged = [
+            assistant_blocks_msg(vec![
+                tool_use_block("t1", "tool_a"),
+                tool_use_block("t2", "tool_b"),
+                tool_use_block("t3", "tool_c"),
+            ]),
+            // Simulate 3 tool_result messages already merged into 1
+            user_blocks_msg(vec![
+                tool_result_block("t1", "result_a"),
+                tool_result_block("t2", "result_b"),
+                tool_result_block("t3", "result_c"),
+            ]),
+        ];
+
+        // Apply tail caching with tail_count=2 (both messages)
+        let len = merged.len();
+        let cache_start = len.saturating_sub(2);
+        for msg in &mut merged[cache_start..] {
+            apply_tail_cache_to_message(msg, &mut validator);
+        }
+
+        // Should use exactly 2 breakpoints (one per merged message)
+        assert_eq!(
+            validator.breakpoint_count(),
+            2,
+            "Should use 2 breakpoints, not more"
+        );
+
+        // Assistant message: last block (tool_use t3) should be cached
+        if let AnthropicMessageContent::Blocks(blocks) = &merged[0].content {
+            match &blocks[2] {
+                AnthropicContent::ToolUse { cache_control, .. } => {
+                    assert!(cache_control.is_some(), "Last tool_use should be cached");
+                }
+                _ => panic!("Expected ToolUse"),
+            }
+            // First two should NOT be cached
+            for block in &blocks[..2] {
+                match block {
+                    AnthropicContent::ToolUse { cache_control, .. } => {
+                        assert!(cache_control.is_none());
+                    }
+                    _ => panic!("Expected ToolUse"),
+                }
+            }
+        }
+
+        // User message: last block (tool_result t3) should be cached
+        if let AnthropicMessageContent::Blocks(blocks) = &merged[1].content {
+            match &blocks[2] {
+                AnthropicContent::ToolResult { cache_control, .. } => {
+                    assert!(cache_control.is_some(), "Last tool_result should be cached");
+                }
+                _ => panic!("Expected ToolResult"),
+            }
+            // First two should NOT be cached
+            for block in &blocks[..2] {
+                match block {
+                    AnthropicContent::ToolResult { cache_control, .. } => {
+                        assert!(cache_control.is_none());
+                    }
+                    _ => panic!("Expected ToolResult"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_block_cache_control() {
+        let cc = AnthropicCacheControl::ephemeral();
+
+        // Text block
+        let mut block = text_block("hello");
+        set_block_cache_control(&mut block, Some(cc.clone()));
+        match &block {
+            AnthropicContent::Text { cache_control, .. } => assert!(cache_control.is_some()),
+            _ => panic!("Expected Text"),
+        }
+
+        // ToolResult block
+        let mut block = tool_result_block("t1", "result");
+        set_block_cache_control(&mut block, Some(cc.clone()));
+        match &block {
+            AnthropicContent::ToolResult { cache_control, .. } => {
+                assert!(cache_control.is_some())
+            }
+            _ => panic!("Expected ToolResult"),
+        }
+
+        // ToolUse block
+        let mut block = tool_use_block("t1", "tool_a");
+        set_block_cache_control(&mut block, Some(cc.clone()));
+        match &block {
+            AnthropicContent::ToolUse { cache_control, .. } => assert!(cache_control.is_some()),
+            _ => panic!("Expected ToolUse"),
         }
     }
 }
