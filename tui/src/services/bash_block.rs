@@ -2239,3 +2239,614 @@ pub fn render_run_command_block(
 
     owned_lines
 }
+
+/// Render a task wait block showing progress of background tasks
+/// Displays a bordered box with task statuses and overall progress
+pub fn render_task_wait_block(
+    task_updates: &[stakpak_shared::models::integrations::openai::TaskUpdate],
+    progress: f64,
+    target_task_ids: &[String],
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Border color - gray for all states (could differentiate later)
+    let border_color = term_color(Color::Gray);
+
+    // Check if all tasks are completed
+    let all_completed = progress >= 100.0;
+
+    // Dot color and title suffix based on progress
+    let (dot_color, title_suffix, suffix_color) = if all_completed {
+        (Color::LightGreen, "".to_string(), None)
+    } else {
+        let completed_count = task_updates
+            .iter()
+            .filter(|t| {
+                t.is_target
+                    && (t.status == "Completed"
+                        || t.status == "Failed"
+                        || t.status == "Cancelled"
+                        || t.status == "TimedOut")
+            })
+            .count();
+        let total_count = target_task_ids.len();
+        (
+            Color::Yellow,
+            format!(" - Waiting ({}/{})", completed_count, total_count),
+            Some(Color::Yellow),
+        )
+    };
+
+    // Build title
+    let base_title = "Wait for Tasks";
+    let title_text = format!("{}{}", base_title, title_suffix);
+    let title_display_len = calculate_display_width(&title_text);
+    let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
+
+    // Build title spans
+    let title_border = if let Some(color) = suffix_color {
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", base_title),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} ", title_suffix.trim_start()),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", title_text),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    // Filter to show only target tasks, sorted by status (running first, then completed)
+    let mut target_tasks: Vec<_> = task_updates.iter().filter(|t| t.is_target).collect();
+
+    // Sort: Running tasks first, then by task_id
+    target_tasks.sort_by(|a, b| {
+        let a_running = a.status == "Running" || a.status == "Pending";
+        let b_running = b.status == "Running" || b.status == "Pending";
+        match (a_running, b_running) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.task_id.cmp(&b.task_id),
+        }
+    });
+
+    // Render each task
+    for task in &target_tasks {
+        let (status_icon, status_color) = match task.status.as_str() {
+            "Running" => ("◐", Color::Yellow),
+            "Pending" => ("○", Color::DarkGray),
+            "Paused" => ("⏸", Color::Magenta),
+            "Completed" => ("✓", Color::LightGreen),
+            "Failed" => ("✗", Color::LightRed),
+            "Cancelled" => ("⊘", Color::LightRed),
+            "TimedOut" => ("⏱", Color::LightRed),
+            _ => ("?", Color::DarkGray),
+        };
+
+        // Format duration
+        let duration_str = task
+            .duration_secs
+            .map(|d| {
+                if d < 60.0 {
+                    format!("{:.1}s", d)
+                } else {
+                    format!("{:.0}m{:.0}s", d / 60.0, d % 60.0)
+                }
+            })
+            .unwrap_or_else(|| "...".to_string());
+
+        // Truncate task_id for display (show first 8 chars)
+        let task_id_display = if task.task_id.len() > 8 {
+            format!("{}…", &task.task_id[..8])
+        } else {
+            task.task_id.clone()
+        };
+
+        // Get description or fall back to truncated task_id
+        let display_name = task
+            .description
+            .as_ref()
+            .map(|d| {
+                // Truncate description if too long
+                if d.len() > 30 {
+                    format!("{}…", &d[..30])
+                } else {
+                    d.clone()
+                }
+            })
+            .unwrap_or_else(|| task_id_display.clone());
+
+        // Build the task line: "│ ● description [duration] status │"
+        let task_content = format!("{} {} [{}]", display_name, task.status, duration_str);
+        let content_display_width = calculate_display_width(&task_content) + 2; // +2 for icon and space
+        let padding_needed = inner_width.saturating_sub(content_display_width);
+
+        let line_spans = vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" "),
+            Span::styled(
+                status_icon.to_string(),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::styled(display_name, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(
+                format!(" [{}]", duration_str),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(" {}", task.status),
+                Style::default().fg(status_color),
+            ),
+            Span::from(" ".repeat(padding_needed)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ];
+        formatted_lines.push(Line::from(line_spans));
+
+        // If task is paused, show pause info (agent message and pending tool calls)
+        if let Some(pause_info) = &task.pause_info {
+            // Show agent message if present
+            if let Some(agent_msg) = &pause_info.agent_message {
+                let trimmed_msg = agent_msg.trim();
+                if !trimmed_msg.is_empty() {
+                    // Truncate long messages
+                    let display_msg = if trimmed_msg.len() > inner_width.saturating_sub(6) {
+                        format!("{}…", &trimmed_msg[..inner_width.saturating_sub(7)])
+                    } else {
+                        trimmed_msg.to_string()
+                    };
+                    let msg_padding = inner_width.saturating_sub(display_msg.len() + 4);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from("     "),
+                        Span::styled(
+                            display_msg,
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                        Span::from(" ".repeat(msg_padding)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                    ]));
+                }
+            }
+
+            // Show pending tool calls
+            if let Some(tool_calls) = &pause_info.pending_tool_calls {
+                for tc in tool_calls {
+                    // Format: "  → tool_name(args_preview)"
+                    let args_preview = tc
+                        .arguments
+                        .as_ref()
+                        .map(|args| {
+                            let args_str = args.to_string();
+                            if args_str.len() > 40 {
+                                format!("{}…", &args_str[..40])
+                            } else {
+                                args_str
+                            }
+                        })
+                        .unwrap_or_default();
+
+                    let tool_display = if args_preview.is_empty() {
+                        format!("→ {}", tc.name)
+                    } else {
+                        format!("→ {}({})", tc.name, args_preview)
+                    };
+
+                    let tool_display_width = calculate_display_width(&tool_display) + 4;
+                    let tool_padding = inner_width.saturating_sub(tool_display_width);
+
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from("     "),
+                        Span::styled("→ ", Style::default().fg(Color::Magenta)),
+                        Span::styled(
+                            tc.name.clone(),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            if args_preview.is_empty() {
+                                String::new()
+                            } else {
+                                format!("({})", args_preview)
+                            },
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::from(" ".repeat(tool_padding)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                    ]));
+                }
+            }
+        }
+    }
+
+    // If no target tasks, show a message
+    if target_tasks.is_empty() {
+        let msg = "No tasks to display";
+        let padding = inner_width.saturating_sub(msg.len());
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" "),
+            Span::styled(msg.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::from(" ".repeat(padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+    }
+
+    formatted_lines.push(bottom_border);
+
+    // Add spacing marker
+    formatted_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    formatted_lines
+}
+
+/// Render a pending block for resume_subagent_task showing what the subagent wants to do
+pub fn render_subagent_resume_pending_block<'a>(
+    tool_call: &ToolCall,
+    is_auto_approved: bool,
+    pause_info: Option<&stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    width: usize,
+) -> Vec<Line<'a>> {
+    let mut formatted_lines: Vec<Line<'a>> = Vec::new();
+
+    let border_color = if is_auto_approved {
+        Color::Green
+    } else {
+        Color::Cyan
+    };
+    let inner_width = width.saturating_sub(4);
+
+    // Parse arguments to determine resume type
+    let args = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+
+    // Extract task_id from arguments
+    let task_id = args
+        .as_ref()
+        .and_then(|a| a.get("task_id").and_then(|v| v.as_str()).map(String::from))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Check if this is an input-based resume (for completed agents) or tool approval resume
+    let input_text = args
+        .as_ref()
+        .and_then(|a| a.get("input").and_then(|v| v.as_str()).map(String::from));
+
+    let has_approve_all = args
+        .as_ref()
+        .and_then(|a| a.get("approve_all").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+
+    // Title
+    let title = format!(" Resume Subagent [{}] ", task_id);
+    let title_len = calculate_display_width(&title);
+    let dashes_after = inner_width.saturating_sub(title_len + 1);
+
+    // Top border with title
+    let top_border = Line::from(vec![
+        Span::styled("╭─", Style::default().fg(border_color)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{}╮", "─".repeat(dashes_after)),
+            Style::default().fg(border_color),
+        ),
+    ]);
+    formatted_lines.push(top_border);
+
+    // Handle input-based resume (completed agent, continuing with user input)
+    if let Some(input) = input_text {
+        let header = "Continue with input:";
+        let header_padding = inner_width.saturating_sub(calculate_display_width(header));
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│ ", Style::default().fg(border_color)),
+            Span::styled(
+                header.to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" ".repeat(header_padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+
+        // Empty line
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" ".repeat(inner_width + 2)),
+            Span::styled("│", Style::default().fg(border_color)),
+        ]));
+
+        // Show the input text, wrapped if necessary
+        let input_lines = wrap_text_to_lines(&input, inner_width.saturating_sub(4));
+        for line in input_lines {
+            let line_width = calculate_display_width(&line);
+            let line_padding = inner_width.saturating_sub(line_width + 2);
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(border_color)),
+                Span::styled("  ", Style::default()),
+                Span::styled(line, Style::default().fg(Color::White)),
+                Span::from(" ".repeat(line_padding)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ]));
+        }
+
+        // Empty line
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" ".repeat(inner_width + 2)),
+            Span::styled("│", Style::default().fg(border_color)),
+        ]));
+    } else if has_approve_all || pause_info.is_some() {
+        // Handle tool approval resume - show what the subagent wants to execute
+        if let Some(pi) = pause_info {
+            // Header line
+            let header = "Subagent wants to execute:";
+            let header_padding = inner_width.saturating_sub(calculate_display_width(header));
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(border_color)),
+                Span::styled(
+                    header.to_string(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::from(" ".repeat(header_padding)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ]));
+
+            // Empty line
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" ".repeat(inner_width + 2)),
+                Span::styled("│", Style::default().fg(border_color)),
+            ]));
+
+            // Show pending tool calls
+            if let Some(tool_calls) = &pi.pending_tool_calls {
+                for tc in tool_calls {
+                    // Tool name line
+                    let tool_header = format!("  → {}", tc.name);
+                    let tool_header_width = calculate_display_width(&tool_header);
+                    let tool_header_padding = inner_width.saturating_sub(tool_header_width);
+
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(border_color)),
+                        Span::styled("  → ", Style::default().fg(Color::Magenta)),
+                        Span::styled(
+                            tc.name.clone(),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::from(" ".repeat(tool_header_padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+
+                    // Show arguments in a readable format
+                    if let Some(args) = &tc.arguments {
+                        let formatted_args = format_tool_arguments_readable(args, inner_width - 6);
+                        for arg_line in formatted_args {
+                            let arg_display_width = calculate_display_width(&arg_line);
+                            let arg_padding = inner_width.saturating_sub(arg_display_width + 4);
+
+                            formatted_lines.push(Line::from(vec![
+                                Span::styled("│ ", Style::default().fg(border_color)),
+                                Span::from("    "),
+                                Span::styled(arg_line, Style::default().fg(Color::DarkGray)),
+                                Span::from(" ".repeat(arg_padding)),
+                                Span::styled(" │", Style::default().fg(border_color)),
+                            ]));
+                        }
+                    }
+
+                    // Empty line between tool calls
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" ".repeat(inner_width + 2)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                    ]));
+                }
+            }
+        } else {
+            // approve_all but no pause_info cached
+            let msg = "Approve all pending tool calls";
+            let msg_padding = inner_width.saturating_sub(calculate_display_width(msg));
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(border_color)),
+                Span::styled(msg.to_string(), Style::default().fg(Color::Yellow)),
+                Span::from(" ".repeat(msg_padding)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ]));
+
+            // Empty line
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" ".repeat(inner_width + 2)),
+                Span::styled("│", Style::default().fg(border_color)),
+            ]));
+        }
+    } else {
+        // No pause info and no input - generic message
+        let msg = "Resume subagent task";
+        let msg_padding = inner_width.saturating_sub(calculate_display_width(msg));
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│ ", Style::default().fg(border_color)),
+            Span::styled(msg.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::from(" ".repeat(msg_padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+
+        // Empty line
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" ".repeat(inner_width + 2)),
+            Span::styled("│", Style::default().fg(border_color)),
+        ]));
+    }
+
+    // Bottom border
+    let bottom_border = Line::from(vec![
+        Span::styled("╰", Style::default().fg(border_color)),
+        Span::styled(
+            "─".repeat(inner_width + 2),
+            Style::default().fg(border_color),
+        ),
+        Span::styled("╯", Style::default().fg(border_color)),
+    ]);
+    formatted_lines.push(bottom_border);
+
+    // Add spacing marker
+    formatted_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    formatted_lines
+}
+
+/// Wrap text to fit within a given width, respecting word boundaries
+fn wrap_text_to_lines(text: &str, max_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        if current_line.is_empty() {
+            if word.chars().count() > max_width {
+                // Word is too long, truncate it
+                let truncated: String = word.chars().take(max_width.saturating_sub(1)).collect();
+                lines.push(format!("{}…", truncated));
+            } else {
+                current_line = word.to_string();
+            }
+        } else if current_line.chars().count() + 1 + word.chars().count() <= max_width {
+            current_line.push(' ');
+            current_line.push_str(word);
+        } else {
+            lines.push(current_line);
+            if word.chars().count() > max_width {
+                let truncated: String = word.chars().take(max_width.saturating_sub(1)).collect();
+                lines.push(format!("{}…", truncated));
+                current_line = String::new();
+            } else {
+                current_line = word.to_string();
+            }
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    // Limit to 5 lines max
+    if lines.len() > 5 {
+        lines.truncate(4);
+        lines.push("...".to_string());
+    }
+
+    lines
+}
+
+/// Format tool arguments in a readable way for display
+fn format_tool_arguments_readable(args: &serde_json::Value, max_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if let Some(obj) = args.as_object() {
+        for (key, value) in obj {
+            let value_str = match value {
+                serde_json::Value::String(s) => {
+                    // For long strings, truncate and show preview
+                    let max_value_len = max_width.saturating_sub(key.len() + 4);
+                    if s.chars().count() > max_value_len {
+                        let truncated: String =
+                            s.chars().take(max_value_len.saturating_sub(3)).collect();
+                        format!("\"{}…\"", truncated)
+                    } else {
+                        format!("\"{}\"", s)
+                    }
+                }
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Array(arr) => {
+                    if arr.is_empty() {
+                        "[]".to_string()
+                    } else {
+                        format!("[{} items]", arr.len())
+                    }
+                }
+                serde_json::Value::Object(_) => "{...}".to_string(),
+                serde_json::Value::Null => "null".to_string(),
+            };
+
+            let line = format!("{}: {}", key, value_str);
+            // Truncate if still too long (respecting char boundaries)
+            if line.chars().count() > max_width {
+                let truncated: String = line.chars().take(max_width.saturating_sub(1)).collect();
+                lines.push(format!("{}…", truncated));
+            } else {
+                lines.push(line);
+            }
+        }
+    } else {
+        // Not an object, just show the raw value truncated
+        let s = args.to_string();
+        if s.chars().count() > max_width {
+            let truncated: String = s.chars().take(max_width.saturating_sub(1)).collect();
+            lines.push(format!("{}…", truncated));
+        } else {
+            lines.push(s);
+        }
+    }
+
+    lines
+}

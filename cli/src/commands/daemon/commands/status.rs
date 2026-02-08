@@ -129,6 +129,7 @@ async fn get_last_run_info(db: &DaemonDb, trigger_name: &str) -> Option<(DateTim
             RunStatus::Failed => "failed",
             RunStatus::Skipped => "skipped",
             RunStatus::TimedOut => "timed out",
+            RunStatus::Paused => "paused",
         };
         (
             run.finished_at.unwrap_or(run.started_at),

@@ -94,6 +94,7 @@ mod tests {
             timeout: Some(Duration::from_secs(1800)),
             enable_slack_tools: None,
             enable_subagents: None,
+            pause_on_approval: None,
         }
     }
 
@@ -110,6 +111,7 @@ mod tests {
             timeout: None,
             enable_slack_tools: None,
             enable_subagents: None,
+            pause_on_approval: None,
         }
     }
 

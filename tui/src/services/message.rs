@@ -70,6 +70,20 @@ pub enum MessageContent {
     /// View file block - compact display showing file path, line count, and optional grep/glob
     /// (file_path: String, total_lines: usize, grep: Option<String>, glob: Option<String>)
     RenderViewFileBlock(String, usize, Option<String>, Option<String>),
+    /// Task wait block - shows progress of background tasks being waited on
+    /// (task_updates: Vec<TaskUpdate>, overall_progress: f64, target_task_ids: Vec<String>)
+    RenderTaskWaitBlock(
+        Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        f64,
+        Vec<String>,
+    ),
+    /// Subagent resume pending block - shows what the subagent wants to do
+    /// (tool_call: ToolCall, is_auto_approved: bool, pause_info: Option<TaskPauseInfo>)
+    RenderSubagentResumePendingBlock(
+        ToolCall,
+        bool,
+        Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    ),
 }
 
 /// Compute a hash of the MessageContent for cache invalidation.
@@ -204,6 +218,35 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
         MessageContent::UserMessage(text) => {
             18u8.hash(&mut hasher);
             text.hash(&mut hasher);
+        }
+        MessageContent::RenderTaskWaitBlock(task_updates, progress, target_ids) => {
+            19u8.hash(&mut hasher);
+            task_updates.len().hash(&mut hasher);
+            // Hash progress as integer to avoid float hashing issues
+            (*progress as u64).hash(&mut hasher);
+            target_ids.hash(&mut hasher);
+            // Hash task statuses and durations for change detection
+            for task in task_updates {
+                task.task_id.hash(&mut hasher);
+                task.status.hash(&mut hasher);
+                // Hash duration as integer seconds for change detection
+                if let Some(d) = task.duration_secs {
+                    (d as u64).hash(&mut hasher);
+                }
+            }
+        }
+        MessageContent::RenderSubagentResumePendingBlock(tool_call, is_auto, pause_info) => {
+            20u8.hash(&mut hasher);
+            tool_call.id.hash(&mut hasher);
+            is_auto.hash(&mut hasher);
+            if let Some(pi) = pause_info {
+                if let Some(msg) = &pi.agent_message {
+                    msg.hash(&mut hasher);
+                }
+                if let Some(calls) = &pi.pending_tool_calls {
+                    calls.len().hash(&mut hasher);
+                }
+            }
         }
     }
 
@@ -533,6 +576,40 @@ impl Message {
             content: MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob),
             // is_collapsed: Some(true) means it shows in full screen popup only
             is_collapsed: Some(true),
+        }
+    }
+
+    /// Create a task wait block message
+    /// Shows progress of background tasks being waited on with status indicators
+    pub fn render_task_wait_block(
+        task_updates: Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        progress: f64,
+        target_task_ids: Vec<String>,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids),
+            is_collapsed: None,
+        }
+    }
+
+    /// Create a subagent resume pending block message
+    /// Shows what the subagent wants to do (pending tool calls)
+    pub fn render_subagent_resume_pending_block(
+        tool_call: ToolCall,
+        is_auto_approved: bool,
+        pause_info: Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderSubagentResumePendingBlock(
+                tool_call,
+                is_auto_approved,
+                pause_info,
+            ),
+            is_collapsed: None,
         }
     }
 }
@@ -1353,6 +1430,30 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
         }
+        MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids) => {
+            let rendered = crate::services::bash_block::render_task_wait_block(
+                task_updates,
+                *progress,
+                target_task_ids,
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderSubagentResumePendingBlock(
+            tool_call,
+            is_auto_approved,
+            pause_info,
+        ) => {
+            let rendered = crate::services::bash_block::render_subagent_resume_pending_block(
+                tool_call,
+                *is_auto_approved,
+                pause_info.as_ref(),
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
     }
 
     lines
@@ -1961,6 +2062,33 @@ fn get_wrapped_message_lines_internal(
                         glob.as_deref(),
                     )
                 };
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids) => {
+                let rendered_lines = crate::services::bash_block::render_task_wait_block(
+                    task_updates,
+                    *progress,
+                    target_task_ids,
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderSubagentResumePendingBlock(
+                tool_call,
+                is_auto_approved,
+                pause_info,
+            ) => {
+                let rendered_lines =
+                    crate::services::bash_block::render_subagent_resume_pending_block(
+                        tool_call,
+                        *is_auto_approved,
+                        pause_info.as_ref(),
+                        width,
+                    );
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);

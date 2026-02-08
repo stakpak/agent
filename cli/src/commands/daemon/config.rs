@@ -79,6 +79,11 @@ pub struct DaemonDefaults {
     /// Enable subagents for agent.
     #[serde(default)]
     pub enable_subagents: bool,
+
+    /// Pause when tools require approval instead of auto-approving.
+    /// When true, the agent will pause and exit with code 10 when tools need approval.
+    #[serde(default = "default_pause_on_approval")]
+    pub pause_on_approval: bool,
 }
 
 impl Default for DaemonDefaults {
@@ -89,6 +94,7 @@ impl Default for DaemonDefaults {
             check_timeout: default_check_timeout(),
             enable_slack_tools: false,
             enable_subagents: false,
+            pause_on_approval: default_pause_on_approval(),
         }
     }
 }
@@ -103,6 +109,10 @@ fn default_timeout() -> Duration {
 
 fn default_check_timeout() -> Duration {
     Duration::from_secs(30) // 30 seconds
+}
+
+fn default_pause_on_approval() -> bool {
+    false // Default to auto-approve, matching async mode default
 }
 
 /// A scheduled trigger that can wake the agent.
@@ -145,6 +155,10 @@ pub struct Trigger {
     /// Enable subagents for agent.
     /// Falls back to defaults.enable_subagents if not specified.
     pub enable_subagents: Option<bool>,
+
+    /// Pause when tools require approval instead of auto-approving.
+    /// Falls back to defaults.pause_on_approval if not specified.
+    pub pause_on_approval: Option<bool>,
 }
 
 impl Trigger {
@@ -172,6 +186,11 @@ impl Trigger {
     /// Get the effective enable_subagents, falling back to defaults.
     pub fn effective_enable_subagents(&self, defaults: &DaemonDefaults) -> bool {
         self.enable_subagents.unwrap_or(defaults.enable_subagents)
+    }
+
+    /// Get the effective pause_on_approval, falling back to defaults.
+    pub fn effective_pause_on_approval(&self, defaults: &DaemonDefaults) -> bool {
+        self.pause_on_approval.unwrap_or(defaults.pause_on_approval)
     }
 }
 

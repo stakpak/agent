@@ -223,6 +223,7 @@ mod tests {
             timeout: None,
             enable_slack_tools: None,
             enable_subagents: None,
+            pause_on_approval: None,
         }
     }
 

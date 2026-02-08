@@ -345,6 +345,7 @@ async fn handle_trigger_event(
         workdir: None,
         enable_slack_tools: trigger.effective_enable_slack_tools(&config.defaults),
         enable_subagents: trigger.effective_enable_subagents(&config.defaults),
+        pause_on_approval: trigger.effective_pause_on_approval(&config.defaults),
     };
 
     match spawn_agent(spawn_config).await {
@@ -366,6 +367,17 @@ async fn handle_trigger_event(
             let (status, error_msg) = if result.timed_out {
                 print_event("timeout", &trigger.name, "Agent timed out");
                 (RunStatus::TimedOut, Some("Agent timed out".to_string()))
+            } else if result.is_paused() {
+                let resume_hint = result
+                    .resume_hint
+                    .as_deref()
+                    .unwrap_or("stakpak daemon resume <run_id>");
+                print_event(
+                    "pause",
+                    &trigger.name,
+                    &format!("Agent paused - resume with: {}", resume_hint),
+                );
+                (RunStatus::Paused, None)
             } else if result.success() {
                 print_event("done", &trigger.name, "Agent completed successfully");
                 (RunStatus::Completed, None)
@@ -407,6 +419,7 @@ async fn handle_trigger_event(
                 trigger = %trigger.name,
                 status = ?status,
                 session_id = ?result.session_id,
+                paused = result.is_paused(),
                 "Agent completed"
             );
         }

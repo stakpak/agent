@@ -3,7 +3,6 @@ use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
-use stakpak_shared::models::subagent::SubagentConfigs;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -21,7 +20,10 @@ use commands::{
     Commands,
     agent::{
         self,
-        run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
+        run::{
+            AsyncOutcome, OutputFormat, ResumeInput, RunAsyncConfig, RunInteractiveConfig,
+            pause::EXIT_CODE_PAUSED,
+        },
     },
 };
 use config::{AppConfig, ModelsCache};
@@ -98,13 +100,29 @@ struct Cli {
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
     disable_mcp_mtls: bool,
 
-    /// Enable subagents
-    #[arg(long = "enable-subagents", default_value_t = false)]
-    enable_subagents: bool,
+    /// Disable subagents
+    #[arg(long = "disable-subagents", default_value_t = false)]
+    disable_subagents: bool,
 
-    /// Subagent configuration file subagents.toml
-    #[arg(long = "subagent-config")]
-    subagent_config_path: Option<String>,
+    /// Pause when tools require approval (async mode only)
+    #[arg(long = "pause-on-approval", default_value_t = false)]
+    pause_on_approval: bool,
+
+    /// Approve a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "approve", action = clap::ArgAction::Append)]
+    approve: Option<Vec<String>>,
+
+    /// Reject a specific tool call by ID when resuming (can be repeated)
+    #[arg(long = "reject", action = clap::ArgAction::Append)]
+    reject: Option<Vec<String>>,
+
+    /// Approve all pending tool calls when resuming
+    #[arg(long = "approve-all", default_value_t = false)]
+    approve_all: bool,
+
+    /// Reject all pending tool calls when resuming
+    #[arg(long = "reject-all", default_value_t = false)]
+    reject_all: bool,
 
     /// Ignore AGENTS.md files (skip discovery and injection)
     #[arg(long = "ignore-agents-md", default_value_t = false)]
@@ -140,8 +158,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 }
-
-static DEFAULT_SUBAGENT_CONFIG: &str = include_str!("../subagents.toml");
 
 #[tokio::main]
 async fn main() {
@@ -343,25 +359,7 @@ async fn main() {
                     let _ = update_result;
                     let rulebooks = rulebooks_result;
 
-                    let subagent_configs = if cli.enable_subagents {
-                        if let Some(subagent_config_path) = &cli.subagent_config_path {
-                            SubagentConfigs::load_from_file(subagent_config_path)
-                                .map_err(|e| {
-                                    eprintln!("Warning: Failed to load subagent configs: {}", e);
-                                    e
-                                })
-                                .ok()
-                        } else {
-                            SubagentConfigs::load_from_str(DEFAULT_SUBAGENT_CONFIG)
-                                .map_err(|e| {
-                                    eprintln!("Warning: Failed to load subagent configs: {}", e);
-                                    e
-                                })
-                                .ok()
-                        }
-                    } else {
-                        None
-                    };
+                    let enable_subagents = !cli.disable_subagents;
 
                     // match get_or_build_local_code_index(&config, None, cli.index_big_project)
                     //     .await
@@ -412,7 +410,9 @@ async fn main() {
                     let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                         match std::fs::read_to_string(prompt_file_path) {
                             Ok(content) => {
-                                println!("📖 Reading prompt from file: {}", prompt_file_path);
+                                if cli.output_format != OutputFormat::Json {
+                                    println!("📖 Reading prompt from file: {}", prompt_file_path);
+                                }
                                 content.trim().to_string()
                             }
                             Err(e) => {
@@ -449,7 +449,7 @@ async fn main() {
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
                         true => {
-                            agent::run::run_async(
+                            let async_result = agent::run::run_async(
                                 config,
                                 RunAsyncConfig {
                                     prompt,
@@ -460,7 +460,7 @@ async fn main() {
                                     redact_secrets: !cli.disable_secret_redaction,
                                     privacy_mode: cli.privacy_mode,
                                     rulebooks,
-                                    subagent_configs,
+                                    enable_subagents,
                                     max_steps,
                                     output_format: cli.output_format,
                                     enable_mtls: !cli.disable_mcp_mtls,
@@ -471,9 +471,45 @@ async fn main() {
                                     },
                                     model: default_model.clone(),
                                     agents_md: agents_md.clone(),
+                                    pause_on_approval: cli.pause_on_approval,
+                                    resume_input: if cli.approve.is_some()
+                                        || cli.reject.is_some()
+                                        || cli.approve_all
+                                        || cli.reject_all
+                                    {
+                                        Some(ResumeInput {
+                                            approved: cli
+                                                .approve
+                                                .unwrap_or_default()
+                                                .into_iter()
+                                                .collect(),
+                                            rejected: cli
+                                                .reject
+                                                .unwrap_or_default()
+                                                .into_iter()
+                                                .collect(),
+                                            approve_all: cli.approve_all,
+                                            reject_all: cli.reject_all,
+                                            prompt: None,
+                                        })
+                                    } else {
+                                        None
+                                    },
+                                    auto_approve_tools: None,
                                 },
                             )
-                            .await
+                            .await;
+
+                            // Handle AsyncOutcome → exit code
+                            match async_result {
+                                Ok(AsyncOutcome::Paused { .. }) => {
+                                    cache_task.abort();
+                                    std::process::exit(EXIT_CODE_PAUSED);
+                                }
+                                Ok(AsyncOutcome::Completed { .. }) => Ok(()),
+                                Ok(AsyncOutcome::Failed { error }) => Err(error),
+                                Err(e) => Err(e),
+                            }
                         }
 
                         // Interactive mode: run in TUI
@@ -487,7 +523,7 @@ async fn main() {
                                     redact_secrets: !cli.disable_secret_redaction,
                                     privacy_mode: cli.privacy_mode,
                                     rulebooks,
-                                    subagent_configs,
+                                    enable_subagents,
                                     enable_mtls: !cli.disable_mcp_mtls,
                                     is_git_repo: gitignore::is_git_repo(),
                                     study_mode: cli.study_mode,

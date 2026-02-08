@@ -56,7 +56,7 @@ pub async fn run_server(
                 slack: enable_slack_tools,
             },
             tool_mode,
-            subagent_configs: None,
+            enable_subagents: true,
             bind_address,
             certificate_chain: Arc::new(certificate_chain),
         },

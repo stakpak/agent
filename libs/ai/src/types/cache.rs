@@ -108,11 +108,13 @@ impl Default for CacheControl {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PromptCacheRetention {
     /// Standard in-memory caching (default)
     ///
     /// Cached prompts may persist for 5-10 minutes during normal operation,
     /// or up to an hour during off-peak periods.
+    #[default]
     InMemory,
 
     /// Extended 24-hour caching
@@ -121,12 +123,6 @@ pub enum PromptCacheRetention {
     /// **Note**: Only available for GPT-5.1 series models.
     #[serde(rename = "24h")]
     Extended24h,
-}
-
-impl Default for PromptCacheRetention {
-    fn default() -> Self {
-        Self::InMemory
-    }
 }
 
 impl std::fmt::Display for PromptCacheRetention {

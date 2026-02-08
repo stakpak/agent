@@ -250,10 +250,9 @@ impl ApprovalBar {
         if !self.is_visible() {
             return 0;
         }
-        // For now, estimate max height needed
-        // Top border (1) + up to 3 button rows with spacing (5) + empty line (1) + footer (1) + bottom border (1) = 9
-        // But cap at reasonable height
-        8
+        // Base height: top border (1) + button row (1) + empty line (1) + footer (1) + bottom border (1) = 5
+        // Cap at reasonable height
+        5
     }
 
     /// Render the approval bar with wrapping support

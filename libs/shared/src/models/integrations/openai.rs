@@ -549,6 +549,65 @@ pub struct ToolCallResult {
 pub struct ToolCallResultProgress {
     pub id: Uuid,
     pub message: String,
+    /// Type of progress update for specialized handling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress_type: Option<ProgressType>,
+    /// Structured task updates for task wait progress
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_updates: Option<Vec<TaskUpdate>>,
+    /// Overall progress percentage (0.0 - 100.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f64>,
+}
+
+/// Type of progress update
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ProgressType {
+    /// Command output streaming
+    CommandOutput,
+    /// Task wait progress with structured updates
+    TaskWait,
+    /// Generic progress
+    Generic,
+}
+
+/// Structured task status update
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskUpdate {
+    pub task_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
+    /// Whether this is a target task being waited on
+    #[serde(default)]
+    pub is_target: bool,
+    /// Pause information for paused subagent tasks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_info: Option<TaskPauseInfo>,
+}
+
+/// Pause information for subagent tasks awaiting approval
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskPauseInfo {
+    /// The agent's message before pausing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_message: Option<String>,
+    /// Pending tool calls awaiting approval
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_tool_calls: Option<Vec<PendingToolCall>>,
+}
+
+/// A pending tool call awaiting approval
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PendingToolCall {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<serde_json::Value>,
 }
 
 // =============================================================================

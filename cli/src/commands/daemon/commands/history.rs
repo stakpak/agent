@@ -231,6 +231,7 @@ fn format_status(status: &RunStatus) -> String {
         RunStatus::Failed => "\x1b[31mfailed\x1b[0m".to_string(),
         RunStatus::Skipped => "\x1b[90mskipped\x1b[0m".to_string(),
         RunStatus::TimedOut => "\x1b[31mtimed out\x1b[0m".to_string(),
+        RunStatus::Paused => "\x1b[33mpaused\x1b[0m".to_string(),
     }
 }
 
