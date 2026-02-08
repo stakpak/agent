@@ -15,25 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ./target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-
-      - name: Check
-        run: cargo check --verbose --all-targets
+      - uses: Swatinem/rust-cache@v2
 
       - name: Format Check
         run: cargo fmt -- --check
 
       - name: Lint
-        run: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cargo build --verbose
