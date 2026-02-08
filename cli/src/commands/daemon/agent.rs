@@ -3,7 +3,7 @@
 //! Spawns the stakpak agent as a child process when a trigger fires,
 //! capturing session and checkpoint information from JSON output.
 
-use crate::commands::agent::run::pause::{AsyncManifest, PauseReason, EXIT_CODE_PAUSED};
+use crate::commands::agent::run::pause::{AsyncManifest, EXIT_CODE_PAUSED, PauseReason};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};

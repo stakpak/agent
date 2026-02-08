@@ -190,8 +190,7 @@ impl Trigger {
 
     /// Get the effective pause_on_approval, falling back to defaults.
     pub fn effective_pause_on_approval(&self, defaults: &DaemonDefaults) -> bool {
-        self.pause_on_approval
-            .unwrap_or(defaults.pause_on_approval)
+        self.pause_on_approval.unwrap_or(defaults.pause_on_approval)
     }
 }
 
