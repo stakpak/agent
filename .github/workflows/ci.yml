@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.89.0"
+          components: rustfmt, clippy
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Format Check
