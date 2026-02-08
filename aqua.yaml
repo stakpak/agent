@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/aquaproj/aqua/main/json-schema/aqua-yaml.json
+# Stakpak Agent - Global aqua configuration
+# Tools are lazy-loaded on first use
+# Versions pinned as of 2026-02-06
+
+registries:
+  - type: standard
+    ref: v4.466.1
+
+packages:
+  # ---------------------------------------------------------------------------
+  # Core utilities
+  # ---------------------------------------------------------------------------
+  - name: jqlang/jq@jq-1.8.1
+  - name: mikefarah/yq@v4.52.2
+
+  # ---------------------------------------------------------------------------
+  # Search and file utilities
+  # ---------------------------------------------------------------------------
+  - name: junegunn/fzf@v0.67.0
+  - name: BurntSushi/ripgrep@15.1.0
+  - name: sharkdp/fd@v10.3.0
+  - name: sharkdp/bat@v0.26.1
+  - name: eza-community/eza@v0.23.4
+
+  # ---------------------------------------------------------------------------
+  # Kubernetes tools
+  # ---------------------------------------------------------------------------
+  - name: kubernetes/kubernetes/kubectl@v1.35.0
+  - name: helm/helm@v4.1.0
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure as Code
+  # ---------------------------------------------------------------------------
+  - name: hashicorp/terraform@v1.14.4
+  - name: gruntwork-io/terragrunt@v0.99.1
+
+  # ---------------------------------------------------------------------------
+  # Cloud provider CLIs
+  # ---------------------------------------------------------------------------
+  - name: aws/aws-cli@2.33.16
+  - name: digitalocean/doctl@v1.150.0
+  # Note: gcloud (v555.0.0) and azure-cli (v2.83.0) are installed
+  # via wrapper scripts - they're Python-based and not in aqua registry
+
+  # ---------------------------------------------------------------------------
+  # GitHub
+  # ---------------------------------------------------------------------------
+  - name: cli/cli@v2.86.0 # gh
+
+  # ---------------------------------------------------------------------------
+  # Security scanners
+  # ---------------------------------------------------------------------------
+  - name: aquasecurity/trivy@v0.69.1
+  - name: anchore/grype@v0.107.1
+
+  # ---------------------------------------------------------------------------
+  # Load testing & HTTP tools
+  # ---------------------------------------------------------------------------
+  - name: grafana/k6@v1.5.0
+  - name: hatoo/oha@v1.12.1
+  - name: tsenart/vegeta@v12.13.0
