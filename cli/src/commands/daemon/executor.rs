@@ -184,14 +184,18 @@ pub async fn run_check_script(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs::{self, File};
+    #[cfg(unix)]
     use std::io::Write;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     /// Create a test script that exits with the given code.
+    #[cfg(unix)]
     fn create_script(dir: &Path, name: &str, content: &str) -> std::path::PathBuf {
         let script_path = dir.join(name);
         let mut file = File::create(&script_path).expect("Failed to create script");
@@ -210,6 +214,7 @@ mod tests {
         script_path
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_script_exit_0() {
         let dir = tempdir().expect("Failed to create temp dir");
@@ -231,6 +236,7 @@ mod tests {
         assert!(result.stdout.contains("context data"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_script_exit_1() {
         let dir = tempdir().expect("Failed to create temp dir");
@@ -251,6 +257,7 @@ mod tests {
         assert!(!result.timed_out);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_script_exit_2() {
         let dir = tempdir().expect("Failed to create temp dir");
@@ -271,6 +278,7 @@ mod tests {
         assert!(!result.timed_out);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_script_timeout() {
         let dir = tempdir().expect("Failed to create temp dir");
@@ -285,6 +293,7 @@ mod tests {
         assert!(result.exit_code.is_none());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_capture_stderr() {
         let dir = tempdir().expect("Failed to create temp dir");
@@ -302,6 +311,7 @@ mod tests {
         assert!(result.stderr.contains("stderr message"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_missing_script() {
         let result =
@@ -340,6 +350,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_large_output() {
         let dir = tempdir().expect("Failed to create temp dir");
