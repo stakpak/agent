@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
+use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent, PendingUserMessage};
 use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
@@ -497,17 +497,8 @@ fn handle_input_submitted(
             state.attached_images.len()
         );
 
-        // Show loading immediately if processing images
-        let has_images = !state.attached_images.is_empty();
-
         // Convert any pending image paths before submission
         convert_all_pending_paths(state);
-
-        // Start streaming/loading state if we have images to process
-        if has_images || !state.attached_images.is_empty() {
-            state.is_streaming = true;
-            state.loading = true;
-        }
 
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
@@ -708,16 +699,31 @@ fn handle_input_submitted(
                 }
             }
 
-            if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
-                final_input.clone(),
-                state.shell_tool_calls.clone(),
-                image_parts,
-            )) {
-                log::warn!("Failed to send UserMessage event: {}", e);
-            }
+            let should_buffer_message =
+                state.loading_manager.is_loading() || !state.pending_user_messages.is_empty();
 
-            if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
-                log::warn!("Failed to send AddUserMessage event: {}", e);
+            if should_buffer_message {
+                // Buffer while operations are active (or if previous buffered messages are pending)
+                state
+                    .pending_user_messages
+                    .push_back(PendingUserMessage::new(
+                        final_input.clone(),
+                        state.shell_tool_calls.clone(),
+                        image_parts,
+                        user_message_text,
+                    ));
+            } else {
+                if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
+                    final_input.clone(),
+                    state.shell_tool_calls.clone(),
+                    image_parts,
+                )) {
+                    log::warn!("Failed to send UserMessage event: {}", e);
+                }
+
+                if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
+                    log::warn!("Failed to send AddUserMessage event: {}", e);
+                }
             }
         } else {
             if !state.messages.is_empty() {

@@ -26,7 +26,7 @@ use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -247,6 +247,8 @@ pub struct AppState {
     /// Used to display what subagents want to do in the approval bar
     pub subagent_pause_info:
         HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    /// Buffered user messages waiting to be sent after streaming completes
+    pub pending_user_messages: VecDeque<PendingUserMessage>,
 }
 
 pub struct AppStateOptions<'a> {
@@ -498,6 +500,7 @@ impl AppState {
             editor_command: crate::services::editor::detect_editor(editor_command)
                 .unwrap_or_else(|| "nano".to_string()),
             pending_editor_open: None,
+            pending_user_messages: VecDeque::new(),
             billing_info: None,
             auth_display_info,
             subagent_pause_info: HashMap::new(),

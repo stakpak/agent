@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::common::HistoryProcessingOptions;
 use stakpak_shared::models::{
     integrations::openai::{ChatMessage, MessageContent, Role},
-    llm::LLMMessage,
+    llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent},
 };
 
 pub struct TaskBoardContextManager {
@@ -37,7 +37,7 @@ impl super::ContextManager for TaskBoardContextManager {
             .collect();
 
         // Process each message: clean checkpoint_id tags and apply dropping logic
-        messages
+        let llm_messages: Vec<_> = messages
             .into_iter()
             .map(|mut message| {
                 // Remove checkpoint_id XML tags from message content
@@ -111,9 +111,105 @@ impl super::ContextManager for TaskBoardContextManager {
 
                 message
             })
-            .map(|msg| msg.into())
-            .collect()
+            .map(LLMMessage::from)
+            .collect();
+
+        // Post-process: merge consecutive same-role messages and deduplicate
+        // tool_results. Providers like Anthropic require strictly alternating
+        // user/assistant turns; multiple consecutive role=tool messages (each
+        // converted to role=user by the provider layer) would violate this.
+        let llm_messages = merge_consecutive_same_role(llm_messages);
+        dedup_tool_results(llm_messages)
     }
+}
+
+/// Merge consecutive LLMMessages that share the same role into a single message.
+///
+/// When the assistant returns N tool_calls, the chat history contains N separate
+/// `role=tool` messages. Provider conversion layers map `tool` → `user`, which
+/// creates N consecutive `user` messages — invalid for Anthropic.  By merging
+/// them here into a single `role=tool` LLMMessage with multiple ToolResult
+/// content parts, the downstream conversion produces one `user` message with
+/// all the tool_result blocks.
+fn merge_consecutive_same_role(messages: Vec<LLMMessage>) -> Vec<LLMMessage> {
+    if messages.is_empty() {
+        return messages;
+    }
+
+    let mut result: Vec<LLMMessage> = Vec::with_capacity(messages.len());
+
+    for msg in messages {
+        let should_merge = result.last().is_some_and(|prev| prev.role == msg.role);
+
+        if should_merge {
+            let prev = result.last_mut().expect("checked above");
+            let new_parts = msg.content.into_parts();
+            prev.content = match std::mem::take(&mut prev.content) {
+                LLMMessageContent::String(s) if s.is_empty() => LLMMessageContent::List(new_parts),
+                LLMMessageContent::String(s) => {
+                    let mut parts = vec![LLMMessageTypedContent::Text { text: s }];
+                    parts.extend(new_parts);
+                    LLMMessageContent::List(parts)
+                }
+                LLMMessageContent::List(mut existing) => {
+                    existing.extend(new_parts);
+                    LLMMessageContent::List(existing)
+                }
+            };
+        } else {
+            result.push(msg);
+        }
+    }
+
+    result
+}
+
+/// Remove duplicate ToolResult entries that share the same tool_use_id.
+/// Keeps only the **last** occurrence (the most recent / retried result).
+fn dedup_tool_results(mut messages: Vec<LLMMessage>) -> Vec<LLMMessage> {
+    for msg in &mut messages {
+        if msg.role != "tool" {
+            continue;
+        }
+        let parts = match &mut msg.content {
+            LLMMessageContent::List(p) => p,
+            _ => continue,
+        };
+
+        // Track last index for each tool_use_id
+        let mut last_index: HashMap<String, usize> = HashMap::new();
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for (i, part) in parts.iter().enumerate() {
+            if let LLMMessageTypedContent::ToolResult { tool_use_id, .. } = part {
+                last_index.insert(tool_use_id.clone(), i);
+                *counts.entry(tool_use_id.clone()).or_insert(0) += 1;
+            }
+        }
+
+        // Only filter if there are actual duplicates
+        let has_dups = counts.values().any(|&c| c > 1);
+        if !has_dups {
+            continue;
+        }
+
+        let mut idx = 0;
+        parts.retain(|part| {
+            let keep = if let LLMMessageTypedContent::ToolResult { tool_use_id, .. } = part {
+                if counts.get(tool_use_id).copied().unwrap_or(0) > 1 {
+                    // Duplicate — keep only the last one
+                    last_index.get(tool_use_id).copied() == Some(idx)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+            idx += 1;
+            keep
+        });
+    }
+
+    messages
 }
 
 #[cfg(test)]
@@ -144,6 +240,27 @@ mod tests {
                 },
                 metadata: None,
             }]),
+            ..Default::default()
+        }
+    }
+
+    fn create_tool_call_msg_with_ids(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("Thinking...".to_string())),
+            tool_calls: Some(
+                ids.iter()
+                    .map(|id| ToolCall {
+                        id: (*id).to_string(),
+                        r#type: "function".to_string(),
+                        function: FunctionCall {
+                            name: "test_tool".to_string(),
+                            arguments: "{}".to_string(),
+                        },
+                        metadata: None,
+                    })
+                    .collect(),
+            ),
             ..Default::default()
         }
     }
@@ -456,6 +573,86 @@ mod tests {
                     "Small text content should be preserved even for old actions"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_reduce_context_merges_consecutive_tool_results_for_same_assistant_turn() {
+        let cm = create_context_manager();
+        let messages = vec![
+            create_tool_call_msg_with_ids(&["call_1", "call_2"]),
+            create_tool_result_msg("call_1", "Result 1"),
+            create_tool_result_msg("call_2", "Result 2"),
+        ];
+
+        let reduced = cm.reduce_context(messages);
+
+        assert_eq!(reduced.len(), 2);
+        assert_eq!(reduced[1].role, "tool");
+        match &reduced[1].content {
+            LLMMessageContent::List(parts) => {
+                let tool_results: Vec<_> = parts
+                    .iter()
+                    .filter_map(|part| {
+                        if let LLMMessageTypedContent::ToolResult {
+                            tool_use_id,
+                            content,
+                        } = part
+                        {
+                            Some((tool_use_id.as_str(), content.as_str()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                assert_eq!(
+                    tool_results,
+                    vec![("call_1", "Result 1"), ("call_2", "Result 2")]
+                );
+            }
+            other => panic!(
+                "Expected list content for merged tool results, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_reduce_context_deduplicates_tool_results_keeping_last() {
+        let cm = create_context_manager();
+        let messages = vec![
+            create_tool_call_msg("call_1"),
+            create_tool_result_msg("call_1", "old_result"),
+            create_tool_result_msg("call_1", "new_result"),
+        ];
+
+        let reduced = cm.reduce_context(messages);
+
+        assert_eq!(reduced.len(), 2);
+        assert_eq!(reduced[1].role, "tool");
+        match &reduced[1].content {
+            LLMMessageContent::List(parts) => {
+                let tool_results: Vec<_> = parts
+                    .iter()
+                    .filter_map(|part| {
+                        if let LLMMessageTypedContent::ToolResult {
+                            tool_use_id,
+                            content,
+                        } = part
+                        {
+                            Some((tool_use_id.as_str(), content.as_str()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert_eq!(tool_results, vec![("call_1", "new_result")]);
+            }
+            other => panic!(
+                "Expected list content for deduplicated tool results, got {:?}",
+                other
+            ),
         }
     }
 

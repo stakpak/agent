@@ -53,8 +53,12 @@ struct Cli {
     max_steps: Option<usize>,
 
     /// Resume agent session at a specific checkpoint
-    #[arg(short = 'c', long = "checkpoint")]
+    #[arg(short = 'c', long = "checkpoint", conflicts_with = "session_id")]
     checkpoint_id: Option<String>,
+
+    /// Resume from the latest checkpoint in a specific session
+    #[arg(short = 's', long = "session", conflicts_with = "checkpoint_id")]
+    session_id: Option<String>,
 
     /// Run the agent in a specific directory
     #[arg(short = 'w', long = "workdir")]
@@ -439,6 +443,8 @@ async fn main() {
                     let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
                     let auto_approve = config.auto_approve.clone();
                     let default_model = config.get_default_model(cli.model.as_deref());
+                    let checkpoint_id = cli.checkpoint_id.clone();
+                    let session_id = cli.session_id.clone();
 
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
@@ -448,7 +454,8 @@ async fn main() {
                                 RunAsyncConfig {
                                     prompt,
                                     verbose: cli.verbose,
-                                    checkpoint_id: cli.checkpoint_id,
+                                    checkpoint_id: checkpoint_id.clone(),
+                                    session_id: session_id.clone(),
                                     local_context,
                                     redact_secrets: !cli.disable_secret_redaction,
                                     privacy_mode: cli.privacy_mode,
@@ -510,7 +517,8 @@ async fn main() {
                             agent::run::run_interactive(
                                 config,
                                 RunInteractiveConfig {
-                                    checkpoint_id: cli.checkpoint_id,
+                                    checkpoint_id,
+                                    session_id,
                                     local_context,
                                     redact_secrets: !cli.disable_secret_redaction,
                                     privacy_mode: cli.privacy_mode,
@@ -544,5 +552,35 @@ async fn main() {
             }
         }
         Err(e) => eprintln!("Failed to load config: {}", e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_parses_session_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "-s", "session-id", "hello"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            assert_eq!(cli.session_id, Some("session-id".to_string()));
+            assert_eq!(cli.checkpoint_id, None);
+            assert_eq!(cli.prompt, Some("hello".to_string()));
+        }
+    }
+
+    #[test]
+    fn cli_rejects_checkpoint_and_session_together() {
+        let parsed = Cli::try_parse_from([
+            "stakpak",
+            "-c",
+            "checkpoint-id",
+            "-s",
+            "session-id",
+            "hello",
+        ]);
+        assert!(parsed.is_err());
     }
 }

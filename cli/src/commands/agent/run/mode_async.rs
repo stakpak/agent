@@ -1,6 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
+    user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -26,6 +27,7 @@ use uuid::Uuid;
 pub struct RunAsyncConfig {
     pub prompt: String,
     pub checkpoint_id: Option<String>,
+    pub session_id: Option<String>,
     pub local_context: Option<LocalContext>,
     pub verbose: bool,
     pub redact_secrets: bool,
@@ -235,12 +237,31 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
     let mut current_checkpoint_id: Option<Uuid> = None;
     let mut prior_steps: usize = 0;
 
-    // Load checkpoint messages if provided
-    if let Some(checkpoint_id_str) = &config.checkpoint_id {
+    // Load checkpoint/session messages if provided
+    if let Some(session_id_str) = config.session_id {
+        let checkpoint_start = Instant::now();
+        let session_uuid = Uuid::parse_str(&session_id_str)
+            .map_err(|_| format!("Invalid session ID: {}", session_id_str))?;
+
+        let checkpoint = client
+            .get_active_checkpoint(session_uuid)
+            .await
+            .map_err(|e| format!("Failed to get active checkpoint for session: {}", e))?;
+
+        current_session_id = Some(checkpoint.session_id);
+        current_checkpoint_id = Some(checkpoint.id);
+        chat_messages.extend(checkpoint.state.messages);
+
+        llm_response_time += checkpoint_start.elapsed();
+        print!(
+            "{}",
+            renderer.render_info(&format!("Resuming from session ({})", session_id_str))
+        );
+    } else if let Some(checkpoint_id_str) = config.checkpoint_id {
         let checkpoint_start = Instant::now();
 
         // Parse checkpoint UUID
-        let checkpoint_uuid = Uuid::parse_str(checkpoint_id_str)
+        let checkpoint_uuid = Uuid::parse_str(checkpoint_id_str.as_str())
             .map_err(|_| format!("Invalid checkpoint ID: {}", checkpoint_id_str))?;
 
         // Get checkpoint with session info
@@ -786,11 +807,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 );
             }
         }
-
-        // Print resume command
-        if config.output_format != OutputFormat::Json {
-            println!("\nTo resume, run:\nstakpak -c {}\n", checkpoint_id);
-        }
     } else {
         print!(
             "{}",
@@ -798,11 +814,17 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
         );
     }
 
-    // Print session ID if available
-    if let Some(session_id) = current_session_id
-        && config.output_format != OutputFormat::Json
-    {
-        println!("Session ID: {}", session_id);
+    if config.output_format != OutputFormat::Json {
+        // Print resume command and session ID if available
+        if let Some(resume_command) =
+            build_resume_command(current_session_id, current_checkpoint_id)
+        {
+            println!("\nTo resume, run:\n{}\n", resume_command);
+        }
+
+        if let Some(session_id) = current_session_id {
+            println!("Session ID: {}", session_id);
+        }
     }
 
     // Gracefully shutdown MCP server and proxy
@@ -824,4 +846,35 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
     };
 
     Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_resume_command_prefers_session_id() {
+        let session_id = Uuid::from_u128(0x11111111111111111111111111111111);
+        let checkpoint_id = Uuid::from_u128(0x22222222222222222222222222222222);
+
+        let resume_command = build_resume_command(Some(session_id), Some(checkpoint_id));
+        assert_eq!(resume_command, Some(format!("stakpak -s {}", session_id)));
+    }
+
+    #[test]
+    fn build_resume_command_uses_checkpoint_when_no_session() {
+        let checkpoint_id = Uuid::from_u128(0x22222222222222222222222222222222);
+
+        let resume_command = build_resume_command(None, Some(checkpoint_id));
+        assert_eq!(
+            resume_command,
+            Some(format!("stakpak -c {}", checkpoint_id))
+        );
+    }
+
+    #[test]
+    fn build_resume_command_returns_none_when_no_ids() {
+        let resume_command = build_resume_command(None, None);
+        assert_eq!(resume_command, None);
+    }
 }
