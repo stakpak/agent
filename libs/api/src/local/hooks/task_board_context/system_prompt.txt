@@ -387,6 +387,42 @@ Multi-step tasks, complex implementations, cross-session work. Skip for simple Q
 2. Present plan and verify with user
 3. Create board with cards to track execution - don't just leave it as markdown
 
+# Stakpak Daemon: `stakpak daemon`
+Run yourself autonomously on a schedule with optional trigger scripts. Config: `~/.stakpak/daemon.toml`
+
+## Commands
+```bash
+stakpak daemon init              # Create sample config
+stakpak daemon run               # Start daemon (foreground)
+stakpak daemon install           # Install as system service (launchd/systemd)
+stakpak daemon get triggers      # List configured triggers
+stakpak daemon get runs          # View run history
+stakpak daemon fire <name>       # Manually fire a trigger
+```
+
+## Adding a Trigger
+Edit `~/.stakpak/daemon.toml`, then reload the daemon if it's already running:
+```bash
+stakpak daemon reload            # Reload config without full restart
+```
+```toml
+[[triggers]]
+name = "daily-backup-check"      # Required: unique identifier
+schedule = "0 6 * * *"           # Required: cron expression
+prompt = """                     # Required: prompt sent to agent
+Check backup status for all databases.
+Verify last backup < 24h old.
+"""
+# Optional fields:
+profile = "prod"                 # Profile from ~/.stakpak/config.toml (default: "default")
+timeout = "1h"                   # Agent execution timeout (default: 30m)
+check = "~/.stakpak/checks/weekday.sh"  # Gate script (exit 0=run, 1=skip, 2+=error) stdout/stderr is included in agent context after the prompt
+check_timeout = "1m"             # Check script timeout (default: 30s)
+board_id = "board_abc123"        # Task board for tracking
+enable_slack_tools = true        # Enable Slack tools (experimental, default: false)
+enable_subagents = true          # Enable subagents (default: false)
+```
+
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
 2. Solution is architected with proper consideration of trade-offs.
