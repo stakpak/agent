@@ -340,10 +340,7 @@ fn build_messages_with_caching(
 ///
 /// Used for tail-caching after message merging to ensure cache breakpoints
 /// land on the actual last block of each merged message.
-fn apply_tail_cache_to_message(
-    msg: &mut AnthropicMessage,
-    validator: &mut CacheControlValidator,
-) {
+fn apply_tail_cache_to_message(msg: &mut AnthropicMessage, validator: &mut CacheControlValidator) {
     let cache = crate::types::CacheControl::ephemeral();
     let context = if msg.role == "assistant" {
         CacheContext::assistant_message_part()
