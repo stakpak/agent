@@ -469,13 +469,10 @@ NOTES:
 
         // If sandbox mode is enabled, wrap the command in warden
         if enable_sandbox {
-            let stakpak_image = format!(
-                "ghcr.io/stakpak/agent-warden:v{}",
-                env!("CARGO_PKG_VERSION")
-            );
+            // Use standard stakpak image (no special warden image needed with wrap)
+            let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
 
-            let mut warden_command =
-                format!("{} warden run --image {}", current_exe, stakpak_image);
+            let mut warden_command = format!("{} warden wrap {}", current_exe, stakpak_image);
 
             // Mount the prompt file into the container
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
@@ -513,9 +510,9 @@ NOTES:
                 }
             }
 
-            // Wrap the stakpak command, replacing the prompt path with the container path
+            // wrap uses -- separator before the command
             command = format!(
-                "{} '{}'",
+                "{} -- {}",
                 warden_command,
                 command.replace(&prompt_file_path, &warden_prompt_path)
             );
