@@ -269,8 +269,7 @@ pub async fn reload() -> Result<ReloadResult, String> {
     // Verify it restarted
     if !is_loaded() {
         return Err(
-            "Service stopped but did not restart. Check logs at ~/.stakpak/watch/logs/"
-                .to_string(),
+            "Service stopped but did not restart. Check logs at ~/.stakpak/watch/logs/".to_string(),
         );
     }
 

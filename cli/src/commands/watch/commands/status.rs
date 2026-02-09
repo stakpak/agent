@@ -1,8 +1,6 @@
 //! Watch status command - shows watch status and trigger information.
 
-use crate::commands::watch::{
-    WatchConfig, WatchDb, ListRunsFilter, RunStatus, is_process_running,
-};
+use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb, is_process_running};
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use std::str::FromStr;

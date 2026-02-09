@@ -1,6 +1,6 @@
 //! Watch resume command - resume an interrupted agent run in TUI mode.
 
-use crate::commands::watch::{WatchConfig, WatchDb, RunStatus};
+use crate::commands::watch::{RunStatus, WatchConfig, WatchDb};
 
 /// Resume an interrupted agent run in TUI mode.
 ///

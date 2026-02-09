@@ -1,7 +1,7 @@
 //! Watch trigger command - inspect or manually fire a trigger.
 
 use crate::commands::watch::{
-    WatchConfig, WatchDb, RunStatus, assemble_prompt, is_process_running, run_check_script,
+    RunStatus, WatchConfig, WatchDb, assemble_prompt, is_process_running, run_check_script,
 };
 
 /// Show detailed information about a trigger.

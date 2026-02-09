@@ -1,6 +1,6 @@
 //! Watch history command - show run history.
 
-use crate::commands::watch::{WatchConfig, WatchDb, ListRunsFilter, RunStatus};
+use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb};
 use chrono::{DateTime, Utc};
 
 /// Show run history for all triggers or a specific trigger.

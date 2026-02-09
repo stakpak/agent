@@ -12,13 +12,13 @@ pub mod agent;
 pub mod auth;
 pub mod auto_update;
 pub mod board;
-pub mod watch;
 pub mod mcp;
 pub mod warden;
+pub mod watch;
 
 pub use auth::AuthCommands;
-pub use watch::WatchCommands;
 pub use mcp::McpCommands;
+pub use watch::WatchCommands;
 
 /// Frontmatter structure for rulebook metadata
 #[derive(Deserialize, Serialize)]
@@ -460,8 +460,7 @@ impl Commands {
                 use crate::commands::watch::commands::{
                     DescribeResource, GetResource, WatchCommands, fire_trigger, init_config,
                     install_watch, prune_history, reload_watch, resume_run, run_watch,
-                    show_history, show_run, show_status, show_trigger, stop_watch,
-                    uninstall_watch,
+                    show_history, show_run, show_status, show_trigger, stop_watch, uninstall_watch,
                 };
                 match watch_command {
                     WatchCommands::Run => {
