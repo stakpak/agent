@@ -125,6 +125,8 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    /// When true, send init_prompt_content as first user message on session start (stakpak init)
+    pub send_init_prompt_on_start: bool,
 }
 
 pub async fn run_interactive(
@@ -187,6 +189,15 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+        let init_path = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("init.md"))
+            .filter(|p| p.exists());
+        let init_prompt_content_for_tui = match init_path {
+            Some(path) => tokio::fs::read_to_string(path).await.ok(),
+            None => None,
+        };
+        let send_init_prompt_on_start = config.send_init_prompt_on_start;
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -205,6 +216,8 @@ pub async fn run_interactive(
                 model_for_tui,
                 editor_command,
                 auth_display_info_for_tui,
+                init_prompt_content_for_tui,
+                send_init_prompt_on_start,
             )
             .await
             .map_err(|e| e.to_string())

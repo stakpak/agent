@@ -201,6 +201,8 @@ pub struct AppState {
     pub model: Model,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
+    /// Content of init prompt loaded from init.md in current directory (for /init)
+    pub init_prompt_content: Option<String>,
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
@@ -265,6 +267,8 @@ pub struct AppStateOptions<'a> {
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
     /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID env var)
     pub board_agent_id: Option<String>,
+    /// Content of init prompt loaded from init.md (passed from CLI)
+    pub init_prompt_content: Option<String>,
 }
 
 impl AppState {
@@ -307,6 +311,7 @@ impl AppState {
             editor_command,
             auth_display_info,
             board_agent_id,
+            init_prompt_content,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -504,6 +509,7 @@ impl AppState {
             billing_info: None,
             auth_display_info,
             subagent_pause_info: HashMap::new(),
+            init_prompt_content,
         }
     }
 
