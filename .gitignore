@@ -16,3 +16,5 @@ cli-workflows.md
 stakpak_FIX_ISSUE.md
 docs/rfc_stakpak_init.md
 .github/issues/anthropic-400-tool-result-blocks.md
+cost-stats.md
+token-stats.md
