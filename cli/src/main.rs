@@ -350,26 +350,7 @@ async fn main() {
                 let _ = update_result;
                 let rulebooks = rulebooks_result;
 
-                    let enable_subagents = !cli.disable_subagents;
-                let subagent_configs = if cli.enable_subagents {
-                    if let Some(subagent_config_path) = &cli.subagent_config_path {
-                        SubagentConfigs::load_from_file(subagent_config_path)
-                            .map_err(|e| {
-                                eprintln!("Warning: Failed to load subagent configs: {}", e);
-                                e
-                            })
-                            .ok()
-                    } else {
-                        SubagentConfigs::load_from_str(DEFAULT_SUBAGENT_CONFIG)
-                            .map_err(|e| {
-                                eprintln!("Warning: Failed to load subagent configs: {}", e);
-                                e
-                            })
-                            .ok()
-                    }
-                } else {
-                    None
-                };
+                let enable_subagents = !cli.disable_subagents;
 
                 // match get_or_build_local_code_index(&config, None, cli.index_big_project)
                 //     .await
@@ -416,29 +397,12 @@ async fn main() {
                     None
                 };
 
-                    let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
-                        match std::fs::read_to_string(prompt_file_path) {
-                            Ok(content) => {
-                                if cli.output_format != OutputFormat::Json {
-                                    println!("📖 Reading prompt from file: {}", prompt_file_path);
-                                }
-                                content.trim().to_string()
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "Failed to read prompt file '{}': {}",
-                                    prompt_file_path, e
-                                );
-                                std::process::exit(1);
-                            }
-                        }
-                    } else {
-                        cli.prompt.unwrap_or_default()
-                    };
                 let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                     match std::fs::read_to_string(prompt_file_path) {
                         Ok(content) => {
-                            println!("📖 Reading prompt from file: {}", prompt_file_path);
+                            if cli.output_format != OutputFormat::Json {
+                                println!("📖 Reading prompt from file: {}", prompt_file_path);
+                            }
                             content.trim().to_string()
                         }
                         Err(e) => {
@@ -469,75 +433,10 @@ async fn main() {
                 let checkpoint_id = cli.checkpoint_id.clone();
                 let session_id = cli.session_id.clone();
 
-                    let result = match use_async_mode {
-                        // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
-                        true => {
-                            let async_result = agent::run::run_async(
-                                config,
-                                RunAsyncConfig {
-                                    prompt,
-                                    verbose: cli.verbose,
-                                    checkpoint_id: checkpoint_id.clone(),
-                                    session_id: session_id.clone(),
-                                    local_context,
-                                    redact_secrets: !cli.disable_secret_redaction,
-                                    privacy_mode: cli.privacy_mode,
-                                    rulebooks,
-                                    enable_subagents,
-                                    max_steps,
-                                    output_format: cli.output_format,
-                                    enable_mtls: !cli.disable_mcp_mtls,
-                                    allowed_tools,
-                                    system_prompt,
-                                    enabled_tools: EnabledToolsConfig {
-                                        slack: cli.enable_slack_tools,
-                                    },
-                                    model: default_model.clone(),
-                                    agents_md: agents_md.clone(),
-                                    pause_on_approval: cli.pause_on_approval,
-                                    resume_input: if cli.approve.is_some()
-                                        || cli.reject.is_some()
-                                        || cli.approve_all
-                                        || cli.reject_all
-                                    {
-                                        Some(ResumeInput {
-                                            approved: cli
-                                                .approve
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .collect(),
-                                            rejected: cli
-                                                .reject
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .collect(),
-                                            approve_all: cli.approve_all,
-                                            reject_all: cli.reject_all,
-                                            prompt: None,
-                                        })
-                                    } else {
-                                        None
-                                    },
-                                    auto_approve_tools: None,
-                                },
-                            )
-                            .await;
-
-                            // Handle AsyncOutcome → exit code
-                            match async_result {
-                                Ok(AsyncOutcome::Paused { .. }) => {
-                                    cache_task.abort();
-                                    std::process::exit(EXIT_CODE_PAUSED);
-                                }
-                                Ok(AsyncOutcome::Completed { .. }) => Ok(()),
-                                Ok(AsyncOutcome::Failed { error }) => Err(error),
-                                Err(e) => Err(e),
-                            }
-                        }
                 let result = match use_async_mode {
                     // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
                     true => {
-                        agent::run::run_async(
+                        let async_result = agent::run::run_async(
                             config,
                             RunAsyncConfig {
                                 prompt,
@@ -548,7 +447,7 @@ async fn main() {
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
-                                subagent_configs,
+                                enable_subagents,
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
@@ -559,39 +458,47 @@ async fn main() {
                                 },
                                 model: default_model.clone(),
                                 agents_md: agents_md.clone(),
+                                pause_on_approval: cli.pause_on_approval,
+                                resume_input: if cli.approve.is_some()
+                                    || cli.reject.is_some()
+                                    || cli.approve_all
+                                    || cli.reject_all
+                                {
+                                    Some(ResumeInput {
+                                        approved: cli
+                                            .approve
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .collect(),
+                                        rejected: cli
+                                            .reject
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .collect(),
+                                        approve_all: cli.approve_all,
+                                        reject_all: cli.reject_all,
+                                        prompt: None,
+                                    })
+                                } else {
+                                    None
+                                },
+                                auto_approve_tools: None,
                             },
                         )
-                        .await
+                        .await;
+
+                        // Handle AsyncOutcome → exit code
+                        match async_result {
+                            Ok(AsyncOutcome::Paused { .. }) => {
+                                cache_task.abort();
+                                std::process::exit(EXIT_CODE_PAUSED);
+                            }
+                            Ok(AsyncOutcome::Completed { .. }) => Ok(()),
+                            Ok(AsyncOutcome::Failed { error }) => Err(error),
+                            Err(e) => Err(e),
+                        }
                     }
 
-                        // Interactive mode: run in TUI
-                        false => {
-                            agent::run::run_interactive(
-                                config,
-                                RunInteractiveConfig {
-                                    checkpoint_id,
-                                    session_id,
-                                    local_context,
-                                    redact_secrets: !cli.disable_secret_redaction,
-                                    privacy_mode: cli.privacy_mode,
-                                    rulebooks,
-                                    enable_subagents,
-                                    enable_mtls: !cli.disable_mcp_mtls,
-                                    is_git_repo: gitignore::is_git_repo(),
-                                    study_mode: cli.study_mode,
-                                    system_prompt,
-                                    allowed_tools,
-                                    auto_approve,
-                                    enabled_tools: EnabledToolsConfig {
-                                        slack: cli.enable_slack_tools,
-                                    },
-                                    model: default_model,
-                                    agents_md,
-                                },
-                            )
-                            .await
-                        }
-                    };
                     // Interactive mode: run in TUI
                     false => {
                         agent::run::run_interactive(
@@ -603,7 +510,7 @@ async fn main() {
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
-                                subagent_configs,
+                                enable_subagents,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
                                 study_mode: cli.study_mode,
