@@ -256,7 +256,13 @@ Subagents require explicit tool lists. **Apply principle of least-privilege**—
 - When granted, constrain in prompt: "Only run `terraform validate` and `terraform fmt`"
 - Use `view` instead of shell commands like `cat`, `ls`, `find`
 - Consider if `view` with grep/glob args can replace the command
-- Consider enabling sandbox mode so you can run commands safely without risk of destructive operations
+- When granting `run_command`, ALWAYS enable sandbox mode (`enable_sandbox=true`)
+
+**Sandbox mode behavior:**
+- Sandbox subagents run AUTONOMOUSLY to completion without pausing for tool approval
+- Non-sandbox subagents pause on each mutating tool call (run_command, create, str_replace, remove) waiting for your approval
+- Read-only tools (view, search_docs, etc.) never require approval regardless of sandbox mode
+- Always pair mutating tools with `enable_sandbox=true` to avoid the subagent getting stuck waiting for approvals
 
 ## Writing Effective Prompts
 Subagents have no prior context. Make prompts self-contained:

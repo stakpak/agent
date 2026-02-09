@@ -141,6 +141,14 @@ SANDBOX MODE (enable_sandbox=true):
 - Read-only access to working directory and cloud credentials
 - Recommended when using run_command tool for untrusted operations
 - Adds ~5-10s startup overhead for container initialization
+- IMPORTANT: Sandbox subagents run AUTONOMOUSLY to completion without pausing for tool approval
+  (non-sandbox subagents pause on mutating tools like run_command, requiring master agent approval)
+
+SANDBOX + MUTATING TOOLS PATTERN:
+When granting mutating tools (run_command, create, str_replace, remove) to a subagent,
+enable sandbox mode so the subagent can execute autonomously while safely isolated.
+Without sandbox, the subagent pauses on each mutating tool call waiting for approval,
+which blocks progress. Read-only tools (view, search_docs, etc.) never require approval.
 
 The subagent runs asynchronously. Use get_task_details to monitor progress."
     )]
