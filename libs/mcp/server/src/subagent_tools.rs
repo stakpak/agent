@@ -431,18 +431,41 @@ NOTES:
             })?;
 
         // Get the current executable path to use for subagent
+        // When running in sandbox (warden container), use "stakpak" since it's in PATH
+        // Otherwise use the current executable path
         let current_exe = get_current_exe()?;
+        let exe_for_command = if enable_sandbox {
+            "stakpak".to_string()
+        } else {
+            current_exe.clone()
+        };
 
-        // Build the base stakpak command using current executable
-        let mut command = format!(
-            r#"{} -a --pause-on-approval --output json --prompt-file {} --max-steps {} --model {}"#,
-            current_exe, prompt_file_path, max_steps, model
-        );
+        // Build the stakpak command arguments
+        let mut args = vec![exe_for_command.clone(), "-a".to_string()];
 
-        // Add each tool
-        for tool in tools {
-            command.push_str(&format!(" -t {}", tool));
+        // --pause-on-approval only when NOT in sandbox mode
+        if !enable_sandbox {
+            args.push("--pause-on-approval".to_string());
         }
+
+        args.extend([
+            "--output".to_string(),
+            "json".to_string(),
+            "--prompt-file".to_string(),
+            prompt_file_path.clone(),
+            "--max-steps".to_string(),
+            max_steps.to_string(),
+            "--model".to_string(),
+            model.to_string(),
+        ]);
+
+        // Add tool flags
+        for tool in tools {
+            args.push("-t".to_string());
+            args.push(tool.clone());
+        }
+
+        let mut command = args.join(" ");
 
         // If sandbox mode is enabled, wrap the command in warden
         if enable_sandbox {
