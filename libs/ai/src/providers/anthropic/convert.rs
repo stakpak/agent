@@ -329,8 +329,19 @@ fn build_messages_with_caching(
         let len = merged.len();
         let cache_start = len.saturating_sub(tail_count);
         for msg in &mut merged[cache_start..] {
-            apply_tail_cache_to_message(msg, validator);
+            // Skip empty-content messages to avoid wasting a cache breakpoint
+            // (max 4 per request) on a block that Phase 4 will strip anyway.
+            if !is_empty_content_message(msg) {
+                apply_tail_cache_to_message(msg, validator);
+            }
         }
+    }
+
+    // Phase 4: Sanitize all messages to enforce Anthropic API constraints.
+    // This is the single boundary where we fix structural issues that would
+    // cause 400 errors, regardless of which upstream phase introduced them.
+    for msg in &mut merged {
+        sanitize_anthropic_message(msg);
     }
 
     Ok(merged)
@@ -365,6 +376,51 @@ fn apply_tail_cache_to_message(msg: &mut AnthropicMessage, validator: &mut Cache
                 text: std::mem::take(s),
                 cache_control: Some(anthropic_cc),
             }]);
+        }
+    }
+}
+
+/// Returns true if the message contains only empty text content (no cacheable substance).
+///
+/// Used to skip tail-caching on messages that would waste a cache breakpoint,
+/// since Phase 4 would strip the `cache_control` from empty text blocks anyway.
+fn is_empty_content_message(msg: &AnthropicMessage) -> bool {
+    match &msg.content {
+        AnthropicMessageContent::String(s) => s.is_empty(),
+        AnthropicMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .all(|b| matches!(b, AnthropicContent::Text { text, .. } if text.is_empty())),
+    }
+}
+
+/// Sanitize an Anthropic message to enforce API constraints.
+///
+/// This is the **single boundary** that fixes structural issues before the
+/// message is sent to the API. All Anthropic-specific content invariants
+/// are enforced here, rather than scattering guards across conversion,
+/// merging, and caching phases. Inspired by Vercel AI SDK's approach of
+/// handling structural concerns in one pass at the output boundary.
+///
+/// Current rules:
+/// - Strip `cache_control` from empty text blocks
+///   (Anthropic `invalid_request_error`: "cache_control cannot be set for empty text blocks")
+fn sanitize_anthropic_message(msg: &mut AnthropicMessage) {
+    match &mut msg.content {
+        AnthropicMessageContent::Blocks(blocks) => {
+            for block in blocks.iter_mut() {
+                if let AnthropicContent::Text {
+                    text,
+                    cache_control,
+                } = block
+                    && text.is_empty()
+                    && cache_control.is_some()
+                {
+                    *cache_control = None;
+                }
+            }
+        }
+        AnthropicMessageContent::String(_) => {
+            // String content has no cache_control field; nothing to sanitize.
         }
     }
 }
@@ -1337,5 +1393,181 @@ mod tests {
             AnthropicContent::ToolUse { cache_control, .. } => assert!(cache_control.is_some()),
             _ => panic!("Expected ToolUse"),
         }
+    }
+
+    // --- sanitize_anthropic_message tests ---
+
+    #[test]
+    fn test_sanitize_strips_cache_control_from_empty_text_blocks() {
+        let cc = AnthropicCacheControl::ephemeral();
+
+        // Empty text block with cache_control should have it stripped
+        let mut msg = user_blocks_msg(vec![AnthropicContent::Text {
+            text: String::new(),
+            cache_control: Some(cc.clone()),
+        }]);
+        sanitize_anthropic_message(&mut msg);
+        match &msg.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    AnthropicContent::Text {
+                        text,
+                        cache_control,
+                    } => {
+                        assert!(text.is_empty());
+                        assert!(
+                            cache_control.is_none(),
+                            "cache_control must be stripped from empty text"
+                        );
+                    }
+                    _ => panic!("Expected Text block"),
+                }
+            }
+            _ => panic!("Expected Blocks"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_preserves_cache_control_on_non_empty_text() {
+        let cc = AnthropicCacheControl::ephemeral();
+
+        let mut msg = user_blocks_msg(vec![AnthropicContent::Text {
+            text: "hello".to_string(),
+            cache_control: Some(cc.clone()),
+        }]);
+        sanitize_anthropic_message(&mut msg);
+        match &msg.content {
+            AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                AnthropicContent::Text { cache_control, .. } => {
+                    assert!(
+                        cache_control.is_some(),
+                        "cache_control must be preserved on non-empty text"
+                    );
+                }
+                _ => panic!("Expected Text block"),
+            },
+            _ => panic!("Expected Blocks"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_handles_mixed_blocks() {
+        let cc = AnthropicCacheControl::ephemeral();
+
+        // Mix of empty text (with cache), non-empty text (with cache), and tool_result
+        let mut msg = user_blocks_msg(vec![
+            AnthropicContent::Text {
+                text: String::new(),
+                cache_control: Some(cc.clone()),
+            },
+            AnthropicContent::Text {
+                text: "real content".to_string(),
+                cache_control: Some(cc.clone()),
+            },
+            AnthropicContent::ToolResult {
+                tool_use_id: "t1".to_string(),
+                content: Some(AnthropicMessageContent::String("ok".to_string())),
+                is_error: None,
+                cache_control: Some(cc.clone()),
+            },
+        ]);
+        sanitize_anthropic_message(&mut msg);
+        match &msg.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 3);
+                // Empty text: cache_control stripped
+                match &blocks[0] {
+                    AnthropicContent::Text { cache_control, .. } => {
+                        assert!(cache_control.is_none());
+                    }
+                    _ => panic!("Expected Text"),
+                }
+                // Non-empty text: cache_control preserved
+                match &blocks[1] {
+                    AnthropicContent::Text { cache_control, .. } => {
+                        assert!(cache_control.is_some());
+                    }
+                    _ => panic!("Expected Text"),
+                }
+                // ToolResult: cache_control preserved (not affected by text rule)
+                match &blocks[2] {
+                    AnthropicContent::ToolResult { cache_control, .. } => {
+                        assert!(cache_control.is_some());
+                    }
+                    _ => panic!("Expected ToolResult"),
+                }
+            }
+            _ => panic!("Expected Blocks"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_noop_on_string_content() {
+        // String content has no cache_control field — sanitize should be a no-op
+        let mut msg = user_msg("hello");
+        sanitize_anthropic_message(&mut msg);
+        match &msg.content {
+            AnthropicMessageContent::String(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected String content"),
+        }
+    }
+
+    // --- is_empty_content_message tests ---
+
+    #[test]
+    fn test_is_empty_content_message() {
+        // Empty string content
+        assert!(is_empty_content_message(&user_msg("")));
+
+        // Non-empty string content
+        assert!(!is_empty_content_message(&user_msg("hello")));
+
+        // Blocks with only empty text
+        assert!(is_empty_content_message(&user_blocks_msg(vec![
+            text_block(""),
+        ])));
+
+        // Blocks with non-empty text
+        assert!(!is_empty_content_message(&user_blocks_msg(vec![
+            text_block("hello"),
+        ])));
+
+        // Blocks with tool_result (not empty even if no text)
+        assert!(!is_empty_content_message(&user_blocks_msg(vec![
+            tool_result_block("t1", "result"),
+        ])));
+
+        // Mixed: empty text + tool_result → not empty
+        assert!(!is_empty_content_message(&user_blocks_msg(vec![
+            text_block(""),
+            tool_result_block("t1", "result"),
+        ])));
+    }
+
+    #[test]
+    fn test_empty_message_does_not_waste_cache_breakpoint() {
+        // Phase 3 should skip empty messages, preserving breakpoints for real content.
+        let mut validator = CacheControlValidator::new();
+
+        // Simulate tail caching over [non-empty, empty, non-empty]
+        let mut messages = vec![
+            user_msg("real content"),
+            assistant_msg(""), // empty — should be skipped
+            user_msg("more content"),
+        ];
+
+        for msg in &mut messages {
+            if !is_empty_content_message(msg) {
+                apply_tail_cache_to_message(msg, &mut validator);
+            }
+        }
+
+        // Only 2 breakpoints consumed, not 3
+        assert_eq!(
+            validator.breakpoint_count(),
+            2,
+            "Empty message must not consume a cache breakpoint"
+        );
     }
 }
