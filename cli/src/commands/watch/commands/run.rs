@@ -1,15 +1,15 @@
-//! Daemon run command - runs the daemon in foreground mode.
+//! Watch run command - runs the watch service in foreground mode.
 //!
-//! This is the main entry point for the daemon, which:
+//! This is the main entry point for the watch service, which:
 //! 1. Loads and validates configuration
 //! 2. Initializes the SQLite database
-//! 3. Sets daemon state (PID, start time)
+//! 3. Sets watch state (PID, start time)
 //! 4. Registers all triggers with the scheduler
 //! 5. Runs the scheduler loop
 //! 6. Handles graceful shutdown on SIGTERM/SIGINT
 
-use crate::commands::daemon::{
-    DaemonConfig, DaemonDb, DaemonScheduler, RunStatus, SpawnConfig, assemble_prompt,
+use crate::commands::watch::{
+    RunStatus, SpawnConfig, WatchConfig, WatchDb, WatchScheduler, assemble_prompt,
     is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};
@@ -19,15 +19,15 @@ use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info, warn};
 
-/// Run the daemon in foreground mode.
+/// Run the watch service in foreground mode.
 ///
-/// This function blocks until the daemon receives a shutdown signal (SIGTERM/SIGINT).
-pub async fn run_daemon() -> Result<(), String> {
+/// This function blocks until the watch service receives a shutdown signal (SIGTERM/SIGINT).
+pub async fn run_watch() -> Result<(), String> {
     print_banner();
 
     // Load and validate configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
 
     info!(
         triggers = config.triggers.len(),
@@ -41,14 +41,14 @@ pub async fn run_daemon() -> Result<(), String> {
             .map_err(|e| format!("Failed to create database directory: {}", e))?;
     }
 
-    // Check for existing daemon via PID file
+    // Check for existing watch service via PID file
     let pid_file = db_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join("daemon.pid");
-    if let Some(existing_pid) = check_existing_daemon(&pid_file) {
+        .join("watch.pid");
+    if let Some(existing_pid) = check_existing_watch(&pid_file) {
         return Err(format!(
-            "Another daemon instance is already running (PID {}). \
+            "Another watch instance is already running (PID {}). \
              Stop it first with 'kill {}' or remove the stale PID file at {}",
             existing_pid,
             existing_pid,
@@ -68,22 +68,22 @@ pub async fn run_daemon() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
-    // Set daemon state
-    db.set_daemon_state(pid as i64)
+    // Set watch state
+    db.set_watch_state(pid as i64)
         .await
-        .map_err(|e| format!("Failed to set daemon state: {}", e))?;
+        .map_err(|e| format!("Failed to set watch state: {}", e))?;
 
-    info!(pid = pid, db_path = %db_path.display(), "Daemon state initialized");
+    info!(pid = pid, db_path = %db_path.display(), "Watch state initialized");
 
     // Print config summary
     print_config_summary(&config, pid as i64);
 
     // Create scheduler (returns scheduler and event receiver)
-    let (mut scheduler, mut event_rx) = DaemonScheduler::new()
+    let (mut scheduler, mut event_rx) = WatchScheduler::new()
         .await
         .map_err(|e| format!("Failed to create scheduler: {}", e))?;
 
@@ -187,12 +187,12 @@ pub async fn run_daemon() -> Result<(), String> {
     });
 
     // Wait for shutdown signal
-    info!("Daemon running. Press Ctrl+C to stop.");
+    info!("Watch service running. Press Ctrl+C to stop.");
     wait_for_shutdown_signal().await;
 
     println!();
-    println!("\x1b[33mShutdown signal received, stopping daemon...\x1b[0m");
-    info!("Shutdown signal received, stopping daemon...");
+    println!("\x1b[33mShutdown signal received, stopping watch service...\x1b[0m");
+    info!("Shutdown signal received, stopping watch service...");
 
     // Stop scheduler
     if let Err(e) = scheduler.shutdown().await {
@@ -203,9 +203,9 @@ pub async fn run_daemon() -> Result<(), String> {
     event_handler.abort();
     pending_poller.abort();
 
-    // Clear daemon state
-    if let Err(e) = db.clear_daemon_state().await {
-        warn!(error = %e, "Failed to clear daemon state");
+    // Clear watch state
+    if let Err(e) = db.clear_watch_state().await {
+        warn!(error = %e, "Failed to clear watch state");
     }
 
     // Remove PID file
@@ -213,16 +213,16 @@ pub async fn run_daemon() -> Result<(), String> {
         warn!(error = %e, "Failed to remove PID file");
     }
 
-    println!("\x1b[32mDaemon stopped.\x1b[0m");
-    info!("Daemon stopped");
+    println!("\x1b[32mWatch service stopped.\x1b[0m");
+    info!("Watch service stopped");
     Ok(())
 }
 
 /// Handle a trigger event by running the check script and spawning the agent if needed.
 async fn handle_trigger_event(
-    db: &DaemonDb,
-    config: &DaemonConfig,
-    trigger: &crate::commands::daemon::Trigger,
+    db: &WatchDb,
+    config: &WatchConfig,
+    trigger: &crate::commands::watch::Trigger,
 ) -> Result<(), String> {
     info!(trigger = %trigger.name, "Trigger fired");
     print_event("fire", &trigger.name, "Trigger fired");
@@ -235,7 +235,7 @@ async fn handle_trigger_event(
 
     // Run check script if defined
     let check_result = if let Some(check_path) = &trigger.check {
-        let expanded_path = crate::commands::daemon::config::expand_tilde(check_path);
+        let expanded_path = crate::commands::watch::config::expand_tilde(check_path);
         let timeout = trigger.effective_check_timeout(&config.defaults);
 
         info!(
@@ -371,7 +371,7 @@ async fn handle_trigger_event(
                 let resume_hint = result
                     .resume_hint
                     .as_deref()
-                    .unwrap_or("stakpak daemon resume <run_id>");
+                    .unwrap_or("stakpak watch resume <run_id>");
                 print_event(
                     "pause",
                     &trigger.name,
@@ -505,9 +505,9 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-/// Check if an existing daemon is running by reading the PID file.
-/// Returns Some(pid) if a daemon is running, None otherwise.
-fn check_existing_daemon(pid_file: &std::path::Path) -> Option<u32> {
+/// Check if an existing watch service is running by reading the PID file.
+/// Returns Some(pid) if a watch service is running, None otherwise.
+fn check_existing_watch(pid_file: &std::path::Path) -> Option<u32> {
     let pid_str = std::fs::read_to_string(pid_file).ok()?;
     let pid: u32 = pid_str.trim().parse().ok()?;
 
@@ -530,7 +530,7 @@ fn print_banner() {
     println!();
     println!("\x1b[1;36m+-------------------------------------+\x1b[0m");
     println!(
-        "\x1b[1;36m|\x1b[0m   \x1b[1mStakpak Daemon\x1b[0m                    \x1b[1;36m|\x1b[0m"
+        "\x1b[1;36m|\x1b[0m   \x1b[1mStakpak Watch\x1b[0m                      \x1b[1;36m|\x1b[0m"
     );
     println!("\x1b[1;36m|\x1b[0m   Autonomous Agent Scheduler        \x1b[1;36m|\x1b[0m");
     println!("\x1b[1;36m+-------------------------------------+\x1b[0m");
@@ -538,7 +538,7 @@ fn print_banner() {
 }
 
 /// Print configuration summary.
-fn print_config_summary(config: &DaemonConfig, pid: i64) {
+fn print_config_summary(config: &WatchConfig, pid: i64) {
     println!("\x1b[1mConfiguration:\x1b[0m");
     println!("  PID:        {}", pid);
     println!("  Database:   {}", config.db_path().display());
@@ -552,7 +552,7 @@ fn print_config_summary(config: &DaemonConfig, pid: i64) {
 }
 
 /// Print registered triggers table with next run times.
-fn print_triggers_table(triggers: &[crate::commands::daemon::Trigger]) {
+fn print_triggers_table(triggers: &[crate::commands::watch::Trigger]) {
     if triggers.is_empty() {
         println!("\x1b[33mNo triggers registered.\x1b[0m");
         println!();
@@ -577,7 +577,7 @@ fn print_triggers_table(triggers: &[crate::commands::daemon::Trigger]) {
     }
 
     println!();
-    println!("\x1b[32mDaemon running.\x1b[0m Press \x1b[1mCtrl+C\x1b[0m to stop.");
+    println!("\x1b[32mWatch service running.\x1b[0m Press \x1b[1mCtrl+C\x1b[0m to stop.");
     println!();
     println!("\x1b[2m--- Event Log ---\x1b[0m");
     println!();

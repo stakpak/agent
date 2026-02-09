@@ -1,14 +1,14 @@
 //! Linux systemd service installation.
 //!
-//! Installs the stakpak daemon as a user systemd service.
-//! The service file is installed to ~/.config/systemd/user/stakpak-daemon.service
+//! Installs the stakpak watch service as a user systemd service.
+//! The service file is installed to ~/.config/systemd/user/stakpak-watch.service
 
 use super::{InstallResult, ReloadResult, UninstallResult, get_stakpak_binary_path};
 use std::path::PathBuf;
 use std::process::Command;
 
 /// Service name for systemd.
-const SERVICE_NAME: &str = "stakpak-daemon";
+const SERVICE_NAME: &str = "stakpak-watch";
 
 /// Get the path to the systemd user service file.
 pub fn get_service_path() -> PathBuf {
@@ -46,13 +46,13 @@ fn generate_service_unit(binary_path: &std::path::Path) -> String {
 
     format!(
         r#"[Unit]
-Description=Stakpak Autonomous Agent Daemon
-Documentation=https://stakpak.dev/docs/daemon
+Description=Stakpak Autonomous Agent Watch Service
+Documentation=https://stakpak.dev/docs/watch
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={} daemon run
+ExecStart={} watch run
 Restart=on-failure
 RestartSec=10
 WorkingDirectory={}
@@ -62,8 +62,8 @@ Environment=HOME={}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 
 # Logging
-StandardOutput=append:{}/.stakpak/daemon/logs/stdout.log
-StandardError=append:{}/.stakpak/daemon/logs/stderr.log
+StandardOutput=append:{}/.stakpak/watch/logs/stdout.log
+StandardError=append:{}/.stakpak/watch/logs/stderr.log
 
 # Security hardening
 NoNewPrivileges=true
@@ -106,7 +106,7 @@ pub async fn install() -> Result<InstallResult, String> {
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".stakpak")
-        .join("daemon")
+        .join("watch")
         .join("logs");
     std::fs::create_dir_all(&log_dir)
         .map_err(|e| format!("Failed to create log directory: {}", e))?;
@@ -131,7 +131,7 @@ pub async fn install() -> Result<InstallResult, String> {
 
     if !reload_output.status.success() {
         let stderr = String::from_utf8_lossy(&reload_output.stderr);
-        return Err(format!("Failed to reload systemd daemon: {}", stderr));
+        return Err(format!("Failed to reload systemd: {}", stderr));
     }
 
     // Enable the service
@@ -160,11 +160,11 @@ pub async fn install() -> Result<InstallResult, String> {
         config_path: service_path.clone(),
         post_install_commands: vec![],
         message: format!(
-            "Stakpak daemon installed and started as systemd user service.\n\
+            "Stakpak watch installed and started as systemd user service.\n\
              Service name: {}\n\
              Service file: {}\n\
-             Logs: ~/.stakpak/daemon/logs/\n\n\
-             The daemon will start automatically on login.\n\
+             Logs: ~/.stakpak/watch/logs/\n\n\
+             The watch service will start automatically on login.\n\
              Use 'systemctl --user status {}' to check status.\n\
              Use 'journalctl --user -u {}' to view logs.",
             SERVICE_NAME,
@@ -222,10 +222,10 @@ pub async fn uninstall() -> Result<UninstallResult, String> {
     Ok(UninstallResult {
         config_path: service_path.clone(),
         message: format!(
-            "Stakpak daemon service uninstalled.\n\
+            "Stakpak watch service uninstalled.\n\
              Removed: {}\n\n\
-             Note: Log files in ~/.stakpak/daemon/logs/ were preserved.\n\
-             Run history in ~/.stakpak/daemon/daemon.db was preserved.",
+             Note: Log files in ~/.stakpak/watch/logs/ were preserved.\n\
+             Run history in ~/.stakpak/watch/watch.db was preserved.",
             service_path.display()
         ),
     })
@@ -250,7 +250,7 @@ pub async fn reload() -> Result<ReloadResult, String> {
     }
 
     // Restart the service to reload configuration
-    // The daemon will re-read daemon.toml on startup
+    // The watch service will re-read watch.toml on startup
     let restart_output = Command::new("systemctl")
         .args(["--user", "restart", SERVICE_NAME])
         .output()
@@ -266,13 +266,13 @@ pub async fn reload() -> Result<ReloadResult, String> {
 
     if !is_active() {
         return Err(
-            "Service restarted but is not active. Check logs with 'journalctl --user -u stakpak-daemon'".to_string()
+            "Service restarted but is not active. Check logs with 'journalctl --user -u stakpak-watch'".to_string()
         );
     }
 
     Ok(ReloadResult {
         message: format!(
-            "Daemon restarted and configuration reloaded.\n\
+            "Watch service restarted and configuration reloaded.\n\
              Service name: {}\n\
              Use 'systemctl --user status {}' to verify status.",
             SERVICE_NAME, SERVICE_NAME
@@ -288,7 +288,7 @@ mod tests {
     fn test_get_service_path() {
         let path = get_service_path();
         assert!(path.to_string_lossy().contains("systemd"));
-        assert!(path.to_string_lossy().contains("stakpak-daemon.service"));
+        assert!(path.to_string_lossy().contains("stakpak-watch.service"));
     }
 
     #[test]
@@ -299,7 +299,7 @@ mod tests {
         assert!(unit.contains("[Unit]"));
         assert!(unit.contains("[Service]"));
         assert!(unit.contains("[Install]"));
-        assert!(unit.contains("/usr/local/bin/stakpak daemon run"));
+        assert!(unit.contains("/usr/local/bin/stakpak watch run"));
         assert!(unit.contains("Restart=on-failure"));
     }
 }

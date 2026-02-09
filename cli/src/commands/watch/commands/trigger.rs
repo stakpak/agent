@@ -1,14 +1,14 @@
-//! Daemon trigger command - inspect or manually fire a trigger.
+//! Watch trigger command - inspect or manually fire a trigger.
 
-use crate::commands::daemon::{
-    DaemonConfig, DaemonDb, RunStatus, assemble_prompt, is_process_running, run_check_script,
+use crate::commands::watch::{
+    RunStatus, WatchConfig, WatchDb, assemble_prompt, is_process_running, run_check_script,
 };
 
 /// Show detailed information about a trigger.
 pub async fn show_trigger(name: &str) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the trigger
     let trigger = config
@@ -68,9 +68,9 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
     // Show recent runs
     let db_path = config.db_path();
     if let Ok(db_path_str) = db_path.to_str().ok_or("Invalid path")
-        && let Ok(db) = DaemonDb::new(db_path_str).await
+        && let Ok(db) = WatchDb::new(db_path_str).await
     {
-        let filter = crate::commands::daemon::ListRunsFilter {
+        let filter = crate::commands::watch::ListRunsFilter {
             trigger_name: Some(name.to_string()),
             status: None,
             limit: Some(5),
@@ -95,7 +95,7 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
                 println!("  #{:<4} {} {}", run.id, time_str, status_str);
             }
             println!();
-            println!("Use 'stakpak daemon describe run <id>' to inspect a run.");
+            println!("Use 'stakpak watch describe run <id>' to inspect a run.");
         }
     }
 
@@ -106,7 +106,7 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
 pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the trigger
     let trigger = config
@@ -121,7 +121,7 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
 
         // Run check script if defined (for dry run preview)
         let check_result = if let Some(check_path) = &trigger.check {
-            let expanded_path = crate::commands::daemon::config::expand_tilde(check_path);
+            let expanded_path = crate::commands::watch::config::expand_tilde(check_path);
             let timeout = trigger.effective_check_timeout(&config.defaults);
 
             println!("Check script: {}", expanded_path.display());
@@ -185,20 +185,20 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
-    // Check if daemon is running
-    let daemon_state = db
-        .get_daemon_state()
+    // Check if watch service is running
+    let watch_state = db
+        .get_watch_state()
         .await
-        .map_err(|e| format!("Failed to check daemon state: {}", e))?;
+        .map_err(|e| format!("Failed to check watch state: {}", e))?;
 
-    match daemon_state {
+    match watch_state {
         None => {
             return Err(
-                "Daemon is not running. Start it with 'stakpak daemon run' first, or use --dry-run to preview."
+                "Watch service is not running. Start it with 'stakpak watch run' first, or use --dry-run to preview."
                     .to_string(),
             );
         }
@@ -206,23 +206,23 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
             // Verify the process is actually running
             if !is_process_running(state.pid as u32) {
                 return Err(
-                    "Daemon process is not running (stale state). Start it with 'stakpak daemon run' first, or use --dry-run to preview."
+                    "Watch process is not running (stale state). Start it with 'stakpak watch run' first, or use --dry-run to preview."
                         .to_string(),
                 );
             }
         }
     }
 
-    // Queue the trigger for the daemon to pick up
+    // Queue the trigger for the watch service to pick up
     db.insert_pending_trigger(name)
         .await
         .map_err(|e| format!("Failed to queue trigger: {}", e))?;
 
     println!(
-        "\x1b[32m✓\x1b[0m Trigger '{}' queued for execution by daemon",
+        "\x1b[32m✓\x1b[0m Trigger '{}' queued for execution by watch service",
         name
     );
-    println!("  Use 'stakpak daemon get runs' to monitor progress.");
+    println!("  Use 'stakpak watch get runs' to monitor progress.");
 
     Ok(())
 }

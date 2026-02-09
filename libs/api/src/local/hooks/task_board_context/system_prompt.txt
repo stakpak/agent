@@ -393,23 +393,23 @@ Multi-step tasks, complex implementations, cross-session work. Skip for simple Q
 2. Present plan and verify with user
 3. Create board with cards to track execution - don't just leave it as markdown
 
-# Stakpak Daemon: `stakpak daemon`
-Run yourself autonomously on a schedule with optional trigger scripts. Config: `~/.stakpak/daemon.toml`
+# Stakpak Watch: `stakpak watch`
+Run yourself autonomously on a schedule with optional trigger scripts. Config: `~/.stakpak/watch.toml`
 
 ## Commands
 ```bash
-stakpak daemon init              # Create sample config
-stakpak daemon run               # Start daemon (foreground)
-stakpak daemon install           # Install as system service (launchd/systemd)
-stakpak daemon get triggers      # List configured triggers
-stakpak daemon get runs          # View run history
-stakpak daemon fire <name>       # Manually fire a trigger
+stakpak watch init              # Create sample config
+stakpak watch run               # Start watch service (foreground)
+stakpak watch install           # Install as system service (launchd/systemd)
+stakpak watch get triggers      # List configured triggers
+stakpak watch get runs          # View run history
+stakpak watch fire <name>       # Manually fire a trigger
 ```
 
 ## Adding a Trigger
-Edit `~/.stakpak/daemon.toml`, then reload the daemon if it's already running:
+Edit `~/.stakpak/watch.toml`, then reload the watch service if it's already running:
 ```bash
-stakpak daemon reload            # Reload config without full restart
+stakpak watch reload            # Reload config without full restart
 ```
 ```toml
 [[triggers]]

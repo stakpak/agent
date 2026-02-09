@@ -1,20 +1,18 @@
-//! Daemon status command - shows daemon status and trigger information.
+//! Watch status command - shows watch status and trigger information.
 
-use crate::commands::daemon::{
-    DaemonConfig, DaemonDb, ListRunsFilter, RunStatus, is_process_running,
-};
+use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb, is_process_running};
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use std::str::FromStr;
 
-/// Show daemon status and upcoming trigger runs.
+/// Show watch status and upcoming trigger runs.
 pub async fn show_status() -> Result<(), String> {
     // Load configuration
-    let config = match DaemonConfig::load_default() {
+    let config = match WatchConfig::load_default() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to load daemon config: {}", e);
-            eprintln!("Run 'stakpak daemon init' to create a configuration file.");
+            eprintln!("Failed to load watch config: {}", e);
+            eprintln!("Run 'stakpak watch init' to create a configuration file.");
             return Ok(());
         }
     };
@@ -25,21 +23,21 @@ pub async fn show_status() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = (DaemonDb::new(db_path_str).await).ok();
+    let db = (WatchDb::new(db_path_str).await).ok();
 
-    // Check daemon state
-    let daemon_state = if let Some(ref db) = db {
-        db.get_daemon_state().await.ok().flatten()
+    // Check watch state
+    let watch_state = if let Some(ref db) = db {
+        db.get_watch_state().await.ok().flatten()
     } else {
         None
     };
 
-    // Print daemon status
-    if let Some(state) = daemon_state {
+    // Print watch status
+    if let Some(state) = watch_state {
         // Check if process is actually running
         if is_process_running(state.pid as u32) {
             println!(
-                "Daemon: \x1b[32mrunning\x1b[0m (PID {}, started {})",
+                "Watch: \x1b[32mrunning\x1b[0m (PID {}, started {})",
                 state.pid,
                 format_datetime(&state.started_at)
             );
@@ -49,13 +47,13 @@ pub async fn show_status() -> Result<(), String> {
             );
         } else {
             println!(
-                "Daemon: \x1b[33mstale\x1b[0m (PID {} not running, last seen {})",
+                "Watch: \x1b[33mstale\x1b[0m (PID {} not running, last seen {})",
                 state.pid,
                 format_datetime(&state.started_at)
             );
         }
     } else {
-        println!("Daemon: \x1b[31mnot running\x1b[0m");
+        println!("Watch: \x1b[31mnot running\x1b[0m");
     }
 
     println!();
@@ -113,7 +111,7 @@ fn calculate_next_run(schedule: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Get the last run info for a trigger.
-async fn get_last_run_info(db: &DaemonDb, trigger_name: &str) -> Option<(DateTime<Utc>, String)> {
+async fn get_last_run_info(db: &WatchDb, trigger_name: &str) -> Option<(DateTime<Utc>, String)> {
     let filter = ListRunsFilter {
         trigger_name: Some(trigger_name.to_string()),
         status: None,

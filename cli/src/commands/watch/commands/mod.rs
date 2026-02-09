@@ -1,6 +1,6 @@
-//! Daemon CLI commands.
+//! Watch CLI commands.
 //!
-//! This module contains all the CLI subcommands for the daemon feature.
+//! This module contains all the CLI subcommands for the watch feature.
 
 mod history;
 mod init;
@@ -20,24 +20,24 @@ use clap::Subcommand;
 // Re-export command functions
 pub use history::{show_history, show_run};
 pub use init::init_config;
-pub use install::install_daemon;
+pub use install::install_watch;
 pub use prune::prune_history;
-pub use reload::reload_daemon;
+pub use reload::reload_watch;
 pub use resume::resume_run;
-pub use run::run_daemon;
+pub use run::run_watch;
 pub use status::show_status;
-pub use stop::stop_daemon;
+pub use stop::stop_watch;
 pub use trigger::{fire_trigger, show_trigger};
-pub use uninstall::uninstall_daemon;
+pub use uninstall::uninstall_watch;
 
-/// Daemon subcommands for managing the autonomous agent scheduler.
+/// Watch subcommands for managing the autonomous agent scheduler.
 #[derive(Subcommand, PartialEq, Debug)]
-pub enum DaemonCommands {
-    /// Start the daemon in foreground mode
+pub enum WatchCommands {
+    /// Start the watch service in foreground mode
     Run,
-    /// Stop a running daemon
+    /// Stop a running watch service
     Stop,
-    /// Show daemon status overview
+    /// Show watch status overview
     Status,
     /// List resources (triggers, runs)
     Get {
@@ -77,15 +77,15 @@ pub enum DaemonCommands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Install daemon as a system service (launchd on macOS, systemd on Linux)
+    /// Install watch as a system service (launchd on macOS, systemd on Linux)
     Install {
         /// Reinstall even if already installed
         #[arg(short, long)]
         force: bool,
     },
-    /// Uninstall daemon system service
+    /// Uninstall watch system service
     Uninstall,
-    /// Reload daemon configuration (restarts the service)
+    /// Reload watch configuration (restarts the service)
     Reload,
 }
 

@@ -1,13 +1,13 @@
-//! Daemon history command - show run history.
+//! Watch history command - show run history.
 
-use crate::commands::daemon::{DaemonConfig, DaemonDb, ListRunsFilter, RunStatus};
+use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb};
 use chrono::{DateTime, Utc};
 
 /// Show run history for all triggers or a specific trigger.
 pub async fn show_history(trigger_name: Option<&str>, limit: Option<u32>) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -15,7 +15,7 @@ pub async fn show_history(trigger_name: Option<&str>, limit: Option<u32>) -> Res
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -92,7 +92,7 @@ pub async fn show_history(trigger_name: Option<&str>, limit: Option<u32>) -> Res
 pub async fn show_run(run_id: i64) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -100,7 +100,7 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -210,7 +210,7 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
     {
         println!();
         println!(
-            "\x1b[33mTip: Resume this run with 'stakpak daemon resume {}'\x1b[0m",
+            "\x1b[33mTip: Resume this run with 'stakpak watch resume {}'\x1b[0m",
             run.id
         );
     }

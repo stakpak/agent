@@ -1,4 +1,4 @@
-//! Agent spawner for daemon triggers.
+//! Agent spawner for watch triggers.
 //!
 //! Spawns the stakpak agent as a child process when a trigger fires,
 //! capturing session and checkpoint information from JSON output.

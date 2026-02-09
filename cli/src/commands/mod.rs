@@ -12,13 +12,13 @@ pub mod agent;
 pub mod auth;
 pub mod auto_update;
 pub mod board;
-pub mod daemon;
 pub mod mcp;
 pub mod warden;
+pub mod watch;
 
 pub use auth::AuthCommands;
-pub use daemon::DaemonCommands;
 pub use mcp::McpCommands;
+pub use watch::WatchCommands;
 
 /// Frontmatter structure for rulebook metadata
 #[derive(Deserialize, Serialize)]
@@ -167,9 +167,9 @@ pub enum Commands {
     },
     /// Update Stakpak Agent to the latest version
     Update,
-    /// Run the autonomous agent daemon with scheduled triggers
+    /// Run the autonomous watch agent with scheduled triggers
     #[command(subcommand)]
-    Daemon(DaemonCommands),
+    Watch(WatchCommands),
 }
 
 async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
@@ -217,7 +217,7 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
-                | Commands::Daemon(_)
+                | Commands::Watch(_)
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -456,24 +456,23 @@ impl Commands {
             Commands::Update => {
                 auto_update::run_auto_update().await?;
             }
-            Commands::Daemon(daemon_command) => {
-                use crate::commands::daemon::commands::{
-                    DaemonCommands, DescribeResource, GetResource, fire_trigger, init_config,
-                    install_daemon, prune_history, reload_daemon, resume_run, run_daemon,
-                    show_history, show_run, show_status, show_trigger, stop_daemon,
-                    uninstall_daemon,
+            Commands::Watch(watch_command) => {
+                use crate::commands::watch::commands::{
+                    DescribeResource, GetResource, WatchCommands, fire_trigger, init_config,
+                    install_watch, prune_history, reload_watch, resume_run, run_watch,
+                    show_history, show_run, show_status, show_trigger, stop_watch, uninstall_watch,
                 };
-                match daemon_command {
-                    DaemonCommands::Run => {
-                        run_daemon().await?;
+                match watch_command {
+                    WatchCommands::Run => {
+                        run_watch().await?;
                     }
-                    DaemonCommands::Stop => {
-                        stop_daemon().await?;
+                    WatchCommands::Stop => {
+                        stop_watch().await?;
                     }
-                    DaemonCommands::Status => {
+                    WatchCommands::Status => {
                         show_status().await?;
                     }
-                    DaemonCommands::Get { resource } => match resource {
+                    WatchCommands::Get { resource } => match resource {
                         GetResource::Triggers => {
                             show_status().await?; // Status already shows triggers
                         }
@@ -481,7 +480,7 @@ impl Commands {
                             show_history(trigger.as_deref(), Some(limit)).await?;
                         }
                     },
-                    DaemonCommands::Describe { resource } => match resource {
+                    WatchCommands::Describe { resource } => match resource {
                         DescribeResource::Trigger { name } => {
                             show_trigger(&name).await?;
                         }
@@ -489,26 +488,26 @@ impl Commands {
                             show_run(id).await?;
                         }
                     },
-                    DaemonCommands::Fire { trigger, dry_run } => {
+                    WatchCommands::Fire { trigger, dry_run } => {
                         fire_trigger(&trigger, dry_run).await?;
                     }
-                    DaemonCommands::Resume { run_id, force } => {
+                    WatchCommands::Resume { run_id, force } => {
                         resume_run(run_id, force).await?;
                     }
-                    DaemonCommands::Prune { days } => {
+                    WatchCommands::Prune { days } => {
                         prune_history(days).await?;
                     }
-                    DaemonCommands::Init { force } => {
+                    WatchCommands::Init { force } => {
                         init_config(force).await?;
                     }
-                    DaemonCommands::Install { force } => {
-                        install_daemon(force).await?;
+                    WatchCommands::Install { force } => {
+                        install_watch(force).await?;
                     }
-                    DaemonCommands::Uninstall => {
-                        uninstall_daemon().await?;
+                    WatchCommands::Uninstall => {
+                        uninstall_watch().await?;
                     }
-                    DaemonCommands::Reload => {
-                        reload_daemon().await?;
+                    WatchCommands::Reload => {
+                        reload_watch().await?;
                     }
                 }
             }

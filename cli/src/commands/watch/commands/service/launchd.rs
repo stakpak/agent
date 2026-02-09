@@ -1,14 +1,14 @@
 //! macOS launchd service installation.
 //!
-//! Installs the stakpak daemon as a LaunchAgent that runs on user login.
-//! The plist is installed to ~/Library/LaunchAgents/dev.stakpak.daemon.plist
+//! Installs the stakpak watch service as a LaunchAgent that runs on user login.
+//! The plist is installed to ~/Library/LaunchAgents/dev.stakpak.watch.plist
 
 use super::{InstallResult, ReloadResult, UninstallResult, get_stakpak_binary_path};
 use std::path::PathBuf;
 use std::process::Command;
 
 /// Service identifier for launchd.
-const SERVICE_LABEL: &str = "dev.stakpak.daemon";
+const SERVICE_LABEL: &str = "dev.stakpak.watch";
 
 /// Get the path to the LaunchAgent plist file.
 pub fn get_plist_path() -> PathBuf {
@@ -43,7 +43,7 @@ fn generate_plist(binary_path: &std::path::Path) -> String {
         .display()
         .to_string();
 
-    let log_dir = format!("{}/.stakpak/daemon/logs", home_dir);
+    let log_dir = format!("{}/.stakpak/watch/logs", home_dir);
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -56,7 +56,7 @@ fn generate_plist(binary_path: &std::path::Path) -> String {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
-        <string>daemon</string>
+        <string>watch</string>
         <string>run</string>
     </array>
 
@@ -126,7 +126,7 @@ pub async fn install() -> Result<InstallResult, String> {
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".stakpak")
-        .join("daemon")
+        .join("watch")
         .join("logs");
     std::fs::create_dir_all(&log_dir)
         .map_err(|e| format!("Failed to create log directory: {}", e))?;
@@ -158,11 +158,11 @@ pub async fn install() -> Result<InstallResult, String> {
         config_path: plist_path.clone(),
         post_install_commands: vec![],
         message: format!(
-            "Stakpak daemon installed and started as launchd service.\n\
+            "Stakpak watch installed and started as launchd service.\n\
              Service label: {}\n\
              Plist path: {}\n\
-             Logs: ~/.stakpak/daemon/logs/\n\n\
-             The daemon will start automatically on login.\n\
+             Logs: ~/.stakpak/watch/logs/\n\n\
+             The watch service will start automatically on login.\n\
              Use 'launchctl list {}' to check status.",
             SERVICE_LABEL,
             plist_path.display(),
@@ -202,10 +202,10 @@ pub async fn uninstall() -> Result<UninstallResult, String> {
     Ok(UninstallResult {
         config_path: plist_path.clone(),
         message: format!(
-            "Stakpak daemon service uninstalled.\n\
+            "Stakpak watch service uninstalled.\n\
              Removed: {}\n\n\
-             Note: Log files in ~/.stakpak/daemon/logs/ were preserved.\n\
-             Run history in ~/.stakpak/daemon/daemon.db was preserved.",
+             Note: Log files in ~/.stakpak/watch/logs/ were preserved.\n\
+             Run history in ~/.stakpak/watch/watch.db was preserved.",
             plist_path.display()
         ),
     })
@@ -223,7 +223,7 @@ pub async fn reload() -> Result<ReloadResult, String> {
     }
 
     if !is_loaded() {
-        return Err("Service is installed but not running. Start it first with 'launchctl load ~/Library/LaunchAgents/dev.stakpak.daemon.plist'".to_string());
+        return Err("Service is installed but not running. Start it first with 'launchctl load ~/Library/LaunchAgents/dev.stakpak.watch.plist'".to_string());
     }
 
     // Use kickstart -k to kill and restart the service
@@ -269,14 +269,13 @@ pub async fn reload() -> Result<ReloadResult, String> {
     // Verify it restarted
     if !is_loaded() {
         return Err(
-            "Service stopped but did not restart. Check logs at ~/.stakpak/daemon/logs/"
-                .to_string(),
+            "Service stopped but did not restart. Check logs at ~/.stakpak/watch/logs/".to_string(),
         );
     }
 
     Ok(ReloadResult {
         message: format!(
-            "Daemon restarted and configuration reloaded.\n\
+            "Watch service restarted and configuration reloaded.\n\
              Service label: {}\n\
              Use 'launchctl list {}' to verify status.",
             SERVICE_LABEL, SERVICE_LABEL
@@ -292,7 +291,7 @@ mod tests {
     fn test_get_plist_path() {
         let path = get_plist_path();
         assert!(path.to_string_lossy().contains("LaunchAgents"));
-        assert!(path.to_string_lossy().contains("dev.stakpak.daemon.plist"));
+        assert!(path.to_string_lossy().contains("dev.stakpak.watch.plist"));
     }
 
     #[test]
@@ -300,7 +299,7 @@ mod tests {
         let binary_path = PathBuf::from("/usr/local/bin/stakpak");
         let plist = generate_plist(&binary_path);
 
-        assert!(plist.contains("dev.stakpak.daemon"));
+        assert!(plist.contains("dev.stakpak.watch"));
         assert!(plist.contains("/usr/local/bin/stakpak"));
         assert!(plist.contains("<key>RunAtLoad</key>"));
         assert!(plist.contains("<key>KeepAlive</key>"));

@@ -1,4 +1,4 @@
-//! Shared utilities for daemon commands.
+//! Shared utilities for watch commands.
 
 use std::process::Command;
 

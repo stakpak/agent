@@ -1,15 +1,15 @@
-//! Daemon resume command - resume an interrupted agent run in TUI mode.
+//! Watch resume command - resume an interrupted agent run in TUI mode.
 
-use crate::commands::daemon::{DaemonConfig, DaemonDb, RunStatus};
+use crate::commands::watch::{RunStatus, WatchConfig, WatchDb};
 
 /// Resume an interrupted agent run in TUI mode.
 ///
 /// This launches the TUI with the checkpoint flag, allowing the user to
-/// take over the session interactively where the daemon left off.
+/// take over the session interactively where the watch service left off.
 pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -17,7 +17,7 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 

@@ -1,9 +1,9 @@
-//! Prompt assembly for daemon triggers.
+//! Prompt assembly for watch triggers.
 //!
 //! Assembles the final prompt passed to the agent, combining the user's prompt
 //! with context about the trigger and check script results.
 
-use crate::commands::daemon::{CheckResult, Trigger};
+use crate::commands::watch::{CheckResult, Trigger};
 
 /// Assemble the final prompt to pass to the agent.
 ///
