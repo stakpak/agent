@@ -449,8 +449,8 @@ pub async fn run_interactive(
                 let session_dir = std::path::Path::new(".stakpak/session");
                 if stakpak_tui::services::plan::plan_file_exists(session_dir) {
                     // Existing plan found — let the TUI show the modal
-                    let meta = stakpak_tui::services::plan::read_plan_file(session_dir)
-                        .map(|(m, _)| m);
+                    let meta =
+                        stakpak_tui::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
                     send_input_event(
                         &input_tx,
                         InputEvent::ExistingPlanFound(stakpak_tui::ExistingPlanPrompt {

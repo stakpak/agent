@@ -137,7 +137,8 @@ pub fn update(
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
                 if let Some(prompt) = state.existing_plan_prompt.take() {
-                    let _ = output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                    let _ =
+                        output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
                 return;
             }
@@ -146,7 +147,8 @@ pub fn update(
                 let session_dir = std::path::Path::new(".stakpak/session");
                 crate::services::plan::archive_plan_file(session_dir);
                 if let Some(prompt) = state.existing_plan_prompt.take() {
-                    let _ = output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                    let _ =
+                        output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
                 return;
             }
@@ -1058,7 +1060,7 @@ pub fn update(
             if active && !was_active {
                 push_styled_message(
                     state,
-                    " Plan mode activated — describe what you'd like to plan",
+                    " Plan mode activated - what are we working on today?",
                     ratatui::style::Color::Cyan,
                     "⚙ ",
                     ratatui::style::Color::Cyan,
