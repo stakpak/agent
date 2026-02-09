@@ -189,12 +189,21 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+        // Only load init.md if it is a regular file (not a dir), and cap size to avoid memory/API abuse
+        const MAX_INIT_MD_BYTES: u64 = 1 << 20; // 1 MiB
         let init_path = std::env::current_dir()
             .ok()
             .map(|cwd| cwd.join("init.md"))
-            .filter(|p| p.exists());
+            .filter(|p| p.exists() && p.is_file());
         let init_prompt_content_for_tui = match init_path {
-            Some(path) => tokio::fs::read_to_string(path).await.ok(),
+            Some(path) => {
+                let size = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
+                if size.map_or(true, |s| s > MAX_INIT_MD_BYTES) {
+                    None
+                } else {
+                    tokio::fs::read_to_string(path).await.ok()
+                }
+            }
             None => None,
         };
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
