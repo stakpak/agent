@@ -8,26 +8,28 @@ use std::thread;
 
 #[derive(Subcommand, PartialEq)]
 pub enum WardenCommands {
-    /// Run coding agent in a container and apply security policies
-    Run {
+    /// Run any container image through Warden's network firewall (sidecar pattern)
+    Wrap {
         /// Container image to run
-        #[arg(short, long)]
-        image: Option<String>,
-        /// Environment variables to pass to container
+        image: String,
+        /// Environment variables to pass to container (-e KEY=VALUE)
         #[arg(short, long, action = clap::ArgAction::Append)]
         env: Vec<String>,
-        /// Additional volumes to mount
+        /// Additional volumes to mount (-v /host:/container)
         #[arg(short, long, action = clap::ArgAction::Append)]
         volume: Vec<String>,
-        /// Enable TTY allocation for interactive terminal applications
+        /// Working directory inside the container
+        #[arg(short, long)]
+        workdir: Option<String>,
+        /// Enable TTY allocation for interactive use
         #[arg(short, long)]
         tty: bool,
         /// Container runtime: docker or podman
         #[arg(short, long)]
         runtime: Option<String>,
-        /// Command to run inside the container
-        #[arg()]
-        command: Option<String>,
+        /// Command and arguments to run inside the container
+        #[arg(last = true)]
+        command: Vec<String>,
     },
     /// Display and analyze request logs with filtering options
     Logs {
@@ -56,19 +58,19 @@ impl WardenCommands {
         let mut needs_tty = false;
 
         match self {
-            WardenCommands::Run {
+            WardenCommands::Wrap {
                 image,
                 env,
                 volume,
+                workdir,
                 tty,
                 runtime,
                 command,
             } => {
-                cmd.arg("run");
+                cmd.arg("wrap");
 
-                if let Some(image) = image {
-                    cmd.args(["--image", &image]);
-                }
+                // Image is positional first argument
+                cmd.arg(&image);
 
                 for env_var in env {
                     cmd.args(["--env", &env_var]);
@@ -85,6 +87,10 @@ impl WardenCommands {
                     cmd.args(["--volume", &vol]);
                 }
 
+                if let Some(workdir) = workdir {
+                    cmd.args(["--workdir", &workdir]);
+                }
+
                 if tty {
                     cmd.arg("--tty");
                     needs_tty = true;
@@ -94,8 +100,10 @@ impl WardenCommands {
                     cmd.args(["--runtime", &runtime]);
                 }
 
-                if let Some(command) = command {
-                    cmd.arg(command);
+                // Command comes after -- separator
+                if !command.is_empty() {
+                    cmd.arg("--");
+                    cmd.args(&command);
                 }
             }
             WardenCommands::Logs {
@@ -217,24 +225,6 @@ fn expand_volume_path(volume: String) -> String {
     }
 }
 
-/// Helper function to escape an argument for shell usage
-/// Wraps arguments containing spaces or special characters in quotes
-fn shell_escape_arg(arg: &str) -> String {
-    // If the argument contains spaces, quotes, or other special characters, quote it
-    if arg.contains(' ')
-        || arg.contains('\'')
-        || arg.contains('"')
-        || arg.contains('$')
-        || arg.contains('\\')
-    {
-        // Escape any existing quotes and wrap in double quotes
-        let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
-        format!("\"{}\"", escaped)
-    } else {
-        arg.to_string()
-    }
-}
-
 /// Execute warden command with proper TTY handling and streaming
 fn execute_warden_command(mut cmd: Command, needs_tty: bool) -> Result<(), String> {
     if needs_tty {
@@ -330,16 +320,13 @@ pub async fn run_default_warden(
     // Get warden path (will download if not available)
     let warden_path = get_warden_plugin_path().await;
 
-    // Run warden with default configuration
+    // Run warden wrap with default configuration
     let mut cmd = Command::new(warden_path);
-    cmd.arg("run");
+    cmd.arg("wrap");
 
-    // Use stakpak image with current CLI version
-    let stakpak_image = format!(
-        "ghcr.io/stakpak/agent-warden:v{}",
-        env!("CARGO_PKG_VERSION")
-    );
-    cmd.args(["--image", &stakpak_image]);
+    // Use standard stakpak image with current CLI version (no special warden image needed)
+    let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
+    cmd.arg(&stakpak_image);
 
     // Enable TTY by default for convenience command
     cmd.arg("--tty");
@@ -360,6 +347,9 @@ pub async fn run_default_warden(
         cmd.args(["--volume", &volume]);
     }
 
+    // Command comes after -- separator
+    cmd.args(["--", "stakpak"]);
+
     // Execute the warden command with TTY support
     execute_warden_command(cmd, true)
 }
@@ -369,16 +359,13 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
     // Get warden path (will download if not available)
     let warden_path = get_warden_plugin_path().await;
 
-    // Build warden command
+    // Build warden wrap command
     let mut cmd = Command::new(warden_path);
-    cmd.arg("run");
+    cmd.arg("wrap");
 
-    // Use stakpak image with current CLI version
-    let stakpak_image = format!(
-        "ghcr.io/stakpak/agent-warden:v{}",
-        env!("CARGO_PKG_VERSION")
-    );
-    cmd.args(["--image", &stakpak_image]);
+    // Use standard stakpak image with current CLI version (no special warden image needed)
+    let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
+    cmd.arg(&stakpak_image);
 
     // Determine if we need TTY (interactive mode) based on CLI args.
     // For async/single-step modes (-a/--async or -p/--print), we avoid TTY so warden
@@ -396,15 +383,6 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
     for volume in prepare_volumes(&config, false) {
         let expanded_volume = expand_volume_path(volume);
         cmd.args(["--volume", &expanded_volume]);
-    }
-
-    // Build the stakpak command to run inside container
-    // We need to reconstruct the original command but add STAKPAK_SKIP_WARDEN to prevent recursion
-    let mut stakpak_args = vec!["stakpak".to_string()];
-
-    // Skip the first arg (program name) and add the rest
-    for arg in args.iter().skip(1) {
-        stakpak_args.push(arg.clone());
     }
 
     // Set environment variable to prevent infinite recursion
@@ -425,13 +403,13 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
         cmd.args(["--env", &format!("STAKPAK_API_ENDPOINT={}", api_endpoint)]);
     }
 
-    // Join all stakpak arguments into a single command string, properly escaping arguments
-    let stakpak_cmd = stakpak_args
-        .iter()
-        .map(|arg| shell_escape_arg(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    cmd.arg(stakpak_cmd);
+    // Build the stakpak command arguments to run inside container
+    // Skip the first arg (program name) and pass the rest as separate arguments after --
+    cmd.arg("--");
+    cmd.arg("stakpak");
+    for arg in args.iter().skip(1) {
+        cmd.arg(arg);
+    }
 
     // Execute the warden command with appropriate TTY handling
     execute_warden_command(cmd, needs_tty)

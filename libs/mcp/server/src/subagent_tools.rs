@@ -139,12 +139,10 @@ The subagent runs asynchronously in the background. This tool returns immediatel
         if let Some(warden) = &subagent_config.warden
             && warden.enabled
         {
-            let stakpak_image = format!(
-                "ghcr.io/stakpak/agent-warden:v{}",
-                env!("CARGO_PKG_VERSION")
-            );
+            // Use standard stakpak image (no special warden image needed with wrap)
+            let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
 
-            let mut warden_command = format!("stakpak warden run --image {}", stakpak_image);
+            let mut warden_command = format!("stakpak warden wrap {}", stakpak_image);
 
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
 
@@ -154,8 +152,9 @@ The subagent runs asynchronously in the background. This tool returns immediatel
                 warden_command.push_str(&format!(" -v {}", volume));
             }
 
+            // wrap uses -- separator before the command
             command = format!(
-                "{} '{}'",
+                "{} -- {}",
                 warden_command,
                 command.replace(&prompt_file_path, &warden_prompt_path)
             );
