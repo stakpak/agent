@@ -126,7 +126,7 @@ impl SearchClient {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(MAX_RETRIES);
         let base_client =
             crate::tls_client::create_tls_client(crate::tls_client::TlsClientConfig::default())
-                .unwrap_or_else(|_| reqwest::Client::new());
+                .expect("Failed to create TLS client for search service");
         let client = ClientBuilder::new(base_client)
             .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
