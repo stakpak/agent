@@ -397,6 +397,12 @@ pub enum AnthropicMessageContent {
     Blocks(Vec<AnthropicContent>),
 }
 
+impl Default for AnthropicMessageContent {
+    fn default() -> Self {
+        AnthropicMessageContent::String(String::new())
+    }
+}
+
 /// Anthropic source (for images/PDFs)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnthropicSource {

@@ -1,10 +1,10 @@
 //! Stakpak provider implementation
 
+use super::convert::to_stakpak_request;
 use super::stream::create_stream;
 use super::types::{StakpakModelsResponse, StakpakProviderConfig, StakpakResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::providers::openai::convert::to_openai_request;
 use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
@@ -110,8 +110,7 @@ impl Provider for StakpakProvider {
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}/v1/chat/completions", self.config.base_url);
 
-        // Stakpak uses OpenAI-compatible API for requests
-        let openai_req = to_openai_request(&request, false);
+        let openai_req = to_stakpak_request(&request, false);
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
@@ -139,8 +138,7 @@ impl Provider for StakpakProvider {
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}/v1/chat/completions", self.config.base_url);
 
-        // Stakpak uses OpenAI-compatible API, reuse OpenAI conversion
-        let openai_req = to_openai_request(&request, true);
+        let openai_req = to_stakpak_request(&request, true);
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
