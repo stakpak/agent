@@ -45,10 +45,10 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         if is_same_version(&system_version, &target_version) {
             return config.name.clone();
         } else {
-            println!(
-                "{} v{} is outdated (target: v{}), checking plugins directory...",
-                config.name, system_version, target_version
-            );
+            // println!(
+            //     "{} v{} is outdated (target: v{}), checking plugins directory...",
+            //     config.name, system_version, target_version
+            // );
         }
     }
 
@@ -59,20 +59,20 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         if is_same_version(&current_version, &target_version) {
             return existing_path;
         } else {
-            println!(
-                "{} {} is outdated (target: v{}), updating...",
-                config.name, current_version, target_version
-            );
+            // println!(
+            //     "{} {} is outdated (target: v{}), updating...",
+            //     config.name, current_version, target_version
+            // );
         }
     }
 
     // Try to download and install the latest version
     match download_and_install_plugin(&config).await {
         Ok(path) => {
-            println!(
-                "Successfully installed {} v{} -> {}",
-                config.name, target_version, path
-            );
+            // println!(
+            //     "Successfully installed {} v{} -> {}",
+            //     config.name, target_version, path
+            // );
             path
         }
         Err(e) => {
@@ -228,7 +228,7 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
 
     let plugin_path = plugins_dir.join(&binary_name);
 
-    println!("Downloading {} plugin...", config.name);
+    // println!("Downloading {} plugin...", config.name);
 
     // Download the archive
     let client = create_tls_client(TlsClientConfig::default())?;
