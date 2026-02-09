@@ -154,6 +154,34 @@ pub enum InputEvent {
     RefreshBoardTasks,
     BoardTasksLoaded(FetchTasksResult),
     BoardTasksError(String),
+
+    // Plan mode events
+    /// Plan mode toggled on/off (sent from backend to TUI to sync state)
+    PlanModeChanged(bool),
+    /// Toggle plan review overlay (Ctrl+P in plan mode)
+    TogglePlanReview,
+    /// Close plan review overlay
+    PlanReviewClose,
+    /// Move cursor up in plan review
+    PlanReviewCursorUp,
+    /// Move cursor down in plan review
+    PlanReviewCursorDown,
+    /// Open comment modal for current line
+    PlanReviewComment,
+    /// Approve the plan
+    PlanReviewApprove,
+    /// Submit feedback (unresolved comments)
+    PlanReviewFeedback,
+    /// Jump to next commented line
+    PlanReviewNextComment,
+    /// Jump to previous commented line
+    PlanReviewPrevComment,
+    /// Toggle resolve on selected comment
+    PlanReviewResolve,
+    /// Scroll plan review up by a page
+    PlanReviewPageUp,
+    /// Scroll plan review down by a page
+    PlanReviewPageDown,
 }
 
 #[derive(Debug)]
@@ -177,4 +205,10 @@ pub enum OutputEvent {
     RequestTotalUsage,
     RequestAvailableModels,
     SwitchToModel(Model),
+    /// Plan mode activated via /plan command. Contains optional inline prompt.
+    PlanModeActivated(Option<String>),
+    /// Feedback on the plan — formatted unresolved comments injected as user message.
+    PlanFeedback(String),
+    /// Plan approved — transition to Executing phase.
+    PlanApproved,
 }

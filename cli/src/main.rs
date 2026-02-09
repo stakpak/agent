@@ -86,6 +86,18 @@ struct Cli {
     #[arg(long = "study-mode", default_value_t = false)]
     study_mode: bool,
 
+    /// Enter plan mode — research and draft a plan before executing
+    #[arg(long = "plan", default_value_t = false)]
+    plan: bool,
+
+    /// Auto-approve the plan when status becomes 'reviewing' (async mode)
+    #[arg(long = "plan-approved", default_value_t = false)]
+    plan_approved: bool,
+
+    /// Read feedback from a file and inject as plan feedback (async mode)
+    #[arg(long = "plan-feedback")]
+    plan_feedback: Option<String>,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
@@ -471,6 +483,9 @@ async fn main() {
                                     },
                                     model: default_model.clone(),
                                     agents_md: agents_md.clone(),
+                                    plan_mode: cli.plan,
+                                    plan_approved: cli.plan_approved,
+                                    plan_feedback: cli.plan_feedback.clone(),
                                 },
                             )
                             .await
@@ -491,6 +506,7 @@ async fn main() {
                                     enable_mtls: !cli.disable_mcp_mtls,
                                     is_git_repo: gitignore::is_git_repo(),
                                     study_mode: cli.study_mode,
+                                    plan_mode: cli.plan,
                                     system_prompt,
                                     allowed_tools,
                                     auto_approve,

@@ -248,6 +248,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render plan review overlay (full-screen, on top of everything)
+    if state.show_plan_review {
+        crate::services::plan_review::render_plan_review(f, state, f.area());
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped
