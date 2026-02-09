@@ -1,19 +1,19 @@
-//! Daemon reload command - reload the installed daemon configuration.
+//! Watch reload command - reload the installed watch configuration.
 
 use super::service::{Platform, is_service_installed, reload_service};
 
-/// Reload the daemon configuration.
-pub async fn reload_daemon() -> Result<(), String> {
+/// Reload the watch configuration.
+pub async fn reload_watch() -> Result<(), String> {
     let platform = Platform::detect();
 
     if !is_service_installed() {
         return Err(
-            "Daemon service is not installed. Install it first with 'stakpak daemon install'."
+            "Watch service is not installed. Install it first with 'stakpak watch install'."
                 .to_string(),
         );
     }
 
-    println!("Reloading stakpak daemon configuration...");
+    println!("Reloading stakpak watch configuration...");
     println!("Platform: {}", platform.name());
     println!();
 
@@ -21,9 +21,9 @@ pub async fn reload_daemon() -> Result<(), String> {
     let config_path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".stakpak")
-        .join("daemon.toml");
+        .join("watch.toml");
 
-    match crate::commands::daemon::DaemonConfig::load_default() {
+    match crate::commands::watch::WatchConfig::load_default() {
         Ok(config) => {
             println!(
                 "✓ Configuration validated ({} triggers)",
@@ -45,7 +45,7 @@ pub async fn reload_daemon() -> Result<(), String> {
     let result = reload_service().await?;
 
     println!();
-    println!("\x1b[32m✓ Daemon reloaded successfully!\x1b[0m");
+    println!("\x1b[32m✓ Watch reloaded successfully!\x1b[0m");
     println!();
     println!("{}", result.message);
 

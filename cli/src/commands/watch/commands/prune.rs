@@ -1,12 +1,12 @@
-//! Daemon prune command - clean up old run history.
+//! Watch prune command - clean up old run history.
 
-use crate::commands::daemon::{DaemonConfig, DaemonDb};
+use crate::commands::watch::{WatchConfig, WatchDb};
 
 /// Prune old run history.
 pub async fn prune_history(days: u32) -> Result<(), String> {
     // Load configuration
     let config =
-        DaemonConfig::load_default().map_err(|e| format!("Failed to load daemon config: {}", e))?;
+        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -14,7 +14,7 @@ pub async fn prune_history(days: u32) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = DaemonDb::new(db_path_str)
+    let db = WatchDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 

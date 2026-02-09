@@ -1,4 +1,4 @@
-//! SQLite database layer for daemon state and trigger run history.
+//! SQLite database layer for watch state and trigger run history.
 //!
 //! Uses libsql for async SQLite operations.
 
@@ -74,9 +74,9 @@ pub struct TriggerRun {
     pub created_at: DateTime<Utc>,
 }
 
-/// Daemon state record.
+/// Watch state record.
 #[derive(Debug, Clone)]
-pub struct DaemonState {
+pub struct WatchState {
     pub started_at: DateTime<Utc>,
     pub pid: i64,
     pub last_heartbeat: DateTime<Utc>,
@@ -112,12 +112,12 @@ pub enum DbError {
     NotFound(String),
 }
 
-/// Daemon database storage.
-pub struct DaemonDb {
+/// Watch database storage.
+pub struct WatchDb {
     conn: Mutex<Connection>,
 }
 
-impl DaemonDb {
+impl WatchDb {
     /// Create a new database instance, initializing schema if needed.
     pub async fn new(db_path: &str) -> Result<Self, DbError> {
         // Ensure parent directory exists
@@ -181,9 +181,9 @@ impl DaemonDb {
             .execute("ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT", ())
             .await;
 
-        // Create daemon_state table (singleton)
+        // Create watch_state table (singleton)
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS daemon_state (
+            "CREATE TABLE IF NOT EXISTS watch_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 started_at TEXT,
                 pid INTEGER,
@@ -428,13 +428,13 @@ impl DaemonDb {
         Ok(result)
     }
 
-    /// Set daemon state (upsert).
-    pub async fn set_daemon_state(&self, pid: i64) -> Result<(), DbError> {
+    /// Set watch state (upsert).
+    pub async fn set_watch_state(&self, pid: i64) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "INSERT OR REPLACE INTO daemon_state (id, started_at, pid, last_heartbeat) VALUES (1, ?, ?, ?)",
+            "INSERT OR REPLACE INTO watch_state (id, started_at, pid, last_heartbeat) VALUES (1, ?, ?, ?)",
             (now.as_str(), pid, now.as_str()),
         )
         .await
@@ -443,13 +443,13 @@ impl DaemonDb {
         Ok(())
     }
 
-    /// Update daemon heartbeat.
+    /// Update watch heartbeat.
     pub async fn update_heartbeat(&self) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "UPDATE daemon_state SET last_heartbeat = ? WHERE id = 1",
+            "UPDATE watch_state SET last_heartbeat = ? WHERE id = 1",
             [now.as_str()],
         )
         .await
@@ -458,13 +458,13 @@ impl DaemonDb {
         Ok(())
     }
 
-    /// Get daemon state.
-    pub async fn get_daemon_state(&self) -> Result<Option<DaemonState>, DbError> {
+    /// Get watch state.
+    pub async fn get_watch_state(&self) -> Result<Option<WatchState>, DbError> {
         let conn = self.conn.lock().await;
 
         let mut rows = conn
             .query(
-                "SELECT started_at, pid, last_heartbeat FROM daemon_state WHERE id = 1",
+                "SELECT started_at, pid, last_heartbeat FROM watch_state WHERE id = 1",
                 (),
             )
             .await
@@ -475,7 +475,7 @@ impl DaemonDb {
             let pid: i64 = row.get(1).map_err(|e| DbError::Query(e.to_string()))?;
             let last_heartbeat: String = row.get(2).map_err(|e| DbError::Query(e.to_string()))?;
 
-            Ok(Some(DaemonState {
+            Ok(Some(WatchState {
                 started_at: parse_datetime(&started_at)?,
                 pid,
                 last_heartbeat: parse_datetime(&last_heartbeat)?,
@@ -485,11 +485,11 @@ impl DaemonDb {
         }
     }
 
-    /// Clear daemon state.
-    pub async fn clear_daemon_state(&self) -> Result<(), DbError> {
+    /// Clear watch state.
+    pub async fn clear_watch_state(&self) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
 
-        conn.execute("DELETE FROM daemon_state WHERE id = 1", ())
+        conn.execute("DELETE FROM watch_state WHERE id = 1", ())
             .await
             .map_err(|e| DbError::Query(e.to_string()))?;
 
@@ -614,10 +614,10 @@ mod tests {
     use super::*;
     use tempfile::{TempDir, tempdir};
 
-    async fn create_test_db() -> (DaemonDb, TempDir) {
+    async fn create_test_db() -> (WatchDb, TempDir) {
         let dir = tempdir().expect("Failed to create temp dir");
         let db_path = dir.path().join("test.db");
-        let db = DaemonDb::new(db_path.to_str().expect("Invalid path"))
+        let db = WatchDb::new(db_path.to_str().expect("Invalid path"))
             .await
             .expect("Failed to create test db");
         (db, dir)
@@ -628,7 +628,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let db_path = dir.path().join("test.db");
 
-        let db = DaemonDb::new(db_path.to_str().expect("Invalid path"))
+        let db = WatchDb::new(db_path.to_str().expect("Invalid path"))
             .await
             .expect("Failed to create db");
 
@@ -637,7 +637,7 @@ mod tests {
 
         let mut rows = conn
             .query(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('trigger_runs', 'daemon_state')",
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('trigger_runs', 'watch_state')",
                 (),
             )
             .await
@@ -650,7 +650,7 @@ mod tests {
         }
 
         assert!(tables.contains(&"trigger_runs".to_string()));
-        assert!(tables.contains(&"daemon_state".to_string()));
+        assert!(tables.contains(&"watch_state".to_string()));
     }
 
     #[tokio::test]
@@ -782,18 +782,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_daemon_state_lifecycle() {
+    async fn test_watch_state_lifecycle() {
         let (db, _dir) = create_test_db().await;
 
         // Initially no state
-        let state = db.get_daemon_state().await.expect("Get state failed");
+        let state = db.get_watch_state().await.expect("Get state failed");
         assert!(state.is_none());
 
         // Set state
-        db.set_daemon_state(12345).await.expect("Set state failed");
+        db.set_watch_state(12345).await.expect("Set state failed");
 
         let state = db
-            .get_daemon_state()
+            .get_watch_state()
             .await
             .expect("Get state failed")
             .expect("State should exist");
@@ -806,16 +806,16 @@ mod tests {
             .expect("Update heartbeat failed");
 
         let state2 = db
-            .get_daemon_state()
+            .get_watch_state()
             .await
             .expect("Get state failed")
             .expect("State should exist");
         assert!(state2.last_heartbeat >= state.last_heartbeat);
 
         // Clear state
-        db.clear_daemon_state().await.expect("Clear state failed");
+        db.clear_watch_state().await.expect("Clear state failed");
 
-        let state = db.get_daemon_state().await.expect("Get state failed");
+        let state = db.get_watch_state().await.expect("Get state failed");
         assert!(state.is_none());
     }
 

@@ -1,6 +1,6 @@
-//! Daemon module for autonomous agent scheduling.
+//! Watch module for autonomous agent scheduling.
 //!
-//! This module provides functionality for running the Stakpak agent as a daemon
+//! This module provides functionality for running the Stakpak agent as a watch service
 //! with scheduled triggers, check scripts, and automatic agent invocation.
 
 // Allow dead code in this module as it's still under development
@@ -17,10 +17,10 @@ mod scheduler;
 mod utils;
 
 pub use agent::{SpawnConfig, spawn_agent};
-pub use commands::DaemonCommands;
-pub use config::{DaemonConfig, Trigger};
-pub use db::{DaemonDb, ListRunsFilter, RunStatus};
+pub use commands::WatchCommands;
+pub use config::{Trigger, WatchConfig};
+pub use db::{ListRunsFilter, RunStatus, WatchDb};
 pub use executor::{CheckResult, run_check_script};
 pub use prompt::assemble_prompt;
-pub use scheduler::DaemonScheduler;
+pub use scheduler::WatchScheduler;
 pub use utils::is_process_running;

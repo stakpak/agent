@@ -1,8 +1,8 @@
-//! Daemon init command - create a sample configuration file.
+//! Watch init command - create a sample configuration file.
 
 use std::path::PathBuf;
 
-/// Create a sample daemon configuration file.
+/// Create a sample watch configuration file.
 pub async fn init_config(force: bool) -> Result<(), String> {
     let config_path = get_config_path();
 
@@ -26,11 +26,11 @@ pub async fn init_config(force: bool) -> Result<(), String> {
     std::fs::write(&config_path, SAMPLE_CONFIG)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
-    println!("Created daemon configuration at: {}", config_path.display());
+    println!("Created watch configuration at: {}", config_path.display());
     println!("\nEdit this file to configure your triggers, then run:");
-    println!("  stakpak daemon run");
+    println!("  stakpak watch run");
     println!("\nOr install as a system service:");
-    println!("  stakpak daemon install");
+    println!("  stakpak watch install");
 
     Ok(())
 }
@@ -40,13 +40,13 @@ fn get_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".stakpak")
-        .join("daemon.toml")
+        .join("watch.toml")
 }
 
-const SAMPLE_CONFIG: &str = r#"# Stakpak Daemon Configuration
+const SAMPLE_CONFIG: &str = r#"# Stakpak Watch Configuration
 # 
-# This file configures the autonomous agent daemon that runs scheduled tasks.
-# Place this file at ~/.stakpak/daemon.toml
+# This file configures the autonomous agent watch service that runs scheduled tasks.
+# Place this file at ~/.stakpak/watch.toml
 
 # Default settings applied to all triggers (can be overridden per-trigger)
 [defaults]

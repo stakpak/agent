@@ -1,6 +1,6 @@
-//! Configuration parsing and validation for the daemon.
+//! Configuration parsing and validation for the watch service.
 //!
-//! Handles loading and validating `daemon.toml` configuration files.
+//! Handles loading and validating `watch.toml` configuration files.
 
 use croner::Cron;
 use serde::{Deserialize, Serialize};
@@ -9,28 +9,28 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
-/// Default path for daemon configuration file.
-pub const DAEMON_CONFIG_PATH: &str = "~/.stakpak/daemon.toml";
+/// Default path for watch configuration file.
+pub const STAKPAK_WATCH_CONFIG_PATH: &str = "~/.stakpak/watch.toml";
 
-/// Main daemon configuration structure.
+/// Main watch configuration structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonConfig {
-    /// Daemon-level settings (database path, log directory).
+pub struct WatchConfig {
+    /// Watch-level settings (database path, log directory).
     #[serde(default)]
-    pub daemon: DaemonSettings,
+    pub watch: WatchSettings,
 
     /// Default values for triggers.
     #[serde(default)]
-    pub defaults: DaemonDefaults,
+    pub defaults: WatchDefaults,
 
     /// List of scheduled triggers.
     #[serde(default)]
     pub triggers: Vec<Trigger>,
 }
 
-/// Daemon-level settings.
+/// Watch-level settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonSettings {
+pub struct WatchSettings {
     /// Path to SQLite database file.
     #[serde(default = "default_db_path")]
     pub db_path: String,
@@ -40,7 +40,7 @@ pub struct DaemonSettings {
     pub log_dir: String,
 }
 
-impl Default for DaemonSettings {
+impl Default for WatchSettings {
     fn default() -> Self {
         Self {
             db_path: default_db_path(),
@@ -50,16 +50,16 @@ impl Default for DaemonSettings {
 }
 
 fn default_db_path() -> String {
-    "~/.stakpak/daemon/daemon.db".to_string()
+    "~/.stakpak/watch/watch.db".to_string()
 }
 
 fn default_log_dir() -> String {
-    "~/.stakpak/daemon/logs".to_string()
+    "~/.stakpak/watch/logs".to_string()
 }
 
 /// Default values applied to triggers when not specified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonDefaults {
+pub struct WatchDefaults {
     /// Default profile to use for agent invocation.
     #[serde(default = "default_profile")]
     pub profile: String,
@@ -86,7 +86,7 @@ pub struct DaemonDefaults {
     pub pause_on_approval: bool,
 }
 
-impl Default for DaemonDefaults {
+impl Default for WatchDefaults {
     fn default() -> Self {
         Self {
             profile: default_profile(),
@@ -163,33 +163,33 @@ pub struct Trigger {
 
 impl Trigger {
     /// Get the effective profile, falling back to defaults.
-    pub fn effective_profile<'a>(&'a self, defaults: &'a DaemonDefaults) -> &'a str {
+    pub fn effective_profile<'a>(&'a self, defaults: &'a WatchDefaults) -> &'a str {
         self.profile.as_deref().unwrap_or(&defaults.profile)
     }
 
     /// Get the effective timeout, falling back to defaults.
-    pub fn effective_timeout(&self, defaults: &DaemonDefaults) -> Duration {
+    pub fn effective_timeout(&self, defaults: &WatchDefaults) -> Duration {
         self.timeout.unwrap_or(defaults.timeout)
     }
 
     /// Get the effective check timeout, falling back to defaults.
-    pub fn effective_check_timeout(&self, defaults: &DaemonDefaults) -> Duration {
+    pub fn effective_check_timeout(&self, defaults: &WatchDefaults) -> Duration {
         self.check_timeout.unwrap_or(defaults.check_timeout)
     }
 
     /// Get the effective enable_slack_tools, falling back to defaults.
-    pub fn effective_enable_slack_tools(&self, defaults: &DaemonDefaults) -> bool {
+    pub fn effective_enable_slack_tools(&self, defaults: &WatchDefaults) -> bool {
         self.enable_slack_tools
             .unwrap_or(defaults.enable_slack_tools)
     }
 
     /// Get the effective enable_subagents, falling back to defaults.
-    pub fn effective_enable_subagents(&self, defaults: &DaemonDefaults) -> bool {
+    pub fn effective_enable_subagents(&self, defaults: &WatchDefaults) -> bool {
         self.enable_subagents.unwrap_or(defaults.enable_subagents)
     }
 
     /// Get the effective pause_on_approval, falling back to defaults.
-    pub fn effective_pause_on_approval(&self, defaults: &DaemonDefaults) -> bool {
+    pub fn effective_pause_on_approval(&self, defaults: &WatchDefaults) -> bool {
         self.pause_on_approval.unwrap_or(defaults.pause_on_approval)
     }
 }
@@ -252,24 +252,24 @@ pub enum ConfigError {
     MissingRequiredField(String, String),
 }
 
-impl DaemonConfig {
-    /// Load configuration from the default path (~/.stakpak/daemon.toml).
+impl WatchConfig {
+    /// Load configuration from the default path (~/.stakpak/watch.toml).
     pub fn load_default() -> Result<Self, ConfigError> {
-        let path = expand_tilde(DAEMON_CONFIG_PATH);
+        let path = expand_tilde(STAKPAK_WATCH_CONFIG_PATH);
         Self::load(&path)
     }
 
     /// Load configuration from a specific path.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = std::fs::read_to_string(path.as_ref())?;
-        let config: DaemonConfig = toml::from_str(&content)?;
+        let config: WatchConfig = toml::from_str(&content)?;
         config.validate()?;
         Ok(config)
     }
 
     /// Parse configuration from a string (useful for testing).
     pub fn parse(content: &str) -> Result<Self, ConfigError> {
-        let config: DaemonConfig = toml::from_str(content)?;
+        let config: WatchConfig = toml::from_str(content)?;
         config.validate()?;
         Ok(config)
     }
@@ -325,12 +325,12 @@ impl DaemonConfig {
 
     /// Get the expanded database path.
     pub fn db_path(&self) -> PathBuf {
-        expand_tilde(&self.daemon.db_path)
+        expand_tilde(&self.watch.db_path)
     }
 
     /// Get the expanded log directory path.
     pub fn log_dir(&self) -> PathBuf {
-        expand_tilde(&self.daemon.log_dir)
+        expand_tilde(&self.watch.log_dir)
     }
 }
 
@@ -356,9 +356,9 @@ mod tests {
     #[test]
     fn test_parse_valid_config() {
         let config_str = r#"
-[daemon]
-db_path = "~/.stakpak/daemon/daemon.db"
-log_dir = "~/.stakpak/daemon/logs"
+[watch]
+db_path = "~/.stakpak/watch/watch.db"
+log_dir = "~/.stakpak/watch/logs"
 
 [defaults]
 profile = "production"
@@ -379,9 +379,9 @@ prompt = "Run health checks"
 board_id = "board_123"
 "#;
 
-        let config = DaemonConfig::parse(config_str).expect("Should parse valid config");
+        let config = WatchConfig::parse(config_str).expect("Should parse valid config");
 
-        assert_eq!(config.daemon.db_path, "~/.stakpak/daemon/daemon.db");
+        assert_eq!(config.watch.db_path, "~/.stakpak/watch/watch.db");
         assert_eq!(config.defaults.profile, "production");
         assert_eq!(config.defaults.timeout, Duration::from_secs(3600));
         assert_eq!(config.defaults.check_timeout, Duration::from_secs(60));
@@ -409,10 +409,10 @@ schedule = "0 0 * * *"
 prompt = "Do something"
 "#;
 
-        let config = DaemonConfig::parse(config_str).expect("Should parse minimal config");
+        let config = WatchConfig::parse(config_str).expect("Should parse minimal config");
 
         // Check defaults are applied
-        assert_eq!(config.daemon.db_path, "~/.stakpak/daemon/daemon.db");
+        assert_eq!(config.watch.db_path, "~/.stakpak/watch/watch.db");
         assert_eq!(config.defaults.profile, "default");
         assert_eq!(config.defaults.timeout, Duration::from_secs(30 * 60));
         assert_eq!(config.triggers.len(), 1);
@@ -427,7 +427,7 @@ schedule = "invalid cron expression"
 prompt = "This should fail"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -451,7 +451,7 @@ schedule = "0 0 * * *"
 prompt = "Second"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -480,7 +480,7 @@ schedule = "0 0 * * *"
 prompt = "Test prompt"
 "#;
 
-        let config = DaemonConfig::parse(config_str).expect("Should parse");
+        let config = WatchConfig::parse(config_str).expect("Should parse");
         let trigger = &config.triggers[0];
 
         // Verify defaults are used
@@ -522,7 +522,7 @@ prompt = "Test"
                 expr
             );
 
-            let result = DaemonConfig::parse(&config_str);
+            let result = WatchConfig::parse(&config_str);
             assert!(
                 result.is_ok(),
                 "Should parse valid cron expression: {}",
@@ -546,7 +546,7 @@ timeout = "1h 15m 30s"
 check_timeout = "2m"
 "#;
 
-        let config = DaemonConfig::parse(config_str).expect("Should parse humantime durations");
+        let config = WatchConfig::parse(config_str).expect("Should parse humantime durations");
 
         assert_eq!(
             config.defaults.timeout,
@@ -565,11 +565,11 @@ check_timeout = "2m"
     #[test]
     fn test_empty_triggers() {
         let config_str = r#"
-[daemon]
-db_path = "/custom/path/daemon.db"
+[watch]
+db_path = "/custom/path/watch.db"
 "#;
 
-        let config = DaemonConfig::parse(config_str).expect("Should parse config with no triggers");
+        let config = WatchConfig::parse(config_str).expect("Should parse config with no triggers");
         assert!(config.triggers.is_empty());
     }
 
@@ -583,7 +583,7 @@ prompt = "Test"
 check = "/nonexistent/path/to/script.sh"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -602,7 +602,7 @@ schedule = "0 * * * *"
 prompt = "Test"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
         // Should fail at TOML parsing level due to missing required field
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
@@ -616,7 +616,7 @@ name = "test"
 prompt = "Test"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
     }
@@ -629,7 +629,7 @@ name = "test"
 schedule = "0 * * * *"
 "#;
 
-        let result = DaemonConfig::parse(config_str);
+        let result = WatchConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
     }

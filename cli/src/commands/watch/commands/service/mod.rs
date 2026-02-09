@@ -1,6 +1,6 @@
-//! Platform-specific service installation for the daemon.
+//! Platform-specific service installation for the watch service.
 //!
-//! This module provides functionality to install/uninstall the stakpak daemon
+//! This module provides functionality to install/uninstall the stakpak watch service
 //! as a system service on different platforms:
 //! - macOS: launchd (LaunchAgents)
 //! - Linux: systemd (user services)
@@ -79,19 +79,19 @@ pub struct ReloadResult {
     pub message: String,
 }
 
-/// Install the daemon as a system service.
+/// Install the watch service as a system service.
 pub async fn install_service() -> Result<InstallResult, String> {
     let platform = Platform::detect();
 
     match platform {
         Platform::MacOS => launchd::install().await,
         Platform::Linux => systemd::install().await,
-        Platform::Windows => Err("Windows service installation is not yet supported. Run 'stakpak daemon run' manually or use Task Scheduler.".to_string()),
+        Platform::Windows => Err("Windows service installation is not yet supported. Run 'stakpak watch run' manually or use Task Scheduler.".to_string()),
         Platform::Unknown => Err("Unknown platform. Cannot install service.".to_string()),
     }
 }
 
-/// Uninstall the daemon system service.
+/// Uninstall the watch system service.
 pub async fn uninstall_service() -> Result<UninstallResult, String> {
     let platform = Platform::detect();
 
@@ -105,7 +105,7 @@ pub async fn uninstall_service() -> Result<UninstallResult, String> {
     }
 }
 
-/// Reload the daemon service configuration.
+/// Reload the watch service configuration.
 pub async fn reload_service() -> Result<ReloadResult, String> {
     let platform = Platform::detect();
 

@@ -1,12 +1,12 @@
-//! Daemon uninstall command - remove the system service.
+//! Watch uninstall command - remove the system service.
 
 use super::service::{Platform, get_service_config_path, is_service_installed, uninstall_service};
 
-/// Uninstall the daemon system service.
-pub async fn uninstall_daemon() -> Result<(), String> {
+/// Uninstall the watch system service.
+pub async fn uninstall_watch() -> Result<(), String> {
     let platform = Platform::detect();
 
-    println!("Uninstalling stakpak daemon service...");
+    println!("Uninstalling stakpak watch service...");
     println!("Platform: {}", platform.name());
     println!();
 
