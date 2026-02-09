@@ -4,8 +4,9 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
-    refresh_billing_info, tool_call_history_string, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, add_subagents, build_resume_command,
+    convert_tools_with_filter, extract_last_checkpoint_id, refresh_billing_info,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -110,6 +111,7 @@ fn has_pending_tool_calls(messages: &[ChatMessage], tools_queue: &[ToolCall]) ->
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
+    pub session_id: Option<String>,
     pub local_context: Option<LocalContext>,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
@@ -156,6 +158,7 @@ pub async fn run_interactive(
         let subagent_configs = config.subagent_configs.clone();
         let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
+        let session_id = config.session_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
         let enabled_tools = config.enabled_tools.clone();
@@ -320,7 +323,24 @@ pub async fn run_interactive(
                     send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
             }
 
-            if let Some(checkpoint_id_str) = checkpoint_id {
+            if let Some(session_id_str) = session_id {
+                let (chat_messages, tool_calls, session_id_uuid) =
+                    resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
+                        .await?;
+
+                current_session_id = Some(session_id_uuid);
+                should_update_rulebooks_on_next_message = true;
+                tools_queue.extend(tool_calls.clone());
+
+                if !tools_queue.is_empty() {
+                    send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
+                        .await?;
+                    let initial_tool_call = tools_queue.remove(0);
+                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                }
+
+                messages.extend(chat_messages);
+            } else if let Some(checkpoint_id_str) = checkpoint_id {
                 // Try to get session ID from checkpoint
                 let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str).map_err(|_| {
                     format!(
@@ -499,53 +519,79 @@ pub async fn run_interactive(
                         let has_result = result.is_some();
 
                         if let Some(result) = result {
-                            let content_parts: Vec<String> = result
-                                .content
-                                .iter()
-                                .map(|c| match c.raw.as_text() {
-                                    Some(text) => text.text.clone(),
-                                    None => String::new(),
-                                })
-                                .filter(|s| !s.is_empty())
-                                .collect();
+                            let is_cancelled =
+                                result.get_status() == ToolCallResultStatus::Cancelled;
 
-                            let result_content = if result.get_status()
-                                == ToolCallResultStatus::Error
-                                && content_parts.len() >= 2
-                            {
-                                // For error cases, preserve the original formatting
-                                let error_message = content_parts[1..].join(": ");
-                                format!("[{}] {}", content_parts[0], error_message)
-                            } else {
-                                content_parts.join("\n")
-                            };
+                            // Don't push a tool_result for cancelled tool calls
+                            // when there are no more tools queued — the retry/shell
+                            // flow will send a SendToolResult event with the final
+                            // result later.  However, if there ARE queued tools we
+                            // must record a CANCELLED placeholder so the tool_use
+                            // block is not left orphaned when the next tool completes
+                            // and triggers an API call.
+                            if is_cancelled && !tools_queue.is_empty() {
+                                messages.push(tool_result(
+                                    tool_call.clone().id,
+                                    "TOOL_CALL_CANCELLED".to_string(),
+                                ));
+                            }
+                            if !is_cancelled {
+                                // If a CANCELLED result was already inserted for this tool_call
+                                // (e.g., user sent a message while the tool was in-flight),
+                                // skip adding the real result to avoid duplicate tool_call_ids.
+                                let already_resolved = messages.iter().any(|m| {
+                                    m.role == Role::Tool
+                                        && m.tool_call_id.as_deref() == Some(&tool_call.id)
+                                });
+                                if already_resolved {
+                                    // Skip — a CANCELLED placeholder was already inserted
+                                } else {
+                                    let content_parts: Vec<String> = result
+                                        .content
+                                        .iter()
+                                        .map(|c| match c.raw.as_text() {
+                                            Some(text) => text.text.clone(),
+                                            None => String::new(),
+                                        })
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
 
-                            messages
-                                .push(tool_result(tool_call.clone().id, result_content.clone()));
+                                    let status = result.get_status();
+                                    let result_content = if status == ToolCallResultStatus::Error
+                                        && content_parts.len() >= 2
+                                    {
+                                        // For error cases, preserve the original formatting
+                                        let error_message = content_parts[1..].join(": ");
+                                        format!("[{}] {}", content_parts[0], error_message)
+                                    } else {
+                                        content_parts.join("\n")
+                                    };
 
-                            send_input_event(
-                                &input_tx,
-                                InputEvent::ToolResult(
-                                    stakpak_shared::models::integrations::openai::ToolCallResult {
-                                        call: tool_call.clone(),
-                                        result: result_content,
-                                        status: result.get_status(),
-                                    },
-                                ),
-                            )
-                            .await?;
+                                    messages.push(tool_result(
+                                        tool_call.clone().id,
+                                        result_content.clone(),
+                                    ));
+
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ToolResult(
+                                            stakpak_shared::models::integrations::openai::ToolCallResult {
+                                                call: tool_call.clone(),
+                                                result: result_content,
+                                                status,
+                                            },
+                                        ),
+                                    )
+                                    .await?;
+                                }
+                            }
                             send_input_event(
                                 &input_tx,
                                 InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
                             )
                             .await?;
 
-                            // Continue to next tool or main loop if error
-                            should_stop = match result.get_status() {
-                                ToolCallResultStatus::Cancelled => true,
-                                ToolCallResultStatus::Error => false,
-                                ToolCallResultStatus::Success => false,
-                            };
+                            should_stop = is_cancelled;
                         }
                         end_tool_execution_loading_if_none(has_result, &input_tx).await?;
 
@@ -1288,18 +1334,17 @@ pub async fn run_interactive(
             .await
             .map(|account| account.username)?;
 
-        let latest_checkpoint = final_messages
-            .iter()
-            .rev()
-            .find(|m| m.role == stakpak_shared::models::integrations::openai::Role::Assistant)
-            .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
+        let resume_command = build_resume_command(
+            final_session_id,
+            extract_last_checkpoint_id(&final_messages),
+        );
 
-        if let Some(latest_checkpoint) = latest_checkpoint {
+        if let Some(resume_command) = resume_command {
             println!(
                 r#"To resume, run:
-stakpak -c {}
+{}
 "#,
-                latest_checkpoint
+                resume_command
             );
         }
 
@@ -1364,6 +1409,36 @@ mod tests {
         }
     }
 
+    fn test_tool_call(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            r#type: "function".to_string(),
+            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                name: format!("{}_fn", id),
+                arguments: "{}".to_string(),
+            },
+            metadata: None,
+        }
+    }
+
+    fn assistant_with_tool_calls(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("assistant".to_string())),
+            tool_calls: Some(ids.iter().map(|id| test_tool_call(id)).collect()),
+            ..Default::default()
+        }
+    }
+
+    fn tool_message(id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::Tool,
+            content: Some(MessageContent::String(content.to_string())),
+            tool_call_id: Some(id.to_string()),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn get_unresolved_tool_call_ids_returns_empty_when_no_messages() {
         let messages: Vec<ChatMessage> = vec![];
@@ -1382,22 +1457,7 @@ mod tests {
 
     #[test]
     fn get_unresolved_tool_call_ids_returns_ids_for_unresolved_calls() {
-        let tool_call = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
-        let messages = vec![ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String("test".to_string())),
-            tool_calls: Some(vec![tool_call]),
-            ..Default::default()
-        }];
+        let messages = vec![assistant_with_tool_calls(&["tool_1"])];
 
         let unresolved = get_unresolved_tool_call_ids(&messages);
         assert_eq!(unresolved, vec!["tool_1".to_string()]);
@@ -1405,29 +1465,9 @@ mod tests {
 
     #[test]
     fn get_unresolved_tool_call_ids_returns_empty_when_all_resolved() {
-        let tool_call = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
         let messages = vec![
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("test".to_string())),
-                tool_calls: Some(vec![tool_call]),
-                ..Default::default()
-            },
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("result".to_string())),
-                tool_call_id: Some("tool_1".to_string()),
-                ..Default::default()
-            },
+            assistant_with_tool_calls(&["tool_1"]),
+            tool_message("tool_1", "result"),
         ];
 
         assert!(get_unresolved_tool_call_ids(&messages).is_empty());
@@ -1435,39 +1475,9 @@ mod tests {
 
     #[test]
     fn get_unresolved_tool_call_ids_returns_only_unresolved() {
-        let tool_call_1 = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-        let tool_call_2 = ToolCall {
-            id: "tool_2".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool_2".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
         let messages = vec![
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("test".to_string())),
-                tool_calls: Some(vec![tool_call_1, tool_call_2]),
-                ..Default::default()
-            },
-            // Only tool_1 has a result
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("result".to_string())),
-                tool_call_id: Some("tool_1".to_string()),
-                ..Default::default()
-            },
+            assistant_with_tool_calls(&["tool_1", "tool_2"]),
+            tool_message("tool_1", "result"),
         ];
 
         let unresolved = get_unresolved_tool_call_ids(&messages);
@@ -1477,15 +1487,7 @@ mod tests {
     #[test]
     fn has_pending_tool_calls_returns_true_when_queue_not_empty() {
         let messages: Vec<ChatMessage> = vec![];
-        let tools_queue = vec![ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        }];
+        let tools_queue = vec![test_tool_call("tool_1")];
 
         assert!(has_pending_tool_calls(&messages, &tools_queue));
     }
@@ -1500,22 +1502,7 @@ mod tests {
 
     #[test]
     fn has_pending_tool_calls_returns_true_when_assistant_has_unresolved_tool_calls() {
-        let tool_call = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
-        let messages = vec![ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String("test".to_string())),
-            tool_calls: Some(vec![tool_call]),
-            ..Default::default()
-        }];
+        let messages = vec![assistant_with_tool_calls(&["tool_1"])];
         let tools_queue: Vec<ToolCall> = vec![];
 
         assert!(has_pending_tool_calls(&messages, &tools_queue));
@@ -1523,29 +1510,9 @@ mod tests {
 
     #[test]
     fn has_pending_tool_calls_returns_false_when_all_tool_calls_have_results() {
-        let tool_call = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
         let messages = vec![
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("test".to_string())),
-                tool_calls: Some(vec![tool_call]),
-                ..Default::default()
-            },
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("result".to_string())),
-                tool_call_id: Some("tool_1".to_string()),
-                ..Default::default()
-            },
+            assistant_with_tool_calls(&["tool_1"]),
+            tool_message("tool_1", "result"),
         ];
         let tools_queue: Vec<ToolCall> = vec![];
 
@@ -1554,39 +1521,9 @@ mod tests {
 
     #[test]
     fn has_pending_tool_calls_returns_true_when_some_tool_calls_missing_results() {
-        let tool_call_1 = ToolCall {
-            id: "tool_1".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-        let tool_call_2 = ToolCall {
-            id: "tool_2".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "test_tool_2".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
         let messages = vec![
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("test".to_string())),
-                tool_calls: Some(vec![tool_call_1, tool_call_2]),
-                ..Default::default()
-            },
-            // Only tool_1 has a result, tool_2 is missing
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("result".to_string())),
-                tool_call_id: Some("tool_1".to_string()),
-                ..Default::default()
-            },
+            assistant_with_tool_calls(&["tool_1", "tool_2"]),
+            tool_message("tool_1", "result"),
         ];
         let tools_queue: Vec<ToolCall> = vec![];
 
@@ -1598,7 +1535,7 @@ mod tests {
         let messages = vec![ChatMessage {
             role: Role::Assistant,
             content: Some(MessageContent::String("test".to_string())),
-            tool_calls: Some(vec![]), // Empty tool_calls
+            tool_calls: Some(vec![]),
             ..Default::default()
         }];
         let tools_queue: Vec<ToolCall> = vec![];
@@ -1621,64 +1558,62 @@ mod tests {
 
     #[test]
     fn has_pending_tool_calls_checks_last_assistant_message_only() {
-        let tool_call_old = ToolCall {
-            id: "tool_old".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "old_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-        let tool_call_new = ToolCall {
-            id: "tool_new".to_string(),
-            r#type: "function".to_string(),
-            function: stakpak_shared::models::integrations::openai::FunctionCall {
-                name: "new_tool".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        };
-
         let messages = vec![
-            // First assistant message with unresolved tool call
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("first".to_string())),
-                tool_calls: Some(vec![tool_call_old]),
-                ..Default::default()
-            },
-            // Result for the old tool
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("old result".to_string())),
-                tool_call_id: Some("tool_old".to_string()),
-                ..Default::default()
-            },
-            // User message
+            assistant_with_tool_calls(&["tool_old"]),
+            tool_message("tool_old", "old result"),
             ChatMessage {
                 role: Role::User,
                 content: Some(MessageContent::String("continue".to_string())),
                 ..Default::default()
             },
-            // Second (last) assistant message with tool call
-            ChatMessage {
-                role: Role::Assistant,
-                content: Some(MessageContent::String("second".to_string())),
-                tool_calls: Some(vec![tool_call_new]),
-                ..Default::default()
-            },
-            // Result for the new tool
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("new result".to_string())),
-                tool_call_id: Some("tool_new".to_string()),
-                ..Default::default()
-            },
+            assistant_with_tool_calls(&["tool_new"]),
+            tool_message("tool_new", "new result"),
         ];
         let tools_queue: Vec<ToolCall> = vec![];
 
         // Should return false because the LAST assistant message's tool calls are resolved
         assert!(!has_pending_tool_calls(&messages, &tools_queue));
+    }
+
+    #[test]
+    fn extract_last_checkpoint_id_picks_newest_assistant() {
+        let older = Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);
+        let newer = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+        let messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "<checkpoint_id>{}</checkpoint_id>",
+                    older
+                ))),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(MessageContent::String("tool output".to_string())),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "<checkpoint_id>{}</checkpoint_id>",
+                    newer
+                ))),
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(extract_last_checkpoint_id(&messages), Some(newer));
+    }
+
+    #[test]
+    fn extract_last_checkpoint_id_returns_none_without_tag() {
+        let messages = vec![ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String("no checkpoint".to_string())),
+            ..Default::default()
+        }];
+
+        assert_eq!(extract_last_checkpoint_id(&messages), None);
     }
 }

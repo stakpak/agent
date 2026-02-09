@@ -439,6 +439,18 @@ impl Default for LLMMessageContent {
     }
 }
 
+impl LLMMessageContent {
+    /// Convert into a Vec of typed content parts.
+    /// A `String` variant is returned as a single `Text` part (empty strings yield an empty vec).
+    pub fn into_parts(self) -> Vec<LLMMessageTypedContent> {
+        match self {
+            LLMMessageContent::List(parts) => parts,
+            LLMMessageContent::String(s) if s.is_empty() => vec![],
+            LLMMessageContent::String(s) => vec![LLMMessageTypedContent::Text { text: s }],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum LLMMessageTypedContent {

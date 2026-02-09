@@ -5,6 +5,31 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
 use stakpak_shared::models::subagent::SubagentConfigs;
+use uuid::Uuid;
+
+/// Build a CLI resume command string, preferring session ID over checkpoint ID.
+pub fn build_resume_command(
+    session_id: Option<Uuid>,
+    checkpoint_id: Option<Uuid>,
+) -> Option<String> {
+    if let Some(session_id) = session_id {
+        return Some(format!("stakpak -s {}", session_id));
+    }
+    checkpoint_id.map(|checkpoint_id| format!("stakpak -c {}", checkpoint_id))
+}
+
+/// Extract the checkpoint ID from the last assistant message that contains one.
+pub fn extract_last_checkpoint_id(messages: &[ChatMessage]) -> Option<Uuid> {
+    messages
+        .iter()
+        .rev()
+        .filter(|m| m.role == Role::Assistant)
+        .find_map(|m| {
+            m.content
+                .as_ref()
+                .and_then(MessageContent::extract_checkpoint_id)
+        })
+}
 
 pub fn convert_tools_with_filter(
     tools: &[rmcp::model::Tool],

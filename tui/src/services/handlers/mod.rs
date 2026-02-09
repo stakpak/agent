@@ -15,7 +15,7 @@ pub mod tool;
 // Re-export find_image_file_by_name for use in clipboard_paste
 pub use input::find_image_file_by_name;
 
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, InputEvent, OutputEvent, PendingUserMessage};
 use ratatui::layout::Size;
 use tokio::sync::mpsc::Sender;
 
@@ -23,6 +23,74 @@ use tokio::sync::mpsc::Sender;
 pub struct EventChannels<'a> {
     pub output_tx: &'a Sender<OutputEvent>,
     pub input_tx: &'a Sender<InputEvent>,
+}
+
+fn take_merged_pending_user_message(state: &mut AppState) -> Option<PendingUserMessage> {
+    let mut merged = state.pending_user_messages.pop_front()?;
+    while let Some(next) = state.pending_user_messages.pop_front() {
+        merged.merge_from(next);
+    }
+    Some(merged)
+}
+
+fn flush_pending_user_messages_if_idle(
+    state: &mut AppState,
+    input_tx: &Sender<InputEvent>,
+    output_tx: &Sender<OutputEvent>,
+) {
+    if state.loading_manager.is_loading() {
+        return;
+    }
+
+    let Some(pending_message) = take_merged_pending_user_message(state) else {
+        return;
+    };
+
+    let PendingUserMessage {
+        final_input,
+        shell_tool_calls,
+        image_parts,
+        user_message_text,
+    } = pending_message;
+
+    match output_tx.try_send(OutputEvent::UserMessage(
+        final_input,
+        shell_tool_calls,
+        image_parts,
+    )) {
+        Ok(()) => {
+            if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text.clone()))
+            {
+                log::warn!("Failed to send AddUserMessage event: {}", e);
+                message::handle_add_user_message(state, user_message_text);
+            }
+        }
+        Err(
+            tokio::sync::mpsc::error::TrySendError::Full(OutputEvent::UserMessage(
+                final_input,
+                shell_tool_calls,
+                image_parts,
+            ))
+            | tokio::sync::mpsc::error::TrySendError::Closed(OutputEvent::UserMessage(
+                final_input,
+                shell_tool_calls,
+                image_parts,
+            )),
+        ) => {
+            log::warn!("Failed to flush buffered UserMessage event: output channel unavailable");
+            state
+                .pending_user_messages
+                .push_front(PendingUserMessage::new(
+                    final_input,
+                    shell_tool_calls,
+                    image_parts,
+                    user_message_text,
+                ));
+        }
+        Err(_) => {
+            // OutputEvent::UserMessage is always used here.
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -806,5 +874,247 @@ pub fn update(
         }
     }
 
+    flush_pending_user_messages_if_idle(state, input_tx, output_tx);
     navigation::adjust_scroll(state, message_area_height, message_area_width);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{AppStateOptions, LoadingOperation};
+    use crate::services::message::MessageContent;
+    use ratatui::layout::Size;
+    use stakai::Model;
+    use stakpak_shared::models::integrations::openai::{
+        ContentPart, FunctionCall, ToolCall, ToolCallResult, ToolCallResultStatus,
+    };
+    use tokio::sync::mpsc;
+
+    fn build_state() -> AppState {
+        AppState::new(AppStateOptions {
+            latest_version: None,
+            redact_secrets: false,
+            privacy_mode: false,
+            is_git_repo: false,
+            auto_approve_tools: None,
+            allowed_tools: None,
+            input_tx: None,
+            model: Model::default(),
+            editor_command: None,
+            auth_display_info: (None, None, None),
+            board_agent_id: None,
+        })
+    }
+
+    fn make_tool_result(id: &str) -> ToolCallResult {
+        ToolCallResult {
+            call: ToolCall {
+                id: id.to_string(),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "run_command".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                metadata: None,
+            },
+            result: format!("result-{id}"),
+            status: ToolCallResultStatus::Success,
+        }
+    }
+
+    fn make_image_part(label: &str) -> ContentPart {
+        ContentPart {
+            r#type: "text".to_string(),
+            text: Some(label.to_string()),
+            image_url: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn flush_pending_messages_merges_queue_into_single_user_message() {
+        let mut state = build_state();
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "first".to_string(),
+                Some(vec![make_tool_result("t1")]),
+                vec![make_image_part("img-1")],
+                "first".to_string(),
+            ));
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "second".to_string(),
+                Some(vec![make_tool_result("t2")]),
+                vec![make_image_part("img-2")],
+                "second".to_string(),
+            ));
+
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let (output_tx, mut output_rx) = mpsc::channel(8);
+
+        flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
+
+        match output_rx.recv().await {
+            Some(OutputEvent::UserMessage(text, Some(tool_calls), image_parts)) => {
+                assert_eq!(text, "first\n\nsecond");
+                assert_eq!(tool_calls.len(), 2);
+                assert_eq!(image_parts.len(), 2);
+            }
+            other => panic!("unexpected output event: {:?}", other),
+        }
+
+        match input_rx.recv().await {
+            Some(InputEvent::AddUserMessage(text)) => {
+                assert_eq!(text, "first\n\nsecond");
+            }
+            other => panic!("unexpected input event: {:?}", other),
+        }
+
+        assert!(state.pending_user_messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn flush_pending_messages_does_not_run_when_busy() {
+        let mut state = build_state();
+        state
+            .loading_manager
+            .start_operation(LoadingOperation::StreamProcessing);
+        state.loading = true;
+
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "queued".to_string(),
+                None,
+                Vec::new(),
+                "queued".to_string(),
+            ));
+
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        let (output_tx, mut output_rx) = mpsc::channel(1);
+
+        flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
+
+        assert!(output_rx.try_recv().is_err());
+        assert!(input_rx.try_recv().is_err());
+        assert_eq!(state.pending_user_messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn flush_pending_messages_requeues_when_output_channel_is_full() {
+        let mut state = build_state();
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "queued".to_string(),
+                Some(vec![make_tool_result("t1")]),
+                vec![make_image_part("img-1")],
+                "queued".to_string(),
+            ));
+
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        let (output_tx, mut output_rx) = mpsc::channel(1);
+
+        let send_res = output_tx.try_send(OutputEvent::RequestTotalUsage);
+        assert!(send_res.is_ok());
+
+        flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
+
+        assert_eq!(state.pending_user_messages.len(), 1);
+        match state.pending_user_messages.front() {
+            Some(message) => {
+                assert_eq!(message.final_input, "queued");
+                assert_eq!(message.user_message_text, "queued");
+            }
+            None => panic!("expected queued pending message"),
+        }
+
+        match output_rx.recv().await {
+            Some(OutputEvent::RequestTotalUsage) => {}
+            other => panic!("unexpected output event: {:?}", other),
+        }
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn flush_pending_messages_falls_back_to_local_user_message_when_input_channel_is_full() {
+        let mut state = build_state();
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "queued".to_string(),
+                None,
+                Vec::new(),
+                "queued".to_string(),
+            ));
+
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        let (output_tx, mut output_rx) = mpsc::channel(1);
+
+        let send_res = input_tx.try_send(InputEvent::ToggleCursorVisible);
+        assert!(send_res.is_ok());
+
+        flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
+
+        match output_rx.recv().await {
+            Some(OutputEvent::UserMessage(text, _, _)) => {
+                assert_eq!(text, "queued");
+            }
+            other => panic!("unexpected output event: {:?}", other),
+        }
+
+        match input_rx.recv().await {
+            Some(InputEvent::ToggleCursorVisible) => {}
+            other => panic!("unexpected input event: {:?}", other),
+        }
+        assert!(input_rx.try_recv().is_err());
+
+        assert!(
+            state
+                .messages
+                .iter()
+                .any(|message| matches!(&message.content, MessageContent::UserMessage(text) if text == "queued"))
+        );
+    }
+
+    #[tokio::test]
+    async fn update_invokes_flush_when_idle() {
+        let mut state = build_state();
+        state
+            .pending_user_messages
+            .push_back(PendingUserMessage::new(
+                "from-update".to_string(),
+                None,
+                Vec::new(),
+                "from-update".to_string(),
+            ));
+
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let (output_tx, mut output_rx) = mpsc::channel(8);
+        let (shell_tx, _shell_rx) = mpsc::channel(8);
+
+        update(
+            &mut state,
+            InputEvent::ToggleCursorVisible,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+
+        match output_rx.recv().await {
+            Some(OutputEvent::UserMessage(text, _, _)) => assert_eq!(text, "from-update"),
+            other => panic!("unexpected output event: {:?}", other),
+        }
+
+        match input_rx.recv().await {
+            Some(InputEvent::AddUserMessage(text)) => assert_eq!(text, "from-update"),
+            other => panic!("unexpected input event: {:?}", other),
+        }
+        assert!(state.pending_user_messages.is_empty());
+    }
 }
