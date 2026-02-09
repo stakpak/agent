@@ -244,168 +244,177 @@ async fn main() {
                 }
             }
 
-            match cli.command {
-                Some(command) => {
-                    // check_update is only run in interactive mode (when no command is specified)
-                    // Use get_stakpak_api_key() to check auth.toml fallback chain
-                    if config.get_stakpak_api_key().is_none() && command.requires_auth() {
-                        run_onboarding(&mut config, OnboardingMode::Default).await;
+            // Run interactive/async agent when no subcommand or Init; otherwise run the subcommand
+            if matches!(cli.command, None | Some(Commands::Init)) {
+                // Run onboarding when no API key (Init and default both run the agent)
+                if config.get_stakpak_api_key().is_none() && Commands::Init.requires_auth() {
+                    run_onboarding(&mut config, OnboardingMode::Default).await;
+                }
+
+                let _ = gitignore::ensure_stakpak_in_gitignore(&config);
+
+                let send_init_prompt_on_start = cli.command == Some(Commands::Init);
+
+                // Run onboarding if no credentials are configured at all
+                let has_stakpak_key = config.get_stakpak_api_key().is_some();
+                let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
+                if !has_stakpak_key && !has_provider_keys {
+                    run_onboarding(&mut config, OnboardingMode::Default).await;
+                }
+
+                // Initialize models cache in background (fetch if missing/stale)
+                let cache_task = tokio::spawn(async {
+                    if let Err(e) = ModelsCache::get().await {
+                        tracing::warn!("Failed to load models cache: {}", e);
                     }
+                });
 
-                    // Ensure .stakpak is in .gitignore (after workdir is set, before command execution)
-                    let _ = gitignore::ensure_stakpak_in_gitignore(&config);
+                let local_context = analyze_local_context(&config).await.ok();
 
-                    match command.run(config).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Ops! something went wrong: {}", e);
+                let agents_md = if cli.ignore_agents_md {
+                    None
+                } else {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| discover_agents_md(&cwd))
+                };
+
+                // Use credential resolution with auth.toml fallback chain
+                // Refresh OAuth tokens in parallel to minimize startup delay
+                let providers = config.get_llm_provider_config_async().await;
+
+                // Create unified AgentClient - automatically routes through Stakpak when API key is present
+                let mut client_config = AgentClientConfig::new().with_providers(providers);
+
+                if let Some(api_key) = config.get_stakpak_api_key() {
+                    client_config = client_config.with_stakpak(
+                        stakpak_api::StakpakConfig::new(api_key)
+                            .with_endpoint(config.api_endpoint.clone()),
+                    );
+                }
+                if let Some(smart_model) = &config.smart_model {
+                    client_config = client_config.with_smart_model(smart_model.clone());
+                }
+                if let Some(eco_model) = &config.eco_model {
+                    client_config = client_config.with_eco_model(eco_model.clone());
+                }
+                if let Some(recovery_model) = &config.recovery_model {
+                    client_config = client_config.with_recovery_model(recovery_model.clone());
+                }
+
+                let client: Arc<dyn AgentProvider> =
+                    Arc::new(AgentClient::new(client_config).await.unwrap_or_else(|e| {
+                        eprintln!("Failed to create client: {}", e);
+                        std::process::exit(1);
+                    }));
+
+                // Parallelize HTTP calls for faster startup
+                let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
+                let client_for_rulebooks = client.clone();
+                let config_for_rulebooks = config.clone();
+
+                let (api_result, update_result, rulebooks_result) = tokio::join!(
+                    client.get_my_account(),
+                    check_update(&current_version),
+                    async {
+                        client_for_rulebooks
+                            .list_rulebooks()
+                            .await
+                            .ok()
+                            .map(|rulebooks| {
+                                if let Some(rulebook_config) = &config_for_rulebooks.rulebooks {
+                                    rulebook_config.filter_rulebooks(rulebooks)
+                                } else {
+                                    rulebooks
+                                }
+                            })
+                    }
+                );
+
+                match api_result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Only exit on error if using Stakpak API (has API key)
+                        if has_stakpak_key {
+                            println!();
+                            println!("❌ API key validation failed: {}", e);
+                            println!("Please check your API key and run the below command");
+                            println!();
+                            println!("\x1b[1;34mstakpak login --api-key <your-api-key>\x1b[0m");
+                            println!();
                             std::process::exit(1);
                         }
                     }
                 }
-                None => {
-                    // Run onboarding if no credentials are configured at all
-                    let has_stakpak_key = config.get_stakpak_api_key().is_some();
-                    let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
-                    if !has_stakpak_key && !has_provider_keys {
-                        run_onboarding(&mut config, OnboardingMode::Default).await;
-                    }
 
-                    // Initialize models cache in background (fetch if missing/stale)
-                    let cache_task = tokio::spawn(async {
-                        if let Err(e) = ModelsCache::get().await {
-                            tracing::warn!("Failed to load models cache: {}", e);
-                        }
-                    });
-
-                    let local_context = analyze_local_context(&config).await.ok();
-
-                    let agents_md = if cli.ignore_agents_md {
-                        None
-                    } else {
-                        std::env::current_dir()
-                            .ok()
-                            .and_then(|cwd| discover_agents_md(&cwd))
-                    };
-
-                    // Use credential resolution with auth.toml fallback chain
-                    // Refresh OAuth tokens in parallel to minimize startup delay
-                    let providers = config.get_llm_provider_config_async().await;
-
-                    // Create unified AgentClient - automatically routes through Stakpak when API key is present
-                    let mut client_config = AgentClientConfig::new().with_providers(providers);
-
-                    if let Some(api_key) = config.get_stakpak_api_key() {
-                        client_config = client_config.with_stakpak(
-                            stakpak_api::StakpakConfig::new(api_key)
-                                .with_endpoint(config.api_endpoint.clone()),
-                        );
-                    }
-                    if let Some(smart_model) = &config.smart_model {
-                        client_config = client_config.with_smart_model(smart_model.clone());
-                    }
-                    if let Some(eco_model) = &config.eco_model {
-                        client_config = client_config.with_eco_model(eco_model.clone());
-                    }
-                    if let Some(recovery_model) = &config.recovery_model {
-                        client_config = client_config.with_recovery_model(recovery_model.clone());
-                    }
-
-                    let client: Arc<dyn AgentProvider> =
-                        Arc::new(AgentClient::new(client_config).await.unwrap_or_else(|e| {
-                            eprintln!("Failed to create client: {}", e);
-                            std::process::exit(1);
-                        }));
-
-                    // Parallelize HTTP calls for faster startup
-                    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-                    let client_for_rulebooks = client.clone();
-                    let config_for_rulebooks = config.clone();
-
-                    let (api_result, update_result, rulebooks_result) = tokio::join!(
-                        client.get_my_account(),
-                        check_update(&current_version),
-                        async {
-                            client_for_rulebooks
-                                .list_rulebooks()
-                                .await
-                                .ok()
-                                .map(|rulebooks| {
-                                    if let Some(rulebook_config) = &config_for_rulebooks.rulebooks {
-                                        rulebook_config.filter_rulebooks(rulebooks)
-                                    } else {
-                                        rulebooks
-                                    }
-                                })
-                        }
-                    );
-
-                    match api_result {
-                        Ok(_) => {}
-                        Err(e) => {
-                            // Only exit on error if using Stakpak API (has API key)
-                            if has_stakpak_key {
-                                println!();
-                                println!("❌ API key validation failed: {}", e);
-                                println!("Please check your API key and run the below command");
-                                println!();
-                                println!("\x1b[1;34mstakpak login --api-key <your-api-key>\x1b[0m");
-                                println!();
-                                std::process::exit(1);
-                            }
-                        }
-                    }
-
-                    let _ = update_result;
-                    let rulebooks = rulebooks_result;
+                let _ = update_result;
+                let rulebooks = rulebooks_result;
 
                     let enable_subagents = !cli.disable_subagents;
+                let subagent_configs = if cli.enable_subagents {
+                    if let Some(subagent_config_path) = &cli.subagent_config_path {
+                        SubagentConfigs::load_from_file(subagent_config_path)
+                            .map_err(|e| {
+                                eprintln!("Warning: Failed to load subagent configs: {}", e);
+                                e
+                            })
+                            .ok()
+                    } else {
+                        SubagentConfigs::load_from_str(DEFAULT_SUBAGENT_CONFIG)
+                            .map_err(|e| {
+                                eprintln!("Warning: Failed to load subagent configs: {}", e);
+                                e
+                            })
+                            .ok()
+                    }
+                } else {
+                    None
+                };
 
-                    // match get_or_build_local_code_index(&config, None, cli.index_big_project)
-                    //     .await
-                    // {
-                    //     Ok(_) => {
-                    //         // Indexing was successful, start the file watcher
-                    //         tokio::spawn(async move {
-                    //             match start_code_index_watcher(&config, None) {
-                    //                 Ok(_) => {}
-                    //                 Err(e) => {
-                    //                     eprintln!("Failed to start code index watcher: {}", e);
-                    //                 }
-                    //             }
-                    //         });
-                    //     }
-                    //     Err(e) if e.contains("threshold") && e.contains("--index-big-project") => {
-                    //         // This is the expected error when file count exceeds limit
-                    //         // Continue silently without file watcher
-                    //     }
-                    //     Err(e) => {
-                    //         eprintln!("Failed to build code index: {}", e);
-                    //         // Continue without code indexing instead of exiting
-                    //     }
-                    // }
+                // match get_or_build_local_code_index(&config, None, cli.index_big_project)
+                //     .await
+                // {
+                //     Ok(_) => {
+                //         // Indexing was successful, start the file watcher
+                //         tokio::spawn(async move {
+                //             match start_code_index_watcher(&config, None) {
+                //                 Ok(_) => {}
+                //                 Err(e) => {
+                //                     eprintln!("Failed to start code index watcher: {}", e);
+                //                 }
+                //             }
+                //         });
+                //     }
+                //     Err(e) if e.contains("threshold") && e.contains("--index-big-project") => {
+                //         // This is the expected error when file count exceeds limit
+                //         // Continue silently without file watcher
+                //     }
+                //     Err(e) => {
+                //         eprintln!("Failed to build code index: {}", e);
+                //         // Continue without code indexing instead of exiting
+                //     }
+                // }
 
-                    let system_prompt =
-                        if let Some(system_prompt_file_path) = &cli.system_prompt_file {
-                            match std::fs::read_to_string(system_prompt_file_path) {
-                                Ok(content) => {
-                                    println!(
-                                        "📖 Reading system prompt from file: {}",
-                                        system_prompt_file_path
-                                    );
-                                    Some(content.trim().to_string())
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "Failed to read system prompt file '{}': {}",
-                                        system_prompt_file_path, e
-                                    );
-                                    std::process::exit(1);
-                                }
-                            }
-                        } else {
-                            None
-                        };
+                let system_prompt = if let Some(system_prompt_file_path) = &cli.system_prompt_file {
+                    match std::fs::read_to_string(system_prompt_file_path) {
+                        Ok(content) => {
+                            println!(
+                                "📖 Reading system prompt from file: {}",
+                                system_prompt_file_path
+                            );
+                            Some(content.trim().to_string())
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Failed to read system prompt file '{}': {}",
+                                system_prompt_file_path, e
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    None
+                };
 
                     let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                         match std::fs::read_to_string(prompt_file_path) {
@@ -426,25 +435,39 @@ async fn main() {
                     } else {
                         cli.prompt.unwrap_or_default()
                     };
+                let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
+                    match std::fs::read_to_string(prompt_file_path) {
+                        Ok(content) => {
+                            println!("📖 Reading prompt from file: {}", prompt_file_path);
+                            content.trim().to_string()
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to read prompt file '{}': {}", prompt_file_path, e);
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    cli.prompt.unwrap_or_default()
+                };
 
-                    // When using --prompt-file, force async mode only
-                    let use_async_mode = cli.r#async || cli.print;
+                // When using --prompt-file, force async mode only
+                let use_async_mode = cli.r#async || cli.print;
 
-                    // Determine max_steps: 1 for single-step mode (--print/--approve), user setting or default for --async
-                    let max_steps = if cli.print {
-                        Some(1) // Force single step for non-interactive-like behavior
-                    } else {
-                        cli.max_steps // Use user setting or default (50)
-                    };
+                // Determine max_steps: 1 for single-step mode (--print/--approve), user setting or default for --async
+                let max_steps = if cli.print {
+                    Some(1) // Force single step for non-interactive-like behavior
+                } else {
+                    cli.max_steps // Use user setting or default (50)
+                };
 
-                    // Ensure .stakpak is in .gitignore before running agent
-                    let _ = gitignore::ensure_stakpak_in_gitignore(&config);
+                // Ensure .stakpak is in .gitignore before running agent
+                let _ = gitignore::ensure_stakpak_in_gitignore(&config);
 
-                    let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
-                    let auto_approve = config.auto_approve.clone();
-                    let default_model = config.get_default_model(cli.model.as_deref());
-                    let checkpoint_id = cli.checkpoint_id.clone();
-                    let session_id = cli.session_id.clone();
+                let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
+                let auto_approve = config.auto_approve.clone();
+                let default_model = config.get_default_model(cli.model.as_deref());
+                let checkpoint_id = cli.checkpoint_id.clone();
+                let session_id = cli.session_id.clone();
 
                     let result = match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
@@ -511,6 +534,35 @@ async fn main() {
                                 Err(e) => Err(e),
                             }
                         }
+                let result = match use_async_mode {
+                    // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
+                    true => {
+                        agent::run::run_async(
+                            config,
+                            RunAsyncConfig {
+                                prompt,
+                                verbose: cli.verbose,
+                                checkpoint_id: checkpoint_id.clone(),
+                                session_id: session_id.clone(),
+                                local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
+                                privacy_mode: cli.privacy_mode,
+                                rulebooks,
+                                subagent_configs,
+                                max_steps,
+                                output_format: cli.output_format,
+                                enable_mtls: !cli.disable_mcp_mtls,
+                                allowed_tools,
+                                system_prompt,
+                                enabled_tools: EnabledToolsConfig {
+                                    slack: cli.enable_slack_tools,
+                                },
+                                model: default_model.clone(),
+                                agents_md: agents_md.clone(),
+                            },
+                        )
+                        .await
+                    }
 
                         // Interactive mode: run in TUI
                         false => {
@@ -540,12 +592,53 @@ async fn main() {
                             .await
                         }
                     };
+                    // Interactive mode: run in TUI
+                    false => {
+                        agent::run::run_interactive(
+                            config,
+                            RunInteractiveConfig {
+                                checkpoint_id,
+                                session_id,
+                                local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
+                                privacy_mode: cli.privacy_mode,
+                                rulebooks,
+                                subagent_configs,
+                                enable_mtls: !cli.disable_mcp_mtls,
+                                is_git_repo: gitignore::is_git_repo(),
+                                study_mode: cli.study_mode,
+                                system_prompt,
+                                allowed_tools,
+                                auto_approve,
+                                enabled_tools: EnabledToolsConfig {
+                                    slack: cli.enable_slack_tools,
+                                },
+                                model: default_model,
+                                agents_md,
+                                send_init_prompt_on_start,
+                            },
+                        )
+                        .await
+                    }
+                };
 
-                    // Cancel background cache task on exit
-                    cache_task.abort();
+                // Cancel background cache task on exit
+                cache_task.abort();
 
-                    if let Err(e) = result {
-                        eprintln!("Ops! something went wrong: {}", e);
+                if let Err(e) = result {
+                    eprintln!("Ops! something went wrong: {}", e);
+                    std::process::exit(1);
+                }
+            } else if let Some(command) = cli.command {
+                // Run a specific subcommand (Account, Config, etc.)
+                if config.get_stakpak_api_key().is_none() && command.requires_auth() {
+                    run_onboarding(&mut config, OnboardingMode::Default).await;
+                }
+                let _ = gitignore::ensure_stakpak_in_gitignore(&config);
+                match command.run(config).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Ops! something went wrong: {e}");
                         std::process::exit(1);
                     }
                 }

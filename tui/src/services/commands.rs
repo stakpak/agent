@@ -270,6 +270,10 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
             command: "/shortcuts",
             description: "Show keyboard shortcuts",
         },
+        HelperCommand {
+            command: "/init",
+            description: "Load init.md prompt for analyzing infrastructure",
+        },
     ]
 }
 
@@ -464,6 +468,38 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
+            Ok(())
+        }
+
+        "/init" => {
+            let prompt = match ctx.state.init_prompt_content.as_deref() {
+                Some(s) if !s.trim().is_empty() => s.to_string(),
+                _ => {
+                    push_error_message(ctx.state, "No init.md was found.", None);
+                    ctx.state.text_area.set_text("");
+                    ctx.state.show_helper_dropdown = false;
+                    return Ok(());
+                }
+            };
+
+            ctx.state.messages.push(Message::info("".to_string(), None));
+            ctx.state.messages.push(Message::info(
+                "Analyzing your infrastructure setup.",
+                Some(Style::default().fg(Color::Cyan)),
+            ));
+            ctx.state.messages.push(Message::info(
+                prompt.clone(),
+                Some(Style::default().fg(Color::DarkGray)),
+            ));
+            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+                prompt,
+                ctx.state.shell_tool_calls.clone(),
+                Vec::new(), // No image parts for command
+            ));
+            ctx.state.shell_tool_calls = None;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
 
