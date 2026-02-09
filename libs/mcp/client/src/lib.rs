@@ -10,7 +10,6 @@ use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use uuid::Uuid;
 
 mod local;
 
@@ -74,14 +73,10 @@ pub async fn get_tools(client: &McpClient) -> Result<Vec<Tool>> {
 pub async fn call_tool(
     client: &McpClient,
     params: CallToolRequestParam,
-    session_id: Option<Uuid>,
+    metadata: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<RequestHandle<RoleClient>, String> {
-    let mut meta_map = serde_json::Map::new();
-    if let Some(session_id) = session_id {
-        meta_map.insert("session_id".to_string(), serde_json::json!(session_id));
-    }
     let options = PeerRequestOptions {
-        meta: Some(Meta(meta_map)),
+        meta: Some(Meta(metadata.unwrap_or_default())),
         ..Default::default()
     };
     client

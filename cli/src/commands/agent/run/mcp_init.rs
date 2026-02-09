@@ -34,6 +34,10 @@ pub struct McpInitConfig {
     pub enabled_tools: EnabledToolsConfig,
     /// Whether to enable mTLS for secure communication
     pub enable_mtls: bool,
+    /// Whether to enable subagent tools
+    pub enable_subagents: bool,
+    /// Optional list of allowed tool names (filters tools if specified)
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 impl Default for McpInitConfig {
@@ -43,6 +47,8 @@ impl Default for McpInitConfig {
             privacy_mode: false,
             enabled_tools: EnabledToolsConfig { slack: false },
             enable_mtls: true,
+            enable_subagents: true,
+            allowed_tools: None,
         }
     }
 }
@@ -126,6 +132,7 @@ async fn start_mcp_server(
     let redact_secrets = mcp_config.redact_secrets;
     let privacy_mode = mcp_config.privacy_mode;
     let enabled_tools = mcp_config.enabled_tools.clone();
+    let enable_subagents = mcp_config.enable_subagents;
 
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
@@ -135,7 +142,7 @@ async fn start_mcp_server(
             privacy_mode,
             enabled_tools,
             tool_mode: ToolMode::Combined,
-            subagent_configs: None,
+            enable_subagents,
             certificate_chain: cert_chain,
         };
 
@@ -323,7 +330,12 @@ pub async fn initialize_mcp_server_and_tools(
         .await
         .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-    let tools = convert_tools_with_filter(&mcp_tools, app_config.allowed_tools.as_ref());
+    // Use allowed_tools from mcp_config if provided, otherwise fall back to app_config
+    let allowed_tools_ref = mcp_config
+        .allowed_tools
+        .as_ref()
+        .or(app_config.allowed_tools.as_ref());
+    let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_ref);
 
     Ok(McpInitResult {
         client: mcp_client,

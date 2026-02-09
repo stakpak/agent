@@ -514,6 +514,9 @@ impl RemoteConnection {
                                     message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
                                         id: progress_id,
                                         message: text,
+                                        progress_type: None,
+                                        task_updates: None,
+                                        progress: None,
                                     }).unwrap_or_default()),
                                 }).await;
                         }
@@ -537,6 +540,9 @@ impl RemoteConnection {
                                     message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
                                         id: progress_id,
                                         message: text,
+                                        progress_type: None,
+                                        task_updates: None,
+                                        progress: None,
                                     }).unwrap_or_default()),
                                 }).await;
                         }

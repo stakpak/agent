@@ -39,6 +39,7 @@ pub async fn run_tool_call(
     tool_call: &ToolCall,
     cancel_rx: Option<tokio::sync::broadcast::Receiver<()>>,
     session_id: Option<Uuid>,
+    model_id: Option<String>,
 ) -> Result<Option<CallToolResult>, String> {
     let tool_name = &tool_call.function.name;
     let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
@@ -58,13 +59,26 @@ pub async fn run_tool_call(
         };
 
         // Call tool and handle errors gracefully
+        let metadata = Some({
+            let mut meta = serde_json::Map::new();
+            if let Some(session_id) = session_id {
+                meta.insert(
+                    "session_id".to_string(),
+                    serde_json::Value::String(session_id.to_string()),
+                );
+            }
+            if let Some(model_id) = model_id {
+                meta.insert("model_id".to_string(), serde_json::Value::String(model_id));
+            }
+            meta
+        });
         let handle = match stakpak_mcp_client::call_tool(
             mcp_client,
             CallToolRequestParam {
                 name: tool_name.clone().into(),
                 arguments,
             },
-            session_id,
+            metadata,
         )
         .await
         {
