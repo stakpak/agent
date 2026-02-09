@@ -243,6 +243,10 @@ pub struct AppState {
     /// Billing info for the side panel
     pub billing_info: Option<stakpak_shared::models::billing::BillingResponse>,
 
+    /// Cached pause info for subagent tasks (task_id -> pause_info)
+    /// Used to display what subagents want to do in the approval bar
+    pub subagent_pause_info:
+        HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
     /// Buffered user messages waiting to be sent after streaming completes
     pub pending_user_messages: VecDeque<PendingUserMessage>,
 
@@ -562,6 +566,7 @@ impl AppState {
             plan_review_selected_comment: None,
             plan_review_modal_kind: None,
             plan_review_confirm: None,
+            subagent_pause_info: HashMap::new(),
         }
     }
 

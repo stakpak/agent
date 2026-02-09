@@ -363,6 +363,26 @@ pub fn handle_show_confirmation_dialog(
             crate::services::bash_block::RunCommandState::Pending,
             Some(message_id),
         ));
+    } else if tool_name == "resume_subagent_task" {
+        // For resume_subagent_task, use the special subagent pending block
+        // Try to get pause info from cached subagent state
+        let pause_info = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            .ok()
+            .and_then(|args| {
+                args.get("task_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+
+        state
+            .messages
+            .push(Message::render_subagent_resume_pending_block(
+                tool_call.clone(),
+                is_auto_approved,
+                pause_info,
+                Some(message_id),
+            ));
     } else {
         state.messages.push(Message::render_pending_border_block(
             tool_call.clone(),

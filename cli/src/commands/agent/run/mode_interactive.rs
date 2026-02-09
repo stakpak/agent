@@ -4,9 +4,9 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, add_subagents, build_plan_mode_instructions,
-    build_resume_command, convert_tools_with_filter, extract_last_checkpoint_id,
-    refresh_billing_info, tool_call_history_string, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
+    build_resume_command, extract_last_checkpoint_id, refresh_billing_info,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -28,7 +28,6 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
-use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -116,7 +115,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
-    pub subagent_configs: Option<SubagentConfigs>,
+    pub enable_subagents: bool,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
@@ -161,7 +160,7 @@ pub async fn run_interactive(
         let mut rulebooks = config.rulebooks.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
-        let subagent_configs = config.subagent_configs.clone();
+        let enable_subagents = config.enable_subagents;
         let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let session_id = config.session_id.clone();
@@ -277,8 +276,11 @@ pub async fn run_interactive(
                 privacy_mode,
                 enabled_tools: enabled_tools.clone(),
                 enable_mtls,
+                enable_subagents,
+                allowed_tools: allowed_tools_for_tui.clone(),
             };
-            let (mcp_client, mcp_tools, _tools, _server_shutdown_tx, _proxy_shutdown_tx) =
+            // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
+            let (mcp_client, mcp_tools, tools, _server_shutdown_tx, _proxy_shutdown_tx) =
                 match mcp_init::initialize_mcp_server_and_tools(
                     &ctx_clone,
                     mcp_init_config,
@@ -301,8 +303,6 @@ pub async fn run_interactive(
                         (None, Vec::new(), Vec::new(), None, None)
                     }
                 };
-
-            let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_for_tui.as_ref());
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
@@ -450,9 +450,6 @@ pub async fn run_interactive(
                                 (user_input.to_string(), None::<String>)
                             };
 
-                        let (user_input, _) =
-                            add_subagents(&messages, &user_input, &subagent_configs);
-
                         let user_input = if messages.is_empty()
                             && let Some(agents_md_info) = &agents_md
                         {
@@ -546,6 +543,7 @@ pub async fn run_interactive(
                                 &tool_call,
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
+                                Some(model.id.clone()),
                             )
                             .await?
                         } else {

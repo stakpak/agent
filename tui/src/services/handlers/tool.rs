@@ -7,7 +7,7 @@ use crate::services::commands::{CommandAction, CommandContext, execute_command, 
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
+    ProgressType, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -75,6 +75,11 @@ pub fn handle_stream_tool_result(
         return None; // Don't add this marker to the streaming buffer
     }
 
+    // Handle TaskWait progress type specially - use replace mode instead of append
+    if matches!(progress.progress_type, Some(ProgressType::TaskWait)) {
+        return handle_task_wait_progress(state, progress);
+    }
+
     // Ensure loading state is true during streaming tool results
     // Only set it if it's not already true to avoid unnecessary state changes
     if !state.loading {
@@ -82,7 +87,7 @@ pub fn handle_stream_tool_result(
     }
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
-    // 1. Update the buffer for this tool_call_id
+    // 1. Update the buffer for this tool_call_id (append mode for command output)
     state
         .streaming_tool_results
         .entry(tool_call_id)
@@ -138,6 +143,83 @@ pub fn handle_stream_tool_result(
             Some(tool_call_id),
         ));
     }
+    invalidate_message_lines_cache(state);
+
+    // If content changed while user is scrolled up, mark it
+    if !state.stay_at_bottom {
+        state.content_changed_while_scrolled_up = true;
+    }
+
+    None
+}
+
+/// Handle TaskWait progress type with replace mode and dedicated UI
+fn handle_task_wait_progress(
+    state: &mut AppState,
+    progress: ToolCallResultProgress,
+) -> Option<String> {
+    let tool_call_id = progress.id;
+
+    // Ensure loading state is true
+    if !state.loading {
+        state.loading = true;
+    }
+    state.is_streaming = true;
+    state.streaming_tool_result_id = Some(tool_call_id);
+
+    // Remove the pending message if exists
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+    // Remove any old message with this id (replace mode)
+    state.messages.retain(|m| m.id != tool_call_id);
+
+    // Use structured task updates if available, otherwise fall back to message
+    if let Some(task_updates) = progress.task_updates {
+        // Extract target task IDs from task updates
+        let target_task_ids: Vec<String> = task_updates
+            .iter()
+            .filter(|t| t.is_target)
+            .map(|t| t.task_id.clone())
+            .collect();
+
+        // Cache pause info for paused subagent tasks (for approval bar display)
+        for task in &task_updates {
+            if task.status == "Paused"
+                && let Some(pause_info) = &task.pause_info
+            {
+                state
+                    .subagent_pause_info
+                    .insert(task.task_id.clone(), pause_info.clone());
+            }
+        }
+
+        let overall_progress = progress.progress.unwrap_or(0.0);
+
+        // Use dedicated task wait block
+        state.messages.push(Message::render_task_wait_block(
+            task_updates,
+            overall_progress,
+            target_task_ids,
+            Some(tool_call_id),
+        ));
+    } else {
+        // Fallback: use generic streaming block with replace mode
+        // Store message directly (not appending)
+        state
+            .streaming_tool_results
+            .insert(tool_call_id, progress.message.clone());
+
+        state.messages.push(Message::render_streaming_border_block(
+            &progress.message,
+            "Wait for Tasks",
+            "Progress",
+            None,
+            "TaskWait",
+            Some(tool_call_id),
+        ));
+    }
+
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
@@ -696,6 +778,26 @@ fn update_pending_tool_display(state: &mut AppState) {
             };
 
             let msg = Message::render_run_command_block(command, None, run_state, None);
+            state.pending_bash_message_id = Some(msg.id);
+            state.messages.push(msg);
+        } else if tool_name == "resume_subagent_task" {
+            // For resume_subagent_task, use the special subagent pending block
+            let pause_info =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|args| {
+                        args.get("task_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+
+            let msg = Message::render_subagent_resume_pending_block(
+                tool_call.clone(),
+                auto_approve,
+                pause_info,
+                None,
+            );
             state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
         } else {

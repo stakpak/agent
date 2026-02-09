@@ -12,31 +12,21 @@ use uuid::Uuid;
 // =============================================================================
 
 /// Session visibility
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SessionVisibility {
+    #[default]
     Private,
     Public,
 }
 
-impl Default for SessionVisibility {
-    fn default() -> Self {
-        Self::Private
-    }
-}
-
 /// Session status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SessionStatus {
+    #[default]
     Active,
     Deleted,
-}
-
-impl Default for SessionStatus {
-    fn default() -> Self {
-        Self::Active
-    }
 }
 
 /// Full session with active checkpoint
