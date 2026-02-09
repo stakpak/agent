@@ -745,26 +745,15 @@ pub fn handle_feedback(
 /// Handle the approve action ('a' key).
 ///
 /// Sends OutputEvent::PlanApproved and closes the review.
+/// The agent is responsible for updating plan.md front matter to `status: approved`.
 pub fn handle_approve(
     state: &mut AppState,
     output_tx: &tokio::sync::mpsc::Sender<crate::app::OutputEvent>,
 ) {
-    // Update plan.md front matter: status → approved
-    let session_dir = std::path::Path::new(".stakpak/session");
-    let plan_path = crate::services::plan::plan_file_path(session_dir);
-
-    if let Ok(content) = std::fs::read_to_string(&plan_path) {
-        // Replace status: drafting/pending_review with status: approved in front matter
-        let updated = content
-            .replacen("status: drafting", "status: approved", 1)
-            .replacen("status: pending_review", "status: approved", 1);
-        let _ = std::fs::write(&plan_path, updated);
-    }
-
     // Close review
     close_plan_review(state);
 
-    // Send approval event
+    // Send approval event — the agent will update plan.md status to approved
     let _ = output_tx.try_send(crate::app::OutputEvent::PlanApproved);
 }
 

@@ -416,15 +416,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                     match new_status {
                         stakpak_tui::services::plan::PlanStatus::PendingReview => {
                             if config.plan_approved {
-                                // Auto-approve: update front matter and inject approval message
-                                let plan_path =
-                                    stakpak_tui::services::plan::plan_file_path(session_dir);
-                                if let Ok(file_content) = std::fs::read_to_string(&plan_path) {
-                                    let updated = file_content
-                                        .replacen("status: drafting", "status: approved", 1)
-                                        .replacen("status: pending_review", "status: approved", 1);
-                                    let _ = std::fs::write(&plan_path, updated);
-                                }
+                                // Auto-approve: inject approval message — the agent will update plan.md status
                                 print!(
                                     "{}",
                                     renderer.render_info(
@@ -432,7 +424,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                                     )
                                 );
                                 chat_messages.push(user_message(
-                                    "Plan approved. Proceed with execution.".to_string(),
+                                    "Plan approved. Update the plan front matter status to `approved` and proceed with execution.".to_string(),
                                 ));
                             } else {
                                 // No auto-approve: print plan path and exit
