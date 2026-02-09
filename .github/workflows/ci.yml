@@ -8,35 +8,37 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
   rust-ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ./target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Configure swap
+        run: |
+          sudo swapoff -a
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
 
-      - name: Check
-        run: cargo check --verbose --all-targets
+      - uses: Swatinem/rust-cache@v2
 
       - name: Format Check
         run: cargo fmt -- --check
 
       - name: Lint
-        run: cargo clippy
+        run: cargo clippy --all-targets --workspace
 
-      - name: Build
-        run: cargo build --verbose
+      - name: Compile Tests
+        run: cargo test --workspace --no-run --verbose
 
-      - name: Test
+      - name: Run Tests
+        timeout-minutes: 10
         run: cargo test --workspace --verbose
