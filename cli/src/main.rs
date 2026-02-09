@@ -98,6 +98,10 @@ struct Cli {
     #[arg(long = "plan-feedback")]
     plan_feedback: Option<String>,
 
+    /// Archive any existing plan and start fresh (async mode, requires --plan)
+    #[arg(long = "plan-new", default_value_t = false)]
+    plan_new: bool,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
@@ -486,6 +490,7 @@ async fn main() {
                                     plan_mode: cli.plan,
                                     plan_approved: cli.plan_approved,
                                     plan_feedback: cli.plan_feedback.clone(),
+                                    plan_new: cli.plan_new,
                                 },
                             )
                             .await

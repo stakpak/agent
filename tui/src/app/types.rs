@@ -168,6 +168,19 @@ impl PendingUserMessage {
     }
 }
 
+/// Stashed state for the "existing plan found" modal.
+///
+/// When plan mode is requested and `.stakpak/session/plan.md` already exists,
+/// the inline prompt is stashed here while the user decides whether to resume
+/// or start fresh.
+#[derive(Debug, Clone)]
+pub struct ExistingPlanPrompt {
+    /// The inline prompt from `/plan <prompt>` (or `None` for bare `/plan`).
+    pub inline_prompt: Option<String>,
+    /// Metadata parsed from the existing plan file (for display in the modal).
+    pub metadata: Option<crate::services::plan::PlanMetadata>,
+}
+
 #[derive(Debug)]
 pub struct SessionInfo {
     pub title: String,

@@ -131,6 +131,39 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for "existing plan found" modal
+    if state.existing_plan_prompt.is_some() {
+        match event {
+            InputEvent::InputChanged('u') => {
+                // Use existing plan — proceed with plan mode, keep plan.md
+                if let Some(prompt) = state.existing_plan_prompt.take() {
+                    let _ = output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                }
+                return;
+            }
+            InputEvent::InputChanged('n') => {
+                // Start new — archive existing plan, then activate
+                let session_dir = std::path::Path::new(".stakpak/session");
+                crate::services::plan::archive_plan_file(session_dir);
+                if let Some(prompt) = state.existing_plan_prompt.take() {
+                    let _ = output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                }
+                return;
+            }
+            InputEvent::HandleEsc => {
+                // Cancel — dismiss modal, don't enter plan mode
+                state.existing_plan_prompt = None;
+                return;
+            }
+            InputEvent::AttemptQuit | InputEvent::Quit => {
+                // Allow quit through
+            }
+            _ => {
+                return; // Consume everything else
+            }
+        }
+    }
+
     // Intercept keys for Plan Review overlay
     if state.show_plan_review {
         // Sub-intercept: comment modal is open
@@ -1031,6 +1064,11 @@ pub fn update(
                     ratatui::style::Color::Cyan,
                 );
             }
+        }
+        InputEvent::ExistingPlanFound(prompt) => {
+            // Backend detected an existing plan at --plan startup.
+            // Show the modal so the user can choose to resume or start fresh.
+            state.existing_plan_prompt = Some(prompt);
         }
 
         // Plan review events

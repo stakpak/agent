@@ -446,8 +446,23 @@ pub async fn run_interactive(
 
             // Handle --plan CLI flag: activate plan mode at startup
             if config.plan_mode {
-                plan_mode_active = true;
-                send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+                let session_dir = std::path::Path::new(".stakpak/session");
+                if stakpak_tui::services::plan::plan_file_exists(session_dir) {
+                    // Existing plan found — let the TUI show the modal
+                    let meta = stakpak_tui::services::plan::read_plan_file(session_dir)
+                        .map(|(m, _)| m);
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ExistingPlanFound(stakpak_tui::ExistingPlanPrompt {
+                            inline_prompt: None,
+                            metadata: meta,
+                        }),
+                    )
+                    .await?;
+                } else {
+                    plan_mode_active = true;
+                    send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+                }
             }
 
             let mut retry_attempts = 0;

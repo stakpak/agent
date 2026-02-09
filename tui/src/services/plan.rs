@@ -140,6 +140,39 @@ pub fn compute_plan_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+// ─── Archive ─────────────────────────────────────────────────────────────────
+
+/// Archive the existing plan.md by renaming it with its creation timestamp.
+///
+/// Uses the `created` field from YAML front matter for the suffix. Falls back
+/// to file modification time, then current time if neither is available.
+///
+/// Renames `plan.md` → `plan.<YYYYMMDD_HHMMSS>.md`.
+/// Returns the archive path on success, or `None` if no plan file exists.
+pub fn archive_plan_file(session_dir: &Path) -> Option<PathBuf> {
+    let plan_path = plan_file_path(session_dir);
+    if !plan_path.exists() {
+        return None;
+    }
+
+    let ts = std::fs::read_to_string(&plan_path)
+        .ok()
+        .and_then(|c| parse_plan_front_matter(&c))
+        .and_then(|m| m.created)
+        .or_else(|| {
+            std::fs::metadata(&plan_path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(DateTime::<Utc>::from)
+        })
+        .unwrap_or_else(Utc::now)
+        .format("%Y%m%d_%H%M%S");
+
+    let archive_path = session_dir.join(format!("plan.{ts}.md"));
+    std::fs::rename(&plan_path, &archive_path).ok()?;
+    Some(archive_path)
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -326,5 +359,39 @@ Some content.
         let meta = parse_plan_front_matter(content);
         assert!(meta.is_some());
         assert_eq!(meta.unwrap().status, PlanStatus::Approved);
+    }
+
+    #[test]
+    fn test_archive_plan_file_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(archive_plan_file(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn test_archive_plan_file_with_created_timestamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(PLAN_FILENAME), VALID_FRONT_MATTER).unwrap();
+        let archive = archive_plan_file(tmp.path());
+        assert!(archive.is_some());
+        let archive_path = archive.unwrap();
+        // created: 2026-02-07T15:30:00Z → plan.20260207_153000.md
+        assert_eq!(
+            archive_path.file_name().unwrap().to_str().unwrap(),
+            "plan.20260207_153000.md"
+        );
+        assert!(archive_path.exists());
+        assert!(!plan_file_exists(tmp.path()));
+    }
+
+    #[test]
+    fn test_archive_plan_file_no_created_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(PLAN_FILENAME), MINIMAL_FRONT_MATTER).unwrap();
+        let archive = archive_plan_file(tmp.path());
+        assert!(archive.is_some());
+        let archive_path = archive.unwrap();
+        // No created field → falls back to mtime or now; just check it was renamed
+        assert!(archive_path.exists());
+        assert!(!plan_file_exists(tmp.path()));
     }
 }

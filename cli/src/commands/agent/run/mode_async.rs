@@ -44,6 +44,8 @@ pub struct RunAsyncConfig {
     pub plan_approved: bool,
     /// Path to file containing feedback to inject
     pub plan_feedback: Option<String>,
+    /// Archive any existing plan and start fresh (only with --plan)
+    pub plan_new: bool,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -196,6 +198,20 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let max_steps = config.max_steps.unwrap_or(50); // Safety limit to prevent infinite loops
     let mut plan_instructions_injected = false;
     let mut plan_previous_status: Option<stakpak_tui::services::plan::PlanStatus> = None;
+
+    // If plan mode, handle existing plan file
+    if config.plan_mode && config.plan_new {
+        let session_dir = std::path::Path::new(".stakpak/session");
+        if let Some(archive_path) = stakpak_tui::services::plan::archive_plan_file(session_dir) {
+            print!(
+                "{}",
+                renderer.render_info(&format!(
+                    "Archived existing plan to {}",
+                    archive_path.display()
+                ))
+            );
+        }
+    }
 
     // If plan mode, inject plan instructions into the first user message
     if config.plan_mode && !chat_messages.is_empty() {

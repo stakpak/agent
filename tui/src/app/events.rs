@@ -7,7 +7,7 @@ use stakpak_shared::models::{
 };
 use uuid::Uuid;
 
-use crate::app::{LoadingOperation, SessionInfo};
+use crate::app::{ExistingPlanPrompt, LoadingOperation, SessionInfo};
 use crate::services::board_tasks::FetchTasksResult;
 
 #[derive(Debug)]
@@ -158,6 +158,8 @@ pub enum InputEvent {
     // Plan mode events
     /// Plan mode toggled on/off (sent from backend to TUI to sync state)
     PlanModeChanged(bool),
+    /// Existing plan found at startup — show the modal with metadata and stashed prompt
+    ExistingPlanFound(ExistingPlanPrompt),
     /// Toggle plan review overlay (Ctrl+P in plan mode)
     TogglePlanReview,
     /// Close plan review overlay

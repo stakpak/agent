@@ -257,6 +257,9 @@ pub struct AppState {
     pub plan_previous_status: Option<crate::services::plan::PlanStatus>,
     /// Whether plan review was auto-opened for current reviewing transition
     pub plan_review_auto_opened: bool,
+    /// When set, the "existing plan found" modal is visible.
+    /// Contains the stashed prompt and plan metadata for the modal to display.
+    pub existing_plan_prompt: Option<ExistingPlanPrompt>,
 
     // ========== Plan Review State ==========
     /// Whether the plan review overlay is visible
@@ -544,6 +547,7 @@ impl AppState {
             plan_content_hash: None,
             plan_previous_status: None,
             plan_review_auto_opened: false,
+            existing_plan_prompt: None,
 
             // Plan review initialization
             show_plan_review: false,

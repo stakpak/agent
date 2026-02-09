@@ -503,9 +503,20 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
 
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
-            let _ = ctx
-                .output_tx
-                .try_send(OutputEvent::PlanModeActivated(inline_prompt));
+
+            // Check for existing plan — show modal if one exists
+            let session_dir = std::path::Path::new(".stakpak/session");
+            if crate::services::plan::plan_file_exists(session_dir) {
+                let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
+                ctx.state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
+                    inline_prompt,
+                    metadata: meta,
+                });
+            } else {
+                let _ = ctx
+                    .output_tx
+                    .try_send(OutputEvent::PlanModeActivated(inline_prompt));
+            }
             Ok(())
         }
 
