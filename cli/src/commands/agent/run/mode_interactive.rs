@@ -1035,7 +1035,7 @@ pub async fn run_interactive(
                     OutputEvent::PlanApproved => {
                         // User approved the plan — plan_mode stays active, PlanStatus drives behavior.
                         // The agent is responsible for updating plan.md front matter to status: approved.
-                        let approval_msg = "Plan approved. Update the plan front matter status to `approved` and proceed with execution.".to_string();
+                        let approval_msg = "Plan approved. Update the plan front matter status to `approved` and proceed with creating a new task board breaking down the plan.".to_string();
                         let user_msg = user_message(approval_msg.clone());
                         messages.push(user_msg);
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
