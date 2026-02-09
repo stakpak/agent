@@ -198,9 +198,13 @@ mod tests {
     #[cfg(unix)]
     fn create_script(dir: &Path, name: &str, content: &str) -> std::path::PathBuf {
         let script_path = dir.join(name);
-        let mut file = File::create(&script_path).expect("Failed to create script");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write script");
+        {
+            let mut file = File::create(&script_path).expect("Failed to create script");
+            file.write_all(content.as_bytes())
+                .expect("Failed to write script");
+            file.sync_all().expect("Failed to sync script");
+            // file is dropped (closed) here before we try to execute it
+        }
 
         #[cfg(unix)]
         {
