@@ -340,9 +340,7 @@ fn build_messages_with_caching(
     // Phase 4: Sanitize all messages to enforce Anthropic API constraints.
     // This is the single boundary where we fix structural issues that would
     // cause 400 errors, regardless of which upstream phase introduced them.
-    for msg in &mut merged {
-        sanitize_anthropic_message(msg);
-    }
+    sanitize_anthropic_messages(&mut merged);
 
     Ok(merged)
 }
@@ -393,34 +391,80 @@ fn is_empty_content_message(msg: &AnthropicMessage) -> bool {
     }
 }
 
-/// Sanitize an Anthropic message to enforce API constraints.
+/// Sanitize Anthropic messages to enforce API constraints.
 ///
-/// This is the **single boundary** that fixes structural issues before the
-/// message is sent to the API. All Anthropic-specific content invariants
+/// This is the **single boundary** that fixes structural issues before
+/// messages are sent to the API. All Anthropic-specific content invariants
 /// are enforced here, rather than scattering guards across conversion,
 /// merging, and caching phases. Inspired by Vercel AI SDK's approach of
 /// handling structural concerns in one pass at the output boundary.
 ///
-/// Current rules:
+/// Per-message rules:
 /// - Strip `cache_control` from empty text blocks
 ///   (Anthropic `invalid_request_error`: "cache_control cannot be set for empty text blocks")
-fn sanitize_anthropic_message(msg: &mut AnthropicMessage) {
-    match &mut msg.content {
-        AnthropicMessageContent::Blocks(blocks) => {
-            for block in blocks.iter_mut() {
-                if let AnthropicContent::Text {
-                    text,
-                    cache_control,
-                } = block
-                    && text.is_empty()
-                    && cache_control.is_some()
-                {
-                    *cache_control = None;
-                }
+///
+/// Array-level rules:
+/// - Trim trailing whitespace from the last assistant message's last text block
+///   (Anthropic `invalid_request_error`: rejects trailing whitespace in pre-filled
+///   assistant responses, i.e. when the conversation ends with an assistant message)
+fn sanitize_anthropic_messages(messages: &mut [AnthropicMessage]) {
+    // Per-message sanitization
+    for msg in messages.iter_mut() {
+        sanitize_message_blocks(msg);
+    }
+
+    // Array-level: trim trailing whitespace on the last message if it's an assistant message.
+    // Anthropic treats a trailing assistant message as a "pre-filled" response and rejects
+    // trailing whitespace in that position.
+    if let Some(last) = messages.last_mut()
+        && last.role == "assistant"
+    {
+        trim_trailing_assistant_text(last);
+    }
+}
+
+/// Strip `cache_control` from empty text blocks within a single message.
+fn sanitize_message_blocks(msg: &mut AnthropicMessage) {
+    if let AnthropicMessageContent::Blocks(blocks) = &mut msg.content {
+        for block in blocks.iter_mut() {
+            if let AnthropicContent::Text {
+                text,
+                cache_control,
+            } = block
+                && text.is_empty()
+                && cache_control.is_some()
+            {
+                *cache_control = None;
             }
         }
-        AnthropicMessageContent::String(_) => {
-            // String content has no cache_control field; nothing to sanitize.
+    }
+}
+
+/// Trim trailing whitespace from the last text block of an assistant message.
+///
+/// Anthropic does not allow trailing whitespace in pre-filled assistant responses
+/// (conversations ending with an assistant message). Only the last text block in
+/// the last assistant message needs trimming — intermediate messages are unaffected.
+fn trim_trailing_assistant_text(msg: &mut AnthropicMessage) {
+    match &mut msg.content {
+        AnthropicMessageContent::String(s) => {
+            let trimmed = s.trim_end();
+            if trimmed.len() != s.len() {
+                *s = trimmed.to_string();
+            }
+        }
+        AnthropicMessageContent::Blocks(blocks) => {
+            // Find the last text block and trim it
+            if let Some(AnthropicContent::Text { text, .. }) = blocks
+                .iter_mut()
+                .rev()
+                .find(|b| matches!(b, AnthropicContent::Text { .. }))
+            {
+                let trimmed = text.trim_end();
+                if trimmed.len() != text.len() {
+                    *text = trimmed.to_string();
+                }
+            }
         }
     }
 }
@@ -1395,19 +1439,19 @@ mod tests {
         }
     }
 
-    // --- sanitize_anthropic_message tests ---
+    // --- sanitize_anthropic_messages tests ---
 
     #[test]
     fn test_sanitize_strips_cache_control_from_empty_text_blocks() {
         let cc = AnthropicCacheControl::ephemeral();
 
         // Empty text block with cache_control should have it stripped
-        let mut msg = user_blocks_msg(vec![AnthropicContent::Text {
+        let mut msgs = vec![user_blocks_msg(vec![AnthropicContent::Text {
             text: String::new(),
             cache_control: Some(cc.clone()),
-        }]);
-        sanitize_anthropic_message(&mut msg);
-        match &msg.content {
+        }])];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[0].content {
             AnthropicMessageContent::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 1);
                 match &blocks[0] {
@@ -1432,12 +1476,12 @@ mod tests {
     fn test_sanitize_preserves_cache_control_on_non_empty_text() {
         let cc = AnthropicCacheControl::ephemeral();
 
-        let mut msg = user_blocks_msg(vec![AnthropicContent::Text {
+        let mut msgs = vec![user_blocks_msg(vec![AnthropicContent::Text {
             text: "hello".to_string(),
             cache_control: Some(cc.clone()),
-        }]);
-        sanitize_anthropic_message(&mut msg);
-        match &msg.content {
+        }])];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[0].content {
             AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
                 AnthropicContent::Text { cache_control, .. } => {
                     assert!(
@@ -1456,7 +1500,7 @@ mod tests {
         let cc = AnthropicCacheControl::ephemeral();
 
         // Mix of empty text (with cache), non-empty text (with cache), and tool_result
-        let mut msg = user_blocks_msg(vec![
+        let mut msgs = vec![user_blocks_msg(vec![
             AnthropicContent::Text {
                 text: String::new(),
                 cache_control: Some(cc.clone()),
@@ -1471,9 +1515,9 @@ mod tests {
                 is_error: None,
                 cache_control: Some(cc.clone()),
             },
-        ]);
-        sanitize_anthropic_message(&mut msg);
-        match &msg.content {
+        ])];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[0].content {
             AnthropicMessageContent::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 3);
                 // Empty text: cache_control stripped
@@ -1505,11 +1549,116 @@ mod tests {
     #[test]
     fn test_sanitize_noop_on_string_content() {
         // String content has no cache_control field — sanitize should be a no-op
-        let mut msg = user_msg("hello");
-        sanitize_anthropic_message(&mut msg);
-        match &msg.content {
+        let mut msgs = vec![user_msg("hello")];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[0].content {
             AnthropicMessageContent::String(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected String content"),
+        }
+    }
+
+    // --- trim_trailing_assistant_text tests ---
+
+    #[test]
+    fn test_sanitize_trims_trailing_whitespace_on_last_assistant_string() {
+        let mut msgs = vec![user_msg("hello"), assistant_msg("response  \n")];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[1].content {
+            AnthropicMessageContent::String(s) => assert_eq!(s, "response"),
+            _ => panic!("Expected String"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_trims_trailing_whitespace_on_last_assistant_blocks() {
+        let mut msgs = vec![
+            user_msg("hello"),
+            assistant_blocks_msg(vec![
+                text_block("first part"),
+                AnthropicContent::Text {
+                    text: "second part  ".to_string(),
+                    cache_control: None,
+                },
+            ]),
+        ];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[1].content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                // First text block unchanged
+                match &blocks[0] {
+                    AnthropicContent::Text { text, .. } => assert_eq!(text, "first part"),
+                    _ => panic!("Expected Text"),
+                }
+                // Last text block trimmed
+                match &blocks[1] {
+                    AnthropicContent::Text { text, .. } => assert_eq!(text, "second part"),
+                    _ => panic!("Expected Text"),
+                }
+            }
+            _ => panic!("Expected Blocks"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_no_trim_when_last_is_user() {
+        // Trailing whitespace is only trimmed on the last assistant message.
+        // If the last message is a user message, no trimming should occur.
+        let mut msgs = vec![assistant_msg("response  "), user_msg("followup  ")];
+        sanitize_anthropic_messages(&mut msgs);
+        // Assistant is no longer last — should NOT be trimmed
+        match &msgs[0].content {
+            AnthropicMessageContent::String(s) => assert_eq!(s, "response  "),
+            _ => panic!("Expected String"),
+        }
+        // User message is last — should NOT be trimmed (rule only applies to assistant)
+        match &msgs[1].content {
+            AnthropicMessageContent::String(s) => assert_eq!(s, "followup  "),
+            _ => panic!("Expected String"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_no_trim_on_non_trailing_assistant() {
+        // Only the LAST message gets trimmed, not intermediate assistant messages
+        let mut msgs = vec![
+            user_msg("hello"),
+            assistant_msg("middle  "),
+            user_msg("followup"),
+        ];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[1].content {
+            AnthropicMessageContent::String(s) => {
+                assert_eq!(s, "middle  ", "Non-trailing assistant must not be trimmed");
+            }
+            _ => panic!("Expected String"),
+        }
+    }
+
+    #[test]
+    fn test_sanitize_trims_last_text_block_in_assistant_with_tool_use() {
+        // Assistant message with tool_use blocks followed by text — trim the last text
+        let mut msgs = vec![
+            user_msg("hello"),
+            assistant_blocks_msg(vec![
+                tool_use_block("t1", "my_tool"),
+                AnthropicContent::Text {
+                    text: "thinking...  ".to_string(),
+                    cache_control: None,
+                },
+            ]),
+        ];
+        sanitize_anthropic_messages(&mut msgs);
+        match &msgs[1].content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                // tool_use untouched
+                assert!(matches!(&blocks[0], AnthropicContent::ToolUse { .. }));
+                // last text block trimmed
+                match &blocks[1] {
+                    AnthropicContent::Text { text, .. } => assert_eq!(text, "thinking..."),
+                    _ => panic!("Expected Text"),
+                }
+            }
+            _ => panic!("Expected Blocks"),
         }
     }
 
