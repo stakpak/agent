@@ -127,16 +127,28 @@ pub struct CustomCommand {
 pub enum HelperEntry {
     Builtin(HelperCommand),
     Custom {
+        /// The command ID used for execution (e.g., "/security-review")
         command: String,
+        /// The display string shown in dropdown (e.g., "/usercmd/security-review")
+        display: String,
         description: String,
     },
 }
 
 impl HelperEntry {
+    /// Returns the command ID used for execution
     pub fn command(&self) -> &str {
         match self {
             HelperEntry::Builtin(h) => h.command,
             HelperEntry::Custom { command, .. } => command.as_str(),
+        }
+    }
+
+    /// Returns the display string for the dropdown
+    pub fn display(&self) -> &str {
+        match self {
+            HelperEntry::Builtin(h) => h.command,
+            HelperEntry::Custom { display, .. } => display.as_str(),
         }
     }
 
@@ -246,13 +258,6 @@ pub enum ShortcutsPopupMode {
     Commands,
     Shortcuts,
     Sessions,
-}
-
-/// State for the create-custom-command flow
-#[derive(Debug, Clone)]
-pub enum CreateCustomCommandState {
-    AskingName,
-    AskingBody { name: String },
 }
 
 #[derive(Debug)]

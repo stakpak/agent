@@ -8,7 +8,7 @@
 //!
 //! All commands are defined here and executed through a unified executor.
 
-use crate::app::{AppState, CreateCustomCommandState, CustomCommand, HelperCommand, HelperEntry};
+use crate::app::{AppState, CustomCommand, HelperCommand, HelperEntry};
 use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
@@ -194,10 +194,16 @@ pub fn get_all_commands() -> Vec<Command> {
 /// Max size for custom command files (64 KiB)
 const MAX_CUSTOM_COMMAND_BYTES: u64 = 64 * 1024;
 
-/// Scan project and personal commands directories for .md files.
+/// Prefix required for user command files
+const USER_COMMAND_PREFIX: &str = "Usercmd_";
+
+/// Scan project and personal commands directories for Usercmd_*.md files.
 /// Project: .stakpak/commands/ (relative to current_dir)
 /// Personal: ~/.stakpak/commands/
 /// Project overrides personal when same command exists.
+///
+/// Files must follow the naming convention: Usercmd_{command-name}.md
+/// Example: Usercmd_create-component.md → /create-component
 pub fn scan_custom_commands() -> Vec<CustomCommand> {
     let mut by_id: std::collections::HashMap<String, CustomCommand> =
         std::collections::HashMap::new();
@@ -221,10 +227,27 @@ pub fn scan_custom_commands() -> Vec<CustomCommand> {
             if path.extension().is_none_or(|e| e != "md") {
                 continue;
             }
+            let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+
+            // Only process files with Usercmd_ prefix
+            if !filename.starts_with(USER_COMMAND_PREFIX) {
+                continue;
+            }
+
+            // Extract command name: "Usercmd_create-component.md" -> "create-component"
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            let id = format!("/{stem}");
+            let Some(command_name) = stem.strip_prefix(USER_COMMAND_PREFIX) else {
+                continue;
+            };
+            if command_name.is_empty() {
+                continue;
+            }
+
+            let id = format!("/{command_name}");
 
             let metadata = match std::fs::metadata(&path) {
                 Ok(m) => m,
@@ -239,9 +262,13 @@ pub fn scan_custom_commands() -> Vec<CustomCommand> {
                 Err(_) => continue,
             };
 
+            if content.trim().is_empty() {
+                continue;
+            }
+
             let cmd = CustomCommand {
                 id: id.clone(),
-                description: format!("Custom: {stem}"),
+                description: format!("User: {command_name}"),
                 content: content.trim().to_string(),
             };
             by_id.insert(id, cmd);
@@ -336,10 +363,6 @@ fn builtin_helper_commands() -> Vec<HelperCommand> {
             command: "/init",
             description: "Analyzing your infrastructure setup",
         },
-        HelperCommand {
-            command: "/create_custom_command",
-            description: "Create a new custom slash command",
-        },
     ]
 }
 
@@ -350,8 +373,15 @@ pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
     let mut out: Vec<HelperEntry> = builtin.into_iter().map(HelperEntry::Builtin).collect();
     for c in custom {
         if !builtin_ids.contains(c.id.as_str()) {
+            // Convert "/command-name" to "/usercmd/command-name" for display
+            let display = if let Some(name) = c.id.strip_prefix('/') {
+                format!("/usercmd/{}", name)
+            } else {
+                c.id.clone()
+            };
             out.push(HelperEntry::Custom {
                 command: c.id.clone(),
+                display,
                 description: c.description.clone(),
             });
         }
@@ -550,15 +580,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
-            Ok(())
-        }
-
-        "/create_custom_command" => {
-            ctx.state.create_custom_command = Some(CreateCustomCommandState::AskingName);
-            ctx.state.create_custom_command_popup_input.clear();
-            ctx.state.create_custom_command_popup_error = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
             Ok(())
         }
 

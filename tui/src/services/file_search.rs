@@ -436,12 +436,13 @@ pub async fn file_search_worker(
             if input.starts_with('/') && !input.is_empty() {
                 let custom = crate::services::commands::scan_custom_commands();
                 let fresh_helpers = crate::services::commands::get_helper_commands(&custom);
+                let search_term = input[1..].to_lowercase();
                 let filtered: Vec<HelperEntry> = fresh_helpers
                     .iter()
                     .filter(|h| {
-                        h.command()
-                            .to_lowercase()
-                            .contains(&input[1..].to_lowercase())
+                        // Match against both command ID and display string
+                        h.command().to_lowercase().contains(&search_term)
+                            || h.display().to_lowercase().contains(&search_term)
                     })
                     .cloned()
                     .collect();

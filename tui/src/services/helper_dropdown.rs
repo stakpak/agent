@@ -61,10 +61,10 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             state.helper_scroll
         };
 
-        // Find the longest command name to calculate padding
+        // Find the longest command display name to calculate padding
         let max_command_length = commands_to_show
             .iter()
-            .map(|h| h.command().len())
+            .map(|h| h.display().len())
             .max()
             .unwrap_or(0);
 
@@ -85,7 +85,8 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             let line_index = scroll + i;
             if line_index < total_commands {
                 let command = &commands_to_show[line_index];
-                let padding_needed = max_command_length - command.command().len();
+                let display_text = command.display();
+                let padding_needed = max_command_length - display_text.len();
                 let padding = " ".repeat(padding_needed);
                 let is_selected = line_index == state.helper_selected;
 
@@ -104,7 +105,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 };
 
                 let spans = vec![
-                    Span::styled(format!("  {}  ", command.command()), command_style),
+                    Span::styled(format!("  {}  ", display_text), command_style),
                     Span::styled(padding, Style::default().fg(Color::DarkGray)),
                     Span::styled(format!(" – {}", command.description()), description_style),
                 ];

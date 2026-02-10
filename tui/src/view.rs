@@ -201,8 +201,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.is_dialog_open {
     } else if state.shell_popup_visible && state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
-    } else if state.create_custom_command.is_some() {
-        // Don't render main input when create command popup is open
     } else if !approval_bar_visible {
         // Only render input/dropdown when approval bar is NOT visible
         render_multiline_input(f, state, input_area);
@@ -244,11 +242,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render model switcher
     if state.show_model_switcher {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
-    }
-
-    // Render create custom command popup
-    if state.create_custom_command.is_some() {
-        crate::services::create_command_popup::render_create_command_popup(f, state);
     }
 
     // Render profile switch overlay

@@ -205,13 +205,6 @@ pub struct AppState {
     /// Content of init prompt loaded from init.md in current directory (for /init)
     pub init_prompt_content: Option<String>,
 
-    // ========== Create Custom Command Flow ==========
-    pub create_custom_command: Option<CreateCustomCommandState>,
-    /// Input buffer for the create custom command popup (separate from main text_area)
-    pub create_custom_command_popup_input: String,
-    /// Error message shown inside the create command popup (not pushed to main messages)
-    pub create_custom_command_popup_error: Option<String>,
-
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
@@ -385,9 +378,6 @@ impl AppState {
             file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
-            create_custom_command: None,
-            create_custom_command_popup_input: String::new(),
-            create_custom_command_popup_error: None,
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
             pasted_long_text: None,
