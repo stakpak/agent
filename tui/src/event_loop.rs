@@ -132,10 +132,6 @@ pub async fn run_tui(
         if let Some(prompt) = state.init_prompt_content.clone() {
             if !prompt.trim().is_empty() {
                 state.messages.push(Message::info(
-                    "Analyzing your infrastructure setup.",
-                    Some(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan)),
-                ));
-                state.messages.push(Message::info(
                     prompt.clone(),
                     Some(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray)),
                 ));
