@@ -615,11 +615,7 @@ impl From<&LLMOutput> for ChatMessage {
                 })
                 .collect();
 
-            if calls.is_empty() {
-                None
-            } else {
-                Some(calls)
-            }
+            if calls.is_empty() { None } else { Some(calls) }
         } else {
             None
         };

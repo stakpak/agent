@@ -25,7 +25,7 @@ pub fn discover_skills(directories: &[PathBuf]) -> Vec<Skill> {
             }
 
             let skill_md = path.join("SKILL.md");
-            
+
             if !skill_md.is_file() {
                 continue;
             }
@@ -48,11 +48,11 @@ pub fn discover_skills(directories: &[PathBuf]) -> Vec<Skill> {
             };
 
             if validate_name_matches_directory(&frontmatter.name, dir_name).is_err() {
-                continue; 
+                continue;
             }
 
             if seen_skills.contains(&frontmatter.name) {
-                continue; 
+                continue;
             }
 
             seen_skills.insert(frontmatter.name.clone());
@@ -358,9 +358,11 @@ mod tests {
 
         let result = load_skill_content("actual-name", &[tmp.path().to_path_buf()]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("must match the parent directory name"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("must match the parent directory name")
+        );
     }
 
     #[test]
@@ -388,8 +390,10 @@ mod tests {
 
         let result = load_skill_from_path(&skill_path);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("must match the parent directory name"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("must match the parent directory name")
+        );
     }
 }

@@ -374,8 +374,10 @@ Instructions here.
     fn test_name_mismatches_directory() {
         let result = validate_name_matches_directory("terraform", "tf-skill");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("must match the parent directory name"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("must match the parent directory name")
+        );
     }
 }
