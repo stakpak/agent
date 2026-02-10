@@ -230,7 +230,7 @@ impl AgentClient {
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {
-                keep_last_n_assistant_messages: Some(20),
+                keep_last_n_assistant_messages: Some(10),
                 context_budget_threshold: Some(0.8), // defaults to 0.8 (80%)
             })),
         );

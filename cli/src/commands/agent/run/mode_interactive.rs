@@ -690,7 +690,12 @@ pub async fn run_interactive(
                             )
                             .await
                             {
-                                Ok((chat_messages, tool_calls, session_id_uuid, checkpoint_metadata)) => {
+                                Ok((
+                                    chat_messages,
+                                    tool_calls,
+                                    session_id_uuid,
+                                    checkpoint_metadata,
+                                )) => {
                                     // Track the current session ID
                                     current_session_id = Some(session_id_uuid);
                                     current_metadata = checkpoint_metadata;
@@ -760,7 +765,12 @@ pub async fn run_interactive(
                         )
                         .await
                         {
-                            Ok((chat_messages, tool_calls, session_id_uuid, checkpoint_metadata)) => {
+                            Ok((
+                                chat_messages,
+                                tool_calls,
+                                session_id_uuid,
+                                checkpoint_metadata,
+                            )) => {
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
                                 current_metadata = checkpoint_metadata;

@@ -43,7 +43,20 @@ define_hook!(
         }
 
         let model = ctx.state.active_model.clone();
-        let context_window = model.limit.context;
+        let max_output_tokens: u64 = 16000;
+
+        // Subtract fixed overhead from context window so the trimmer budgets
+        // only the space actually available for chat messages.
+        // - System prompt: added after trimming (line 67+), not in message list
+        // - max_output_tokens: reserved for the model's response
+        let system_prompt_tokens = TaskBoardContextManager::estimate_tokens(&[LLMMessage {
+            role: Role::System.to_string(),
+            content: LLMMessageContent::String(SYSTEM_PROMPT.to_string()),
+        }]);
+        let context_window = model
+            .limit
+            .context
+            .saturating_sub(system_prompt_tokens + max_output_tokens);
 
         let llm_tools: Option<Vec<_>> = ctx
             .state
@@ -74,7 +87,7 @@ define_hook!(
         ctx.state.llm_input = Some(LLMInput {
             model,
             messages,
-            max_tokens: 16000,
+            max_tokens: max_output_tokens as u32,
             tools: llm_tools,
             provider_options: None,
             headers: None,

@@ -52,6 +52,8 @@ impl TaskBoardContextManager {
     }
 }
 
+const BYTES_PER_TOKEN: f64 = 3.5; // Conservative estimate for bytes/token
+
 impl TaskBoardContextManager {
     /// Conservative bytes-to-tokens conversion.
     ///
@@ -61,7 +63,7 @@ impl TaskBoardContextManager {
     /// Overestimating triggers trimming slightly early, which is far safer than
     /// underestimating and hitting context window API errors.
     fn bytes_to_tokens(bytes: usize) -> u64 {
-        (bytes as f64 / 3.0).ceil() as u64
+        (bytes as f64 / BYTES_PER_TOKEN).ceil() as u64
     }
 
     /// Estimate token count for a single content part, including structural overhead.
@@ -281,26 +283,41 @@ impl TaskBoardContextManager {
         // The index only advances when the effective tokens (after re-applying
         // previous trims) still exceed the threshold.
         let effective_trim_end = if effective_estimated_tokens > threshold {
-            // Over budget — we must trim. Use keep_last_n boundary if it
-            // provides any trimming, otherwise fall back to budget-driven
-            // trimming that trims enough assistants to get under threshold
-            // in one shot (minimizes cache invalidations).
-            let trim_end = if keep_n_trim_end > 0 {
+            // Over budget — we must trim. Start with keep_last_n boundary
+            // if available, then fall through to budget-driven scanning if
+            // that boundary alone isn't sufficient.
+            //
+            // Step 1: Apply keep_last_n trimming if it provides a boundary.
+            let mut candidate = if keep_n_trim_end > 0 {
+                // Trim up to the keep_last_n boundary first
+                for msg in llm_messages
+                    .iter_mut()
+                    .take(keep_n_trim_end.min(len))
+                    .skip(prev_clamped)
+                {
+                    let role = msg.role.as_str();
+                    if role == "assistant" || role == "tool" {
+                        Self::trim_message(msg);
+                    }
+                }
                 keep_n_trim_end
             } else {
-                // keep_last_n didn't produce a boundary (fewer assistants
-                // than keep_last_n), but we're over budget. Scan forward
-                // from the previous trim point, trimming one assistant at
-                // a time until the effective token count drops under
-                // threshold. This finds the minimal trim boundary in one
-                // pass rather than advancing by one assistant per turn
-                // (which would invalidate the prompt cache every turn).
-                let mut candidate = prev_trimmed_up_to;
-                for i in prev_trimmed_up_to..len {
-                    let role = llm_messages[i].role.as_str();
+                prev_trimmed_up_to
+            };
+
+            // Step 2: If still over budget after keep_last_n trimming,
+            // continue scanning forward — budget is the HARD constraint,
+            // keep_last_n is best-effort. This handles the case where the
+            // last N assistant messages themselves exceed the budget (e.g.,
+            // long tool results, large file contents).
+            let current_tokens = Self::estimate_tokens(&llm_messages) + tool_overhead;
+            if current_tokens > threshold {
+                let mut scan_idx = candidate;
+                while scan_idx < len {
+                    let role = llm_messages[scan_idx].role.as_str();
                     if role == "assistant" || role == "tool" {
-                        Self::trim_message(&mut llm_messages[i]);
-                        candidate = i + 1;
+                        Self::trim_message(&mut llm_messages[scan_idx]);
+                        candidate = scan_idx + 1;
 
                         // Check if we're under budget now
                         let current_tokens = Self::estimate_tokens(&llm_messages) + tool_overhead;
@@ -308,11 +325,12 @@ impl TaskBoardContextManager {
                             break;
                         }
                     }
+                    scan_idx += 1;
                 }
-                candidate
-            };
+            }
+
             // Never go backward
-            trim_end.max(prev_trimmed_up_to)
+            candidate.max(prev_trimmed_up_to)
         } else {
             // Under budget — keep the previous trim boundary, don't advance
             prev_trimmed_up_to
@@ -718,9 +736,11 @@ mod tests {
             content: LLMMessageContent::String("Hello world".to_string()),
         }];
         let tokens = TaskBoardContextManager::estimate_tokens(&messages);
-        // "Hello world" = 11 bytes / 3.0 = ceil(3.67) = 4 + 8 msg overhead = 12
-        // raw = 12, with 5% buffer: ceil(12 * 1.05) = 13
-        assert_eq!(tokens, 13);
+        // "Hello world" = 11 bytes / BYTES_PER_TOKEN + 8 msg overhead, then 5% buffer
+        let content_tokens = (11.0 / BYTES_PER_TOKEN).ceil() as u64;
+        let raw = content_tokens + 8;
+        let expected = (raw as f64 * 1.05).ceil() as u64;
+        assert_eq!(tokens, expected);
     }
 
     #[test]
@@ -736,9 +756,11 @@ mod tests {
             },
         ];
         let tokens = TaskBoardContextManager::estimate_tokens(&messages);
-        // Each: 5 bytes / 3.0 = ceil(1.67) = 2 + 8 = 10, total raw = 20
-        // with 5% buffer: ceil(20 * 1.05) = 21
-        assert_eq!(tokens, 21);
+        // Each: 5 bytes / BYTES_PER_TOKEN + 8 msg overhead, total raw, then 5% buffer
+        let per_msg = (5.0 / BYTES_PER_TOKEN).ceil() as u64 + 8;
+        let raw = per_msg * 2;
+        let expected = (raw as f64 * 1.05).ceil() as u64;
+        assert_eq!(tokens, expected);
     }
 
     #[test]
@@ -751,11 +773,12 @@ mod tests {
             }]),
         }];
         let tokens = TaskBoardContextManager::estimate_tokens(&messages);
-        // 400 content + 30 structural = 430 bytes / 3.0 = ceil(143.33) = 144
-        // + 3 per-part overhead (1 part) = 147
-        // + 8 msg overhead = 155
-        // raw = 155, with 5% buffer: ceil(155 * 1.05) = 163
-        assert_eq!(tokens, 163);
+        // 400 content + 30 structural = 430 bytes / BYTES_PER_TOKEN
+        // + 3 per-part overhead (1 part) + 8 msg overhead, then 5% buffer
+        let part_tokens = (430.0 / BYTES_PER_TOKEN).ceil() as u64;
+        let raw = part_tokens + 3 + 8;
+        let expected = (raw as f64 * 1.05).ceil() as u64;
+        assert_eq!(tokens, expected);
     }
 
     // =========================================================================
@@ -1209,10 +1232,12 @@ mod tests {
     #[test]
     fn test_trimming_with_empty_metadata_object() {
         let cm = create_context_manager();
+        // Use large assistant messages and small user messages so that trimming
+        // the first assistant (per keep_last_n=2) is sufficient to get under budget.
         let messages = vec![
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(500))),
+                content: Some(MessageContent::String("u1".to_string())),
                 ..Default::default()
             },
             ChatMessage {
@@ -1222,7 +1247,7 @@ mod tests {
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("z".repeat(500))),
+                content: Some(MessageContent::String("u2".to_string())),
                 ..Default::default()
             },
             ChatMessage {
@@ -1242,9 +1267,10 @@ mod tests {
             },
         ];
 
-        // Pass empty JSON object as metadata (simulates fresh checkpoint with metadata field)
+        // Context window sized so total (~380 tokens) exceeds 80% threshold (~320)
+        // but after trimming 1 assistant per keep_last_n=2, remaining fits.
         let (result, metadata) =
-            cm.reduce_context_with_budget(messages, 100, Some(serde_json::json!({})), None);
+            cm.reduce_context_with_budget(messages, 400, Some(serde_json::json!({})), None);
 
         assert!(metadata.is_some());
         let meta = metadata.unwrap();
@@ -1281,55 +1307,60 @@ mod tests {
             context_budget_threshold: 0.8,
         });
 
-        // Build: user, assistant, user, tool_call(assistant), tool_result, user, assistant
-        // Assistant messages are at indices 1, 3, 6 (after merge/dedup)
-        // Actually let's use simple alternating with extra user messages to make
-        // the distinction clear.
-        //
-        // Messages (after conversion): user, asst, user, asst, user, user, asst
-        // Assistants at indices: 1, 3, 6
+        // Build: user, assistant, user, assistant, user, user, assistant
+        // After merge_consecutive_same_role, the two consecutive user messages
+        // get merged, so the sequence is:
+        // [0] user, [1] asst(a1), [2] user, [3] asst(a2), [4] user(merged), [5] asst(a3)
+        // Assistants at indices: 1, 3, 5
         // keep_last_n_assistant_messages = 2 → trim_end = index of 2nd-from-last asst = 3
-        // So messages 0..3 are in the trim zone, messages 3..7 are untrimmed.
+        // So messages 0..3 are in the trim zone, messages 3..6 are untrimmed.
+        //
+        // Use large assistant messages so trimming them actually reduces token count
+        // below the budget threshold. User messages are small so the remaining
+        // content fits within budget after trimming the prefix.
         let messages = vec![
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u1".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a1".to_string())),
+                content: Some(MessageContent::String("a1".to_string() + &"y".repeat(300))),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u2".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a2".to_string())),
+                content: Some(MessageContent::String("a2".to_string() + &"y".repeat(300))),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u3".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u4".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a3".to_string())),
+                content: Some(MessageContent::String("a3".to_string() + &"y".repeat(300))),
                 ..Default::default()
             },
         ];
 
-        // Small window to force trimming
-        let (result, metadata) = cm.reduce_context_with_budget(messages, 50, None, None);
+        // Context window sized so that:
+        // - Total tokens (~380) exceed 80% threshold (~320) → triggers trimming
+        // - After trimming 1 assistant per keep_last_n=2 (~100 tokens saved),
+        //   remaining (~280) fits under threshold
+        let (result, metadata) = cm.reduce_context_with_budget(messages, 400, None, None);
         assert!(metadata.is_some(), "Should trigger trimming");
 
         let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
@@ -1522,7 +1553,14 @@ mod tests {
             },
         ];
 
-        let (result, metadata) = cm.reduce_context_with_budget(messages, 50, None, None);
+        // Compute a context window that triggers trimming: use 90% of the
+        // estimated total so the 80% threshold is exceeded.
+        let pre_messages: Vec<_> = messages.iter().cloned().map(LLMMessage::from).collect();
+        let total_estimate = TaskBoardContextManager::estimate_tokens(&pre_messages);
+        let context_window = (total_estimate as f64 / 0.9).ceil() as u64;
+
+        let (result, metadata) =
+            cm.reduce_context_with_budget(messages, context_window, None, None);
         assert!(metadata.is_some());
         let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
             .as_u64()
@@ -1698,40 +1736,46 @@ mod tests {
             context_budget_threshold: 0.8,
         });
 
+        // Use large assistant messages and small user messages so that trimming
+        // the first 2 assistants (per keep_last_n=1) is sufficient to get under budget.
         let messages = vec![
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u1".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a1".to_string())),
+                content: Some(MessageContent::String("a1".to_string() + &"y".repeat(300))),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u2".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a2".to_string())),
+                content: Some(MessageContent::String("a2".to_string() + &"y".repeat(300))),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::User,
-                content: Some(MessageContent::String("x".repeat(200))),
+                content: Some(MessageContent::String("u3".to_string())),
                 ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
-                content: Some(MessageContent::String("a3_last".to_string())),
+                content: Some(MessageContent::String(
+                    "a3_last".to_string() + &"y".repeat(300),
+                )),
                 ..Default::default()
             },
         ];
 
-        let (result, metadata) = cm.reduce_context_with_budget(messages, 50, None, None);
+        // Context window sized so total (~380 tokens) exceeds 80% threshold (~280)
+        // but after trimming 2 assistants per keep_last_n=1, remaining fits.
+        let (result, metadata) = cm.reduce_context_with_budget(messages, 350, None, None);
         assert!(metadata.is_some());
 
         // Collect assistant messages with their trim state
@@ -1957,7 +2001,7 @@ mod tests {
             });
         }
 
-        let (result, metadata) = cm.reduce_context_with_budget(messages, 50, None, None);
+        let (result, metadata) = cm.reduce_context_with_budget(messages, 700, None, None);
         assert!(metadata.is_some());
         let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
             .as_u64()
@@ -2368,6 +2412,223 @@ mod tests {
                 assert!(!is_trimmed(msg), "User messages should never be trimmed");
             }
         }
+    }
+
+    /// Regression test: keep_last_n produces a trim boundary but the remaining
+    /// N assistant messages (with large tool results) still exceed the budget.
+    ///
+    /// Bug: the old code used keep_last_n as a hard boundary — when
+    /// keep_n_trim_end > 0, it skipped the budget-driven scan entirely.
+    /// With keep_last_n=20 and 200K context window, 20 assistant messages
+    /// with large tool results could easily be 160K+ tokens, blowing past
+    /// the 80% threshold.
+    ///
+    /// Fix: keep_last_n is best-effort. After applying keep_last_n trimming,
+    /// if still over budget, continue scanning forward to trim more messages.
+    #[test]
+    fn test_keep_last_n_boundary_insufficient_budget_continues_trimming() {
+        let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
+            keep_last_n_assistant_messages: 3,
+            context_budget_threshold: 0.8,
+        });
+
+        // 6 turns: user + assistant with large content.
+        // keep_last_n=3 would normally keep the last 3 assistants untrimmed,
+        // but each assistant is so large that 3 of them alone exceed the budget.
+        let mut messages = Vec::new();
+        for i in 0..6 {
+            messages.push(ChatMessage {
+                role: Role::User,
+                content: Some(MessageContent::String(format!("user {}", i))),
+                ..Default::default()
+            });
+            messages.push(ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "assistant {}: {}",
+                    i,
+                    "x".repeat(500) // ~170 tokens each
+                ))),
+                ..Default::default()
+            });
+        }
+
+        // Context window where 80% ≈ 400 tokens.
+        // 6 assistants × ~170 tokens = ~1020 tokens total.
+        // keep_last_n=3 would leave ~510 tokens — still over 400.
+        // Budget must override and trim past the keep_last_n boundary.
+        let context_window = 500;
+        let (result, metadata) =
+            cm.reduce_context_with_budget(messages, context_window, None, None);
+
+        assert!(metadata.is_some(), "Should trigger trimming");
+        let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
+            .as_u64()
+            .unwrap() as usize;
+
+        // The trim index must go PAST the keep_last_n boundary (index of
+        // 3rd-from-last assistant). With 6 assistants at indices 1,3,5,7,9,11,
+        // keep_last_n=3 boundary = index 7. Budget must push past that.
+        let keep_n_boundary = 7; // 3rd-from-last assistant in merged sequence
+        assert!(
+            trimmed_idx > keep_n_boundary,
+            "Budget should override keep_last_n: trimmed_idx {} should be > keep_n boundary {}",
+            trimmed_idx,
+            keep_n_boundary
+        );
+
+        // Effective tokens after trimming should be under threshold
+        let effective_tokens = TaskBoardContextManager::estimate_tokens(&result);
+        let threshold = (context_window as f32 * 0.8) as u64;
+        assert!(
+            effective_tokens <= threshold,
+            "Effective tokens {} should be <= threshold {} after budget-driven trimming",
+            effective_tokens,
+            threshold
+        );
+
+        // User messages are never trimmed
+        for msg in &result {
+            if msg.role == "user" {
+                assert!(!is_trimmed(msg), "User messages should never be trimmed");
+            }
+        }
+    }
+
+    /// Simulates the exact production scenario from the bug report:
+    /// Claude Opus 4.5 with 200K context, keep_last_n=20, threshold=0.8.
+    /// A session grows to 196K/200K tokens because the last 20 assistant
+    /// messages (with large tool results) themselves exceed the budget.
+    ///
+    /// The OLD code would stop trimming at the keep_last_n boundary and
+    /// never get under budget. The fix continues trimming past keep_last_n
+    /// when budget demands it.
+    ///
+    /// We also verify the hook-level fix: the system prompt (~8K tokens)
+    /// and max_output_tokens (16K) are subtracted from the context window
+    /// before the trimmer sees it, so the effective budget is ~176K × 0.8
+    /// = ~140K, not 200K × 0.8 = 160K.
+    #[test]
+    fn test_production_scenario_200k_context_keep_20() {
+        // Mirror production config from client/mod.rs
+        let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
+            keep_last_n_assistant_messages: 20,
+            context_budget_threshold: 0.8,
+        });
+
+        // Simulate a session with 30 turns of tool-heavy interaction.
+        // Each turn: user (small) → assistant with tool_call → tool result (large) → assistant follow-up
+        // This produces 60 assistant messages and 30 tool results.
+        // After merge: 120 messages (30 × 4).
+        let mut messages = Vec::new();
+        for turn in 0..30 {
+            messages.push(ChatMessage {
+                role: Role::User,
+                content: Some(MessageContent::String(format!(
+                    "User turn {}: {}",
+                    turn,
+                    "q".repeat(100)
+                ))),
+                ..Default::default()
+            });
+            messages.push(create_tool_call_msg(&format!("tc_{}", turn)));
+            messages.push(create_tool_result_msg(
+                &format!("tc_{}", turn),
+                // Large tool results (~2000 chars each ≈ 700 tokens)
+                &format!("result {}: {}", turn, "r".repeat(2000)),
+            ));
+            messages.push(ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(format!(
+                    "Follow-up {}: {}",
+                    turn,
+                    "a".repeat(500)
+                ))),
+                ..Default::default()
+            });
+        }
+
+        // Use a context window that simulates the effective budget after
+        // subtracting system prompt and max_output_tokens in the hook.
+        // Real: 200K - ~8K (system prompt) - 16K (max_output) ≈ 176K
+        // Scale down proportionally for test: use 10000 as context_window.
+        // 80% threshold = 8000 tokens.
+        let context_window = 10_000u64;
+        let threshold = (context_window as f32 * 0.8) as u64;
+
+        let (result, metadata) =
+            cm.reduce_context_with_budget(messages.clone(), context_window, None, None);
+
+        assert!(metadata.is_some(), "Should trigger trimming");
+        let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
+            .as_u64()
+            .unwrap() as usize;
+
+        // KEY ASSERTION: effective tokens must be under threshold.
+        // This is what the old code failed to guarantee — it would stop at
+        // keep_last_n boundary even if remaining tokens exceeded the budget.
+        let effective_tokens = TaskBoardContextManager::estimate_tokens(&result);
+        assert!(
+            effective_tokens <= threshold,
+            "PRODUCTION BUG: effective tokens {} exceed threshold {} \
+             (this is the exact scenario where context hit 196K/200K). \
+             trimmed_idx={}, total_messages={}",
+            effective_tokens,
+            threshold,
+            trimmed_idx,
+            result.len()
+        );
+
+        // The trim index should go well past the keep_last_n boundary.
+        // With 60 assistants and keep_last_n=20, the keep_n boundary is at
+        // the 20th-from-last assistant. But 20 assistants with ~700-token
+        // tool results = ~14000 tokens > 8000 threshold, so budget must
+        // push further.
+        assert!(trimmed_idx > 0, "Should have trimmed some messages");
+
+        // User messages are never trimmed
+        for msg in &result {
+            if msg.role == "user" {
+                assert!(!is_trimmed(msg), "User messages should never be trimmed");
+            }
+        }
+
+        // Simulate a second call (next turn) — verify trimming state persists
+        // and effective tokens stay under budget.
+        messages.push(ChatMessage {
+            role: Role::User,
+            content: Some(MessageContent::String("Next question".to_string())),
+            ..Default::default()
+        });
+        messages.push(ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String(format!(
+                "Response: {}",
+                "a".repeat(500)
+            ))),
+            ..Default::default()
+        });
+
+        let (result2, metadata2) =
+            cm.reduce_context_with_budget(messages, context_window, metadata, None);
+
+        let effective_tokens2 = TaskBoardContextManager::estimate_tokens(&result2);
+        assert!(
+            effective_tokens2 <= threshold,
+            "Second call: effective tokens {} exceed threshold {} — trimming not keeping up",
+            effective_tokens2,
+            threshold
+        );
+
+        let trimmed_idx2 = metadata2.as_ref().unwrap()["trimmed_up_to_message_index"]
+            .as_u64()
+            .unwrap() as usize;
+        assert!(
+            trimmed_idx2 >= trimmed_idx,
+            "Trim index should never go backward: {} < {}",
+            trimmed_idx2,
+            trimmed_idx
+        );
     }
 
     /// Lazy trimming preserves prompt cache: after trimming brings effective

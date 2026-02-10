@@ -178,7 +178,15 @@ pub async fn resume_session_from_checkpoint(
     client: &dyn AgentProvider,
     session_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-) -> Result<(Vec<ChatMessage>, Vec<ToolCall>, Uuid, Option<serde_json::Value>), String> {
+) -> Result<
+    (
+        Vec<ChatMessage>,
+        Vec<ToolCall>,
+        Uuid,
+        Option<serde_json::Value>,
+    ),
+    String,
+> {
     let session_uuid = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
 
     match client.get_active_checkpoint(session_uuid).await {

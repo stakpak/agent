@@ -203,7 +203,11 @@ impl AgentProvider for AgentClient {
 
         // Save checkpoint
         let result = self
-            .save_checkpoint(&current_session, ctx.state.messages.clone(), ctx.state.metadata.clone())
+            .save_checkpoint(
+                &current_session,
+                ctx.state.messages.clone(),
+                ctx.state.metadata.clone(),
+            )
             .await?;
         let checkpoint_created_at = result.checkpoint_created_at.timestamp() as u64;
         ctx.set_new_checkpoint_id(result.checkpoint_id);
@@ -336,7 +340,11 @@ impl AgentProvider for AgentClient {
                     }
 
                     let result = client
-                        .save_checkpoint(&current_session, ctx_clone.state.messages.clone(), ctx_clone.state.metadata.clone())
+                        .save_checkpoint(
+                            &current_session,
+                            ctx_clone.state.messages.clone(),
+                            ctx_clone.state.metadata.clone(),
+                        )
                         .await;
 
                     match result {
@@ -792,7 +800,7 @@ impl AgentClient {
     ) -> Result<SessionInfo, String> {
         let mut checkpoint_request =
             StorageCreateCheckpointRequest::new(messages).with_parent(current.checkpoint_id);
-        
+
         if let Some(meta) = metadata {
             checkpoint_request = checkpoint_request.with_metadata(meta);
         }

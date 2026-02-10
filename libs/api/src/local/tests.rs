@@ -896,14 +896,17 @@ mod tests {
         let old_json = r#"{"messages":[{"role":"user","content":"test"}]}"#;
         let state: CheckpointState = serde_json::from_str(old_json).unwrap();
         assert_eq!(state.messages.len(), 1);
-        assert!(state.metadata.is_none(), "Old checkpoints should have None metadata");
+        assert!(
+            state.metadata.is_none(),
+            "Old checkpoints should have None metadata"
+        );
     }
 
     #[test]
     fn test_create_checkpoint_request_with_metadata() {
         let request = CreateCheckpointRequest::new(vec![user_msg("hello")])
             .with_metadata(serde_json::json!({"trimmed_up_to_index": 10}));
-        
+
         assert_eq!(request.state.messages.len(), 1);
         assert!(request.state.metadata.is_some());
         assert_eq!(
@@ -915,7 +918,7 @@ mod tests {
     #[test]
     fn test_create_checkpoint_request_without_metadata() {
         let request = CreateCheckpointRequest::new(vec![user_msg("hello")]);
-        
+
         assert_eq!(request.state.messages.len(), 1);
         assert!(request.state.metadata.is_none());
     }
@@ -1053,14 +1056,16 @@ mod tests {
         let cp = storage
             .create_checkpoint(
                 session.session_id,
-                &CreateCheckpointRequest::new(messages.clone())
-                    .with_parent(session.checkpoint.id),
+                &CreateCheckpointRequest::new(messages.clone()).with_parent(session.checkpoint.id),
             )
             .await
             .unwrap();
 
         // Simulate async mode resume: load checkpoint
-        let loaded = storage.get_active_checkpoint(session.session_id).await.unwrap();
+        let loaded = storage
+            .get_active_checkpoint(session.session_id)
+            .await
+            .unwrap();
         assert_eq!(loaded.id, cp.id);
         assert!(
             loaded.state.metadata.is_none(),
@@ -1127,7 +1132,10 @@ mod tests {
 
         // Create session with initial messages
         let session = storage
-            .create_session(&session_request("Async Trim Trigger", vec![messages[0].clone()]))
+            .create_session(&session_request(
+                "Async Trim Trigger",
+                vec![messages[0].clone()],
+            ))
             .await
             .unwrap();
 
@@ -1135,19 +1143,23 @@ mod tests {
         let cp = storage
             .create_checkpoint(
                 session.session_id,
-                &CreateCheckpointRequest::new(messages.clone())
-                    .with_parent(session.checkpoint.id),
+                &CreateCheckpointRequest::new(messages.clone()).with_parent(session.checkpoint.id),
             )
             .await
             .unwrap();
 
         // Simulate async mode resume
-        let loaded = storage.get_active_checkpoint(session.session_id).await.unwrap();
+        let loaded = storage
+            .get_active_checkpoint(session.session_id)
+            .await
+            .unwrap();
         assert_eq!(loaded.id, cp.id);
 
-        // Run context manager with a SMALL context window (trimming expected)
+        // Run context manager with a SMALL context window (trimming expected).
+        // Budget is the hard constraint — keep_last_n is best-effort and will
+        // be overridden when the last N messages themselves exceed the budget.
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
-            keep_last_n_assistant_messages: 4, // Keep last 4 messages untrimmed
+            keep_last_n_assistant_messages: 4,
             context_budget_threshold: 0.8,
         });
 
@@ -1155,7 +1167,10 @@ mod tests {
             cm.reduce_context_with_budget(messages.clone(), 200, loaded.state.metadata, None);
 
         // Trimming should have occurred
-        assert!(metadata.is_some(), "Should produce metadata when trimming triggers");
+        assert!(
+            metadata.is_some(),
+            "Should produce metadata when trimming triggers"
+        );
         let meta = metadata.as_ref().unwrap();
         let trimmed_idx = meta["trimmed_up_to_message_index"].as_u64().unwrap() as usize;
         assert!(trimmed_idx > 0, "Should have trimmed some messages");
@@ -1175,14 +1190,35 @@ mod tests {
             _ => panic!("Expected string content"),
         }
 
-        // Verify last 4 messages are NOT trimmed (keep_last_n_assistant_messages = 4)
-        let len = result.len();
-        for msg in &result[len.saturating_sub(4)..] {
-            match &msg.content {
-                stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                    assert_ne!(s, "[trimmed]", "Last 4 messages should not be trimmed");
+        // Budget is the hard constraint: the trimmer trims all assistant/tool
+        // messages it can. With a 200-token window, user messages alone (~700
+        // tokens) exceed the threshold, so the trimmer can't get fully under
+        // budget — but it MUST trim every assistant/tool message it can reach.
+        // Verify all assistant messages before the trim boundary are trimmed.
+        for (i, msg) in result.iter().enumerate() {
+            if i < trimmed_idx && msg.role == "assistant" {
+                match &msg.content {
+                    stakpak_shared::models::llm::LLMMessageContent::String(s) => {
+                        assert_eq!(
+                            s, "[trimmed]",
+                            "Assistant at {} before trim boundary should be trimmed",
+                            i
+                        );
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+        }
+
+        // User messages are never trimmed regardless of budget pressure
+        for msg in &result {
+            if msg.role == "user" {
+                match &msg.content {
+                    stakpak_shared::models::llm::LLMMessageContent::String(s) => {
+                        assert_ne!(s, "[trimmed]", "User messages should never be trimmed");
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -1199,7 +1235,10 @@ mod tests {
 
         // Verify: checkpoint has metadata persisted
         let loaded2 = storage.get_checkpoint(cp2.id).await.unwrap();
-        assert!(loaded2.state.metadata.is_some(), "Checkpoint should have metadata");
+        assert!(
+            loaded2.state.metadata.is_some(),
+            "Checkpoint should have metadata"
+        );
         assert_eq!(
             loaded2.state.metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
                 .as_u64()
@@ -1251,30 +1290,55 @@ mod tests {
             .unwrap() as usize;
         assert!(trimmed_idx_1 > 0, "Phase 1: should have trimmed messages");
 
-        // Verify early non-user messages are trimmed, user messages preserved, last 4 are not trimmed
+        // Verify early non-user messages are trimmed, user messages preserved.
+        // Budget is the hard constraint — keep_last_n is best-effort, so the
+        // last 4 messages may also be trimmed if budget demands it.
         for (i, msg) in result1.iter().enumerate() {
             let is_trimmed = match &msg.content {
                 stakpak_shared::models::llm::LLMMessageContent::String(s) => s == "[trimmed]",
-                stakpak_shared::models::llm::LLMMessageContent::List(parts) => parts.iter().all(|p| match p {
-                    stakpak_shared::models::llm::LLMMessageTypedContent::Text { text } => text == "[trimmed]",
-                    stakpak_shared::models::llm::LLMMessageTypedContent::ToolResult { content, .. } => content == "[trimmed]",
-                    _ => true,
-                }),
+                stakpak_shared::models::llm::LLMMessageContent::List(parts) => {
+                    parts.iter().all(|p| match p {
+                        stakpak_shared::models::llm::LLMMessageTypedContent::Text { text } => {
+                            text == "[trimmed]"
+                        }
+                        stakpak_shared::models::llm::LLMMessageTypedContent::ToolResult {
+                            content,
+                            ..
+                        } => content == "[trimmed]",
+                        _ => true,
+                    })
+                }
             };
             if i < trimmed_idx_1 && msg.role != "user" {
-                assert!(is_trimmed, "Phase 1: non-user message {} should be trimmed", i);
+                assert!(
+                    is_trimmed,
+                    "Phase 1: non-user message {} should be trimmed",
+                    i
+                );
             }
             if msg.role == "user" {
-                assert!(!is_trimmed, "Phase 1: user message {} should NOT be trimmed", i);
+                assert!(
+                    !is_trimmed,
+                    "Phase 1: user message {} should NOT be trimmed",
+                    i
+                );
             }
         }
-        let len1 = result1.len();
-        for i in (len1.saturating_sub(4))..len1 {
-            match &result1[i].content {
-                stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                    assert_ne!(s, "[trimmed]", "Phase 1: message {} should NOT be trimmed", i);
-                }
-                _ => {}
+        // Budget hard constraint: trimmer trims all assistant/tool messages it
+        // can. With a 200-token window, user messages alone exceed the threshold,
+        // so the trimmer can't get fully under budget — but all trimmable
+        // messages before the boundary must be trimmed.
+        for (i, msg) in result1.iter().enumerate() {
+            if i < trimmed_idx_1 && msg.role == "assistant" {
+                let is_trimmed = match &msg.content {
+                    stakpak_shared::models::llm::LLMMessageContent::String(s) => s == "[trimmed]",
+                    _ => true,
+                };
+                assert!(
+                    is_trimmed,
+                    "Phase 1: assistant at {} before boundary should be trimmed",
+                    i
+                );
             }
         }
 
@@ -1295,15 +1359,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resumed_checkpoint.id, cp1.id, "Should resume from latest checkpoint");
+        assert_eq!(
+            resumed_checkpoint.id, cp1.id,
+            "Should resume from latest checkpoint"
+        );
         assert!(
             resumed_checkpoint.state.metadata.is_some(),
             "Resumed checkpoint should have metadata"
         );
         let resumed_metadata = resumed_checkpoint.state.metadata.clone();
-        let resumed_trimmed_idx = resumed_metadata
-            .as_ref()
-            .unwrap()["trimmed_up_to_message_index"]
+        let resumed_trimmed_idx = resumed_metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
             .as_u64()
             .unwrap() as usize;
         assert_eq!(
@@ -1321,8 +1386,12 @@ mod tests {
         }
 
         // Run trimming again with loaded metadata
-        let (result2, metadata2) =
-            cm.reduce_context_with_budget(resumed_messages.clone(), context_window, resumed_metadata, None);
+        let (result2, metadata2) = cm.reduce_context_with_budget(
+            resumed_messages.clone(),
+            context_window,
+            resumed_metadata,
+            None,
+        );
 
         assert!(metadata2.is_some(), "Phase 2: trimming should trigger");
         let trimmed_idx_2 = metadata2.as_ref().unwrap()["trimmed_up_to_message_index"]
@@ -1337,10 +1406,11 @@ mod tests {
             trimmed_idx_1
         );
 
-        // Verify: previously-trimmed prefix — assistant/tool messages still trimmed, user preserved
-        for i in 0..trimmed_idx_1 {
-            if result2[i].role == "user" {
-                match &result2[i].content {
+        // Verify: budget overrides keep_last_n — all trimmable messages before
+        // the boundary are trimmed, user messages are always preserved.
+        for (i, msg) in result2.iter().enumerate() {
+            if msg.role == "user" {
+                match &msg.content {
                     stakpak_shared::models::llm::LLMMessageContent::String(s) => {
                         assert_ne!(
                             s, "[trimmed]",
@@ -1350,32 +1420,17 @@ mod tests {
                     }
                     _ => {}
                 }
-            } else {
-                match &result2[i].content {
+            } else if i < trimmed_idx_2 {
+                match &msg.content {
                     stakpak_shared::models::llm::LLMMessageContent::String(s) => {
                         assert_eq!(
                             s, "[trimmed]",
-                            "Phase 2: previously trimmed non-user message {} should still be trimmed",
+                            "Phase 2: non-user message {} before boundary should be trimmed",
                             i
                         );
                     }
                     _ => {}
                 }
-            }
-        }
-
-        // Verify: last 4 messages are NOT trimmed
-        let len2 = result2.len();
-        for i in (len2.saturating_sub(4))..len2 {
-            match &result2[i].content {
-                stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                    assert_ne!(
-                        s, "[trimmed]",
-                        "Phase 2: message {} should NOT be trimmed",
-                        i
-                    );
-                }
-                _ => {}
             }
         }
 
@@ -1398,10 +1453,10 @@ mod tests {
 
         assert_eq!(final_checkpoint.id, cp2.id);
         assert!(final_checkpoint.state.metadata.is_some());
-        let final_trimmed_idx = final_checkpoint.state.metadata.as_ref().unwrap()
-            ["trimmed_up_to_message_index"]
-            .as_u64()
-            .unwrap() as usize;
+        let final_trimmed_idx =
+            final_checkpoint.state.metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
+                .as_u64()
+                .unwrap() as usize;
         assert_eq!(
             final_trimmed_idx, trimmed_idx_2,
             "Final checkpoint metadata should match phase 2 metadata"
@@ -1426,7 +1481,10 @@ mod tests {
         }
 
         let session = storage
-            .create_session(&session_request("Backward Compat", vec![messages[0].clone()]))
+            .create_session(&session_request(
+                "Backward Compat",
+                vec![messages[0].clone()],
+            ))
             .await
             .unwrap();
 
@@ -1434,15 +1492,20 @@ mod tests {
         let _cp = storage
             .create_checkpoint(
                 session.session_id,
-                &CreateCheckpointRequest::new(messages.clone())
-                    .with_parent(session.checkpoint.id),
+                &CreateCheckpointRequest::new(messages.clone()).with_parent(session.checkpoint.id),
             )
             .await
             .unwrap();
 
         // Resume: metadata should be None
-        let loaded = storage.get_active_checkpoint(session.session_id).await.unwrap();
-        assert!(loaded.state.metadata.is_none(), "Old checkpoint has no metadata");
+        let loaded = storage
+            .get_active_checkpoint(session.session_id)
+            .await
+            .unwrap();
+        assert!(
+            loaded.state.metadata.is_none(),
+            "Old checkpoint has no metadata"
+        );
 
         // Run trimming with None metadata and small window
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
@@ -1450,11 +1513,13 @@ mod tests {
             context_budget_threshold: 0.8,
         });
 
-        let (result, metadata) =
-            cm.reduce_context_with_budget(messages, 200, None, None);
+        let (result, metadata) = cm.reduce_context_with_budget(messages, 200, None, None);
 
         // Should still trigger trimming correctly
-        assert!(metadata.is_some(), "Trimming should work without prior metadata");
+        assert!(
+            metadata.is_some(),
+            "Trimming should work without prior metadata"
+        );
         let trimmed_idx = metadata.as_ref().unwrap()["trimmed_up_to_message_index"]
             .as_u64()
             .unwrap() as usize;
@@ -1482,7 +1547,10 @@ mod tests {
         let storage = create_test_storage().await;
 
         let session = storage
-            .create_session(&session_request("Checkpoint Chain", vec![user_msg("start")]))
+            .create_session(&session_request(
+                "Checkpoint Chain",
+                vec![user_msg("start")],
+            ))
             .await
             .unwrap();
 
@@ -1587,7 +1655,10 @@ mod tests {
         ];
 
         let session = storage
-            .create_session(&session_request("No False Positive", vec![messages[0].clone()]))
+            .create_session(&session_request(
+                "No False Positive",
+                vec![messages[0].clone()],
+            ))
             .await
             .unwrap();
 
@@ -1603,7 +1674,10 @@ mod tests {
             .unwrap();
 
         // Resume
-        let loaded = storage.get_active_checkpoint(session.session_id).await.unwrap();
+        let loaded = storage
+            .get_active_checkpoint(session.session_id)
+            .await
+            .unwrap();
         assert_eq!(loaded.id, cp.id);
         assert!(loaded.state.metadata.is_some());
 
