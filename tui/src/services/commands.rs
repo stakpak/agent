@@ -473,16 +473,9 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
 
         "/init" => {
             let prompt = match ctx.state.init_prompt_content.as_deref() {
-                Some(s) if !s.trim().is_empty() => s.to_string(),
-                _ => {
-                    push_error_message(
-                        ctx.state,
-                        "No init.md found. Searched: .stakpak/commands/init.md, .stakpak/init.md, and init.md",
-                        None,
-                    );
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
-                    return Ok(());
+                Some(p) => p.to_string(),
+                None => {
+                    return Err("init prompt not available (bundled prompt not loaded)".into());
                 }
             };
 
