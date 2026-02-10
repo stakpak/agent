@@ -8,7 +8,7 @@
 //!
 //! All commands are defined here and executed through a unified executor.
 
-use crate::app::{AppState, HelperCommand};
+use crate::app::{AppState, CreateCustomCommandState, CustomCommand, HelperCommand, HelperEntry};
 use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
@@ -30,7 +30,7 @@ use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
-pub type CommandId = &'static str;
+pub type CommandId<'a> = &'a str;
 
 /// Command metadata for display (used by command palette)
 #[derive(Debug, Clone)]
@@ -191,8 +191,70 @@ pub fn get_all_commands() -> Vec<Command> {
     ]
 }
 
-/// Convert Command to HelperCommand for backward compatibility
-pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
+/// Max size for custom command files (64 KiB)
+const MAX_CUSTOM_COMMAND_BYTES: u64 = 64 * 1024;
+
+/// Scan project and personal commands directories for .md files.
+/// Project: .stakpak/commands/ (relative to current_dir)
+/// Personal: ~/.stakpak/commands/
+/// Project overrides personal when same command exists.
+pub fn scan_custom_commands() -> Vec<CustomCommand> {
+    let mut by_id: std::collections::HashMap<String, CustomCommand> =
+        std::collections::HashMap::new();
+
+    // Personal first, then project (project overwrites)
+    let personal = dirs::home_dir().map(|h| h.join(".stakpak").join("commands"));
+    let project = std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join(".stakpak").join("commands"));
+    let dirs: Vec<_> = personal.into_iter().chain(project).collect();
+
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "md") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let id = format!("/{stem}");
+
+            let metadata = match std::fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if !metadata.is_file() || metadata.len() > MAX_CUSTOM_COMMAND_BYTES {
+                continue;
+            }
+
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let cmd = CustomCommand {
+                id: id.clone(),
+                description: format!("Custom: {stem}"),
+                content: content.trim().to_string(),
+            };
+            by_id.insert(id, cmd);
+        }
+    }
+
+    let mut commands: Vec<_> = by_id.into_values().collect();
+    commands.sort_by(|a, b| a.id.cmp(&b.id));
+    commands
+}
+
+/// Built-in commands only
+fn builtin_helper_commands() -> Vec<HelperCommand> {
     vec![
         HelperCommand {
             command: "/help",
@@ -272,9 +334,29 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/init",
-            description: "analyzing your infrastructure setup",
+            description: "Analyzing your infrastructure setup",
+        },
+        HelperCommand {
+            command: "/create_custom_command",
+            description: "Create a new custom slash command",
         },
     ]
+}
+
+/// Merge built-in and custom commands. Built-in first, then custom (no override).
+pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
+    let builtin = builtin_helper_commands();
+    let builtin_ids: std::collections::HashSet<_> = builtin.iter().map(|h| h.command).collect();
+    let mut out: Vec<HelperEntry> = builtin.into_iter().map(HelperEntry::Builtin).collect();
+    for c in custom {
+        if !builtin_ids.contains(c.id.as_str()) {
+            out.push(HelperEntry::Custom {
+                command: c.id.clone(),
+                description: c.description.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// Filter commands based on search query
@@ -296,7 +378,7 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
 // ========== Command Execution ==========
 
 /// Execute a command by its ID
-pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(), String> {
+pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Result<(), String> {
     match command_id {
         "/help" => {
             push_help_message(ctx.state);
@@ -471,6 +553,15 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             Ok(())
         }
 
+        "/create_custom_command" => {
+            ctx.state.create_custom_command = Some(CreateCustomCommandState::AskingName);
+            ctx.state.create_custom_command_popup_input.clear();
+            ctx.state.create_custom_command_popup_error = None;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            Ok(())
+        }
+
         "/init" => {
             // Bundled init prompt is always available (embedded at compile time)
             let prompt = match ctx.state.init_prompt_content.as_deref() {
@@ -500,7 +591,30 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             Ok(())
         }
 
-        _ => Err(format!("Unknown command: {}", command_id)),
+        id => {
+            // Custom command fallback
+            if let Some(cmd) = ctx.state.custom_commands.iter().find(|c| c.id == id) {
+                if cmd.content.is_empty() {
+                    push_error_message(ctx.state, "Custom command file is empty.", None);
+                } else {
+                    ctx.state.messages.push(Message::info(
+                        cmd.content.clone(),
+                        Some(Style::default().fg(Color::DarkGray)),
+                    ));
+                    let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+                        cmd.content.clone(),
+                        ctx.state.shell_tool_calls.clone(),
+                        Vec::new(),
+                    ));
+                    ctx.state.shell_tool_calls = None;
+                    crate::services::message::invalidate_message_lines_cache(ctx.state);
+                }
+                ctx.state.text_area.set_text("");
+                ctx.state.show_helper_dropdown = false;
+                return Ok(());
+            }
+            Err(format!("Unknown command: {}", command_id))
+        }
     }
 }
 

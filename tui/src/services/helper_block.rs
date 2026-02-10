@@ -295,13 +295,13 @@ pub fn push_help_message(state: &mut AppState) {
     )]));
 
     // Slash-commands list
-    let commands = crate::app::AppState::get_helper_commands();
+    let commands = crate::services::commands::get_helper_commands(&state.custom_commands);
 
     for cmd in &commands {
         lines.push(Line::from(vec![
-            Span::styled(cmd.command, Style::default().fg(Color::Cyan)),
+            Span::styled(cmd.command().to_string(), Style::default().fg(Color::Cyan)),
             Span::raw(" – "),
-            Span::raw(cmd.description),
+            Span::raw(cmd.description().to_string()),
         ]));
     }
     lines.push(Line::from(""));

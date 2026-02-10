@@ -131,6 +131,48 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for Create Custom Command Popup
+    if state.create_custom_command.is_some() {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_create_command_popup_cancel(state);
+                return;
+            }
+            InputEvent::InputChanged(c) => {
+                popup::handle_create_command_popup_input(state, c);
+                return;
+            }
+            InputEvent::InputChangedNewline => {
+                popup::handle_create_command_popup_input(state, '\n');
+                return;
+            }
+            InputEvent::InputBackspace => {
+                popup::handle_create_command_popup_backspace(state);
+                return;
+            }
+            InputEvent::InputDelete => {
+                popup::handle_create_command_popup_delete(state);
+                return;
+            }
+            InputEvent::InputDeleteWord => {
+                popup::handle_create_command_popup_delete_word(state);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_create_command_popup_submit(state, output_tx);
+                return;
+            }
+            InputEvent::HandlePaste(text) => {
+                popup::handle_create_command_popup_paste(state, text);
+                return;
+            }
+            _ => {
+                // Consume other events
+                return;
+            }
+        }
+    }
+
     // Intercept keys for File Changes Popup
     if state.show_file_changes_popup {
         match event {
