@@ -766,6 +766,7 @@ pub fn update(
         InputEvent::AddUserMessage(s) => {
             message::handle_add_user_message(state, s);
         }
+
         InputEvent::HasUserMessage => {
             message::handle_has_user_message(state);
         }
