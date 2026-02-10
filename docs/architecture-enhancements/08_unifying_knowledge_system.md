@@ -220,7 +220,11 @@ Injected into the first user message (or when skills are updated via the TUI swi
 - [x] `mode_async.rs`: `RunAsyncConfig.skills` replaces `rulebooks`
 - [x] `main.rs`: Converts `rulebooks_result` → `initial_skills` via `Skill::from()`
 
-### Phase 2: CLI Commands (Future)
+### Phase 2: System Prompts (Complete)
+
+- [x] Update system prompts to reference unified skills taxonomy
+
+### Phase 3: CLI Commands (Future)
 
 - [ ] `stakpak skills list [--source local|remote|all]`
 - [ ] `stakpak skills get <id>`
@@ -228,15 +232,10 @@ Injected into the first user message (or when skills are updated via the TUI swi
 - [ ] `stakpak skills delete <id>`
 - [ ] Keep `stakpak rulebooks` as alias with deprecation notice
 
-### Phase 3: System Prompts (Future)
-
-- [ ] Update system prompts to reference unified skills taxonomy
-
 ### Phase 4: Deprecation (Future)
 
 - [ ] Add deprecation warnings to `stakpak rulebooks` commands
 - [ ] Migrate `[rulebooks]` config → `[skills.remote]` config
-- [ ] Remove `read_rulebook` MCP tool
 - [ ] Remove old naming in a major version
 
 
