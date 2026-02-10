@@ -280,6 +280,18 @@ pub struct Skill {
     pub content: Option<String>,
     /// Classification tags
     pub tags: Vec<String>,
+    /// License name or reference to a bundled license file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Environment requirements (intended product, system packages, network access, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<String>,
+    /// Arbitrary key-value mapping for additional metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+    /// Space-delimited list of pre-approved tools the skill may use. (Experimental)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -352,6 +364,10 @@ impl From<ListRuleBook> for Skill {
             },
             content: None,
             tags: rb.tags,
+            license: None,
+            compatibility: None,
+            metadata: None,
+            allowed_tools: None,
         }
     }
 }
@@ -369,6 +385,10 @@ impl From<RuleBook> for Skill {
             },
             content: Some(rb.content),
             tags: rb.tags,
+            license: None,
+            compatibility: None,
+            metadata: None,
+            allowed_tools: None,
         }
     }
 }
@@ -595,7 +615,11 @@ impl From<&LLMOutput> for ChatMessage {
                 })
                 .collect();
 
-            if calls.is_empty() { None } else { Some(calls) }
+            if calls.is_empty() {
+                None
+            } else {
+                Some(calls)
+            }
         } else {
             None
         };
