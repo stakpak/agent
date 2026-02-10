@@ -619,11 +619,10 @@ pub fn handle_create_command_popup_delete_word(state: &mut AppState) {
         return;
     }
     let indices: Vec<(usize, char)> = trimmed.char_indices().collect();
-      let new_len = indices
+    let new_len = indices
         .iter()
         .rev()
-        .skip_while(|(_, c)| !c.is_whitespace() && *c != '-')
-        .next()
+        .find(|(_, c)| c.is_whitespace() || *c == '-')
         .map(|(i, c)| {
             if c.is_whitespace() || *c == '-' {
                 *i
