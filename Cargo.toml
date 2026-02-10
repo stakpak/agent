@@ -6,6 +6,8 @@ members = [
     "libs/shared",
     "libs/api",
     "libs/ai",
+    "libs/agent-core",
+    "libs/server",
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
@@ -24,6 +26,8 @@ homepage = "https://stakpak.io"
 
 [workspace.dependencies]
 stakai = { path = "libs/ai", version = "0.3.31" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.31" }
+stakpak-server = { path = "libs/server", version = "0.3.31" }
 stakpak-api = { path = "libs/api", version = "0.3.31" }
 stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.31" }
 stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.31" }
