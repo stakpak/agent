@@ -191,6 +191,8 @@ mod tests {
     #[cfg(unix)]
     use tempfile::tempdir;
 
+    use serial_test::serial;
+
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
@@ -220,6 +222,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_script_exit_0() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
@@ -242,6 +245,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_script_exit_1() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
@@ -263,6 +267,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_script_exit_2() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
@@ -284,6 +289,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_script_timeout() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(dir.path(), "check4.sh", "#!/bin/sh\nsleep 10\nexit 0\n");
@@ -299,6 +305,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_capture_stderr() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
@@ -330,6 +337,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_non_executable() {
         let dir = tempdir().expect("Failed to create temp dir");
         let script_path = dir.path().join("check6.sh");
@@ -356,6 +364,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[serial]
     async fn test_large_output() {
         let dir = tempdir().expect("Failed to create temp dir");
         // Generate a script that outputs a lot of data
