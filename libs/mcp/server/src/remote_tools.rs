@@ -484,7 +484,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
     }
 
     #[tool(
-        description = "Load a skill's full instructions by its URI. Use this to retrieve the complete content of any skill listed in the <skills> block. For local skills the URI is a file path; for remote skills (rulebooks) the URI is the rulebook URI. This tool is auto-approved and does not require user confirmation."
+        description = "Load a skill's full instructions by its URI. Use this to retrieve the complete content of any skill listed in the <available_skills> block. For local skills the URI is a file path; for remote skills the URI is the rulebook URI. This tool is auto-approved and does not require user confirmation."
     )]
     pub async fn load_skill(
         &self,

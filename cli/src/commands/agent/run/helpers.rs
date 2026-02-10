@@ -138,7 +138,7 @@ pub fn add_skills(user_input: &str, skills: &[Skill]) -> (String, Option<String>
         "# No Skills Available".to_string()
     };
 
-    let formatted_input = format!("{}\n<skills>\n{}\n</skills>", user_input, skills_text);
+    let formatted_input = format!("{}\n<available_skills>\n{}\n</available_skills>", user_input, skills_text);
     (formatted_input, Some(skills_text))
 }
 

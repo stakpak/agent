@@ -345,8 +345,8 @@ impl Skill {
             format!(" [{}]", self.tags.join(", "))
         };
         format!(
-            "[{source_label}] {}: {}{}",
-            self.uri, self.description, tags_str
+            "<skill><label>{}</label><name>{}</name><description>{}</description><uri>{}</uri><tags>{}</tags></skill>",
+            source_label,self.name,self.description,self.uri,tags_str
         )
     }
 }
