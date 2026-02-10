@@ -487,10 +487,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 }
             };
 
-            ctx.state.messages.push(Message::info(
-                prompt.clone(),
-                Some(Style::default().fg(Color::DarkGray)),
-            ));
+            ctx.state.messages.push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
                 ctx.state.shell_tool_calls.clone(),

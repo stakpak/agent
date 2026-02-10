@@ -127,24 +127,14 @@ pub async fn run_tui(
         let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 
-    // When started via `stakpak init`, send init.md content as first user message
-    if send_init_prompt_on_start {
-        if let Some(prompt) = state.init_prompt_content.clone() {
-            if !prompt.trim().is_empty() {
-                state.messages.push(Message::info(
-                    prompt.clone(),
-                    Some(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray)),
-                ));
-                crate::services::message::invalidate_message_lines_cache(&mut state);
-                let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new()));
-            }
-        } else {
-            state.messages.push(Message::info(
-                "No init.md was found.",
-                Some(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow)),
-            ));
-            crate::services::message::invalidate_message_lines_cache(&mut state);
-        }
+    // When started via `stakpak init`, add init prompt as user message and send to backend
+    if send_init_prompt_on_start
+        && let Some(prompt) = state.init_prompt_content.clone()
+        && !prompt.trim().is_empty()
+    {
+        state.messages.push(Message::user(prompt.clone(), None));
+        crate::services::message::invalidate_message_lines_cache(&mut state);
+        let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new()));
     }
 
     let internal_tx_thread = internal_tx.clone();
