@@ -238,6 +238,7 @@ pub async fn run_interactive(
         let ctx_clone = ctx.clone(); // Clone ctx for use in client task
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
+            let mut current_metadata: Option<serde_json::Value> = None;
 
             // Build unified AgentClient config
             let providers = ctx_clone.get_llm_provider_config();
@@ -324,11 +325,12 @@ pub async fn run_interactive(
             }
 
             if let Some(session_id_str) = session_id {
-                let (chat_messages, tool_calls, session_id_uuid) =
+                let (chat_messages, tool_calls, session_id_uuid, checkpoint_metadata) =
                     resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
                         .await?;
 
                 current_session_id = Some(session_id_uuid);
+                current_metadata = checkpoint_metadata;
                 should_update_rulebooks_on_next_message = true;
                 tools_queue.extend(tool_calls.clone());
 
@@ -354,7 +356,7 @@ pub async fn run_interactive(
                     current_session_id = Some(checkpoint.session_id);
                 }
 
-                let checkpoint_messages =
+                let (checkpoint_messages, _checkpoint_metadata) =
                     get_checkpoint_messages(client.as_ref(), &checkpoint_id_str).await?;
 
                 let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
@@ -688,9 +690,15 @@ pub async fn run_interactive(
                             )
                             .await
                             {
-                                Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                                Ok((
+                                    chat_messages,
+                                    tool_calls,
+                                    session_id_uuid,
+                                    checkpoint_metadata,
+                                )) => {
                                     // Track the current session ID
                                     current_session_id = Some(session_id_uuid);
+                                    current_metadata = checkpoint_metadata;
 
                                     // Mark that we need to update rulebooks on the next user message
                                     should_update_rulebooks_on_next_message = true;
@@ -757,9 +765,15 @@ pub async fn run_interactive(
                         )
                         .await
                         {
-                            Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                            Ok((
+                                chat_messages,
+                                tool_calls,
+                                session_id_uuid,
+                                checkpoint_metadata,
+                            )) => {
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
+                                current_metadata = checkpoint_metadata;
 
                                 // Mark that we need to update rulebooks on the next user message
                                 should_update_rulebooks_on_next_message = true;
@@ -992,6 +1006,7 @@ pub async fn run_interactive(
                             Some(tools.clone()),
                             headers.clone(),
                             current_session_id,
+                            current_metadata.clone(),
                         )
                         .await;
 

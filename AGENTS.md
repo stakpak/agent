@@ -73,6 +73,7 @@ Vec<ChatMessage>                    # OpenAI-shaped messages (cli/mode_interacti
 ContextManager::reduce_context()   # History reduction (libs/api/context_managers/)
     ↓  merge_consecutive_same_role()  # Merge tool messages
     ↓  dedup_tool_results()           # Deduplicate within merged messages
+    ↓  reduce_context_with_budget()   # Budget-aware trimming (if over threshold)
     ↓
 Vec<LLMMessage>                    # Provider-neutral messages
     ↓
@@ -176,6 +177,22 @@ The codebase uses **three layers** to prevent invalid message sequences:
 1. **Source prevention** (`mode_interactive.rs`): Don't push cancelled tool_results when retry will send the real one
 2. **Pre-API sanitization** (`sanitize_tool_results`): Dedup and remove orphans from `Vec<ChatMessage>` before every API call
 3. **Context manager** (`task_board_context_manager.rs`): Merge consecutive same-role messages and dedup tool_results in the `reduce_context()` pipeline
+
+### Context Trimming with Cache Preservation
+
+Long sessions accumulate messages that approach the context window limit. The `TaskBoardContextManager` implements budget-aware trimming:
+
+1. **Lazy trimming**: Only triggers when estimated tokens exceed `context_window × threshold` (default 80%)
+2. **Stable prefix**: Trimmed messages are replaced with `[trimmed]` placeholders, preserving message structure (roles, tool_call_ids) for API validity
+3. **Cache-friendly**: The trimmed prefix produces identical output across turns, so Anthropic's prompt cache stays valid
+4. **Metadata persistence**: Trimming state (`trimmed_up_to_message_index`) is stored in `CheckpointState.metadata` and flows through:
+   - `CheckpointState.metadata` → `AgentState.metadata` → Hook updates → `save_checkpoint()` → persisted
+
+Key files:
+- `libs/api/src/local/context_managers/task_board_context_manager.rs` — `reduce_context_with_budget()`, `estimate_tokens()`, `trim_message()`
+- `libs/api/src/local/hooks/task_board_context/mod.rs` — Wires budget-aware trimming into the hook lifecycle
+- `libs/api/src/storage.rs` — `CheckpointState.metadata` field
+- `libs/api/src/models.rs` — `AgentState.metadata` field
 
 ## Build & Test
 
