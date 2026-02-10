@@ -272,7 +272,7 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/init",
-            description: "Load init.md prompt for analyzing infrastructure",
+            description: "analyzing your infrastructure setup",
         },
     ]
 }
@@ -482,11 +482,6 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 }
             };
 
-            ctx.state.messages.push(Message::info("".to_string(), None));
-            ctx.state.messages.push(Message::info(
-                "Analyzing your infrastructure setup.",
-                Some(Style::default().fg(Color::Cyan)),
-            ));
             ctx.state.messages.push(Message::info(
                 prompt.clone(),
                 Some(Style::default().fg(Color::DarkGray)),
