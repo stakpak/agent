@@ -43,6 +43,7 @@ dirs = "5.0"
 unwrap_used = "deny"
 expect_used = "deny"
 
+
 [target.'cfg(any(unix, windows))'.dependencies]
 portable-pty = "0.8"
 

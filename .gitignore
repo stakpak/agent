@@ -8,13 +8,3 @@ debug.log
 .DS_Store
 debug_acp.sh
 PR_Description.md
-pr_description.md
-
-# Scratch / issue docs (created during init feature work)
-Fix_rfc.md
-cli-workflows.md
-stakpak_FIX_ISSUE.md
-docs/rfc_stakpak_init.md
-.github/issues/anthropic-400-tool-result-blocks.md
-cost-stats.md
-token-stats.md
