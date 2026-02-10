@@ -189,22 +189,32 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
-        // Only load init.md if it is a regular file (not a dir), and cap size to avoid memory/API abuse
-        const MAX_INIT_MD_BYTES: u64 = 1 << 20; // 1 MiB
-        let init_path = std::env::current_dir()
-            .ok()
-            .map(|cwd| cwd.join("init.md"))
-            .filter(|p| p.exists() && p.is_file());
-        let init_prompt_content_for_tui = match init_path {
-            Some(path) => {
-                let size = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
-                if size.is_none_or(|s| s > MAX_INIT_MD_BYTES) {
-                    None
+        // Load init.md with three-tier discovery:
+        // 1. .stakpak/commands/init.md (project commands)
+        // 2. .stakpak/init.md (project root)
+        // 3. cwd/init.md (current directory)
+        let init_prompt_content_for_tui = if let Ok(cwd) = std::env::current_dir() {
+            // Priority 1: Check .stakpak/commands/init.md
+            let commands_init = cwd.join(".stakpak").join("commands").join("init.md");
+            if commands_init.exists() && commands_init.is_file() {
+                tokio::fs::read_to_string(commands_init).await.ok()
+            } else {
+                // Priority 2: Check .stakpak/init.md
+                let stakpak_init = cwd.join(".stakpak").join("init.md");
+                if stakpak_init.exists() && stakpak_init.is_file() {
+                    tokio::fs::read_to_string(stakpak_init).await.ok()
                 } else {
-                    tokio::fs::read_to_string(path).await.ok()
+                    // Priority 3: Check cwd/init.md
+                    let cwd_init = cwd.join("init.md");
+                    if cwd_init.exists() && cwd_init.is_file() {
+                        tokio::fs::read_to_string(cwd_init).await.ok()
+                    } else {
+                        None
+                    }
                 }
             }
-            None => None,
+        } else {
+            None
         };
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
         let tui_handle = tokio::spawn(async move {
