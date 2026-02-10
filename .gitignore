@@ -2,8 +2,6 @@ target
 debug.log
 .stakpak/session*
 
-
-
 # Stakpak local files
 .stakpak
 .pi
