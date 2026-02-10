@@ -624,7 +624,13 @@ pub fn handle_create_command_popup_delete_word(state: &mut AppState) {
         .rev()
         .skip_while(|(_, c)| !c.is_whitespace() && *c != '-')
         .nth(0)
-        .map(|(i, c)| if c.is_whitespace() || *c == '-' { *i } else { 0 })
+        .map(|(i, c)| {
+            if c.is_whitespace() || *c == '-' {
+                *i
+            } else {
+                0
+            }
+        })
         .unwrap_or(0);
     s.truncate(new_len);
 }
@@ -632,7 +638,9 @@ pub fn handle_create_command_popup_delete_word(state: &mut AppState) {
 pub fn handle_create_command_popup_paste(state: &mut AppState, text: String) {
     state.create_custom_command_popup_error = None;
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-    state.create_custom_command_popup_input.push_str(&normalized);
+    state
+        .create_custom_command_popup_input
+        .push_str(&normalized);
 }
 
 pub fn handle_create_command_popup_cancel(state: &mut AppState) {
@@ -669,9 +677,8 @@ pub fn handle_create_command_popup_submit(
             if name.is_empty() {
                 state.create_custom_command = Some(CreateCustomCommandState::AskingName);
                 state.create_custom_command_popup_input = input;
-                state.create_custom_command_popup_error = Some(
-                    "Command name must use letters, numbers, or hyphens only.".to_string(),
-                );
+                state.create_custom_command_popup_error =
+                    Some("Command name must use letters, numbers, or hyphens only.".to_string());
                 return;
             }
             state.create_custom_command =
@@ -680,8 +687,7 @@ pub fn handle_create_command_popup_submit(
         CreateCustomCommandState::AskingBody { name } => {
             let body = input.trim();
             if body.is_empty() {
-                state.create_custom_command =
-                    Some(CreateCustomCommandState::AskingBody { name });
+                state.create_custom_command = Some(CreateCustomCommandState::AskingBody { name });
                 state.create_custom_command_popup_input = input;
                 state.create_custom_command_popup_error =
                     Some("Prompt body cannot be empty.".to_string());
@@ -699,8 +705,7 @@ pub fn handle_create_command_popup_submit(
                 }
             };
             if let Err(e) = std::fs::create_dir_all(&dir) {
-                state.create_custom_command =
-                    Some(CreateCustomCommandState::AskingBody { name });
+                state.create_custom_command = Some(CreateCustomCommandState::AskingBody { name });
                 state.create_custom_command_popup_input = input;
                 state.create_custom_command_popup_error =
                     Some(format!("Could not create .stakpak/commands: {}", e));
@@ -708,16 +713,14 @@ pub fn handle_create_command_popup_submit(
             }
             let path = dir.join(format!("{}.md", name));
             if let Err(e) = std::fs::write(&path, body) {
-                state.create_custom_command =
-                    Some(CreateCustomCommandState::AskingBody { name });
+                state.create_custom_command = Some(CreateCustomCommandState::AskingBody { name });
                 state.create_custom_command_popup_input = input;
                 state.create_custom_command_popup_error =
                     Some(format!("Could not write {}: {}", path.display(), e));
                 return;
             }
             state.custom_commands = crate::services::commands::scan_custom_commands();
-            state.helpers =
-                crate::services::commands::get_helper_commands(&state.custom_commands);
+            state.helpers = crate::services::commands::get_helper_commands(&state.custom_commands);
             push_styled_message(
                 state,
                 &format!("Created /{}. Type /{} to use it.", name, name),

@@ -81,9 +81,12 @@ pub fn render_create_command_popup(f: &mut Frame, state: &AppState) {
     let mut chunk_idx = 0;
 
     // Step label
-    let step_para = Paragraph::new(Line::from(vec![
-        Span::styled(step_label, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-    ]));
+    let step_para = Paragraph::new(Line::from(vec![Span::styled(
+        step_label,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
     f.render_widget(step_para, chunks[chunk_idx]);
     chunk_idx += 1;
 
@@ -98,9 +101,7 @@ pub fn render_create_command_popup(f: &mut Frame, state: &AppState) {
 
     // Path hint: where the file will be saved
     if let Some(path) = &path_hint {
-        let path_para = Paragraph::new(
-            Span::styled(path, Style::default().fg(Color::Yellow))
-        );
+        let path_para = Paragraph::new(Span::styled(path, Style::default().fg(Color::Yellow)));
         f.render_widget(path_para, chunks[chunk_idx]);
         chunk_idx += 1;
     }
@@ -122,7 +123,9 @@ pub fn render_create_command_popup(f: &mut Frame, state: &AppState) {
         .border_style(Style::default().fg(Color::Magenta))
         .title(Span::styled(
             input_box_title,
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         ));
     let input_inner = Rect {
         x: input_area.x + 1,
