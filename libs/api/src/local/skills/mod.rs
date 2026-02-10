@@ -58,7 +58,6 @@ pub fn discover_skills(directories: &[PathBuf]) -> Vec<Skill> {
     skills
 }
 
-
 pub fn load_skill_content(
     name: &str,
     directories: &[PathBuf],
@@ -105,7 +104,6 @@ pub fn load_skill_content(
     Err(format!("Skill '{}' not found in any skill directory", name))
 }
 
-
 pub fn load_skill_from_path(path: &Path) -> Result<(PathBuf, String), String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
@@ -119,7 +117,6 @@ pub fn load_skill_from_path(path: &Path) -> Result<(PathBuf, String), String> {
 
     Ok((skill_dir, body))
 }
-
 
 pub fn default_skill_directories() -> Vec<PathBuf> {
     let mut dirs = Vec::new();

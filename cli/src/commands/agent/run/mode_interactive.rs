@@ -4,15 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-<<<<<<< HEAD
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command,
-    extract_last_checkpoint_id, refresh_billing_info, tool_call_history_string, tool_result,
-    user_message,
-=======
-    add_agents_md, add_local_context, add_skills, add_subagents,
-    build_resume_command, convert_tools_with_filter, extract_last_checkpoint_id,
+    add_agents_md, add_local_context, add_skills, build_resume_command, extract_last_checkpoint_id,
     refresh_billing_info, tool_call_history_string, tool_result, user_message,
->>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -25,8 +18,8 @@ use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
-use stakpak_api::models::ApiStreamError;
 use stakpak_api::local::skills::{default_skill_directories, discover_skills};
+use stakpak_api::models::ApiStreamError;
 use stakpak_api::models::Skill;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
 
@@ -127,12 +120,8 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
-<<<<<<< HEAD
     pub enable_subagents: bool,
-=======
     pub skills: Option<Vec<Skill>>,
-    pub subagent_configs: Option<SubagentConfigs>,
->>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
@@ -361,10 +350,8 @@ pub async fn run_interactive(
                 }
 
                 // Discover local skills
-                let skill_dirs =
-                    stakpak_api::local::skills::default_skill_directories();
-                let local_skills =
-                    stakpak_api::local::skills::discover_skills(&skill_dirs);
+                let skill_dirs = stakpak_api::local::skills::default_skill_directories();
+                let local_skills = stakpak_api::local::skills::discover_skills(&skill_dirs);
                 merged_skills.extend(local_skills);
 
                 if !merged_skills.is_empty() {
@@ -459,12 +446,11 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                let (user_input_with_skills, _) =
-                                    if let Some(skills) = &skills {
-                                        add_skills(&user_input_with_context, skills)
-                                    } else {
-                                        (user_input_with_context, None)
-                                    };
+                                let (user_input_with_skills, _) = if let Some(skills) = &skills {
+                                    add_skills(&user_input_with_context, skills)
+                                } else {
+                                    (user_input_with_context, None)
+                                };
 
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_skills, None::<String>)
@@ -991,10 +977,8 @@ pub async fn run_interactive(
                             // Rebuild unified skills: filtered remote + all local
                             let mut merged_skills: Vec<Skill> =
                                 filtered_rulebooks.into_iter().map(Skill::from).collect();
-                            let skill_dirs =
-                                default_skill_directories();
-                            let local_skills =
-                                discover_skills(&skill_dirs);
+                            let skill_dirs = default_skill_directories();
+                            let local_skills = discover_skills(&skill_dirs);
                             merged_skills.extend(local_skills);
                             skills = Some(merged_skills);
 

@@ -1,12 +1,6 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-<<<<<<< HEAD
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
-    user_message,
-=======
-    add_agents_md, add_local_context, add_skills, add_subagents,
-    build_resume_command, tool_result, user_message,
->>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
+    add_agents_md, add_local_context, add_skills, build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -36,13 +30,8 @@ pub struct RunAsyncConfig {
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-<<<<<<< HEAD
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
-=======
     pub skills: Option<Vec<Skill>>,
-    pub subagent_configs: Option<SubagentConfigs>,
->>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,

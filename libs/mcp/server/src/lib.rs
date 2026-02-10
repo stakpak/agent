@@ -37,12 +37,7 @@ pub mod tool_names {
 
     const FS_FILE_READ: &[&str] = &[VIEW];
     const FS_FILE_WRITE: &[&str] = &[CREATE, CREATE_FILE, STR_REPLACE, EDIT_FILE];
-    pub const AUTO_APPROVED: &[&str] = &[
-        VIEW,
-        SEARCH_DOCS,
-        LOAD_SKILL,
-        LOCAL_CODE_SEARCH,
-    ];
+    pub const AUTO_APPROVED: &[&str] = &[VIEW, SEARCH_DOCS, LOAD_SKILL, LOCAL_CODE_SEARCH];
 
     pub fn is_fs_file_read(name: &str) -> bool {
         FS_FILE_READ.contains(&name)
@@ -233,7 +228,6 @@ fn build_tool_container(
 ) -> Result<ToolContainer> {
     let skill_directories = config.skill_directories.clone();
     let tool_container = match config.tool_mode {
-<<<<<<< HEAD
         ToolMode::LocalOnly => {
             let mut tool_router = ToolContainer::tool_router_local();
 
@@ -248,20 +242,9 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                skill_directories,
             )
         }
-=======
-        ToolMode::LocalOnly => ToolContainer::new(
-            None,
-            config.redact_secrets,
-            config.privacy_mode,
-            config.enabled_tools.clone(),
-            task_manager_handle.clone(),
-            config.subagent_configs.clone(),
-            ToolContainer::tool_router_local(),
-            skill_directories,
-        ),
->>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
         ToolMode::RemoteOnly => {
             let mut tool_router = ToolContainer::tool_router_remote();
             if config.enabled_tools.slack {

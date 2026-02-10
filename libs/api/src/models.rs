@@ -265,11 +265,10 @@ pub struct CodeIndex {
     pub index: BuildCodeIndexOutput,
 }
 
-
 /// Unified skill type representing knowledge from any source.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Skill {
-    /// Display name / identifier 
+    /// Display name / identifier
     pub name: String,
     /// Unique identifier — API URI for remote, file path for local
     pub uri: String,
@@ -373,7 +372,6 @@ impl From<RuleBook> for Skill {
         }
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
 #[serde(rename_all = "UPPERCASE")]

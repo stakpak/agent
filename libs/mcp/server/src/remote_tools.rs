@@ -495,11 +495,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         if path.exists() && path.is_file() {
             match stakpak_api::local::skills::load_skill_from_path(path) {
                 Ok((skill_dir, body)) => {
-                    let response = format!(
-                        "Skill directory: {}\n\n{}",
-                        skill_dir.display(),
-                        body
-                    );
+                    let response = format!("Skill directory: {}\n\n{}", skill_dir.display(), body);
                     return Ok(CallToolResult::success(vec![Content::text(response)]));
                 }
                 Err(e) => {
@@ -510,7 +506,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
                 }
             }
         }
-        
+
         // Fall back to remote rulebook fetch
         let client = match self.get_client() {
             Some(client) => client,
@@ -523,7 +519,9 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         };
 
         match client.get_rulebook_by_uri(&uri).await {
-            Ok(rulebook) => Ok(CallToolResult::success(vec![Content::text(rulebook.content)])),
+            Ok(rulebook) => Ok(CallToolResult::success(vec![Content::text(
+                rulebook.content,
+            )])),
             Err(e) => Ok(CallToolResult::error(vec![
                 Content::text("LOAD_SKILL_ERROR"),
                 Content::text(format!("Failed to load skill: {}", e)),
