@@ -198,7 +198,7 @@ pub async fn run_interactive(
         let init_prompt_content_for_tui = match init_path {
             Some(path) => {
                 let size = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
-                if size.map_or(true, |s| s > MAX_INIT_MD_BYTES) {
+                if size.is_none_or(|s| s > MAX_INIT_MD_BYTES) {
                     None
                 } else {
                     tokio::fs::read_to_string(path).await.ok()
