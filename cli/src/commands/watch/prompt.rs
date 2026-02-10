@@ -52,7 +52,10 @@ pub fn assemble_prompt(trigger: &Trigger, check_result: Option<&CheckResult>) ->
         && let Some(check_path) = &trigger.check
     {
         context_lines.push(format!("Check script: {}", check_path));
-        context_lines.push(format!("Check exit code: {}", result.exit_code.unwrap_or(-1)));
+        context_lines.push(format!(
+            "Check exit code: {}",
+            result.exit_code.unwrap_or(-1)
+        ));
 
         // Include check stdout if non-empty
         let stdout = result.stdout.trim();
