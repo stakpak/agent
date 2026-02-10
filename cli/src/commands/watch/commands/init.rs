@@ -59,6 +59,12 @@ timeout = "30m"
 # Maximum time for check scripts (default: 30s)
 check_timeout = "30s"
 
+# Determines which check script exit codes trigger the agent (default: "success")
+# - "success": trigger on exit 0
+# - "failure": trigger on non-zero exit codes (1+)
+# - "any": trigger regardless of exit code (only timeout/error prevents trigger)
+# check_trigger_on = "success"
+
 # Enable Slack tools for agent (experimental, default: false)
 # enable_slack_tools = false
 
@@ -85,8 +91,13 @@ Output a summary report but DO NOT make any changes to the system.
 This is a read-only health check.
 """
 # Optional: check script that determines if agent should run
-# Exit 0 = run agent, Exit 1 = skip, Exit 2+ = error
 # check = "~/.stakpak/triggers/check-weekday.sh"
+
+# Optional: which exit codes trigger the agent (overrides default)
+# - "success": trigger on exit 0 (default)
+# - "failure": trigger on non-zero exit codes (1+)
+# - "any": trigger regardless of exit code
+# check_trigger_on = "success"
 
 # Optional: override default timeout for this trigger
 # timeout = "10m"
@@ -110,6 +121,20 @@ This is a read-only health check.
 # - List repos that are behind their remote
 # - Summarize any stale branches (older than 30 days)
 # DO NOT make any changes, just report findings.
+# """
+
+# Example: Alert on service failure (trigger on failure)
+# [[triggers]]
+# name = "service-down-alert"
+# schedule = "*/5 * * * *"  # Every 5 minutes
+# check = "~/.stakpak/triggers/check-service-health.sh"
+# check_trigger_on = "failure"  # Only wake agent when check fails
+# prompt = """
+# The service health check failed. Investigate and report:
+# - Which services are down
+# - Recent error logs
+# - Possible root causes
+# DO NOT restart services automatically, just report findings.
 # """
 
 # Example: Security advisory check (read-only)
