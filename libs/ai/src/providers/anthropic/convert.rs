@@ -1,10 +1,10 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    infer_max_tokens, AnthropicAuth, AnthropicCacheControl, AnthropicConfig, AnthropicContent,
-    AnthropicMessage, AnthropicMessageContent, AnthropicRequest, AnthropicResponse,
-    AnthropicSource, AnthropicSystemBlock, AnthropicSystemContent,
-    AnthropicThinkingConfig as AnthropicThinking, CLAUDE_CODE_SYSTEM_PREFIX,
+    AnthropicAuth, AnthropicCacheControl, AnthropicConfig, AnthropicContent, AnthropicMessage,
+    AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSource,
+    AnthropicSystemBlock, AnthropicSystemContent, AnthropicThinkingConfig as AnthropicThinking,
+    CLAUDE_CODE_SYSTEM_PREFIX, infer_max_tokens,
 };
 use crate::error::{Error, Result};
 use crate::types::{
