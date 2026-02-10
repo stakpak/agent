@@ -147,6 +147,7 @@ pub trait AgentProvider: SessionStorage + Send + Sync {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         session_id: Option<Uuid>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<ChatCompletionResponse, String>;
     async fn chat_completion_stream(
         &self,
@@ -155,6 +156,7 @@ pub trait AgentProvider: SessionStorage + Send + Sync {
         tools: Option<Vec<Tool>>,
         headers: Option<HeaderMap>,
         session_id: Option<Uuid>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<
         (
             std::pin::Pin<

@@ -235,6 +235,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
     let mut current_session_id: Option<Uuid> = None;
     let mut current_checkpoint_id: Option<Uuid> = None;
+    let mut current_metadata: Option<serde_json::Value> = None;
     let mut prior_steps: usize = 0;
 
     // Load checkpoint/session messages if provided
@@ -250,6 +251,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
         current_session_id = Some(checkpoint.session_id);
         current_checkpoint_id = Some(checkpoint.id);
+        current_metadata = checkpoint.state.metadata;
         chat_messages.extend(checkpoint.state.messages);
 
         llm_response_time += checkpoint_start.elapsed();
@@ -269,6 +271,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
             Ok(checkpoint) => {
                 current_session_id = Some(checkpoint.session_id);
                 current_checkpoint_id = Some(checkpoint_uuid);
+                current_metadata = checkpoint.state.metadata;
                 prior_steps = checkpoint
                     .state
                     .messages
@@ -452,6 +455,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 chat_messages.clone(),
                 Some(tools.clone()),
                 current_session_id,
+                current_metadata.clone(),
             )
             .await
             .map_err(|e| e.to_string())?;

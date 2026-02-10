@@ -117,6 +117,7 @@ impl SessionStorage for StakpakStorage {
                 parent_id: c.parent_id,
                 state: CheckpointState {
                     messages: c.state.messages,
+                    metadata: c.state.metadata,
                 },
                 created_at: c.created_at,
                 updated_at: c.updated_at,
@@ -137,6 +138,7 @@ impl SessionStorage for StakpakStorage {
             cwd: request.cwd.clone(),
             state: stakpak_api::CheckpointState {
                 messages: request.initial_state.messages.clone(),
+                metadata: request.initial_state.metadata.clone(),
             },
         };
 
@@ -154,6 +156,7 @@ impl SessionStorage for StakpakStorage {
                 parent_id: response.checkpoint.parent_id,
                 state: CheckpointState {
                     messages: response.checkpoint.state.messages,
+                    metadata: response.checkpoint.state.metadata,
                 },
                 created_at: response.checkpoint.created_at,
                 updated_at: response.checkpoint.updated_at,
@@ -201,6 +204,7 @@ impl SessionStorage for StakpakStorage {
                 parent_id: c.parent_id,
                 state: CheckpointState {
                     messages: c.state.messages,
+                    metadata: c.state.metadata,
                 },
                 created_at: c.created_at,
                 updated_at: c.updated_at,
@@ -263,6 +267,7 @@ impl SessionStorage for StakpakStorage {
             parent_id: c.parent_id,
             state: CheckpointState {
                 messages: c.state.messages,
+                metadata: c.state.metadata,
             },
             created_at: c.created_at,
             updated_at: c.updated_at,
@@ -277,6 +282,7 @@ impl SessionStorage for StakpakStorage {
         let api_request = stakpak_api::CreateCheckpointRequest {
             state: stakpak_api::CheckpointState {
                 messages: request.state.messages.clone(),
+                metadata: request.state.metadata.clone(),
             },
             parent_id: request.parent_id,
         };
@@ -293,6 +299,7 @@ impl SessionStorage for StakpakStorage {
             parent_id: response.checkpoint.parent_id,
             state: CheckpointState {
                 messages: response.checkpoint.state.messages,
+                metadata: response.checkpoint.state.metadata,
             },
             created_at: response.checkpoint.created_at,
             updated_at: response.checkpoint.updated_at,
