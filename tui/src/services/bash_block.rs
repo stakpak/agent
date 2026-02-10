@@ -143,46 +143,56 @@ fn wrap_text_by_word(text: &str, width: usize) -> Vec<String> {
 
     let stripped = strip_ansi_codes(text);
     let mut lines = Vec::new();
-    let mut current_line = String::new();
-    let mut current_width = 0;
 
-    for word in stripped.split_inclusive(|c: char| c.is_whitespace()) {
-        let word_width = calculate_display_width(word);
+    // First split by newlines to preserve explicit line breaks
+    for input_line in stripped.split('\n') {
+        let mut current_line = String::new();
+        let mut current_width = 0;
 
-        if current_width + word_width > width && !current_line.is_empty() {
-            // Word doesn't fit, start new line
-            lines.push(current_line.trim_end().to_string());
-            current_line.clear();
-            current_width = 0;
+        // Handle empty lines from consecutive newlines
+        if input_line.is_empty() {
+            lines.push(String::new());
+            continue;
         }
 
-        // If a single word is longer than width, we need to break it
-        if word_width > width && current_line.is_empty() {
-            // Break the long word by character
-            let mut word_part = String::new();
-            let mut part_width = 0;
-            for ch in word.chars() {
-                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-                if part_width + char_width > width && !word_part.is_empty() {
-                    lines.push(word_part);
-                    word_part = String::new();
-                    part_width = 0;
+        for word in input_line.split_inclusive(|c: char| c.is_whitespace()) {
+            let word_width = calculate_display_width(word);
+
+            if current_width + word_width > width && !current_line.is_empty() {
+                // Word doesn't fit, start new line
+                lines.push(current_line.trim_end().to_string());
+                current_line.clear();
+                current_width = 0;
+            }
+
+            // If a single word is longer than width, we need to break it
+            if word_width > width && current_line.is_empty() {
+                // Break the long word by character
+                let mut word_part = String::new();
+                let mut part_width = 0;
+                for ch in word.chars() {
+                    let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                    if part_width + char_width > width && !word_part.is_empty() {
+                        lines.push(word_part);
+                        word_part = String::new();
+                        part_width = 0;
+                    }
+                    word_part.push(ch);
+                    part_width += char_width;
                 }
-                word_part.push(ch);
-                part_width += char_width;
+                if !word_part.is_empty() {
+                    current_line = word_part;
+                    current_width = part_width;
+                }
+            } else {
+                current_line.push_str(word);
+                current_width += word_width;
             }
-            if !word_part.is_empty() {
-                current_line = word_part;
-                current_width = part_width;
-            }
-        } else {
-            current_line.push_str(word);
-            current_width += word_width;
         }
-    }
 
-    if !current_line.is_empty() {
-        lines.push(current_line.trim_end().to_string());
+        if !current_line.is_empty() {
+            lines.push(current_line.trim_end().to_string());
+        }
     }
 
     if lines.is_empty() {
@@ -1141,7 +1151,9 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         term_color(Color::White)
     };
     // Check if the title with arguments fits on one line
-    if title_with_args.len() <= available_width {
+    // Also check for embedded newlines - if present, always use multi-line rendering
+    let has_newlines = command_args.contains('\n');
+    if !has_newlines && title_with_args.len() <= available_width {
         // Single line header
         let mut header_spans = vec![];
 
@@ -2849,4 +2861,76 @@ fn format_tool_arguments_readable(args: &serde_json::Value, max_width: usize) ->
     }
 
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wrap_text_by_word_preserves_newlines() {
+        // Multi-line command should preserve explicit line breaks
+        let input = "echo \"line 1\" \\\n  && echo \"line 2\" \\\n  && echo \"line 3\"";
+        let result = wrap_text_by_word(input, 80);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "echo \"line 1\" \\");
+        assert_eq!(result[1], "  && echo \"line 2\" \\");
+        assert_eq!(result[2], "  && echo \"line 3\"");
+    }
+
+    #[test]
+    fn test_wrap_text_by_word_empty_lines() {
+        // Consecutive newlines should produce empty lines
+        let input = "line 1\n\nline 3";
+        let result = wrap_text_by_word(input, 80);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "line 1");
+        assert_eq!(result[1], "");
+        assert_eq!(result[2], "line 3");
+    }
+
+    #[test]
+    fn test_wrap_text_by_word_wraps_long_lines() {
+        // Long lines should still wrap at width boundary
+        let input = "this is a very long line that should wrap";
+        let result = wrap_text_by_word(input, 20);
+
+        assert!(result.len() > 1);
+        for line in &result {
+            assert!(line.len() <= 20);
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_by_word_mixed_newlines_and_wrapping() {
+        // Combine explicit newlines with width-based wrapping
+        let input = "short\nthis is a longer line that needs wrapping\nend";
+        let result = wrap_text_by_word(input, 20);
+
+        // First line: "short"
+        assert_eq!(result[0], "short");
+        // Middle lines: wrapped version of the long line
+        // Last line: "end"
+        assert_eq!(result[result.len() - 1], "end");
+        assert!(result.len() >= 3);
+    }
+
+    #[test]
+    fn test_wrap_text_by_word_single_line_no_newlines() {
+        let input = "simple command";
+        let result = wrap_text_by_word(input, 80);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "simple command");
+    }
+
+    #[test]
+    fn test_wrap_text_by_word_empty_input() {
+        let result = wrap_text_by_word("", 80);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "");
+    }
 }
