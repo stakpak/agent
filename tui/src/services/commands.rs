@@ -472,10 +472,18 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
         }
 
         "/init" => {
+            // Bundled init prompt is always available (embedded at compile time)
             let prompt = match ctx.state.init_prompt_content.as_deref() {
-                Some(p) => p.to_string(),
-                None => {
-                    return Err("init prompt not available (bundled prompt not loaded)".into());
+                Some(p) if !p.trim().is_empty() => p.to_string(),
+                _ => {
+                    push_error_message(
+                        ctx.state,
+                        "Internal error: init prompt not available",
+                        None,
+                    );
+                    ctx.state.text_area.set_text("");
+                    ctx.state.show_helper_dropdown = false;
+                    return Ok(());
                 }
             };
 
