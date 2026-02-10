@@ -39,7 +39,7 @@ impl Default for AutoApproveConfig {
         tools.insert("generate_password".to_string(), AutoApprovePolicy::Auto);
         tools.insert("search_docs".to_string(), AutoApprovePolicy::Auto);
         tools.insert("search_memory".to_string(), AutoApprovePolicy::Auto);
-        tools.insert("read_rulebook".to_string(), AutoApprovePolicy::Auto);
+        tools.insert("load_skill".to_string(), AutoApprovePolicy::Auto);
         tools.insert("local_code_search".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_all_tasks".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_task_details".to_string(), AutoApprovePolicy::Auto);

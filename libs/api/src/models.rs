@@ -265,6 +265,116 @@ pub struct CodeIndex {
     pub index: BuildCodeIndexOutput,
 }
 
+
+/// Unified skill type representing knowledge from any source.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Skill {
+    /// Display name / identifier 
+    pub name: String,
+    /// Unique identifier — API URI for remote, file path for local
+    pub uri: String,
+    /// When to use this skill
+    pub description: String,
+    /// Where this skill comes from
+    pub source: SkillSource,
+    /// None = metadata only; Some = full content loaded
+    pub content: Option<String>,
+    /// Classification tags
+    pub tags: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum SkillSource {
+    Local,
+    Remote { provider: RemoteProvider },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum RemoteProvider {
+    Rulebook { visibility: RuleBookVisibility },
+    Pak,
+}
+
+impl Skill {
+    pub fn is_local(&self) -> bool {
+        matches!(self.source, SkillSource::Local)
+    }
+
+    pub fn is_rulebook(&self) -> bool {
+        matches!(
+            self.source,
+            SkillSource::Remote {
+                provider: RemoteProvider::Rulebook { .. }
+            }
+        )
+    }
+
+    pub fn is_pak(&self) -> bool {
+        matches!(
+            self.source,
+            SkillSource::Remote {
+                provider: RemoteProvider::Pak
+            }
+        )
+    }
+
+    pub fn to_metadata_text(&self) -> String {
+        let source_label = match &self.source {
+            SkillSource::Local => "local",
+            SkillSource::Remote {
+                provider: RemoteProvider::Rulebook { .. },
+            } => "remote",
+            SkillSource::Remote {
+                provider: RemoteProvider::Pak,
+            } => "pak",
+        };
+        let tags_str = if self.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", self.tags.join(", "))
+        };
+        format!(
+            "[{source_label}] {}: {}{}",
+            self.uri, self.description, tags_str
+        )
+    }
+}
+
+impl From<ListRuleBook> for Skill {
+    fn from(rb: ListRuleBook) -> Self {
+        Skill {
+            name: rb.uri.clone(),
+            uri: rb.uri,
+            description: rb.description,
+            source: SkillSource::Remote {
+                provider: RemoteProvider::Rulebook {
+                    visibility: rb.visibility,
+                },
+            },
+            content: None,
+            tags: rb.tags,
+        }
+    }
+}
+
+impl From<RuleBook> for Skill {
+    fn from(rb: RuleBook) -> Self {
+        Skill {
+            name: rb.uri.clone(),
+            uri: rb.uri,
+            description: rb.description,
+            source: SkillSource::Remote {
+                provider: RemoteProvider::Rulebook {
+                    visibility: rb.visibility,
+                },
+            },
+            content: Some(rb.content),
+            tags: rb.tags,
+        }
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RuleBookVisibility {

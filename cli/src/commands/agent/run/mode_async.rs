@@ -1,7 +1,12 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
+<<<<<<< HEAD
     add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
     user_message,
+=======
+    add_agents_md, add_local_context, add_skills, add_subagents,
+    build_resume_command, tool_result, user_message,
+>>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -12,9 +17,8 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
-};
+use stakpak_api::models::Skill;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
@@ -32,8 +36,13 @@ pub struct RunAsyncConfig {
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
+<<<<<<< HEAD
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+=======
+    pub skills: Option<Vec<Skill>>,
+    pub subagent_configs: Option<SubagentConfigs>,
+>>>>>>> 0dcb814c (Implement the first phase of SKILLS RFC)
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -408,10 +417,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 .await
                 .map_err(|e| e.to_string())?;
 
-        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
-            && chat_messages.is_empty()
+        let (user_input, _skills_text) = if chat_messages.is_empty()
+            && let Some(skills) = &config.skills
         {
-            add_rulebooks(&user_input, rulebooks)
+            add_skills(&user_input, skills)
         } else {
             (user_input, None)
         };
