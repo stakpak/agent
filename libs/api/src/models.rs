@@ -346,7 +346,7 @@ impl Skill {
         };
         format!(
             "<skill><label>{}</label><name>{}</name><description>{}</description><uri>{}</uri><tags>{}</tags></skill>",
-            source_label,self.name,self.description,self.uri,tags_str
+            source_label, self.name, self.description, self.uri, tags_str
         )
     }
 }
