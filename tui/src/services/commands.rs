@@ -266,9 +266,13 @@ pub fn scan_custom_commands() -> Vec<CustomCommand> {
                 continue;
             }
 
+            // Extract title from first markdown heading (# Title) if present
+            let description =
+                extract_markdown_title(&content).unwrap_or_else(|| command_name.to_string());
+
             let cmd = CustomCommand {
                 id: id.clone(),
-                description: format!("User: {command_name}"),
+                description,
                 content: content.trim().to_string(),
             };
             by_id.insert(id, cmd);
@@ -278,6 +282,20 @@ pub fn scan_custom_commands() -> Vec<CustomCommand> {
     let mut commands: Vec<_> = by_id.into_values().collect();
     commands.sort_by(|a, b| a.id.cmp(&b.id));
     commands
+}
+
+/// Extract the first markdown heading (# Title) from content as the command title
+fn extract_markdown_title(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(title) = trimmed.strip_prefix("# ") {
+            let title = title.trim();
+            if !title.is_empty() {
+                return Some(title.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Built-in commands only
@@ -373,9 +391,9 @@ pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
     let mut out: Vec<HelperEntry> = builtin.into_iter().map(HelperEntry::Builtin).collect();
     for c in custom {
         if !builtin_ids.contains(c.id.as_str()) {
-            // Convert "/command-name" to "/usercmd/command-name" for display
+            // Convert "/command-name" to "/cmd:command-name" for display
             let display = if let Some(name) = c.id.strip_prefix('/') {
-                format!("/usercmd/{}", name)
+                format!("/cmd:{}", name)
             } else {
                 c.id.clone()
             };
