@@ -566,7 +566,11 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             let prompt = match ctx.state.init_prompt_content.as_deref() {
                 Some(s) if !s.trim().is_empty() => s.to_string(),
                 _ => {
-                    push_error_message(ctx.state, "No init.md was found.", None);
+                    push_error_message(
+                        ctx.state,
+                        "No init.md found. Searched: .stakpak/commands/init.md, .stakpak/init.md, and init.md",
+                        None,
+                    );
                     ctx.state.text_area.set_text("");
                     ctx.state.show_helper_dropdown = false;
                     return Ok(());
