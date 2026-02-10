@@ -4,9 +4,9 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command,
-    extract_last_checkpoint_id, refresh_billing_info, tool_call_history_string, tool_result,
-    user_message,
+    add_agents_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
+    build_resume_command, extract_last_checkpoint_id, refresh_billing_info,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -119,6 +119,7 @@ pub struct RunInteractiveConfig {
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
+    pub plan_mode: bool,
     pub system_prompt: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
@@ -127,6 +128,7 @@ pub struct RunInteractiveConfig {
     pub agents_md: Option<AgentsMdInfo>,
 }
 
+#[allow(unused_assignments)] // plan_mode_active: written in PlanModeActivated, read in later phases
 pub async fn run_interactive(
     mut ctx: AppConfig,
     mut config: RunInteractiveConfig,
@@ -136,6 +138,10 @@ pub async fn run_interactive(
         let mut model = config.model.clone();
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
+        // Plan mode tracking — written in PlanModeActivated, read in later phases
+        #[allow(unused_variables, unused_assignments)]
+        let mut plan_mode_active = false;
+        let mut plan_instructions_injected = false;
         let mut should_update_rulebooks_on_next_message = false;
         let mut total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
@@ -382,6 +388,27 @@ pub async fn run_interactive(
                 messages.insert(0, system_message(system_prompt_text));
             }
 
+            // Handle --plan CLI flag: activate plan mode at startup
+            if config.plan_mode {
+                let session_dir = std::path::Path::new(".stakpak/session");
+                if stakpak_tui::services::plan::plan_file_exists(session_dir) {
+                    // Existing plan found — let the TUI show the modal
+                    let meta =
+                        stakpak_tui::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ExistingPlanFound(stakpak_tui::ExistingPlanPrompt {
+                            inline_prompt: None,
+                            metadata: meta,
+                        }),
+                    )
+                    .await?;
+                } else {
+                    plan_mode_active = true;
+                    send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+                }
+            }
+
             let mut retry_attempts = 0;
             const MAX_RETRY_ATTEMPTS: u32 = 2;
 
@@ -430,6 +457,16 @@ pub async fn run_interactive(
                         {
                             let (user_input, _) = add_agents_md(&user_input, agents_md_info);
                             user_input
+                        } else {
+                            user_input
+                        };
+
+                        // Inject plan mode instructions on the first user message
+                        // after plan mode is activated (via /plan or --plan)
+                        let user_input = if plan_mode_active && !plan_instructions_injected {
+                            plan_instructions_injected = true;
+                            let plan_prompt = build_plan_mode_instructions();
+                            format!("{} {}", plan_prompt, user_input)
                         } else {
                             user_input
                         };
@@ -978,6 +1015,46 @@ pub async fn run_interactive(
                         )
                         .await?;
                         continue;
+                    }
+                    OutputEvent::PlanModeActivated(inline_prompt) => {
+                        // Transition to plan mode
+                        plan_mode_active = true;
+                        send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+
+                        // If there's an inline prompt, inject plan instructions + prompt
+                        // as a user message so the agent starts planning immediately.
+                        if let Some(prompt) = inline_prompt {
+                            let instructions = build_plan_mode_instructions();
+                            let plan_prompt = format!("{instructions} {prompt}");
+                            let user_msg = user_message(plan_prompt);
+                            plan_instructions_injected = true;
+                            send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                            messages.push(user_msg);
+                        } else {
+                            // No inline prompt — wait for the user to type their message.
+                            // Don't fall through to the API call with empty messages.
+                            continue;
+                        }
+                    }
+                    OutputEvent::PlanFeedback(feedback_text) => {
+                        // User submitted feedback from plan review.
+                        // Inject as direct user message — the feedback already contains
+                        // anchor references so the agent knows what to revise.
+                        let user_msg = user_message(feedback_text.clone());
+                        messages.push(user_msg);
+                        send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                        send_input_event(&input_tx, InputEvent::AddUserMessage(feedback_text))
+                            .await?;
+                    }
+                    OutputEvent::PlanApproved => {
+                        // User approved the plan — plan_mode stays active, PlanStatus drives behavior.
+                        // The agent is responsible for updating plan.md front matter to status: approved.
+                        let approval_msg = "Plan approved. Update the plan front matter status to `approved` and proceed with creating a new task board breaking down the plan.".to_string();
+                        let user_msg = user_message(approval_msg.clone());
+                        messages.push(user_msg);
+                        send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                        send_input_event(&input_tx, InputEvent::AddUserMessage(approval_msg))
+                            .await?;
                     }
                 }
 

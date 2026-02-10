@@ -1,7 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
-    user_message,
+    add_agents_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
+    build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -42,6 +42,14 @@ pub struct RunAsyncConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    #[allow(dead_code)] // consumed in Phase 11: Async Mode Plan Support
+    pub plan_mode: bool,
+    /// Auto-approve the plan when status becomes 'reviewing'
+    pub plan_approved: bool,
+    /// Path to file containing feedback to inject
+    pub plan_feedback: Option<String>,
+    /// Archive any existing plan and start fresh (only with --plan)
+    pub plan_new: bool,
     /// When true, respect auto-approve config and pause when tools require approval.
     pub pause_on_approval: bool,
     /// Resume input (tool decisions or text prompt) when resuming from a paused checkpoint.
@@ -430,6 +438,55 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
     let mut step = 0;
     let max_steps = config.max_steps.unwrap_or(50); // Safety limit to prevent infinite loops
+    let mut plan_instructions_injected = false;
+    let mut plan_previous_status: Option<stakpak_tui::services::plan::PlanStatus> = None;
+
+    // If plan mode, handle existing plan file
+    if config.plan_mode && config.plan_new {
+        let session_dir = std::path::Path::new(".stakpak/session");
+        if let Some(archive_path) = stakpak_tui::services::plan::archive_plan_file(session_dir) {
+            print!(
+                "{}",
+                renderer.render_info(&format!(
+                    "Archived existing plan to {}",
+                    archive_path.display()
+                ))
+            );
+        }
+    }
+
+    // If plan mode, inject plan instructions into the first user message
+    if config.plan_mode && !chat_messages.is_empty() {
+        let instructions = build_plan_mode_instructions();
+        if let Some(last_user_msg) = chat_messages
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == Role::User)
+            && let Some(stakpak_shared::models::integrations::openai::MessageContent::String(
+                ref mut text,
+            )) = last_user_msg.content
+        {
+            *text = format!("{instructions} {text}");
+            plan_instructions_injected = true;
+        }
+    }
+
+    // If --plan-feedback, validate the file exists and read it
+    if let Some(ref feedback_path) = config.plan_feedback {
+        if !std::path::Path::new(feedback_path).exists() {
+            return Err(format!("Plan feedback file not found: {}", feedback_path));
+        }
+        let feedback_text = std::fs::read_to_string(feedback_path)
+            .map_err(|e| format!("Failed to read feedback file '{}': {}", feedback_path, e))?;
+        let feedback_msg = if !plan_instructions_injected {
+            let instructions = build_plan_mode_instructions();
+            format!("{instructions}\n\n{feedback_text}")
+        } else {
+            feedback_text
+        };
+        chat_messages.push(user_message(feedback_msg));
+        print!("{}", renderer.render_info("Plan feedback loaded from file"));
+    }
 
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
@@ -686,6 +743,65 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 renderer.render_success("No more tools to execute - agent completed successfully")
             );
             break;
+        }
+
+        // Plan mode: check if plan.md status has changed after tool execution
+        if config.plan_mode {
+            let session_dir = std::path::Path::new(".stakpak/session");
+            if let Some((meta, _content)) = stakpak_tui::services::plan::read_plan_file(session_dir)
+            {
+                let new_status = meta.status;
+                if plan_previous_status != Some(new_status) {
+                    let old = plan_previous_status;
+                    plan_previous_status = Some(new_status);
+
+                    match new_status {
+                        stakpak_tui::services::plan::PlanStatus::PendingReview => {
+                            if config.plan_approved {
+                                // Auto-approve: inject approval message — the agent will update plan.md status
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Plan status: pending_review → auto-approved (--plan-approved)"
+                                    )
+                                );
+                                chat_messages.push(user_message(
+                                    "Plan approved. Update the plan front matter status to `approved` and proceed with execution.".to_string(),
+                                ));
+                            } else {
+                                // No auto-approve: print plan path and exit
+                                print!(
+                                    "{}",
+                                    renderer.render_info(&format!(
+                                        "Plan ready for review at: {}/plan.md",
+                                        session_dir.display()
+                                    ))
+                                );
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Review the plan, then re-run with --plan-approved or --plan-feedback <file>"
+                                    )
+                                );
+                                break;
+                            }
+                        }
+                        stakpak_tui::services::plan::PlanStatus::Approved => {
+                            if old == Some(stakpak_tui::services::plan::PlanStatus::PendingReview) {
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Plan approved externally, continuing execution"
+                                    )
+                                );
+                            }
+                        }
+                        stakpak_tui::services::plan::PlanStatus::Drafting => {
+                            // Plan revision, continue
+                        }
+                    }
+                }
+            }
         }
     }
 
