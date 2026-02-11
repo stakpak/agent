@@ -35,7 +35,7 @@ use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 /// based on available cloud provider credentials (AWS, GCP, Azure) and IaC tools
 /// (Terraform, Kubernetes, etc.). It instructs the agent to focus analysis on
 /// what's actually present in the environment.
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/local/prompts/init.md");
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
