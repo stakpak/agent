@@ -35,14 +35,14 @@ pub struct RulebookConfig {
     pub exclude_tags: Option<Vec<String>>,
 }
 
-/// Custom commands filtering configuration (re-defined here to avoid circular dependency with CLI)
+/// Custom commands configuration (re-defined here to avoid circular dependency with CLI)
 #[derive(Clone, Debug, Default)]
 pub struct CommandsConfig {
     /// Include only these commands by name (supports glob patterns, empty = all allowed)
     pub include: Option<Vec<String>>,
     /// Exclude specific commands by name (supports glob patterns, empty = none excluded)
     pub exclude: Option<Vec<String>>,
-    /// Inline command definitions: command name → markdown content
+    /// Command definitions: name → file path (e.g., "security-review" → "~/.stakpak/prompts/security.md")
     pub definitions: std::collections::HashMap<String, String>,
 }
 

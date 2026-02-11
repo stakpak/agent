@@ -294,13 +294,30 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
         }
     }
 
-    // 2. Load inline definitions (override file-based commands)
+    // 2. Load from definitions (file references, override cmd_*.md files)
     if let Some(config) = commands_config {
-        for (name, content) in &config.definitions {
-            // Apply filters to inline commands too
+        for (name, file_path) in &config.definitions {
+            // Apply filters to definition-based commands too
             if !config.should_load(name) {
                 continue;
             }
+
+            // Expand ~ to home directory
+            let expanded_path = if let Some(stripped) = file_path.strip_prefix("~/") {
+                if let Some(home) = dirs::home_dir() {
+                    home.join(stripped)
+                } else {
+                    std::path::PathBuf::from(file_path)
+                }
+            } else {
+                std::path::PathBuf::from(file_path)
+            };
+
+            // Read file content
+            let content = match std::fs::read_to_string(&expanded_path) {
+                Ok(c) => c,
+                Err(_) => continue, // Skip if file can't be read
+            };
 
             let content = content.trim();
             if content.is_empty() {
@@ -310,7 +327,7 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
             let id = format!("{}{}", CMD_PREFIX, name);
             let description = extract_markdown_title(content).unwrap_or_else(|| name.to_string());
 
-            // Inline overrides file-based
+            // Definitions override file-based commands
             by_id.insert(
                 id.clone(),
                 CustomCommand {
