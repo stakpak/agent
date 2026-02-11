@@ -189,6 +189,8 @@ mod tests {
     #[cfg(unix)]
     use std::io::Write;
     #[cfg(unix)]
+    use std::thread;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     #[cfg(unix)]
@@ -205,6 +207,7 @@ mod tests {
             file.sync_all().expect("Failed to sync script");
             // file is dropped (closed) here before we try to execute it
         }
+        thread::sleep(Duration::from_millis(100)); // allow OS to release file, avoid "Text file busy"
 
         #[cfg(unix)]
         {
