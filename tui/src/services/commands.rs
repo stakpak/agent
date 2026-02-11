@@ -272,7 +272,7 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/init",
-            description: "analyzing your infrastructure setup",
+            description: "analyze your infrastructure setup",
         },
     ]
 }
