@@ -270,6 +270,8 @@ pub struct AppStateOptions<'a> {
     pub board_agent_id: Option<String>,
     /// Content of init prompt ( init.v1.md, passed from CLI)
     pub init_prompt_content: Option<String>,
+    /// Optional allowlist of custom command names to load (from global config)
+    pub custom_commands_allowlist: Option<Vec<String>>,
 }
 
 impl AppState {
@@ -281,6 +283,7 @@ impl AppState {
     /// Initialize file search channels and spawn worker
     fn init_file_search_channels(
         helpers: &[HelperEntry],
+        custom_commands_allowlist: Option<Vec<String>>,
     ) -> (
         mpsc::Sender<(String, usize)>,
         mpsc::Receiver<FileSearchResult>,
@@ -289,12 +292,12 @@ impl AppState {
         let (result_tx, result_rx) = mpsc::channel::<FileSearchResult>(10);
         let helpers_clone = helpers.to_vec();
         let file_search_instance = FileSearch::default();
-        // Spawn file_search worker from file_search.rs
         tokio::spawn(file_search_worker(
             file_search_rx,
             result_tx,
             helpers_clone,
             file_search_instance,
+            custom_commands_allowlist,
         ));
         (file_search_tx, result_rx)
     }
@@ -313,11 +316,14 @@ impl AppState {
             auth_display_info,
             board_agent_id,
             init_prompt_content,
+            custom_commands_allowlist,
         } = options;
 
-        let custom_commands = crate::services::commands::scan_custom_commands();
+        let custom_commands =
+            crate::services::commands::scan_custom_commands(custom_commands_allowlist.as_deref());
         let helpers = Self::get_helper_commands(&custom_commands);
-        let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
+        let (file_search_tx, result_rx) =
+            Self::init_file_search_channels(&helpers, custom_commands_allowlist);
 
         AppState {
             text_area: TextArea::new(),

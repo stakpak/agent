@@ -197,14 +197,19 @@ const MAX_CUSTOM_COMMAND_BYTES: u64 = 64 * 1024;
 /// Prefix required for user command files
 const USER_COMMAND_PREFIX: &str = "Usercmd_";
 
+/// Slash prefix for user commands in the TUI (display and id)
+pub const CMD_PREFIX: &str = "/cmd:";
+
 /// Scan project and personal commands directories for Usercmd_*.md files.
 /// Project: .stakpak/commands/ (relative to current_dir)
 /// Personal: ~/.stakpak/commands/
 /// Project overrides personal when same command exists.
 ///
 /// Files must follow the naming convention: Usercmd_{command-name}.md
-/// Example: Usercmd_create-component.md → /create-component
-pub fn scan_custom_commands() -> Vec<CustomCommand> {
+/// Example: Usercmd_create-component.md → /cmd:create-component
+///
+/// If `allowlist` is `Some`, only commands whose name is in the list are returned (e.g. from global config).
+pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> {
     let mut by_id: std::collections::HashMap<String, CustomCommand> =
         std::collections::HashMap::new();
 
@@ -247,7 +252,13 @@ pub fn scan_custom_commands() -> Vec<CustomCommand> {
                 continue;
             }
 
-            let id = format!("/{command_name}");
+            let id = format!("{}{command_name}", CMD_PREFIX);
+
+            if let Some(list) = allowlist {
+                if !list.iter().any(|n| n == command_name) {
+                    continue;
+                }
+            }
 
             let metadata = match std::fs::metadata(&path) {
                 Ok(m) => m,
@@ -381,10 +392,6 @@ fn builtin_helper_commands() -> Vec<HelperCommand> {
             command: "/init",
             description: "analyze your infrastructure setup",
         },
-        HelperCommand {
-            command: "/init",
-            description: "Analyzing your infrastructure setup",
-        },
     ]
 }
 
@@ -395,15 +402,10 @@ pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
     let mut out: Vec<HelperEntry> = builtin.into_iter().map(HelperEntry::Builtin).collect();
     for c in custom {
         if !builtin_ids.contains(c.id.as_str()) {
-            // Convert "/command-name" to "/cmd:command-name" for display
-            let display = if let Some(name) = c.id.strip_prefix('/') {
-                format!("/cmd:{}", name)
-            } else {
-                c.id.clone()
-            };
+            // User commands use /cmd:name for both id and display
             out.push(HelperEntry::Custom {
                 command: c.id.clone(),
-                display,
+                display: c.id.clone(),
                 description: c.description.clone(),
             });
         }
@@ -431,6 +433,28 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
 
 /// Execute a command by its ID
 pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Result<(), String> {
+    // User custom commands (id = /cmd:name)
+    if let Some(cmd) = ctx
+        .state
+        .custom_commands
+        .iter()
+        .find(|c| c.id == command_id)
+    {
+        ctx.state
+            .messages
+            .push(Message::user(cmd.content.clone(), None));
+        let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+            cmd.content.clone(),
+            ctx.state.shell_tool_calls.clone(),
+            Vec::new(),
+        ));
+        ctx.state.shell_tool_calls = None;
+        ctx.state.text_area.set_text("");
+        ctx.state.show_helper_dropdown = false;
+        crate::services::message::invalidate_message_lines_cache(ctx.state);
+        return Ok(());
+    }
+
     match command_id {
         "/help" => {
             push_help_message(ctx.state);

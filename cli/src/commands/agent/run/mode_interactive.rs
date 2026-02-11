@@ -131,6 +131,8 @@ pub struct RunInteractiveConfig {
     pub agents_md: Option<AgentsMdInfo>,
     /// When true, send init_prompt_content as first user message on session start (stakpak init)
     pub send_init_prompt_on_start: bool,
+    /// Optional allowlist of custom command names to load (from global config)
+    pub custom_commands: Option<Vec<String>>,
 }
 
 pub async fn run_interactive(
@@ -198,6 +200,7 @@ pub async fn run_interactive(
         let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
 
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
+        let custom_commands_for_tui = config.custom_commands.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -218,6 +221,7 @@ pub async fn run_interactive(
                 auth_display_info_for_tui,
                 init_prompt_content_for_tui,
                 send_init_prompt_on_start,
+                custom_commands_for_tui,
             )
             .await
             .map_err(|e| e.to_string())

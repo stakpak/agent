@@ -423,6 +423,7 @@ pub async fn file_search_worker(
     tx: mpsc::Sender<FileSearchResult>,
     _helpers: Vec<HelperEntry>, // Unused: we re-scan dynamically when input starts with '/'
     mut file_search: FileSearch,
+    custom_commands_allowlist: Option<Vec<String>>,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
         // Load files if not already loaded or directory changed
@@ -434,7 +435,9 @@ pub async fn file_search_worker(
         // Re-scan custom commands each time for dynamic reload (no restart needed).
         let (filtered_helpers, custom_commands): (Vec<HelperEntry>, Option<Vec<CustomCommand>>) =
             if input.starts_with('/') && !input.is_empty() {
-                let custom = crate::services::commands::scan_custom_commands();
+                let custom = crate::services::commands::scan_custom_commands(
+                    custom_commands_allowlist.as_deref(),
+                );
                 let fresh_helpers = crate::services::commands::get_helper_commands(&custom);
                 let search_term = input[1..].to_lowercase();
                 let filtered: Vec<HelperEntry> = fresh_helpers

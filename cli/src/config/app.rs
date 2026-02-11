@@ -62,6 +62,8 @@ pub struct AppConfig {
     pub collect_telemetry: Option<bool>,
     /// Editor command
     pub editor: Option<String>,
+    /// Optional allowlist of custom command names to load from global config
+    pub custom_commands: Option<Vec<String>>,
 }
 
 impl AppConfig {
@@ -168,6 +170,7 @@ impl AppConfig {
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
+            custom_commands: settings.custom_commands,
         }
     }
 
@@ -832,6 +835,7 @@ impl From<AppConfig> for Settings {
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
             editor: config.editor,
+            custom_commands: config.custom_commands,
         }
     }
 }

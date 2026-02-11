@@ -905,6 +905,7 @@ mod tests {
             auth_display_info: (None, None, None),
             board_agent_id: None,
             init_prompt_content: None,
+            custom_commands_allowlist: None,
         })
     }
 

@@ -29,6 +29,7 @@ impl Default for ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                custom_commands: None,
             },
         }
     }
@@ -48,11 +49,12 @@ impl ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                custom_commands: None,
             },
         }
     }
 
-    /// Get a profile configuration by name.
+    /// Get the profile configuration by name.
     pub(crate) fn profile_config(&self, profile_name: &str) -> Option<&ProfileConfig> {
         self.profiles.get(profile_name)
     }
@@ -98,6 +100,7 @@ impl ConfigFile {
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
             editor: config.editor.or(existing_editor),
+            custom_commands: config.custom_commands,
         };
     }
 

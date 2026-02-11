@@ -54,6 +54,7 @@ pub async fn run_tui(
     auth_display_info: (Option<String>, Option<String>, Option<String>),
     init_prompt_content: Option<String>,
     send_init_prompt_on_start: bool,
+    custom_commands_allowlist: Option<Vec<String>>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -101,6 +102,7 @@ pub async fn run_tui(
         auth_display_info,
         board_agent_id,
         init_prompt_content,
+        custom_commands_allowlist,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
