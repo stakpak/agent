@@ -202,7 +202,7 @@ pub struct AppState {
     pub model: Model,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
-    /// Content of init prompt loaded from init.md in current directory (for /init)
+    /// Content of init prompt ( init.v1.md) for /init
     pub init_prompt_content: Option<String>,
 
     // ========== Misc State ==========
@@ -268,7 +268,7 @@ pub struct AppStateOptions<'a> {
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
     /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID env var)
     pub board_agent_id: Option<String>,
-    /// Content of init prompt loaded from init.md (passed from CLI)
+    /// Content of init prompt ( init.v1.md, passed from CLI)
     pub init_prompt_content: Option<String>,
 }
 

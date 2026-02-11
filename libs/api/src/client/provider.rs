@@ -672,8 +672,7 @@ impl crate::storage::SessionStorage for super::AgentClient {
 // Helper Methods
 // =============================================================================
 
-const TITLE_GENERATOR_PROMPT: &str =
-    include_str!("../local/prompts/session_title_generator.v1.txt");
+const TITLE_GENERATOR_PROMPT: &str = include_str!("../prompts/session_title_generator.v1.txt");
 
 impl AgentClient {
     /// Initialize or resume a session based on context

@@ -30,12 +30,8 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
-///
-/// This adaptive prompt guides the agent to detect and analyze infrastructure
-/// based on available cloud provider credentials (AWS, GCP, Azure) and IaC tools
-/// (Terraform, Kubernetes, etc.). It instructs the agent to focus analysis on
-/// what's actually present in the environment.
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/local/prompts/init.md");
+/// analyze the infrastructure and provide a summary of the current state
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -198,7 +194,7 @@ pub async fn run_interactive(
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
 
-        // Use bundled init prompt (loaded at module level as const)
+        // Use  init prompt (loaded at module level as const)
         let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
 
         let send_init_prompt_on_start = config.send_init_prompt_on_start;

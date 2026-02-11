@@ -379,6 +379,10 @@ fn builtin_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/init",
+            description: "analyze your infrastructure setup",
+        },
+        HelperCommand {
+            command: "/init",
             description: "Analyzing your infrastructure setup",
         },
     ]
@@ -602,7 +606,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
         }
 
         "/init" => {
-            // Bundled init prompt is always available (embedded at compile time)
+            //  init prompt is always available (embedded at compile time)
             let prompt = match ctx.state.init_prompt_content.as_deref() {
                 Some(p) if !p.trim().is_empty() => p.to_string(),
                 _ => {
@@ -630,30 +634,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             Ok(())
         }
 
-        id => {
-            // Custom command fallback
-            if let Some(cmd) = ctx.state.custom_commands.iter().find(|c| c.id == id) {
-                if cmd.content.is_empty() {
-                    push_error_message(ctx.state, "Custom command file is empty.", None);
-                } else {
-                    ctx.state.messages.push(Message::info(
-                        cmd.content.clone(),
-                        Some(Style::default().fg(Color::DarkGray)),
-                    ));
-                    let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
-                        cmd.content.clone(),
-                        ctx.state.shell_tool_calls.clone(),
-                        Vec::new(),
-                    ));
-                    ctx.state.shell_tool_calls = None;
-                    crate::services::message::invalidate_message_lines_cache(ctx.state);
-                }
-                ctx.state.text_area.set_text("");
-                ctx.state.show_helper_dropdown = false;
-                return Ok(());
-            }
-            Err(format!("Unknown command: {}", command_id))
-        }
+        _ => Err(format!("Unknown command: {}", command_id)),
     }
 }
 
