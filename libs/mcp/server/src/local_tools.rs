@@ -17,9 +17,10 @@ use ignore::WalkBuilder;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
+use stakpak_shared::models::async_manifest::{AsyncManifest, PendingToolCall};
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    PendingToolCall, ProgressType, TaskPauseInfo, TaskUpdate, ToolCallResultProgress,
+    ProgressType, TaskPauseInfo, TaskUpdate, ToolCallResultProgress,
 };
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
@@ -382,7 +383,7 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
     )]
     pub async fn get_all_tasks(
         &self,
-        _ctx: RequestContext<RoleServer>,
+        ctx: RequestContext<RoleServer>,
         Parameters(GetAllTasksRequest { view: _ }): Parameters<GetAllTasksRequest>,
     ) -> Result<CallToolResult, McpError> {
         match self.get_task_manager().get_all_tasks().await {
@@ -391,6 +392,38 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                     return Ok(CallToolResult::success(vec![Content::text(
                         "No background tasks found.",
                     )]));
+                }
+
+                // Send progress notifications for any paused tasks so the TUI
+                // caches their pause_info for the approval display.
+                let paused_updates: Vec<TaskUpdate> = tasks
+                    .iter()
+                    .filter(|t| {
+                        matches!(t.status, stakpak_shared::task_manager::TaskStatus::Paused)
+                    })
+                    .map(Self::build_task_update)
+                    .collect();
+
+                if !paused_updates.is_empty() {
+                    let progress_id = uuid::Uuid::new_v4();
+                    let _ = ctx
+                        .peer
+                        .notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 100.0,
+                            total: Some(100.0),
+                            message: Some(
+                                serde_json::to_string(&ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: String::new(),
+                                    progress_type: Some(ProgressType::TaskWait),
+                                    task_updates: Some(paused_updates),
+                                    progress: Some(100.0),
+                                })
+                                .unwrap_or_default(),
+                            ),
+                        })
+                        .await;
                 }
 
                 // Create markdown table format
@@ -563,7 +596,7 @@ Use this tool to check the progress and results of long-running background tasks
     )]
     pub async fn get_task_details(
         &self,
-        _ctx: RequestContext<RoleServer>,
+        ctx: RequestContext<RoleServer>,
         Parameters(GetTaskDetailsRequest { task_id }): Parameters<GetTaskDetailsRequest>,
     ) -> Result<CallToolResult, McpError> {
         match self
@@ -578,14 +611,52 @@ Use this tool to check the progress and results of long-running background tasks
                     "N/A".to_string()
                 };
 
+                // If the task is paused, send a progress notification so the TUI
+                // caches the pause_info (pending tool calls) for the approval display.
+                // Without this, only wait_for_tasks populates the cache and
+                // resume_subagent_task shows a generic "Resume subagent task" message.
+                if matches!(
+                    task_info.status,
+                    stakpak_shared::task_manager::TaskStatus::Paused
+                ) {
+                    let task_update = Self::build_task_update(&task_info);
+                    let progress_id = uuid::Uuid::new_v4();
+                    let _ = ctx
+                        .peer
+                        .notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 100.0,
+                            total: Some(100.0),
+                            message: Some(
+                                serde_json::to_string(&ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: String::new(),
+                                    progress_type: Some(ProgressType::TaskWait),
+                                    task_updates: Some(vec![task_update]),
+                                    progress: Some(100.0),
+                                })
+                                .unwrap_or_default(),
+                            ),
+                        })
+                        .await;
+                }
+
+                // Try to parse output as AsyncManifest (subagent JSON output)
+                // If successful, format it in a human/LLM-friendly way
                 let output_str = if let Some(ref output) = task_info.output {
-                    match handle_large_output(output, "task.output", 300, false) {
-                        Ok(result) => result,
-                        Err(e) => {
-                            return Ok(CallToolResult::error(vec![
-                                Content::text("OUTPUT_HANDLING_ERROR"),
-                                Content::text(format!("Failed to handle task output: {}", e)),
-                            ]));
+                    if let Some(manifest) = AsyncManifest::try_parse(output) {
+                        // Subagent output - use Display impl for LLM-friendly formatting
+                        manifest.to_string()
+                    } else {
+                        // Regular task output - use standard handling
+                        match handle_large_output(output, "task.output", 300, false) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                return Ok(CallToolResult::error(vec![
+                                    Content::text("OUTPUT_HANDLING_ERROR"),
+                                    Content::text(format!("Failed to handle task output: {}", e)),
+                                ]));
+                            }
                         }
                     }
                 } else {
@@ -593,13 +664,12 @@ Use this tool to check the progress and results of long-running background tasks
                 };
 
                 let output = format!(
-                    "# Task Details: {}\n\nStatus: {:?}\nTask ID: {}\nStarted: {}\nDuration: {}\nCommand: \n```\n{}\n```\n\n## Output:\n```\n{}\n```",
+                    "# Task Details: {}\n\nStatus: {:?}\nTask ID: {}\nStarted: {}\nDuration: {}\n\n## Output:\n{}",
                     task_info.id,
                     task_info.status,
                     task_info.id,
                     task_info.start_time.format("%Y-%m-%d %H:%M:%S UTC"),
                     duration_str,
-                    task_info.command,
                     output_str
                 );
 
@@ -2652,6 +2722,78 @@ SAFETY NOTES:
 
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
+    /// Build a TaskUpdate from a TaskInfo, extracting pause_info from raw_output if present.
+    /// Used by both get_task_details and wait_for_tasks_with_streaming to populate
+    /// the TUI's subagent_pause_info cache.
+    fn build_task_update(task_info: &TaskInfo) -> TaskUpdate {
+        let duration_secs = task_info.duration.map(|d| d.as_secs_f64());
+        let output_preview = task_info.output.as_ref().and_then(|o| {
+            let lines: Vec<&str> = o.lines().collect();
+            if lines.is_empty() {
+                None
+            } else {
+                lines.iter().rev().find(|l| !l.is_empty()).map(|l| {
+                    if l.len() > 50 {
+                        format!("{}...", &l[..50])
+                    } else {
+                        l.to_string()
+                    }
+                })
+            }
+        });
+
+        let pause_info = task_info.pause_info.as_ref().and_then(|pi| {
+            pi.raw_output.as_ref().and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()
+                    .and_then(|json| {
+                        let agent_message = json
+                            .get("agent_message")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+
+                        let pending_tool_calls = json
+                            .get("pause_reason")
+                            .and_then(|pr| pr.get("pending_tool_calls"))
+                            .and_then(|ptc| ptc.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|tc| {
+                                        Some(PendingToolCall {
+                                            id: tc.get("id")?.as_str()?.to_string(),
+                                            name: tc.get("name")?.as_str()?.to_string(),
+                                            arguments: tc
+                                                .get("arguments")
+                                                .cloned()
+                                                .unwrap_or(serde_json::Value::Null),
+                                        })
+                                    })
+                                    .collect()
+                            });
+
+                        if agent_message.is_some() || pending_tool_calls.is_some() {
+                            Some(TaskPauseInfo {
+                                agent_message,
+                                pending_tool_calls,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+            })
+        });
+
+        TaskUpdate {
+            task_id: task_info.id.clone(),
+            status: format!("{:?}", task_info.status),
+            description: task_info.description.clone(),
+            duration_secs,
+            output_preview,
+            is_target: true,
+            pause_info,
+        }
+    }
+
     async fn wait_for_tasks_with_streaming(
         &self,
         task_ids: &[String],
@@ -2710,77 +2852,7 @@ SAFETY NOTES:
                 let task_updates: Vec<TaskUpdate> = all_tasks
                     .iter()
                     .filter(|t| task_ids.contains(&t.id))
-                    .map(|t| {
-                        let duration_secs = t.duration.map(|d| d.as_secs_f64());
-                        let output_preview = t.output.as_ref().and_then(|o| {
-                            let lines: Vec<&str> = o.lines().collect();
-                            if lines.is_empty() {
-                                None
-                            } else {
-                                // Get last non-empty line, truncated
-                                lines.iter().rev().find(|l| !l.is_empty()).map(|l| {
-                                    if l.len() > 50 {
-                                        format!("{}...", &l[..50])
-                                    } else {
-                                        l.to_string()
-                                    }
-                                })
-                            }
-                        });
-
-                        // Extract pause info if task is paused
-                        let pause_info = t.pause_info.as_ref().and_then(|pi| {
-                            pi.raw_output.as_ref().and_then(|raw| {
-                                // Parse the JSON output to extract agent_message and pending_tool_calls
-                                serde_json::from_str::<serde_json::Value>(raw)
-                                    .ok()
-                                    .and_then(|json| {
-                                        let agent_message = json
-                                            .get("agent_message")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.to_string());
-
-                                        let pending_tool_calls = json
-                                            .get("pause_reason")
-                                            .and_then(|pr| pr.get("pending_tool_calls"))
-                                            .and_then(|ptc| ptc.as_array())
-                                            .map(|arr| {
-                                                arr.iter()
-                                                    .filter_map(|tc| {
-                                                        Some(PendingToolCall {
-                                                            id: tc.get("id")?.as_str()?.to_string(),
-                                                            name: tc
-                                                                .get("name")?
-                                                                .as_str()?
-                                                                .to_string(),
-                                                            arguments: tc.get("arguments").cloned(),
-                                                        })
-                                                    })
-                                                    .collect()
-                                            });
-
-                                        if agent_message.is_some() || pending_tool_calls.is_some() {
-                                            Some(TaskPauseInfo {
-                                                agent_message,
-                                                pending_tool_calls,
-                                            })
-                                        } else {
-                                            None
-                                        }
-                                    })
-                            })
-                        });
-
-                        TaskUpdate {
-                            task_id: t.id.clone(),
-                            status: format!("{:?}", t.status),
-                            description: t.description.clone(),
-                            duration_secs,
-                            output_preview,
-                            is_target: true,
-                            pause_info,
-                        }
-                    })
+                    .map(Self::build_task_update)
                     .collect();
 
                 // Also include fallback message for backwards compatibility

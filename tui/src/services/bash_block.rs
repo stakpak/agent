@@ -2474,18 +2474,23 @@ pub fn render_task_wait_block(
             if let Some(tool_calls) = &pause_info.pending_tool_calls {
                 for tc in tool_calls {
                     // Format: "  → tool_name(args_preview)"
-                    let args_preview = tc
-                        .arguments
-                        .as_ref()
-                        .map(|args| {
-                            let args_str = args.to_string();
-                            if args_str.len() > 40 {
-                                format!("{}…", &args_str[..40])
-                            } else {
-                                args_str
-                            }
-                        })
-                        .unwrap_or_default();
+                    let args_preview = {
+                        let args_str = tc.arguments.to_string();
+                        if args_str == "null" || args_str == "{}" {
+                            String::new()
+                        } else if args_str.len() > 40 {
+                            // Find a valid UTF-8 boundary near 40 chars
+                            let truncate_at = args_str
+                                .char_indices()
+                                .take_while(|(i, _)| *i < 40)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(0);
+                            format!("{}…", &args_str[..truncate_at])
+                        } else {
+                            args_str
+                        }
+                    };
 
                     let tool_display = if args_preview.is_empty() {
                         format!("→ {}", tc.name)
@@ -2689,8 +2694,9 @@ pub fn render_subagent_resume_pending_block<'a>(
                     ]));
 
                     // Show arguments in a readable format
-                    if let Some(args) = &tc.arguments {
-                        let formatted_args = format_tool_arguments_readable(args, inner_width - 6);
+                    if !tc.arguments.is_null() {
+                        let formatted_args =
+                            format_tool_arguments_readable(&tc.arguments, inner_width - 6);
                         for arg_line in formatted_args {
                             let arg_display_width = calculate_display_width(&arg_line);
                             let arg_padding = inner_width.saturating_sub(arg_display_width + 4);
