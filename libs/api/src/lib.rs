@@ -12,6 +12,7 @@ pub mod client;
 pub mod error;
 pub mod local;
 pub mod models;
+pub mod predefined_commands;
 pub mod prompts;
 pub mod stakpak;
 pub mod storage;

@@ -200,33 +200,33 @@ const MAX_CUSTOM_COMMAND_BYTES: u64 = 64 * 1024;
 /// File prefix for custom command markdown files (on disk). Aligns with CMD_PREFIX: cmd_*.md → /cmd:*
 const CMD_FILE_PREFIX: &str = "cmd_";
 
-/// Slash prefix for user commands in the TUI (display and id)
+/// Slash prefix for user-created commands in the TUI (display and id)
 pub const CMD_PREFIX: &str = "/cmd:";
 
 /// Scan for custom commands from four sources (in order of precedence):
-/// 1. Built-in commands: Embedded in binary (lowest precedence)
-/// 2. Personal files: ~/.stakpak/commands/cmd_*.md
-/// 3. Project files: ./.stakpak/commands/cmd_*.md (overrides personal)
-/// 4. Config definitions: config.definitions file references (highest precedence)
+/// 1. Predefined commands: Embedded in binary as /* (e.g., /security-review) - lowest precedence
+/// 2. Personal files: ~/.stakpak/commands/cmd_*.md as /cmd:*
+/// 3. Project files: ./.stakpak/commands/cmd_*.md as /cmd:* (overrides personal)
+/// 4. Config definitions: config.definitions file references as /cmd:* (highest precedence)
 ///
-/// Files must follow the naming convention: cmd_{command-name}.md
-/// Example: cmd_create-component.md → /cmd:create-component
+/// Predefined commands use no prefix (like /init), user commands use /cmd: prefix.
+/// User can override predefined by creating cmd_security-review.md → /cmd:security-review
 ///
 /// If `commands_config` is `Some`, filtering is applied based on include/exclude patterns.
-/// Filters apply to all sources.
+/// Filters apply to predefined and user commands (but NOT to /init, /help, etc.).
 pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<CustomCommand> {
     let mut by_id: HashMap<String, CustomCommand> = HashMap::new();
 
-    // 1. Load built-in commands (lowest precedence)
-    for (name, content) in stakpak_api::prompts::BUILTIN_COMMANDS {
-        // Apply filters to built-in commands too
+    // 1. Load predefined commands (lowest precedence, no prefix like /init)
+    for (name, content) in stakpak_api::predefined_commands::PREDEFINED_COMMANDS {
+        // Apply filters to predefined commands
         if let Some(config) = commands_config
             && !config.should_load(name)
         {
             continue;
         }
 
-        let id = format!("{}{}", CMD_PREFIX, name);
+        let id = format!("/{}", name); // No prefix, like /init
         let description = extract_markdown_title(content).unwrap_or_else(|| name.to_string());
 
         by_id.insert(
@@ -239,7 +239,8 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
         );
     }
 
-    // 2. Load from files: personal first, then project (project overwrites personal, both override built-in)
+    // 2. Load from files: personal first, then project (project overwrites personal)
+    // These use /cmd: prefix (user-created)
     let personal = dirs::home_dir().map(|h| h.join(".stakpak").join("commands"));
     let project = std::env::current_dir()
         .ok()
