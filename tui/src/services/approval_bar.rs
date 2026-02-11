@@ -701,7 +701,11 @@ mod tests {
         // 50 - 6 (borders/padding) = 44 usable width
         // ~2-3 buttons per row, so 8 buttons = 3-4 rows
         let height = bar.calculate_height(50);
-        assert!(height > 5, "Expected height > 5 for wrapped rows, got {}", height);
+        assert!(
+            height > 5,
+            "Expected height > 5 for wrapped rows, got {}",
+            height
+        );
     }
 
     #[test]
