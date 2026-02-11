@@ -203,7 +203,6 @@ fn resolved_profile_config_merges_all_profile_defaults() {
             collect_telemetry: Some(true),
             editor: Some("nano".into()),
         },
-        commands: None,
     };
 
     config.profiles.insert(
@@ -505,37 +504,37 @@ fn list_available_profiles_reads_existing_config() {
 
 #[test]
 fn test_glob_pattern_matching() {
-    assert!(RulebookConfig::matches_pattern(
+    assert!(matches_pattern(
         "https://rules.stakpak.dev/security/auth",
         "https://rules.stakpak.dev/security/*"
     ));
 
-    assert!(RulebookConfig::matches_pattern(
+    assert!(matches_pattern(
         "https://rules.stakpak.dev/security/network",
         "https://rules.stakpak.dev/security/*"
     ));
 
-    assert!(!RulebookConfig::matches_pattern(
+    assert!(!matches_pattern(
         "https://rules.stakpak.dev/performance/v1",
         "https://rules.stakpak.dev/security/*"
     ));
 
-    assert!(RulebookConfig::matches_pattern(
+    assert!(matches_pattern(
         "https://rules.stakpak.dev/performance/v2",
         "https://rules.stakpak.dev/performance/v2"
     ));
 
-    assert!(RulebookConfig::matches_pattern(
+    assert!(matches_pattern(
         "https://internal.company.com/team1/stable",
         "https://internal.company.com/*/stable"
     ));
 
-    assert!(!RulebookConfig::matches_pattern(
+    assert!(!matches_pattern(
         "https://internal.company.com/team1/beta",
         "https://internal.company.com/*/stable"
     ));
 
-    assert!(RulebookConfig::matches_pattern(
+    assert!(matches_pattern(
         "https://rules.stakpak.dev/performance/v1",
         "https://rules.stakpak.dev/performance/v?"
     ));

@@ -94,7 +94,6 @@ impl AppConfig {
             config_path,
             config_file.settings,
             profile,
-            config_file.commands,
         ))
     }
 
@@ -141,7 +140,6 @@ impl AppConfig {
         path: PathBuf,
         settings: Settings,
         mut profile_config: ProfileConfig,
-        commands: Option<CommandsConfig>,
     ) -> Self {
         // Migrate any legacy provider fields to the unified providers HashMap
         profile_config.migrate_legacy_providers();
@@ -173,7 +171,7 @@ impl AppConfig {
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
-            commands,
+            commands: profile_config.commands,
         }
     }
 
@@ -850,6 +848,7 @@ impl From<AppConfig> for ProfileConfig {
             allowed_tools: config.allowed_tools,
             auto_approve: config.auto_approve,
             rulebooks: config.rulebooks,
+            commands: config.commands,
             warden: config.warden,
             provider: None,
             providers: config.providers,
@@ -874,7 +873,6 @@ impl From<ConfigFile> for AppConfig {
             PathBuf::from(STAKPAK_CONFIG_PATH),
             file.settings,
             profile,
-            file.commands,
         )
     }
 }

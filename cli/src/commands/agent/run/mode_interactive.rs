@@ -211,6 +211,7 @@ pub async fn run_interactive(
                 .map(|c| stakpak_tui::CommandsConfig {
                     include: c.include.clone(),
                     exclude: c.exclude.clone(),
+                    definitions: c.definitions.clone(),
                 });
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;

@@ -42,6 +42,41 @@ pub struct CommandsConfig {
     pub include: Option<Vec<String>>,
     /// Exclude specific commands by name (supports glob patterns, empty = none excluded)
     pub exclude: Option<Vec<String>>,
+    /// Inline command definitions: command name → markdown content
+    pub definitions: std::collections::HashMap<String, String>,
+}
+
+impl CommandsConfig {
+    /// Check if a command should be loaded based on include/exclude patterns.
+    pub fn should_load(&self, command_name: &str) -> bool {
+        self.matches_include(command_name) && self.matches_exclude(command_name)
+    }
+
+    fn matches_include(&self, name: &str) -> bool {
+        match &self.include {
+            Some(patterns) if !patterns.is_empty() => {
+                patterns.iter().any(|p| Self::matches_pattern(name, p))
+            }
+            _ => true, // No include filter = allow all
+        }
+    }
+
+    fn matches_exclude(&self, name: &str) -> bool {
+        match &self.exclude {
+            Some(patterns) if !patterns.is_empty() => {
+                !patterns.iter().any(|p| Self::matches_pattern(name, p))
+            }
+            _ => true, // No exclude filter = exclude none
+        }
+    }
+
+    fn matches_pattern(value: &str, pattern: &str) -> bool {
+        if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+            glob_pattern.matches(value)
+        } else {
+            value == pattern
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

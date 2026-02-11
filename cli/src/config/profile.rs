@@ -7,6 +7,7 @@ use stakpak_shared::models::integrations::openai::OpenAIConfig;
 use stakpak_shared::models::llm::ProviderConfig;
 use std::collections::HashMap;
 
+use super::commands::CommandsConfig;
 use super::rulebook::RulebookConfig;
 use super::types::{OldAppConfig, ProviderType};
 use super::warden::WardenConfig;
@@ -49,6 +50,8 @@ pub struct ProfileConfig {
     pub auto_approve: Option<Vec<String>>,
     /// Rulebook filtering configuration
     pub rulebooks: Option<RulebookConfig>,
+    /// Custom commands filtering configuration
+    pub commands: Option<CommandsConfig>,
     /// Warden (runtime security) configuration
     pub warden: Option<WardenConfig>,
 
@@ -310,6 +313,10 @@ impl ProfileConfig {
                 .rulebooks
                 .clone()
                 .or_else(|| other.and_then(|config| config.rulebooks.clone())),
+            commands: self
+                .commands
+                .clone()
+                .or_else(|| other.and_then(|config| config.commands.clone())),
             warden: self
                 .warden
                 .clone()

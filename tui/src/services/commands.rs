@@ -203,48 +203,20 @@ const CMD_FILE_PREFIX: &str = "cmd_";
 /// Slash prefix for user commands in the TUI (display and id)
 pub const CMD_PREFIX: &str = "/cmd:";
 
-/// Check if a command name should be loaded based on include/exclude rules.
-fn should_load_command(config: &CommandsConfig, command_name: &str) -> bool {
-    let matches_include = match &config.include {
-        Some(patterns) if !patterns.is_empty() => patterns
-            .iter()
-            .any(|p| matches_glob_pattern(command_name, p)),
-        _ => true, // No include filter = allow all
-    };
-
-    let matches_exclude = match &config.exclude {
-        Some(patterns) if !patterns.is_empty() => patterns
-            .iter()
-            .any(|p| matches_glob_pattern(command_name, p)),
-        _ => false, // No exclude filter = exclude none
-    };
-
-    matches_include && !matches_exclude
-}
-
-/// Check if a name matches a glob pattern.
-fn matches_glob_pattern(name: &str, pattern: &str) -> bool {
-    if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-        glob_pattern.matches(name)
-    } else {
-        // Fallback to exact match if glob pattern is invalid
-        name == pattern
-    }
-}
-
-/// Scan project and personal commands directories for cmd_*.md files.
-/// Project: .stakpak/commands/ (relative to current_dir)
-/// Personal: ~/.stakpak/commands/
-/// Project overrides personal when same command exists.
+/// Scan for custom commands from three sources (in order of precedence):
+/// 1. Personal files: ~/.stakpak/commands/cmd_*.md
+/// 2. Project files: ./.stakpak/commands/cmd_*.md (overrides personal)
+/// 3. Inline definitions: config.definitions (overrides files)
 ///
 /// Files must follow the naming convention: cmd_{command-name}.md
 /// Example: cmd_create-component.md → /cmd:create-component
 ///
 /// If `commands_config` is `Some`, filtering is applied based on include/exclude patterns.
+/// Filters apply to both file-based and inline commands.
 pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<CustomCommand> {
     let mut by_id: HashMap<String, CustomCommand> = HashMap::new();
 
-    // Personal first, then project (project overwrites)
+    // 1. Load from files: personal first, then project (project overwrites personal)
     let personal = dirs::home_dir().map(|h| h.join(".stakpak").join("commands"));
     let project = std::env::current_dir()
         .ok()
@@ -287,7 +259,7 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
 
             // Apply commands config filter if present
             if let Some(config) = commands_config
-                && !should_load_command(config, command_name)
+                && !config.should_load(command_name)
             {
                 continue;
             }
@@ -319,6 +291,34 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
                 content: content.trim().to_string(),
             };
             by_id.insert(id, cmd);
+        }
+    }
+
+    // 2. Load inline definitions (override file-based commands)
+    if let Some(config) = commands_config {
+        for (name, content) in &config.definitions {
+            // Apply filters to inline commands too
+            if !config.should_load(name) {
+                continue;
+            }
+
+            let content = content.trim();
+            if content.is_empty() {
+                continue;
+            }
+
+            let id = format!("{}{}", CMD_PREFIX, name);
+            let description = extract_markdown_title(content).unwrap_or_else(|| name.to_string());
+
+            // Inline overrides file-based
+            by_id.insert(
+                id.clone(),
+                CustomCommand {
+                    id,
+                    description,
+                    content: content.to_string(),
+                },
+            );
         }
     }
 

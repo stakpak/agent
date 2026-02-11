@@ -3,6 +3,18 @@
 use serde::{Deserialize, Serialize};
 use stakpak_api::models::ListRuleBook;
 
+/// Check if a string matches a glob pattern.
+/// Supports: `*` (any chars), `?` (single char), `[abc]` (char class).
+/// Falls back to exact match if pattern is invalid.
+pub(crate) fn matches_pattern(value: &str, pattern: &str) -> bool {
+    if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+        glob_pattern.matches(value)
+    } else {
+        // Fallback to exact match if glob pattern is invalid
+        value == pattern
+    }
+}
+
 /// Configuration for filtering which rulebooks are loaded.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
@@ -37,7 +49,7 @@ impl RulebookConfig {
         match &self.include {
             Some(patterns) if !patterns.is_empty() => patterns
                 .iter()
-                .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern)),
+                .any(|pattern| matches_pattern(&rulebook.uri, pattern)),
             _ => true,
         }
     }
@@ -46,7 +58,7 @@ impl RulebookConfig {
         match &self.exclude {
             Some(patterns) if !patterns.is_empty() => !patterns
                 .iter()
-                .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern)),
+                .any(|pattern| matches_pattern(&rulebook.uri, pattern)),
             _ => true,
         }
     }
@@ -66,17 +78,6 @@ impl RulebookConfig {
         match &self.exclude_tags {
             Some(tags) if !tags.is_empty() => !tags.iter().any(|tag| rulebook.tags.contains(tag)),
             _ => true,
-        }
-    }
-
-    /// Check if a URI matches a pattern (supports wildcards).
-    pub(crate) fn matches_pattern(uri: &str, pattern: &str) -> bool {
-        // Use glob pattern matching for better wildcard support
-        if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-            glob_pattern.matches(uri)
-        } else {
-            // Fallback to exact match if glob pattern is invalid
-            uri == pattern
         }
     }
 }

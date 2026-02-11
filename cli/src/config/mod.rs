@@ -33,6 +33,8 @@ pub use types::ProviderType;
 #[allow(unused_imports)]
 pub use rulebook::RulebookConfig;
 #[allow(unused_imports)]
+pub(crate) use rulebook::matches_pattern;
+#[allow(unused_imports)]
 pub use types::Settings;
 #[allow(unused_imports)]
 pub use warden::WardenConfig;
