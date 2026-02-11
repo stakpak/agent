@@ -35,6 +35,19 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Default placeholder string used to replace trimmed message content during
+/// context budget reduction.
+///
+/// When a context manager trims old messages to stay within the context window,
+/// it replaces their text content with this placeholder. The caching layer can
+/// then detect these placeholders via [`AnthropicCacheConfig::trim_boundary_hint`]
+/// to place a cache breakpoint at the trim boundary, anchoring the stable
+/// trimmed prefix for cache reuse.
+///
+/// This constant is the **single source of truth** — used by context managers
+/// for trimming and by the caching layer for trim boundary detection.
+pub const TRIMMED_CONTENT_PLACEHOLDER: &str = "[trimmed]";
+
 /// Caching strategy configuration
 ///
 /// Controls how cache breakpoints are applied to requests.
@@ -83,9 +96,21 @@ pub enum CacheStrategy {
 /// |-----------|-------------|-------|
 /// | Last tool | 1 | Caches ALL tools (they form a prefix) |
 /// | Last system | 1 | Caches ALL system messages |
-/// | Tail messages | 2 | Last N non-system messages |
+/// | Trim boundary | 0–1 | Anchors stable trimmed prefix (when hint is set) |
+/// | Tail messages | 1–2 | Last N non-system messages (reduced by 1 when trim boundary is used) |
 ///
 /// Total: 4 breakpoints (Anthropic's maximum)
+///
+/// # Trim Boundary Hint
+///
+/// When `trim_boundary_hint` is set, the caching layer scans the final
+/// (post-merge, post-sanitize) message array for the **last** message whose
+/// text content consists entirely of the hint string. A cache breakpoint is
+/// placed on that message, anchoring the stable trimmed prefix so it can be
+/// read from cache on subsequent calls instead of re-written.
+///
+/// This consumes one breakpoint from the tail budget. When no message matches
+/// the hint, the breakpoint is not used and the full tail budget is preserved.
 ///
 /// # Example
 ///
@@ -100,6 +125,13 @@ pub enum CacheStrategy {
 ///     cache_tools: false,
 ///     cache_system: true,
 ///     tail_message_count: 3,
+///     ..Default::default()
+/// };
+///
+/// // With trim boundary hint: anchor trimmed prefix for cache reuse
+/// let config = AnthropicCacheConfig {
+///     trim_boundary_hint: Some("[trimmed]".to_string()),
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -121,6 +153,20 @@ pub struct AnthropicCacheConfig {
     /// Default: `2` (uses remaining budget after tools/system)
     #[serde(default = "default_tail_count")]
     pub tail_message_count: usize,
+
+    /// Hint string for detecting the trim boundary in the message array.
+    ///
+    /// When set, the caching layer scans the final message array (after merge
+    /// and sanitization) for the last message whose text content consists
+    /// entirely of this string. A cache breakpoint is placed on that message
+    /// to anchor the stable trimmed prefix for cache reuse.
+    ///
+    /// This consumes one breakpoint from the tail budget. If no message
+    /// matches, the hint is ignored and the full tail budget is used.
+    ///
+    /// Default: `None` (no trim boundary detection)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim_boundary_hint: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -137,6 +183,7 @@ impl Default for AnthropicCacheConfig {
             cache_tools: true,
             cache_system: true,
             tail_message_count: 2,
+            trim_boundary_hint: None,
         }
     }
 }
@@ -168,12 +215,43 @@ impl CacheStrategy {
             cache_tools,
             cache_system,
             tail_message_count: tail_count,
+            trim_boundary_hint: None,
         })
     }
 
     /// Disable automatic caching
     pub fn none() -> Self {
         Self::None
+    }
+
+    /// Set the trim boundary hint on this strategy.
+    ///
+    /// When set, the Anthropic caching layer will scan the final message array
+    /// for the last message whose text content consists entirely of this string,
+    /// and place a cache breakpoint there to anchor the stable trimmed prefix.
+    ///
+    /// Only applies to `Auto` and `Anthropic` variants. No-op for `None`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::CacheStrategy;
+    ///
+    /// let strategy = CacheStrategy::auto()
+    ///     .with_trim_boundary_hint("[trimmed]");
+    /// ```
+    pub fn with_trim_boundary_hint(self, hint: impl Into<String>) -> Self {
+        match self {
+            Self::Auto => Self::Anthropic(AnthropicCacheConfig {
+                trim_boundary_hint: Some(hint.into()),
+                ..AnthropicCacheConfig::default()
+            }),
+            Self::Anthropic(mut config) => {
+                config.trim_boundary_hint = Some(hint.into());
+                Self::Anthropic(config)
+            }
+            Self::None => Self::None,
+        }
     }
 
     /// Check if caching is enabled
@@ -204,6 +282,9 @@ impl CacheStrategy {
                     count += 1;
                 }
                 if config.cache_system && has_system {
+                    count += 1;
+                }
+                if config.trim_boundary_hint.is_some() {
                     count += 1;
                 }
                 count += config.tail_message_count;
@@ -305,5 +386,67 @@ mod tests {
         assert!(config.cache_tools);
         assert!(config.cache_system);
         assert_eq!(config.tail_message_count, 2);
+        assert!(config.trim_boundary_hint.is_none());
+    }
+
+    #[test]
+    fn test_with_trim_boundary_hint_on_auto() {
+        let strategy = CacheStrategy::auto().with_trim_boundary_hint("[trimmed]");
+        let config = strategy.to_anthropic_config().unwrap();
+        assert_eq!(config.trim_boundary_hint.as_deref(), Some("[trimmed]"));
+        // Should preserve Auto defaults
+        assert!(config.cache_tools);
+        assert!(config.cache_system);
+        assert_eq!(config.tail_message_count, 2);
+    }
+
+    #[test]
+    fn test_with_trim_boundary_hint_on_custom() {
+        let strategy =
+            CacheStrategy::anthropic(false, true, 3).with_trim_boundary_hint("[redacted]");
+        let config = strategy.to_anthropic_config().unwrap();
+        assert_eq!(config.trim_boundary_hint.as_deref(), Some("[redacted]"));
+        // Should preserve custom settings
+        assert!(!config.cache_tools);
+        assert!(config.cache_system);
+        assert_eq!(config.tail_message_count, 3);
+    }
+
+    #[test]
+    fn test_with_trim_boundary_hint_on_none_is_noop() {
+        let strategy = CacheStrategy::none().with_trim_boundary_hint("[trimmed]");
+        assert_eq!(strategy, CacheStrategy::None);
+        assert!(strategy.to_anthropic_config().is_none());
+    }
+
+    #[test]
+    fn test_max_breakpoint_count_with_trim_hint() {
+        // Auto + trim hint: 1 (tools) + 1 (system) + 1 (trim) + 2 (tail) = 5, capped at 4
+        let strategy = CacheStrategy::auto().with_trim_boundary_hint("[trimmed]");
+        assert_eq!(strategy.max_breakpoint_count(true, true), 4);
+
+        // No tools + trim hint: 0 + 1 (system) + 1 (trim) + 2 (tail) = 4
+        assert_eq!(strategy.max_breakpoint_count(false, true), 4);
+    }
+
+    #[test]
+    fn test_serialization_with_trim_boundary_hint() {
+        let strategy = CacheStrategy::auto().with_trim_boundary_hint("[trimmed]");
+        let json = serde_json::to_string(&strategy).unwrap();
+        assert!(json.contains("trim_boundary_hint"));
+        assert!(json.contains("[trimmed]"));
+
+        let deserialized: CacheStrategy = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, strategy);
+    }
+
+    #[test]
+    fn test_deserialization_without_trim_boundary_hint() {
+        // Existing configs without the field should deserialize with None
+        let json =
+            r#"{"type":"anthropic","cache_tools":true,"cache_system":true,"tail_message_count":2}"#;
+        let strategy: CacheStrategy = serde_json::from_str(json).unwrap();
+        let config = strategy.to_anthropic_config().unwrap();
+        assert!(config.trim_boundary_hint.is_none());
     }
 }

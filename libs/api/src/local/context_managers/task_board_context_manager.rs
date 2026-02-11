@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use stakai::TRIMMED_CONTENT_PLACEHOLDER;
 use stakpak_shared::models::{
     integrations::openai::{ChatMessage, MessageContent},
     llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTool},
@@ -129,7 +130,7 @@ impl TaskBoardContextManager {
     /// Trim a single message's content, replacing it with a placeholder.
     /// Preserves message structure (role, tool_call_ids) for API validity.
     fn trim_message(msg: &mut LLMMessage) {
-        let placeholder = "[trimmed]";
+        let placeholder = TRIMMED_CONTENT_PLACEHOLDER;
         match &mut msg.content {
             LLMMessageContent::String(s) => {
                 *s = placeholder.to_string();
@@ -855,7 +856,7 @@ mod tests {
             match &msg.content {
                 LLMMessageContent::String(s) => {
                     assert_ne!(
-                        s, "[trimmed]",
+                        s, TRIMMED_CONTENT_PLACEHOLDER,
                         "Messages after trim boundary should not be trimmed"
                     );
                 }
@@ -867,7 +868,10 @@ mod tests {
         let first_assistant = &result[1]; // index 1 is assistant
         match &first_assistant.content {
             LLMMessageContent::String(s) => {
-                assert_eq!(s, "[trimmed]", "Early assistant messages should be trimmed");
+                assert_eq!(
+                    s, TRIMMED_CONTENT_PLACEHOLDER,
+                    "Early assistant messages should be trimmed"
+                );
             }
             _ => {}
         }
@@ -876,7 +880,10 @@ mod tests {
         let first_user = &result[0]; // index 0 is user
         match &first_user.content {
             LLMMessageContent::String(s) => {
-                assert_ne!(s, "[trimmed]", "User messages should never be trimmed");
+                assert_ne!(
+                    s, TRIMMED_CONTENT_PLACEHOLDER,
+                    "User messages should never be trimmed"
+                );
             }
             _ => {}
         }
@@ -985,10 +992,12 @@ mod tests {
     /// Helper: check if a message has been trimmed
     fn is_trimmed(msg: &LLMMessage) -> bool {
         match &msg.content {
-            LLMMessageContent::String(s) => s == "[trimmed]",
+            LLMMessageContent::String(s) => s == TRIMMED_CONTENT_PLACEHOLDER,
             LLMMessageContent::List(parts) => parts.iter().all(|p| match p {
-                LLMMessageTypedContent::Text { text } => text == "[trimmed]",
-                LLMMessageTypedContent::ToolResult { content, .. } => content == "[trimmed]",
+                LLMMessageTypedContent::Text { text } => text == TRIMMED_CONTENT_PLACEHOLDER,
+                LLMMessageTypedContent::ToolResult { content, .. } => {
+                    content == TRIMMED_CONTENT_PLACEHOLDER
+                }
                 LLMMessageTypedContent::ToolCall { .. } => true, // tool calls are never trimmed
                 LLMMessageTypedContent::Image { .. } => true,
             }),

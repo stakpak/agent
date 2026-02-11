@@ -11,10 +11,10 @@ use crate::models::llm::{
 };
 use futures::StreamExt;
 use stakai::{
-    AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
+    AnthropicOptions, CacheStrategy, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
     Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
-    StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
+    StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage, TRIMMED_CONTENT_PLACEHOLDER,
     providers::anthropic::AnthropicConfig as StakaiAnthropicConfig, registry::ProviderRegistry,
 };
 
@@ -437,6 +437,9 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
+                    cfg = cfg.with_cache_strategy(
+                        CacheStrategy::auto().with_trim_boundary_hint(TRIMMED_CONTENT_PLACEHOLDER),
+                    );
                     Some(cfg)
                 } else if let Some(key) = api_key {
                     // API key authentication - uses x-api-key header
@@ -444,6 +447,9 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
+                    cfg = cfg.with_cache_strategy(
+                        CacheStrategy::auto().with_trim_boundary_hint(TRIMMED_CONTENT_PLACEHOLDER),
+                    );
                     Some(cfg)
                 } else {
                     None
@@ -520,12 +526,18 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
+                    cfg = cfg.with_cache_strategy(
+                        CacheStrategy::auto().with_trim_boundary_hint(TRIMMED_CONTENT_PLACEHOLDER),
+                    );
                     Some(cfg)
                 } else if let Some(key) = api_key {
                     let mut cfg = StakaiAnthropicConfig::new(key);
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
+                    cfg = cfg.with_cache_strategy(
+                        CacheStrategy::auto().with_trim_boundary_hint(TRIMMED_CONTENT_PLACEHOLDER),
+                    );
                     Some(cfg)
                 } else {
                     None
