@@ -139,7 +139,7 @@ pub enum Commands {
     /// Get current account
     Account,
 
-    /// Start a new session with init.md prompt loaded and sent automatically
+    /// Analyze your infrastructure
     Init,
 
     /// MCP commands
