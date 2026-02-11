@@ -472,7 +472,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
         }
 
         "/init" => {
-            // Bundled init prompt is always available (embedded at compile time)
+            //  init prompt is always available (embedded at compile time)
             let prompt = match ctx.state.init_prompt_content.as_deref() {
                 Some(p) if !p.trim().is_empty() => p.to_string(),
                 _ => {

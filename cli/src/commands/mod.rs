@@ -139,7 +139,7 @@ pub enum Commands {
     /// Get current account
     Account,
 
-    /// Analyze your infrastructure
+    /// Analyze your infrastructure setup
     Init,
 
     /// MCP commands
