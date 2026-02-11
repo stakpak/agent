@@ -28,14 +28,13 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
-
-/// Bundled infrastructure analysis prompt (embedded at compile time)
-/// analyze the infrastructure and provide a summary of the current state
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Bundled infrastructure analysis prompt for `stakpak init` (embedded at compile time).
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
 
 type ClientTaskResult = Result<
     (
@@ -196,10 +195,14 @@ pub async fn run_interactive(
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
 
-        // Use  init prompt (loaded at module level as const)
-        let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
-
+        // Only allocate init prompt string when actually needed (stakpak init)
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
+        let init_prompt_content_for_tui = if send_init_prompt_on_start {
+            Some(INIT_PROMPT.to_string())
+        } else {
+            None
+        };
+
         let custom_commands_for_tui = config.custom_commands.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;

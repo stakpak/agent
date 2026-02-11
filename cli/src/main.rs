@@ -424,9 +424,6 @@ async fn main() {
                     cli.max_steps // Use user setting or default (50)
                 };
 
-                // Ensure .stakpak is in .gitignore before running agent
-                let _ = gitignore::ensure_stakpak_in_gitignore(&config);
-
                 let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
                 let auto_approve = config.auto_approve.clone();
                 let default_model = config.get_default_model(cli.model.as_deref());

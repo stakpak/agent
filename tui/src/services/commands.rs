@@ -8,6 +8,18 @@
 //!
 //! All commands are defined here and executed through a unified executor.
 
+use std::collections::HashMap;
+
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Paragraph},
+};
+use stakpak_shared::models::llm::LLMTokenUsage;
+use tokio::sync::mpsc::Sender;
+
 use crate::app::{AppState, CustomCommand, HelperCommand, HelperEntry};
 use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
@@ -18,16 +30,6 @@ use crate::services::helper_block::{
 };
 use crate::services::message::{Message, MessageContent};
 use crate::{InputEvent, OutputEvent};
-use ratatui::{
-    Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
-};
-
-use stakpak_shared::models::llm::LLMTokenUsage;
-use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
 pub type CommandId<'a> = &'a str;
@@ -210,8 +212,7 @@ pub const CMD_PREFIX: &str = "/cmd:";
 ///
 /// If `allowlist` is `Some`, only commands whose name is in the list are returned (e.g. from global config).
 pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> {
-    let mut by_id: std::collections::HashMap<String, CustomCommand> =
-        std::collections::HashMap::new();
+    let mut by_id: HashMap<String, CustomCommand> = HashMap::new();
 
     // Personal first, then project (project overwrites)
     let personal = dirs::home_dir().map(|h| h.join(".stakpak").join("commands"));
@@ -254,17 +255,18 @@ pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> 
 
             let id = format!("{}{command_name}", CMD_PREFIX);
 
-            if let Some(list) = allowlist
-                && !list.iter().any(|n| n == command_name)
-            {
-                continue;
+            // Apply allowlist filter if present
+            if let Some(list) = allowlist {
+                if !list.iter().any(|n| n == command_name) {
+                    continue;
+                }
             }
 
-            let metadata = match std::fs::metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
+            // Size check via metadata (avoids reading large files)
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                continue;
             };
-            if !metadata.is_file() || metadata.len() > MAX_CUSTOM_COMMAND_BYTES {
+            if metadata.len() > MAX_CUSTOM_COMMAND_BYTES {
                 continue;
             }
 
@@ -390,7 +392,7 @@ fn builtin_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/init",
-            description: "analyze your infrastructure setup",
+            description: "Analyze your infrastructure setup",
         },
     ]
 }

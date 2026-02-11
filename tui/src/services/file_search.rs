@@ -426,9 +426,9 @@ pub async fn file_search_worker(
     custom_commands_allowlist: Option<Vec<String>>,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
-        // Load files if not already loaded or directory changed
+        // Load files if not already loaded (uses cache if same directory)
         if let Ok(current_dir) = std::env::current_dir() {
-            file_search.force_reload_files(&current_dir);
+            file_search.scan_directory(&current_dir);
         }
 
         // Filter helpers - only when input starts with '/' and is not empty.
