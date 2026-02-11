@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
@@ -8,6 +7,7 @@ use stakpak_shared::models::{
     integrations::openai::{ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall},
     llm::{LLMInput, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
 };
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
