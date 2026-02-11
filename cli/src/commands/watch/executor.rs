@@ -224,7 +224,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
             dir.path(),
-            "check.sh",
+            "check1.sh",
             "#!/bin/sh\necho 'context data'\nexit 0\n",
         );
 
@@ -246,7 +246,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
             dir.path(),
-            "check.sh",
+            "check2.sh",
             "#!/bin/sh\necho 'not ready'\nexit 1\n",
         );
 
@@ -267,7 +267,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
             dir.path(),
-            "check.sh",
+            "check3.sh",
             "#!/bin/sh\necho 'error occurred' >&2\nexit 2\n",
         );
 
@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_script_timeout() {
         let dir = tempdir().expect("Failed to create temp dir");
-        let script = create_script(dir.path(), "check.sh", "#!/bin/sh\nsleep 10\nexit 0\n");
+        let script = create_script(dir.path(), "check4.sh", "#!/bin/sh\nsleep 10\nexit 0\n");
 
         let result = run_check_script(&script, Duration::from_millis(100))
             .await
@@ -303,7 +303,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let script = create_script(
             dir.path(),
-            "check.sh",
+            "check5.sh",
             "#!/bin/sh\necho 'stdout message'\necho 'stderr message' >&2\nexit 0\n",
         );
 
@@ -332,7 +332,7 @@ mod tests {
     #[tokio::test]
     async fn test_non_executable() {
         let dir = tempdir().expect("Failed to create temp dir");
-        let script_path = dir.path().join("check.sh");
+        let script_path = dir.path().join("check6.sh");
 
         // Create file without execute permission
         let mut file = File::create(&script_path).expect("Failed to create script");
@@ -361,7 +361,7 @@ mod tests {
         // Generate a script that outputs a lot of data
         let script = create_script(
             dir.path(),
-            "check.sh",
+            "check7.sh",
             "#!/bin/sh\nfor i in $(seq 1 1000); do echo \"line $i\"; done\nexit 0\n",
         );
 
