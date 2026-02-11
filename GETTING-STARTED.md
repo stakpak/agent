@@ -170,6 +170,36 @@ allowed_tools = ["view", "search_docs", "create", "run_command"]
 api_key = "prod_api_key_here"
 allowed_tools = ["view", "search_docs"]  # Read-only for safety
 
+
+## Configuration
+
+### Filter Predefined Commands
+
+```toml
+[profiles.default.commands]
+include = ["security-*", "code-*"]  # Only these
+exclude = ["write-*"]               # Hide these
+
+[profiles.readonly.commands]
+exclude = ["security-*"]  # Hide security commands in readonly
+```
+
+### Override Predefined with Custom File
+
+```toml
+# ~/.stakpak/config.toml
+[profiles.default.commands.definitions]
+# Your custom version becomes /cmd:security-review
+security-review = "~/my-prompts/custom-security.md"
+```
+
+---
+
+
+
+
+
+
 [profiles.development]
 api_key = "dev_api_key_here"
 allowed_tools = ["view", "search_docs", "create", "str_replace", "run_command"]
