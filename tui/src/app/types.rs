@@ -129,7 +129,7 @@ pub enum HelperEntry {
     Custom {
         /// The command ID used for execution (e.g., "/security-review")
         command: String,
-        /// The display string shown in dropdown (e.g., "/usercmd/security-review")
+        /// The display string shown in dropdown (e.g., "/cmd:security-review")
         display: String,
         description: String,
     },

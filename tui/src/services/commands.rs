@@ -194,19 +194,19 @@ pub fn get_all_commands() -> Vec<Command> {
 /// Max size for custom command files (64 KiB)
 const MAX_CUSTOM_COMMAND_BYTES: u64 = 64 * 1024;
 
-/// Prefix required for user command files
-const USER_COMMAND_PREFIX: &str = "Usercmd_";
+/// File prefix for custom command markdown files (on disk). Aligns with CMD_PREFIX: cmd_*.md → /cmd:*
+const CMD_FILE_PREFIX: &str = "cmd_";
 
 /// Slash prefix for user commands in the TUI (display and id)
 pub const CMD_PREFIX: &str = "/cmd:";
 
-/// Scan project and personal commands directories for Usercmd_*.md files.
+/// Scan project and personal commands directories for cmd_*.md files.
 /// Project: .stakpak/commands/ (relative to current_dir)
 /// Personal: ~/.stakpak/commands/
 /// Project overrides personal when same command exists.
 ///
-/// Files must follow the naming convention: Usercmd_{command-name}.md
-/// Example: Usercmd_create-component.md → /cmd:create-component
+/// Files must follow the naming convention: cmd_{command-name}.md
+/// Example: cmd_create-component.md → /cmd:create-component
 ///
 /// If `allowlist` is `Some`, only commands whose name is in the list are returned (e.g. from global config).
 pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> {
@@ -236,16 +236,16 @@ pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> 
                 continue;
             };
 
-            // Only process files with Usercmd_ prefix
-            if !filename.starts_with(USER_COMMAND_PREFIX) {
+            // Only process files with cmd_ prefix
+            if !filename.starts_with(CMD_FILE_PREFIX) {
                 continue;
             }
 
-            // Extract command name: "Usercmd_create-component.md" -> "create-component"
+            // Extract command name: "cmd_create-component.md" -> "create-component"
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            let Some(command_name) = stem.strip_prefix(USER_COMMAND_PREFIX) else {
+            let Some(command_name) = stem.strip_prefix(CMD_FILE_PREFIX) else {
                 continue;
             };
             if command_name.is_empty() {
@@ -254,10 +254,10 @@ pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> 
 
             let id = format!("{}{command_name}", CMD_PREFIX);
 
-            if let Some(list) = allowlist {
-                if !list.iter().any(|n| n == command_name) {
-                    continue;
-                }
+            if let Some(list) = allowlist
+                && !list.iter().any(|n| n == command_name)
+            {
+                continue;
             }
 
             let metadata = match std::fs::metadata(&path) {

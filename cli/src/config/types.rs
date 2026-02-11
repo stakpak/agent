@@ -28,7 +28,7 @@ pub struct Settings {
     /// Preferred external editor (e.g. vim, nano, code)
     pub editor: Option<String>,
     /// Optional allowlist of custom command names to load (e.g. ["write-rfc", "create-component"]).
-    /// When set, only these Usercmd_*.md commands are shown; when unset, all are loaded.
+    /// When set, only these cmd_*.md custom commands are shown; when unset, all are loaded.
     pub custom_commands: Option<Vec<String>>,
 }
 
