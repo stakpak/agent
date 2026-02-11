@@ -52,6 +52,8 @@ pub async fn run_tui(
     model: Model,
     editor_command: Option<String>,
     auth_display_info: (Option<String>, Option<String>, Option<String>),
+    init_prompt_content: Option<String>,
+    send_init_prompt_on_start: bool,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -98,6 +100,7 @@ pub async fn run_tui(
         editor_command,
         auth_display_info,
         board_agent_id,
+        init_prompt_content,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
@@ -122,6 +125,16 @@ pub async fn run_tui(
     // Trigger initial board tasks refresh if agent ID is configured
     if state.board_agent_id.is_some() {
         let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
+    }
+
+    // When started via `stakpak init`, add init prompt as user message and send to backend
+    if send_init_prompt_on_start
+        && let Some(prompt) = state.init_prompt_content.clone()
+        && !prompt.trim().is_empty()
+    {
+        state.messages.push(Message::user(prompt.clone(), None));
+        crate::services::message::invalidate_message_lines_cache(&mut state);
+        let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new()));
     }
 
     let internal_tx_thread = internal_tx.clone();
