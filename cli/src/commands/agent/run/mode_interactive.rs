@@ -14,7 +14,7 @@ use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CommandsConfig};
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
@@ -130,8 +130,8 @@ pub struct RunInteractiveConfig {
     pub agents_md: Option<AgentsMdInfo>,
     /// When true, send init_prompt_content as first user message on session start (stakpak init)
     pub send_init_prompt_on_start: bool,
-    /// Optional allowlist of custom command names to load (from global config)
-    pub custom_commands: Option<Vec<String>>,
+    /// Custom commands filtering configuration (from global config)
+    pub commands_config: Option<CommandsConfig>,
 }
 
 pub async fn run_interactive(
@@ -203,7 +203,13 @@ pub async fn run_interactive(
             None
         };
 
-        let custom_commands_for_tui = config.custom_commands.clone();
+        // Convert CLI CommandsConfig to TUI CommandsConfig
+        let commands_config_for_tui = config.commands_config.as_ref().map(|c| {
+            stakpak_tui::CommandsConfig {
+                include: c.include.clone(),
+                exclude: c.exclude.clone(),
+            }
+        });
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -224,7 +230,7 @@ pub async fn run_interactive(
                 auth_display_info_for_tui,
                 init_prompt_content_for_tui,
                 send_init_prompt_on_start,
-                custom_commands_for_tui,
+                commands_config_for_tui,
             )
             .await
             .map_err(|e| e.to_string())

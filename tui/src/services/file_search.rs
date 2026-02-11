@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::AppState;
 use crate::app::{CustomCommand, FileSearchResult, HelperEntry};
+use crate::event_loop::CommandsConfig;
 
 /// Maintains the best N matches for a given pattern using parallel processing
 #[derive(Debug)]
@@ -423,7 +424,7 @@ pub async fn file_search_worker(
     tx: mpsc::Sender<FileSearchResult>,
     _helpers: Vec<HelperEntry>, // Unused: we re-scan dynamically when input starts with '/'
     mut file_search: FileSearch,
-    custom_commands_allowlist: Option<Vec<String>>,
+    commands_config: Option<CommandsConfig>,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
         // Load files if not already loaded (uses cache if same directory)
@@ -436,7 +437,7 @@ pub async fn file_search_worker(
         let (filtered_helpers, custom_commands): (Vec<HelperEntry>, Option<Vec<CustomCommand>>) =
             if input.starts_with('/') && !input.is_empty() {
                 let custom = crate::services::commands::scan_custom_commands(
-                    custom_commands_allowlist.as_deref(),
+                    commands_config.as_ref(),
                 );
                 let fresh_helpers = crate::services::commands::get_helper_commands(&custom);
                 let search_term = input[1..].to_lowercase();

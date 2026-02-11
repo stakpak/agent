@@ -7,6 +7,7 @@ use std::fs::{create_dir_all, write};
 use std::path::Path;
 
 use super::STAKPAK_API_ENDPOINT;
+use super::commands::CommandsConfig;
 use super::profile::ProfileConfig;
 use super::types::{OldAppConfig, Settings};
 
@@ -17,6 +18,9 @@ pub struct ConfigFile {
     pub profiles: HashMap<String, ProfileConfig>,
     /// Global settings
     pub settings: Settings,
+    /// Custom commands filtering configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands: Option<CommandsConfig>,
 }
 
 impl Default for ConfigFile {
@@ -29,8 +33,8 @@ impl Default for ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
-                custom_commands: None,
             },
+            commands: None,
         }
     }
 }
@@ -49,8 +53,8 @@ impl ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
-                custom_commands: None,
             },
+            commands: None,
         }
     }
 
@@ -100,8 +104,12 @@ impl ConfigFile {
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
             editor: config.editor.or(existing_editor),
-            custom_commands: config.custom_commands,
         };
+
+        // Update commands config if provided
+        if config.commands.is_some() {
+            self.commands = config.commands;
+        }
     }
 
     /// Check if a readonly profile exists.
@@ -155,6 +163,7 @@ impl From<OldAppConfig> for ConfigFile {
                 ProfileConfig::migrated_from_old_config(old_config),
             )]),
             settings,
+            commands: None,
         }
     }
 }

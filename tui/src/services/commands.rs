@@ -22,6 +22,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::app::{AppState, CustomCommand, HelperCommand, HelperEntry};
 use crate::constants::SUMMARIZE_PROMPT_BASE;
+use crate::event_loop::CommandsConfig;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
@@ -202,6 +203,35 @@ const CMD_FILE_PREFIX: &str = "cmd_";
 /// Slash prefix for user commands in the TUI (display and id)
 pub const CMD_PREFIX: &str = "/cmd:";
 
+/// Check if a command name should be loaded based on include/exclude rules.
+fn should_load_command(config: &CommandsConfig, command_name: &str) -> bool {
+    let matches_include = match &config.include {
+        Some(patterns) if !patterns.is_empty() => {
+            patterns.iter().any(|p| matches_glob_pattern(command_name, p))
+        }
+        _ => true, // No include filter = allow all
+    };
+
+    let matches_exclude = match &config.exclude {
+        Some(patterns) if !patterns.is_empty() => {
+            patterns.iter().any(|p| matches_glob_pattern(command_name, p))
+        }
+        _ => false, // No exclude filter = exclude none
+    };
+
+    matches_include && !matches_exclude
+}
+
+/// Check if a name matches a glob pattern.
+fn matches_glob_pattern(name: &str, pattern: &str) -> bool {
+    if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+        glob_pattern.matches(name)
+    } else {
+        // Fallback to exact match if glob pattern is invalid
+        name == pattern
+    }
+}
+
 /// Scan project and personal commands directories for cmd_*.md files.
 /// Project: .stakpak/commands/ (relative to current_dir)
 /// Personal: ~/.stakpak/commands/
@@ -210,8 +240,8 @@ pub const CMD_PREFIX: &str = "/cmd:";
 /// Files must follow the naming convention: cmd_{command-name}.md
 /// Example: cmd_create-component.md → /cmd:create-component
 ///
-/// If `allowlist` is `Some`, only commands whose name is in the list are returned (e.g. from global config).
-pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> {
+/// If `commands_config` is `Some`, filtering is applied based on include/exclude patterns.
+pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<CustomCommand> {
     let mut by_id: HashMap<String, CustomCommand> = HashMap::new();
 
     // Personal first, then project (project overwrites)
@@ -255,11 +285,11 @@ pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> 
 
             let id = format!("{}{command_name}", CMD_PREFIX);
 
-            // Apply allowlist filter if present
-            if let Some(list) = allowlist
-                && !list.iter().any(|n| n == command_name)
-            {
-                continue;
+            // Apply commands config filter if present
+            if let Some(config) = commands_config {
+                if !should_load_command(config, command_name) {
+                    continue;
+                }
             }
 
             // Size check via metadata (avoids reading large files)

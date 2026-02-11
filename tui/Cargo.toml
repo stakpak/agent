@@ -38,6 +38,7 @@ url = "2"
 base64 = "0.22"
 vt100 = "0.15.2"
 dirs = "5.0"
+glob = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"

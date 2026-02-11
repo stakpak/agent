@@ -498,7 +498,7 @@ async fn main() {
 
                     // Interactive mode: run in TUI
                     false => {
-                        let custom_commands = config.custom_commands.clone();
+                        let commands_config = config.commands.clone();
                         agent::run::run_interactive(
                             config,
                             RunInteractiveConfig {
@@ -521,7 +521,7 @@ async fn main() {
                                 model: default_model,
                                 agents_md,
                                 send_init_prompt_on_start,
-                                custom_commands,
+                                commands_config,
                             },
                         )
                         .await

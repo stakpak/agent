@@ -12,6 +12,7 @@ use std::fs::{create_dir_all, write};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::commands::CommandsConfig;
 use super::file::ConfigFile;
 use super::profile::ProfileConfig;
 use super::rulebook::RulebookConfig;
@@ -62,8 +63,8 @@ pub struct AppConfig {
     pub collect_telemetry: Option<bool>,
     /// Editor command
     pub editor: Option<String>,
-    /// Optional allowlist of custom command names to load from global config
-    pub custom_commands: Option<Vec<String>>,
+    /// Custom commands filtering configuration
+    pub commands: Option<CommandsConfig>,
 }
 
 impl AppConfig {
@@ -93,6 +94,7 @@ impl AppConfig {
             config_path,
             config_file.settings,
             profile,
+            config_file.commands,
         ))
     }
 
@@ -139,6 +141,7 @@ impl AppConfig {
         path: PathBuf,
         settings: Settings,
         mut profile_config: ProfileConfig,
+        commands: Option<CommandsConfig>,
     ) -> Self {
         // Migrate any legacy provider fields to the unified providers HashMap
         profile_config.migrate_legacy_providers();
@@ -170,7 +173,7 @@ impl AppConfig {
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
-            custom_commands: settings.custom_commands,
+            commands,
         }
     }
 
@@ -835,7 +838,6 @@ impl From<AppConfig> for Settings {
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
             editor: config.editor,
-            custom_commands: config.custom_commands,
         }
     }
 }
@@ -872,6 +874,7 @@ impl From<ConfigFile> for AppConfig {
             PathBuf::from(STAKPAK_CONFIG_PATH),
             file.settings,
             profile,
+            file.commands,
         )
     }
 }

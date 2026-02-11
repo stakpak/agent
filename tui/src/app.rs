@@ -6,6 +6,7 @@ use stakai::Model;
 use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
+use crate::event_loop::CommandsConfig;
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::board_tasks::TaskProgress;
@@ -270,8 +271,8 @@ pub struct AppStateOptions<'a> {
     pub board_agent_id: Option<String>,
     /// Content of init prompt ( init.v1.md, passed from CLI)
     pub init_prompt_content: Option<String>,
-    /// Optional allowlist of custom command names to load (from global config)
-    pub custom_commands_allowlist: Option<Vec<String>>,
+    /// Custom commands filtering configuration (from global config)
+    pub commands_config: Option<CommandsConfig>,
 }
 
 impl AppState {
@@ -283,7 +284,7 @@ impl AppState {
     /// Initialize file search channels and spawn worker
     fn init_file_search_channels(
         helpers: &[HelperEntry],
-        custom_commands_allowlist: Option<Vec<String>>,
+        commands_config: Option<CommandsConfig>,
     ) -> (
         mpsc::Sender<(String, usize)>,
         mpsc::Receiver<FileSearchResult>,
@@ -297,7 +298,7 @@ impl AppState {
             result_tx,
             helpers_clone,
             file_search_instance,
-            custom_commands_allowlist,
+            commands_config,
         ));
         (file_search_tx, result_rx)
     }
@@ -316,14 +317,14 @@ impl AppState {
             auth_display_info,
             board_agent_id,
             init_prompt_content,
-            custom_commands_allowlist,
+            commands_config,
         } = options;
 
         let custom_commands =
-            crate::services::commands::scan_custom_commands(custom_commands_allowlist.as_deref());
+            crate::services::commands::scan_custom_commands(commands_config.as_ref());
         let helpers = Self::get_helper_commands(&custom_commands);
         let (file_search_tx, result_rx) =
-            Self::init_file_search_channels(&helpers, custom_commands_allowlist);
+            Self::init_file_search_channels(&helpers, commands_config);
 
         AppState {
             text_area: TextArea::new(),

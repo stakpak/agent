@@ -5833,6 +5833,7 @@ dependencies = [
  "console",
  "crossterm 0.29.0",
  "dirs",
+ "glob",
  "ignore",
  "image",
  "log",

@@ -27,9 +27,6 @@ pub struct Settings {
     pub collect_telemetry: Option<bool>,
     /// Preferred external editor (e.g. vim, nano, code)
     pub editor: Option<String>,
-    /// Optional allowlist of custom command names to load (e.g. ["write-rfc", "create-component"]).
-    /// When set, only these cmd_*.md custom commands are shown; when unset, all are loaded.
-    pub custom_commands: Option<Vec<String>>,
 }
 
 /// Legacy configuration format for migration purposes.
@@ -49,7 +46,6 @@ impl From<OldAppConfig> for Settings {
             anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
             collect_telemetry: Some(true),
             editor: Some("nano".to_string()),
-            custom_commands: None,
         }
     }
 }

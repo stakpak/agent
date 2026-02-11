@@ -35,6 +35,15 @@ pub struct RulebookConfig {
     pub exclude_tags: Option<Vec<String>>,
 }
 
+/// Custom commands filtering configuration (re-defined here to avoid circular dependency with CLI)
+#[derive(Clone, Debug, Default)]
+pub struct CommandsConfig {
+    /// Include only these commands by name (supports glob patterns, empty = all allowed)
+    pub include: Option<Vec<String>>,
+    /// Exclude specific commands by name (supports glob patterns, empty = none excluded)
+    pub exclude: Option<Vec<String>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
@@ -54,7 +63,7 @@ pub async fn run_tui(
     auth_display_info: (Option<String>, Option<String>, Option<String>),
     init_prompt_content: Option<String>,
     send_init_prompt_on_start: bool,
-    custom_commands_allowlist: Option<Vec<String>>,
+    commands_config: Option<CommandsConfig>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -102,7 +111,7 @@ pub async fn run_tui(
         auth_display_info,
         board_agent_id,
         init_prompt_content,
-        custom_commands_allowlist,
+        commands_config,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)

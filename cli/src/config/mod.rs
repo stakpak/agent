@@ -4,11 +4,13 @@
 //! - Profile configurations (per-environment settings)
 //! - Provider configurations (OpenAI, Anthropic, Gemini)
 //! - Rulebook filtering
+//! - Custom commands filtering
 //! - Warden (runtime security) settings
 //! - Authentication and credential resolution
 //! - Models cache from models.dev
 
 mod app;
+mod commands;
 mod file;
 pub mod models_cache;
 mod profile;
@@ -21,6 +23,7 @@ mod tests;
 
 // Re-export public types
 pub use app::AppConfig;
+pub use commands::CommandsConfig;
 pub use file::ConfigFile;
 pub use models_cache::ModelsCache;
 pub use profile::ProfileConfig;
