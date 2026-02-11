@@ -35,11 +35,17 @@ pub async fn run_auto_update(silent: bool) -> Result<(), String> {
         && is_stakpak_homebrew_install()
         && is_current_binary_homebrew_managed()?
     {
-        update_info!(silent, "Detected current binary is managed by Homebrew. Updating via Homebrew...");
+        update_info!(
+            silent,
+            "Detected current binary is managed by Homebrew. Updating via Homebrew..."
+        );
         update_via_brew(silent)?;
         Ok(())
     } else {
-        update_info!(silent, "Detected direct binary installation. Updating binary...");
+        update_info!(
+            silent,
+            "Detected direct binary installation. Updating binary..."
+        );
         let version = get_latest_cli_version().await.unwrap_or_default();
         update_binary_atomic(os, arch, Some(version), silent).await?;
         Ok(())
@@ -81,7 +87,10 @@ fn update_via_brew(silent: bool) -> Result<(), String> {
         .status()
         .map_err(|e| format!("Failed to run brew upgrade: {}", e))?;
     if upgrade_status.success() {
-        update_info!(silent, "Update complete! Please restart the CLI to use the new version.");
+        update_info!(
+            silent,
+            "Update complete! Please restart the CLI to use the new version."
+        );
         std::process::exit(0);
     } else {
         Err("brew upgrade stakpak failed".to_string())
@@ -134,7 +143,10 @@ fn get_binary_dir() -> Result<(PathBuf, PathBuf), String> {
     Ok((binary_path, binary_dir))
 }
 
-async fn download_and_extract_binary(config: &PluginConfig, silent: bool) -> Result<String, String> {
+async fn download_and_extract_binary(
+    config: &PluginConfig,
+    silent: bool,
+) -> Result<String, String> {
     // Determine the appropriate download URL based on OS and architecture
     let (download_url, _binary_name, is_zip) = get_download_info(config)?;
 
@@ -251,7 +263,12 @@ fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>, silent: bool) -> Result<(), String> {
+async fn update_binary_atomic(
+    os: &str,
+    arch: &str,
+    version: Option<String>,
+    silent: bool,
+) -> Result<(), String> {
     update_info!(silent, "Starting atomic binary update for {} {}", os, arch);
 
     // 1. Set up PluginConfig for the CLI itself
@@ -389,7 +406,11 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>, sil
             // Clean up downloaded binary
             fs::remove_file(&extracted_binary_path).ok();
 
-            update_info!(silent, "🎉 Update complete! Restarting with version {}...", version);
+            update_info!(
+                silent,
+                "🎉 Update complete! Restarting with version {}...",
+                version
+            );
 
             // Re-exec the new binary with the same arguments
             // This replaces the current process with the updated binary
