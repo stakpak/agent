@@ -2,68 +2,6 @@
 
 > Agent guidance for working effectively in this codebase.
 
-## Agent Workflow
-
-When working in this repo, follow this workflow:
-
-### 1. Understand requirements
-
-- Read the user request carefully.
-- Use `AGENTS.md` (this file) and the workspace structure to locate relevant code.
-- Search semantically for behavior; use `grep` for exact symbols.
-
-### 2. File map (quick reference)
-
-| Area | Key files |
-|------|-----------|
-| **CLI entry** | `cli/src/main.rs` |
-| **Agent run (interactive)** | `cli/src/commands/agent/run/mode_interactive.rs` |
-| **Agent run (async)** | `cli/src/commands/agent/run/mode_async.rs` |
-| **TUI event loop** | `tui/src/event_loop.rs` |
-| **TUI commands (/init, /summarize, etc.)** | `tui/src/services/commands.rs` |
-| **Message types** | `libs/shared/src/models/integrations/openai.rs`, `libs/shared/src/models/llm.rs` |
-| **Context managers** | `libs/api/src/local/context_managers/` |
-| **Watch / checks** | `cli/src/commands/watch/` |
-
-### 3. Documentation (read for architecture context)
-
-| Doc | Path | Purpose |
-|-----|------|---------|
-| **Architecture overview** | `docs/architecture-enhancements/00-overview.md` | Current vs proposed architecture, enhancement proposals |
-| Plugin system | `docs/architecture-enhancements/01-plugin-system.md` | Plugin trait system |
-| Event bus | `docs/architecture-enhancements/02-event-bus-system.md` | Pub/sub event bus |
-| HTTP Server API | `docs/architecture-enhancements/03-http-server-api.md` | REST API with Axum |
-| OAuth auth | `docs/architecture-enhancements/04-oauth-provider-auth.md` | OAuth for Claude Max/Pro |
-| Slash commands | `docs/architecture-enhancements/05-slash-commands.md` | /command system |
-| Project instance context | `docs/architecture-enhancements/06-project-instance-context.md` | State management |
-| Modular tool system | `docs/architecture-enhancements/07-modular-tool-system.md` | Tool registry pattern |
-| Shell mode | `docs/shell_mode.md` | Shell integration |
-| **Extend commands RFC** | `docs/rfc_extend_commands.md` | User-extended slash commands (file-based) |
-| Extend commands analysis | `docs/extend_commands.md` | Competitive analysis of slash command systems |
-
-### 4. Before finishing
-
-Always run before considering the task done:
-
-```bash
-cargo fmt
-cargo clippy --all-targets
-cargo test --workspace
-```
-
-- **`cargo fmt`**: Apply formatting (or use `cargo fmt --check` to verify without writing).
-- **`cargo clippy --all-targets`**: Must pass with zero warnings.
-- **`cargo test --workspace`**: All tests must pass.
-
-### 5. Conventions to follow
-
-- No `unwrap()` or `expect()` in app code (allowed in tests).
-- Use `anyhow::Result` and `.context()` for errors.
-- Prefer `if let` + `let chains` where readable.
-- See **Coding Conventions** below for more detail.
-
----
-
 ## Project Overview
 
 Stakpak is a **security-hardened DevOps AI agent** that runs in the terminal. It generates infrastructure code, debugs Kubernetes, configures CI/CD, and automates deployments — without giving the LLM keys to production.
