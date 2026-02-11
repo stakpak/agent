@@ -204,12 +204,14 @@ pub async fn run_interactive(
         };
 
         // Convert CLI CommandsConfig to TUI CommandsConfig
-        let commands_config_for_tui = config.commands_config.as_ref().map(|c| {
-            stakpak_tui::CommandsConfig {
-                include: c.include.clone(),
-                exclude: c.exclude.clone(),
-            }
-        });
+        let commands_config_for_tui =
+            config
+                .commands_config
+                .as_ref()
+                .map(|c| stakpak_tui::CommandsConfig {
+                    include: c.include.clone(),
+                    exclude: c.exclude.clone(),
+                });
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(

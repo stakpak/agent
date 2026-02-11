@@ -66,6 +66,7 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        commands: None,
     }
 }
 
@@ -202,6 +203,7 @@ fn resolved_profile_config_merges_all_profile_defaults() {
             collect_telemetry: Some(true),
             editor: Some("nano".into()),
         },
+        commands: None,
     };
 
     config.profiles.insert(
@@ -435,6 +437,7 @@ fn save_writes_profile_and_settings() {
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        commands: None,
     };
 
     config.save().unwrap();

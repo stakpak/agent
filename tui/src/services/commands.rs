@@ -206,16 +206,16 @@ pub const CMD_PREFIX: &str = "/cmd:";
 /// Check if a command name should be loaded based on include/exclude rules.
 fn should_load_command(config: &CommandsConfig, command_name: &str) -> bool {
     let matches_include = match &config.include {
-        Some(patterns) if !patterns.is_empty() => {
-            patterns.iter().any(|p| matches_glob_pattern(command_name, p))
-        }
+        Some(patterns) if !patterns.is_empty() => patterns
+            .iter()
+            .any(|p| matches_glob_pattern(command_name, p)),
         _ => true, // No include filter = allow all
     };
 
     let matches_exclude = match &config.exclude {
-        Some(patterns) if !patterns.is_empty() => {
-            patterns.iter().any(|p| matches_glob_pattern(command_name, p))
-        }
+        Some(patterns) if !patterns.is_empty() => patterns
+            .iter()
+            .any(|p| matches_glob_pattern(command_name, p)),
         _ => false, // No exclude filter = exclude none
     };
 
@@ -286,10 +286,10 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
             let id = format!("{}{command_name}", CMD_PREFIX);
 
             // Apply commands config filter if present
-            if let Some(config) = commands_config {
-                if !should_load_command(config, command_name) {
-                    continue;
-                }
+            if let Some(config) = commands_config
+                && !should_load_command(config, command_name)
+            {
+                continue;
             }
 
             // Size check via metadata (avoids reading large files)

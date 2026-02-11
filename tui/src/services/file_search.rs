@@ -436,9 +436,8 @@ pub async fn file_search_worker(
         // Re-scan custom commands each time for dynamic reload (no restart needed).
         let (filtered_helpers, custom_commands): (Vec<HelperEntry>, Option<Vec<CustomCommand>>) =
             if input.starts_with('/') && !input.is_empty() {
-                let custom = crate::services::commands::scan_custom_commands(
-                    commands_config.as_ref(),
-                );
+                let custom =
+                    crate::services::commands::scan_custom_commands(commands_config.as_ref());
                 let fresh_helpers = crate::services::commands::get_helper_commands(&custom);
                 let search_term = input[1..].to_lowercase();
                 let filtered: Vec<HelperEntry> = fresh_helpers
