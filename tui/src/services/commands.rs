@@ -203,20 +203,43 @@ const CMD_FILE_PREFIX: &str = "cmd_";
 /// Slash prefix for user commands in the TUI (display and id)
 pub const CMD_PREFIX: &str = "/cmd:";
 
-/// Scan for custom commands from three sources (in order of precedence):
-/// 1. Personal files: ~/.stakpak/commands/cmd_*.md
-/// 2. Project files: ./.stakpak/commands/cmd_*.md (overrides personal)
-/// 3. Inline definitions: config.definitions (overrides files)
+/// Scan for custom commands from four sources (in order of precedence):
+/// 1. Built-in commands: Embedded in binary (lowest precedence)
+/// 2. Personal files: ~/.stakpak/commands/cmd_*.md
+/// 3. Project files: ./.stakpak/commands/cmd_*.md (overrides personal)
+/// 4. Config definitions: config.definitions file references (highest precedence)
 ///
 /// Files must follow the naming convention: cmd_{command-name}.md
 /// Example: cmd_create-component.md → /cmd:create-component
 ///
 /// If `commands_config` is `Some`, filtering is applied based on include/exclude patterns.
-/// Filters apply to both file-based and inline commands.
+/// Filters apply to all sources.
 pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<CustomCommand> {
     let mut by_id: HashMap<String, CustomCommand> = HashMap::new();
 
-    // 1. Load from files: personal first, then project (project overwrites personal)
+    // 1. Load built-in commands (lowest precedence)
+    for (name, content) in stakpak_api::prompts::BUILTIN_COMMANDS {
+        // Apply filters to built-in commands too
+        if let Some(config) = commands_config
+            && !config.should_load(name)
+        {
+            continue;
+        }
+
+        let id = format!("{}{}", CMD_PREFIX, name);
+        let description = extract_markdown_title(content).unwrap_or_else(|| name.to_string());
+
+        by_id.insert(
+            id.clone(),
+            CustomCommand {
+                id,
+                description,
+                content: content.to_string(),
+            },
+        );
+    }
+
+    // 2. Load from files: personal first, then project (project overwrites personal, both override built-in)
     let personal = dirs::home_dir().map(|h| h.join(".stakpak").join("commands"));
     let project = std::env::current_dir()
         .ok()
@@ -294,7 +317,7 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
         }
     }
 
-    // 2. Load from definitions (file references, override cmd_*.md files)
+    // 3. Load from definitions (file references, highest precedence - override everything)
     if let Some(config) = commands_config {
         for (name, file_path) in &config.definitions {
             // Apply filters to definition-based commands too
@@ -327,7 +350,7 @@ pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<Cus
             let id = format!("{}{}", CMD_PREFIX, name);
             let description = extract_markdown_title(content).unwrap_or_else(|| name.to_string());
 
-            // Definitions override file-based commands
+            // Definitions override file-based and built-in commands
             by_id.insert(
                 id.clone(),
                 CustomCommand {
