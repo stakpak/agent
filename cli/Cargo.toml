@@ -59,7 +59,6 @@ thiserror = "2.0"
 libsql = "0.9.29"
 tokio-cron-scheduler = "0.15"
 which = "7.0"
-serial_test = "3.3.1"
 
 [dev-dependencies]
 tempfile = "3"
