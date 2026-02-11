@@ -527,6 +527,7 @@ async fn main() {
                                 checkpoint_id,
                                 session_id,
                                 local_context,
+                                rulebooks,
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 enable_subagents,
