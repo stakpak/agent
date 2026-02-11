@@ -461,7 +461,7 @@ impl Commands {
                 board::run_board(args).await?;
             }
             Commands::Update => {
-                auto_update::run_auto_update().await?;
+                auto_update::run_auto_update(false).await?;
             }
             Commands::Watch(watch_command) => {
                 use crate::commands::watch::commands::{

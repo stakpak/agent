@@ -6,8 +6,26 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Print an informational message to stdout, or stderr when `silent` is true.
+/// When running in ACP mode, stdout is reserved for the JSON-RPC protocol
+/// stream, so all informational output must go to stderr to avoid corruption.
+macro_rules! update_info {
+    ($silent:expr, $($arg:tt)*) => {
+        if $silent {
+            eprintln!($($arg)*);
+        } else {
+            println!($($arg)*);
+        }
+    };
+}
+
+/// Run the auto-update process.
+///
+/// When `silent` is true, all informational output is sent to stderr instead
+/// of stdout. This is required when called from ACP mode where stdout carries
+/// the JSON-RPC protocol stream.
 #[allow(clippy::needless_return)]
-pub async fn run_auto_update() -> Result<(), String> {
+pub async fn run_auto_update(silent: bool) -> Result<(), String> {
     // 1. Check OS
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
@@ -17,13 +35,19 @@ pub async fn run_auto_update() -> Result<(), String> {
         && is_stakpak_homebrew_install()
         && is_current_binary_homebrew_managed()?
     {
-        println!("Detected current binary is managed by Homebrew. Updating via Homebrew...");
-        update_via_brew()?;
+        update_info!(
+            silent,
+            "Detected current binary is managed by Homebrew. Updating via Homebrew..."
+        );
+        update_via_brew(silent)?;
         Ok(())
     } else {
-        println!("Detected direct binary installation. Updating binary...");
+        update_info!(
+            silent,
+            "Detected direct binary installation. Updating binary..."
+        );
         let version = get_latest_cli_version().await.unwrap_or_default();
-        update_binary_atomic(os, arch, Some(version)).await?;
+        update_binary_atomic(os, arch, Some(version), silent).await?;
         Ok(())
     }
 }
@@ -47,14 +71,14 @@ fn is_stakpak_homebrew_install() -> bool {
     }
 }
 
-fn update_via_brew() -> Result<(), String> {
+fn update_via_brew(silent: bool) -> Result<(), String> {
     // update brew
     let update_status = Command::new("brew")
         .arg("update")
         .status()
         .map_err(|e| format!("Failed to run brew update: {}", e))?;
     if !update_status.success() {
-        println!("brew update failed!");
+        update_info!(silent, "brew update failed!");
     }
 
     let upgrade_status = Command::new("brew")
@@ -63,7 +87,10 @@ fn update_via_brew() -> Result<(), String> {
         .status()
         .map_err(|e| format!("Failed to run brew upgrade: {}", e))?;
     if upgrade_status.success() {
-        println!("Update complete! Please restart the CLI to use the new version.");
+        update_info!(
+            silent,
+            "Update complete! Please restart the CLI to use the new version."
+        );
         std::process::exit(0);
     } else {
         Err("brew upgrade stakpak failed".to_string())
@@ -116,13 +143,16 @@ fn get_binary_dir() -> Result<(PathBuf, PathBuf), String> {
     Ok((binary_path, binary_dir))
 }
 
-async fn download_and_extract_binary(config: &PluginConfig) -> Result<String, String> {
+async fn download_and_extract_binary(
+    config: &PluginConfig,
+    silent: bool,
+) -> Result<String, String> {
     // Determine the appropriate download URL based on OS and architecture
     let (download_url, _binary_name, is_zip) = get_download_info(config)?;
 
     let (_binary_path, binary_dir) = get_binary_dir()?;
 
-    println!("Downloading {}...", config.name);
+    update_info!(silent, "Downloading {}...", config.name);
 
     // Download the archive
     let client = create_tls_client(TlsClientConfig::default())?;
@@ -233,8 +263,13 @@ fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> Result<(), String> {
-    println!("Starting atomic binary update for {} {}", os, arch);
+async fn update_binary_atomic(
+    os: &str,
+    arch: &str,
+    version: Option<String>,
+    silent: bool,
+) -> Result<(), String> {
+    update_info!(silent, "Starting atomic binary update for {} {}", os, arch);
 
     // 1. Set up PluginConfig for the CLI itself
     let cli_name = "stakpak";
@@ -278,11 +313,11 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
     }
 
     // 5. Download and extract new binary
-    println!("Downloading new version {}...", version);
-    let extracted_binary_path = download_and_extract_binary(&config).await?;
+    update_info!(silent, "Downloading new version {}...", version);
+    let extracted_binary_path = download_and_extract_binary(&config, silent).await?;
 
     // 6. Copy extracted binary to temp location
-    println!("Preparing new binary...");
+    update_info!(silent, "Preparing new binary...");
     fs::copy(&extracted_binary_path, &temp_exe)
         .map_err(|e| format!("Failed to copy extracted binary to temp location: {}", e))?;
 
@@ -299,7 +334,7 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
     }
 
     // 8. Verify the new binary works - try multiple verification methods
-    println!("Verifying new binary...");
+    update_info!(silent, "Verifying new binary...");
 
     // First try --help (most binaries support this)
     let verification_result = Command::new(&temp_exe).arg("--help").output();
@@ -307,8 +342,9 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
     let verification_success = match verification_result {
         Ok(output) if output.status.success() => {
             let help_output = String::from_utf8_lossy(&output.stdout);
-            println!("✅ New binary verified successfully with --help!");
-            println!(
+            update_info!(silent, "✅ New binary verified successfully with --help!");
+            update_info!(
+                silent,
                 "   Help output preview: {}",
                 help_output.lines().take(2).collect::<Vec<_>>().join(" ")
             );
@@ -316,13 +352,14 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
         }
         Ok(_) | Err(_) => {
             // If --help fails, try running without arguments
-            println!("--help failed, trying without arguments...");
+            update_info!(silent, "--help failed, trying without arguments...");
             match Command::new(&temp_exe).output() {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    println!("✅ New binary verified successfully (no args)!");
-                    println!(
+                    update_info!(silent, "✅ New binary verified successfully (no args)!");
+                    update_info!(
+                        silent,
                         "   Output preview: {}",
                         stdout
                             .lines()
@@ -354,14 +391,14 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
     }
 
     // 9. Create backup of current executable
-    println!("Creating backup of current executable...");
+    update_info!(silent, "Creating backup of current executable...");
     fs::copy(&current_exe, &backup_exe).map_err(|e| format!("Failed to create backup: {}", e))?;
 
     // 10. Atomic replacement using rename
-    println!("Performing atomic replacement...");
+    update_info!(silent, "Performing atomic replacement...");
     match fs::rename(&temp_exe, &current_exe) {
         Ok(()) => {
-            println!("✅ Binary replacement successful!");
+            update_info!(silent, "✅ Binary replacement successful!");
 
             // Clean up backup file
             fs::remove_file(&backup_exe).ok();
@@ -369,7 +406,11 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
             // Clean up downloaded binary
             fs::remove_file(&extracted_binary_path).ok();
 
-            println!("🎉 Update complete! Restarting with version {}...", version);
+            update_info!(
+                silent,
+                "🎉 Update complete! Restarting with version {}...",
+                version
+            );
 
             // Re-exec the new binary with the same arguments
             // This replaces the current process with the updated binary
@@ -401,17 +442,17 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
         }
         Err(e) => {
             // Atomic rename failed, try to restore backup
-            println!("❌ Atomic replacement failed: {}", e);
+            update_info!(silent, "❌ Atomic replacement failed: {}", e);
 
             if backup_exe.exists() {
-                println!("Attempting to restore backup...");
+                update_info!(silent, "Attempting to restore backup...");
                 match fs::copy(&backup_exe, &current_exe) {
                     Ok(_) => {
-                        println!("✅ Backup restored successfully");
+                        update_info!(silent, "✅ Backup restored successfully");
                         fs::remove_file(&backup_exe).ok();
                     }
                     Err(restore_err) => {
-                        println!("❌ Failed to restore backup: {}", restore_err);
+                        update_info!(silent, "❌ Failed to restore backup: {}", restore_err);
                         // Clean up temp files
                         fs::remove_file(&temp_exe).ok();
                         fs::remove_file(&extracted_binary_path).ok();
