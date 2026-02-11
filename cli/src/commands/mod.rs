@@ -139,6 +139,9 @@ pub enum Commands {
     /// Get current account
     Account,
 
+    /// Start a new session with init.md prompt loaded and sent automatically
+    Init,
+
     /// MCP commands
     #[command(subcommand)]
     Mcp(McpCommands),
@@ -428,6 +431,10 @@ impl Commands {
                 let client = get_client(&config).await?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
+            }
+            Commands::Init => {
+                // Handled in main: starts interactive session with init prompt sent on start
+                unreachable!("stakpak init is handled before Commands::run()")
             }
             Commands::Version => {
                 println!(
