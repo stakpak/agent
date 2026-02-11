@@ -256,10 +256,10 @@ pub fn scan_custom_commands(allowlist: Option<&[String]>) -> Vec<CustomCommand> 
             let id = format!("{}{command_name}", CMD_PREFIX);
 
             // Apply allowlist filter if present
-            if let Some(list) = allowlist {
-                if !list.iter().any(|n| n == command_name) {
-                    continue;
-                }
+            if let Some(list) = allowlist
+                && !list.iter().any(|n| n == command_name)
+            {
+                continue;
             }
 
             // Size check via metadata (avoids reading large files)
