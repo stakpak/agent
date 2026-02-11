@@ -2,6 +2,7 @@
 
 > Agent guidance for working effectively in this codebase.
 
+<<<<<<< HEAD
 ## Agent Workflow
 
 When working in this repo, follow this workflow:
@@ -64,6 +65,8 @@ cargo test --workspace
 
 ---
 
+=======
+>>>>>>> d36570a2 ( simplify)
 ## Project Overview
 
 Stakpak is a **security-hardened DevOps AI agent** that runs in the terminal. It generates infrastructure code, debugs Kubernetes, configures CI/CD, and automates deployments — without giving the LLM keys to production.
@@ -135,7 +138,10 @@ Vec<ChatMessage>                    # OpenAI-shaped messages (cli/mode_interacti
 ContextManager::reduce_context()   # History reduction (libs/api/context_managers/)
     ↓  merge_consecutive_same_role()  # Merge tool messages
     ↓  dedup_tool_results()           # Deduplicate within merged messages
+<<<<<<< HEAD
     ↓  reduce_context_with_budget()   # Budget-aware trimming (if over threshold)
+=======
+>>>>>>> d36570a2 ( simplify)
     ↓
 Vec<LLMMessage>                    # Provider-neutral messages
     ↓
@@ -240,6 +246,7 @@ The codebase uses **three layers** to prevent invalid message sequences:
 2. **Pre-API sanitization** (`sanitize_tool_results`): Dedup and remove orphans from `Vec<ChatMessage>` before every API call
 3. **Context manager** (`task_board_context_manager.rs`): Merge consecutive same-role messages and dedup tool_results in the `reduce_context()` pipeline
 
+<<<<<<< HEAD
 ### Context Trimming with Cache Preservation
 
 Long sessions accumulate messages that approach the context window limit. The `TaskBoardContextManager` implements budget-aware trimming:
@@ -256,6 +263,8 @@ Key files:
 - `libs/api/src/storage.rs` — `CheckpointState.metadata` field
 - `libs/api/src/models.rs` — `AgentState.metadata` field
 
+=======
+>>>>>>> d36570a2 ( simplify)
 ## Build & Test
 
 ```bash
