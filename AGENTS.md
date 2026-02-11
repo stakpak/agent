@@ -91,8 +91,13 @@ cli/                          # Main binary crate (`stakpak`)
 │   │   │   └── helpers.rs            # Shared helpers
 │   │   ├── acp/              # Agent Client Protocol (Zed integration)
 │   │   ├── mcp/              # MCP server/proxy commands
-│   │   └── auth/             # Login/account commands
-│   └── config.rs             # CLI configuration
+│   │   ├── auth/             # Login/account commands (interactive + non-interactive setup)
+│   │   └── watch/            # Scheduled trigger system
+│   ├── config/               # Configuration management
+│   │   ├── file.rs           # ConfigFile with profiles + ensure_readonly()
+│   │   ├── profile.rs        # ProfileConfig + readonly_profile()
+│   │   └── types.rs          # ProviderType (Remote/Local)
+│   └── onboarding/           # Interactive setup wizard + save_config.rs
 tui/                          # TUI crate (ratatui-based)
 ├── src/
 │   ├── app/events.rs         # InputEvent / OutputEvent enums
@@ -286,3 +291,26 @@ cargo clippy --all-targets
 # Quick check (no codegen)
 cargo check
 ```
+
+## Non-Interactive Setup
+
+The `stakpak auth login` command supports non-interactive setup for CI/scripts:
+
+```bash
+# Stakpak API (remote provider, default)
+stakpak auth login --api-key $STAKPAK_API_KEY
+
+# Local providers (BYOK)
+stakpak auth login --provider anthropic --api-key $ANTHROPIC_API_KEY
+stakpak auth login --provider openai --api-key $OPENAI_API_KEY
+stakpak auth login --provider gemini --api-key $GEMINI_API_KEY
+```
+
+This creates:
+- `~/.stakpak/config.toml` with `default` + `readonly` profiles
+- `~/.stakpak/auth.toml` for local provider credentials
+
+Key files:
+- `cli/src/commands/auth/login.rs` — `handle_non_interactive_setup()`
+- `cli/src/onboarding/save_config.rs` — `save_to_profile()` + `update_readonly()`
+- `cli/src/config/profile.rs` — `readonly_profile()` creates sandbox replica of default

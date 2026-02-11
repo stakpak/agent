@@ -65,15 +65,7 @@ impl AuthCommands {
                 provider,
                 profile,
                 api_key,
-            } => {
-                login::handle_login(
-                    &config_dir,
-                    &provider,
-                    profile.as_deref(),
-                    api_key,
-                )
-                .await
-            }
+            } => login::handle_login(&config_dir, &provider, profile.as_deref(), api_key).await,
             AuthCommands::Logout { provider, profile } => {
                 logout::handle_logout(&config_dir, provider.as_deref(), profile.as_deref())
             }
