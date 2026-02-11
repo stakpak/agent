@@ -11,7 +11,7 @@ mod byom;
 pub mod config_templates;
 pub mod menu;
 pub mod navigation;
-mod save_config;
+pub mod save_config;
 mod styled_output;
 
 use crate::apikey_auth::prompt_for_api_key;

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Provider type selection for the CLI.
-#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
     /// Use the Stakpak remote API

@@ -401,6 +401,14 @@ Run yourself autonomously on a schedule with optional trigger scripts. Config: `
 curl -sSL https://stakpak.dev/install.sh | sh
 ```
 
+## Authentication
+```bash
+# With your Stakpak account
+stakpak auth login --api-key <stakpak_api_key>
+# Or if using Anthropic provider directly
+stakpak auth login --provider anthropic --api-key <anthropic_api_key>
+```
+
 ## Commands
 ```bash
 stakpak watch init              # Create sample config

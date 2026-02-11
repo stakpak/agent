@@ -126,13 +126,29 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
     if run.check_exit_code.is_some() || run.check_timed_out {
         println!();
         println!("\x1b[1mCheck Script\x1b[0m");
+
+        // Look up the trigger config to get check_trigger_on setting
+        let trigger = config.triggers.iter().find(|t| t.name == run.trigger_name);
+        let check_trigger_on = trigger
+            .map(|t| t.effective_check_trigger_on(&config.defaults))
+            .unwrap_or_default();
+
+        println!("  Trigger on: {}", check_trigger_on);
+
         if run.check_timed_out {
             println!("  Result: \x1b[31mtimed out\x1b[0m");
         } else if let Some(code) = run.check_exit_code {
-            let result_str = match code {
-                0 => "\x1b[32mpassed (exit 0)\x1b[0m".to_string(),
-                1 => "\x1b[33mskipped (exit 1)\x1b[0m".to_string(),
-                _ => format!("\x1b[31mfailed (exit {})\x1b[0m", code),
+            let should_trigger = check_trigger_on.should_trigger(code);
+            let result_str = if should_trigger {
+                format!(
+                    "\x1b[32mtriggered (exit {} matches trigger_on={})\x1b[0m",
+                    code, check_trigger_on
+                )
+            } else {
+                format!(
+                    "\x1b[33mskipped (exit {} does not match trigger_on={})\x1b[0m",
+                    code, check_trigger_on
+                )
             };
             println!("  Result: {}", result_str);
         }
