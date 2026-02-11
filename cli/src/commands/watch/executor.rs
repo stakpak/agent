@@ -193,6 +193,8 @@ mod tests {
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::thread;
 
     /// Create a test script that exits with the given code.
     #[cfg(unix)]
@@ -214,6 +216,9 @@ mod tests {
             perms.set_mode(0o755);
             fs::set_permissions(&script_path, perms).expect("Failed to set permissions");
         }
+
+        // Allow the OS to release file locks before execution (avoids ETXTBSY on some platforms).
+        thread::sleep(Duration::from_millis(10));
 
         script_path
     }

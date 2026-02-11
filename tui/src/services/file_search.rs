@@ -12,7 +12,7 @@ use nucleo_matcher::{
 use tokio::sync::mpsc;
 
 use crate::AppState;
-use crate::app::{FileSearchResult, HelperCommand};
+use crate::app::{CustomCommand, FileSearchResult, HelperEntry};
 
 /// Maintains the best N matches for a given pattern using parallel processing
 #[derive(Debug)]
@@ -421,7 +421,7 @@ impl DebouncedFilter {
 pub async fn file_search_worker(
     mut rx: mpsc::Receiver<(String, usize)>, // (input, cursor_position)
     tx: mpsc::Sender<FileSearchResult>,
-    helpers: Vec<HelperCommand>,
+    _helpers: Vec<HelperEntry>, // Unused: we re-scan dynamically when input starts with '/'
     mut file_search: FileSearch,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
@@ -430,20 +430,26 @@ pub async fn file_search_worker(
             file_search.force_reload_files(&current_dir);
         }
 
-        // Filter helpers - only when input starts with '/' and is not empty
-        let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
-            helpers
-                .iter()
-                .filter(|h| {
-                    h.command
-                        .to_lowercase()
-                        .contains(&input[1..].to_lowercase())
-                })
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
+        // Filter helpers - only when input starts with '/' and is not empty.
+        // Re-scan custom commands each time for dynamic reload (no restart needed).
+        let (filtered_helpers, custom_commands): (Vec<HelperEntry>, Option<Vec<CustomCommand>>) =
+            if input.starts_with('/') && !input.is_empty() {
+                let custom = crate::services::commands::scan_custom_commands();
+                let fresh_helpers = crate::services::commands::get_helper_commands(&custom);
+                let search_term = input[1..].to_lowercase();
+                let filtered: Vec<HelperEntry> = fresh_helpers
+                    .iter()
+                    .filter(|h| {
+                        // Match against both command ID and display string
+                        h.command().to_lowercase().contains(&search_term)
+                            || h.display().to_lowercase().contains(&search_term)
+                    })
+                    .cloned()
+                    .collect();
+                (filtered, Some(custom))
+            } else {
+                (Vec::new(), None)
+            };
 
         let mut filtered_files = Vec::new();
         // Detect @ trigger using new signature
@@ -466,6 +472,7 @@ pub async fn file_search_worker(
                 filtered_files,
                 cursor_position,
                 input,
+                custom_commands,
             })
             .await;
     }

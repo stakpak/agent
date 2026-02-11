@@ -766,6 +766,7 @@ pub fn update(
         InputEvent::AddUserMessage(s) => {
             message::handle_add_user_message(state, s);
         }
+
         InputEvent::HasUserMessage => {
             message::handle_has_user_message(state);
         }
@@ -903,6 +904,7 @@ mod tests {
             editor_command: None,
             auth_display_info: (None, None, None),
             board_agent_id: None,
+            init_prompt_content: None,
         })
     }
 

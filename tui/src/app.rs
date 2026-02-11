@@ -35,11 +35,12 @@ pub struct AppState {
     pub text_area: TextArea,
     pub text_area_state: TextAreaState,
     pub cursor_visible: bool,
-    pub helpers: Vec<HelperCommand>,
+    pub helpers: Vec<HelperEntry>,
+    pub custom_commands: Vec<CustomCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
     pub helper_scroll: usize,
-    pub filtered_helpers: Vec<HelperCommand>,
+    pub filtered_helpers: Vec<HelperEntry>,
     pub filtered_files: Vec<String>,
     pub file_search: FileSearch,
     pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
@@ -201,6 +202,8 @@ pub struct AppState {
     pub model: Model,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
+    /// Content of init prompt loaded from init.md in current directory (for /init)
+    pub init_prompt_content: Option<String>,
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
@@ -265,17 +268,19 @@ pub struct AppStateOptions<'a> {
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
     /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID env var)
     pub board_agent_id: Option<String>,
+    /// Content of init prompt loaded from init.md (passed from CLI)
+    pub init_prompt_content: Option<String>,
 }
 
 impl AppState {
-    pub fn get_helper_commands() -> Vec<HelperCommand> {
-        // Use unified command system
-        crate::services::commands::commands_to_helper_commands()
+    /// Built-in + custom commands merged. Custom commands from .stakpak/commands/*.md
+    pub fn get_helper_commands(custom_commands: &[CustomCommand]) -> Vec<HelperEntry> {
+        crate::services::commands::get_helper_commands(custom_commands)
     }
 
     /// Initialize file search channels and spawn worker
     fn init_file_search_channels(
-        helpers: &[HelperCommand],
+        helpers: &[HelperEntry],
     ) -> (
         mpsc::Sender<(String, usize)>,
         mpsc::Receiver<FileSearchResult>,
@@ -307,9 +312,11 @@ impl AppState {
             editor_command,
             auth_display_info,
             board_agent_id,
+            init_prompt_content,
         } = options;
 
-        let helpers = Self::get_helper_commands();
+        let custom_commands = crate::services::commands::scan_custom_commands();
+        let helpers = Self::get_helper_commands(&custom_commands);
         let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
 
         AppState {
@@ -322,6 +329,7 @@ impl AppState {
             stay_at_bottom: true,
             content_changed_while_scrolled_up: false,
             helpers: helpers.clone(),
+            custom_commands,
             show_helper_dropdown: false,
             helper_selected: 0,
             helper_scroll: 0,
@@ -504,6 +512,7 @@ impl AppState {
             billing_info: None,
             auth_display_info,
             subagent_pause_info: HashMap::new(),
+            init_prompt_content,
         }
     }
 
@@ -626,6 +635,13 @@ impl AppState {
 
                 // Update filtered_helpers from async worker
                 self.filtered_helpers = result.filtered_helpers;
+
+                // Dynamic reload: when slash triggered, update custom_commands and helpers
+                if let Some(custom) = result.custom_commands {
+                    self.custom_commands = custom;
+                    self.helpers =
+                        crate::services::commands::get_helper_commands(&self.custom_commands);
+                }
 
                 // Reset selection index if it's out of bounds
                 if !self.filtered_helpers.is_empty()

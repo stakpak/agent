@@ -28,6 +28,14 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
+
+/// Bundled infrastructure analysis prompt (embedded at compile time)
+///
+/// This adaptive prompt guides the agent to detect and analyze infrastructure
+/// based on available cloud provider credentials (AWS, GCP, Azure) and IaC tools
+/// (Terraform, Kubernetes, etc.). It instructs the agent to focus analysis on
+/// what's actually present in the environment.
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/local/prompts/init.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -125,6 +133,8 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    /// When true, send init_prompt_content as first user message on session start (stakpak init)
+    pub send_init_prompt_on_start: bool,
 }
 
 pub async fn run_interactive(
@@ -187,6 +197,11 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+
+        // Use bundled init prompt (loaded at module level as const)
+        let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
+
+        let send_init_prompt_on_start = config.send_init_prompt_on_start;
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -205,6 +220,8 @@ pub async fn run_interactive(
                 model_for_tui,
                 editor_command,
                 auth_display_info_for_tui,
+                init_prompt_content_for_tui,
+                send_init_prompt_on_start,
             )
             .await
             .map_err(|e| e.to_string())

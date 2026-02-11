@@ -99,16 +99,65 @@ impl RenderMetrics {
 
 /// Async file_search result struct
 pub struct FileSearchResult {
-    pub filtered_helpers: Vec<HelperCommand>,
+    pub filtered_helpers: Vec<HelperEntry>,
     pub filtered_files: Vec<String>,
     pub cursor_position: usize,
     pub input: String,
+    /// Fresh custom commands when slash triggered (for dynamic reload)
+    pub custom_commands: Option<Vec<CustomCommand>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct HelperCommand {
     pub command: &'static str,
     pub description: &'static str,
+}
+
+/// User-defined command loaded from .stakpak/commands/*.md or ~/.stakpak/commands/*.md
+#[derive(Debug, Clone)]
+pub struct CustomCommand {
+    pub id: String,
+    pub description: String,
+    /// Cached file content (loaded at init to keep execute_command sync)
+    pub content: String,
+}
+
+/// Unified entry for the helper dropdown: built-in or custom command.
+#[derive(Debug, Clone)]
+pub enum HelperEntry {
+    Builtin(HelperCommand),
+    Custom {
+        /// The command ID used for execution (e.g., "/security-review")
+        command: String,
+        /// The display string shown in dropdown (e.g., "/usercmd/security-review")
+        display: String,
+        description: String,
+    },
+}
+
+impl HelperEntry {
+    /// Returns the command ID used for execution
+    pub fn command(&self) -> &str {
+        match self {
+            HelperEntry::Builtin(h) => h.command,
+            HelperEntry::Custom { command, .. } => command.as_str(),
+        }
+    }
+
+    /// Returns the display string for the dropdown
+    pub fn display(&self) -> &str {
+        match self {
+            HelperEntry::Builtin(h) => h.command,
+            HelperEntry::Custom { display, .. } => display.as_str(),
+        }
+    }
+
+    pub fn description(&self) -> &str {
+        match self {
+            HelperEntry::Builtin(h) => h.description,
+            HelperEntry::Custom { description, .. } => description.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

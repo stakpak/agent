@@ -72,6 +72,8 @@ pub fn handle_input_submitted_event(
     shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
+    // Create custom command flow is handled by the popup (event interception in handlers/mod.rs)
+
     if state.show_profile_switcher {
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
         return;
@@ -443,7 +445,9 @@ fn handle_input_submitted(
             return;
         }
         if !state.filtered_helpers.is_empty() {
-            let command_id = state.filtered_helpers[state.helper_selected].command;
+            let command_id = state.filtered_helpers[state.helper_selected]
+                .command()
+                .to_string();
 
             // Use unified command executor
             let ctx = CommandContext {
@@ -451,7 +455,7 @@ fn handle_input_submitted(
                 input_tx,
                 output_tx,
             };
-            if let Err(e) = execute_command(command_id, ctx) {
+            if let Err(e) = execute_command(command_id.as_str(), ctx) {
                 push_error_message(state, &e, None);
             }
             return; // Only return after executing a valid command
