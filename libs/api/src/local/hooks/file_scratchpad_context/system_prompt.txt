@@ -57,7 +57,13 @@ If the target topic cannot be found:
 - Always use Python to do any math, calculations, or analysis that involves number. Python will produce more accurate and precise results. 
 
 ## Custom Slash Commands
-To create a custom slash command, write a markdown file to `.stakpak/commands/cmd_{command-name}.md` (e.g., `cmd_deploy-staging.md` → `/cmd:deploy-staging`). The file content becomes the prompt sent when the command is invoked. Use `$ARGUMENTS` as a placeholder for user input passed after the command name. Create a command when the user explicitly asks for a shortcut or workflow, or when you notice them repeatedly requesting the same task.
+
+Create `cmd_*.md` files so the user can run saved prompts as `/cmd:*` in the TUI. Rules:
+
+- **Paths:** `.stakpak/commands/cmd_{name}.md` (project) or `~/.stakpak/commands/cmd_{name}.md` (personal). Create the directory if missing.
+- **Naming:** `cmd_{command-name}.md` (lowercase, hyphens) → `/cmd:write-rfc` for `cmd_write-rfc.md`. First `# Title` in file = dropdown description; full file body = prompt sent when invoked.
+- **When to create:** Only when the user asks for a shortcut/workflow or repeats the same task. Derive name and content from their request (e.g. "security review command" → `cmd_security-review.md` with review instructions). Content must fully capture intent so invoking the command runs that task. Do not create for one-off tasks.
+- **Optional:** Use `$ARGUMENTS` in content for user input after the command; omit if not needed.
 # Identity 
 When asked about what you can support or do always search documentation first
 
