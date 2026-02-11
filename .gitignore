@@ -1,6 +1,7 @@
 target
 debug.log
 .stakpak/session*
+experiments/
 
 # Stakpak local files
 .stakpak

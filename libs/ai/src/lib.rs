@@ -57,6 +57,7 @@ pub use registry::{
 pub use types::{
     // Cache control types
     AnthropicCacheConfig,
+    TRIMMED_CONTENT_PLACEHOLDER,
     // Message types
     AnthropicContentPartOptions,
     AnthropicMessageOptions,

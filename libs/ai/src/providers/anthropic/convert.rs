@@ -75,8 +75,18 @@ pub fn to_anthropic_request(
         c.tail_message_count.min(remaining)
     });
 
+    // Extract trim boundary hint for stable-prefix caching
+    let trim_boundary_hint = cache_config
+        .as_ref()
+        .and_then(|c| c.trim_boundary_hint.clone());
+
     // Convert non-system messages with smart tail caching
-    let messages = build_messages_with_caching(&req.messages, &mut validator, tail_budget)?;
+    let messages = build_messages_with_caching(
+        &req.messages,
+        &mut validator,
+        tail_budget,
+        trim_boundary_hint.as_deref(),
+    )?;
 
     // Determine max_tokens (required by Anthropic!)
     let max_tokens = req
@@ -297,10 +307,15 @@ fn build_tools_with_caching(
     Ok(Some(converted))
 }
 
-/// Build messages with smart tail caching
+/// Build messages with smart tail caching and optional trim boundary detection
 ///
 /// Caches the last N non-system messages to maximize cache hits
 /// on subsequent requests in a conversation.
+///
+/// When `trim_boundary_hint` is provided, scans the final message array for
+/// the last message whose text content consists entirely of the hint string.
+/// A cache breakpoint is placed on that message to anchor the stable trimmed
+/// prefix, consuming one breakpoint from the tail budget.
 ///
 /// Tail caching runs **last** — after all structural mutations (merging,
 /// per-message sanitization, and sequence-level sanitization) are complete.
@@ -311,6 +326,7 @@ fn build_messages_with_caching(
     messages: &[Message],
     validator: &mut CacheControlValidator,
     tail_count: usize,
+    trim_boundary_hint: Option<&str>,
 ) -> Result<Vec<AnthropicMessage>> {
     let non_system: Vec<&Message> = messages.iter().filter(|m| m.role != Role::System).collect();
 
@@ -341,12 +357,29 @@ fn build_messages_with_caching(
     // must run after it to avoid stale breakpoint placement.
     sanitize_message_sequence(&mut merged);
 
-    // Phase 5: Apply tail caching to the last N messages of the *final* array.
+    // Phase 5: Apply cache breakpoints to the *final* stable message array.
     // Running after all mutations ensures breakpoints land on stable positions
     // and won't be shifted by later inserts/removes/re-merges.
-    if tail_count > 0 {
+
+    // Phase 5a: If a trim boundary hint is set, find the last message whose
+    // text content consists entirely of the hint string and place a cache
+    // breakpoint there. This anchors the stable trimmed prefix so it can be
+    // read from cache on subsequent calls. Consumes one from the tail budget.
+    let effective_tail_count = if let Some(hint) = trim_boundary_hint {
+        if let Some(boundary_idx) = find_last_trim_boundary(&merged, hint) {
+            apply_tail_cache_to_message(&mut merged[boundary_idx], validator);
+            tail_count.saturating_sub(1)
+        } else {
+            tail_count
+        }
+    } else {
+        tail_count
+    };
+
+    // Phase 5b: Apply tail caching to the last N messages.
+    if effective_tail_count > 0 {
         let len = merged.len();
-        let cache_start = len.saturating_sub(tail_count);
+        let cache_start = len.saturating_sub(effective_tail_count);
         for msg in &mut merged[cache_start..] {
             if !is_empty_content_message(msg) {
                 apply_tail_cache_to_message(msg, validator);
@@ -355,6 +388,63 @@ fn build_messages_with_caching(
     }
 
     Ok(merged)
+}
+
+/// Find the index of the last message whose text content consists entirely
+/// of the given hint string.
+///
+/// After merge and sanitization, a trimmed message may contain multiple
+/// content blocks (from merged consecutive same-role messages). This function
+/// checks that **every** text and tool_result block in the message matches
+/// the hint, and that the message has at least one such block.
+///
+/// Returns `None` if no message matches.
+fn find_last_trim_boundary(messages: &[AnthropicMessage], hint: &str) -> Option<usize> {
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, msg)| message_content_matches_hint(&msg.content, hint))
+        .map(|(idx, _)| idx)
+}
+
+/// Check if all text content in a message consists entirely of the hint string.
+///
+/// For `String` content: the string must equal the hint exactly.
+/// For `Blocks` content: every text block and tool_result text must equal the
+/// hint, and there must be at least one such block. Non-text blocks (tool_use,
+/// image, thinking) are ignored — they don't carry trimmed content.
+fn message_content_matches_hint(content: &AnthropicMessageContent, hint: &str) -> bool {
+    match content {
+        AnthropicMessageContent::String(s) => s == hint,
+        AnthropicMessageContent::Blocks(blocks) => {
+            let mut has_text = false;
+            for block in blocks {
+                match block {
+                    AnthropicContent::Text { text, .. } => {
+                        if text != hint {
+                            return false;
+                        }
+                        has_text = true;
+                    }
+                    AnthropicContent::ToolResult {
+                        content: Some(inner),
+                        ..
+                    } => {
+                        // Tool results may contain trimmed text
+                        if !message_content_matches_hint(inner, hint) {
+                            return false;
+                        }
+                        has_text = true;
+                    }
+                    // ToolUse, Image, Thinking, RedactedThinking — structural blocks,
+                    // not trimmed content. Skip them.
+                    _ => {}
+                }
+            }
+            has_text
+        }
+    }
 }
 
 /// Apply ephemeral cache control to the last content block of a message.
@@ -2628,5 +2718,175 @@ mod tests {
         // Empty user removed → whitespace assistant removed → just "Hello"
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");
+    }
+
+    // --- trim boundary detection tests ---
+
+    #[test]
+    fn test_find_last_trim_boundary_string_content() {
+        let messages = vec![
+            user_msg("hello"),
+            assistant_msg("[trimmed]"),
+            user_msg("world"),
+            assistant_msg("[trimmed]"),
+            user_msg("question"),
+            assistant_msg("real answer"),
+        ];
+        // Last trimmed assistant is at index 3
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), Some(3));
+    }
+
+    #[test]
+    fn test_find_last_trim_boundary_blocks_content() {
+        let messages = vec![
+            user_msg("hello"),
+            // Merged trimmed assistant with multiple text blocks
+            assistant_blocks_msg(vec![text_block("[trimmed]"), text_block("[trimmed]")]),
+            user_msg("question"),
+            assistant_msg("real answer"),
+        ];
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), Some(1));
+    }
+
+    #[test]
+    fn test_find_last_trim_boundary_mixed_blocks_no_match() {
+        let messages = vec![
+            user_msg("hello"),
+            // One block is trimmed, one is not — should NOT match
+            assistant_blocks_msg(vec![text_block("[trimmed]"), text_block("real content")]),
+            user_msg("question"),
+        ];
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), None);
+    }
+
+    #[test]
+    fn test_find_last_trim_boundary_no_match() {
+        let messages = vec![
+            user_msg("hello"),
+            assistant_msg("real answer"),
+            user_msg("question"),
+        ];
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), None);
+    }
+
+    #[test]
+    fn test_find_last_trim_boundary_tool_result_content() {
+        let messages = vec![
+            user_msg("hello"),
+            assistant_blocks_msg(vec![tool_use_block("t1", "tool_a")]),
+            // Trimmed tool result
+            user_blocks_msg(vec![tool_result_block("t1", "[trimmed]")]),
+            user_msg("question"),
+            assistant_msg("answer"),
+        ];
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), Some(2));
+    }
+
+    #[test]
+    fn test_find_last_trim_boundary_empty_messages() {
+        let messages: Vec<AnthropicMessage> = vec![];
+        assert_eq!(find_last_trim_boundary(&messages, "[trimmed]"), None);
+    }
+
+    #[test]
+    fn test_message_content_matches_hint_ignores_tool_use_blocks() {
+        // A message with tool_use + trimmed text should match
+        // (tool_use blocks are structural, not trimmed content)
+        let content = AnthropicMessageContent::Blocks(vec![
+            tool_use_block("t1", "tool_a"),
+            text_block("[trimmed]"),
+        ]);
+        assert!(message_content_matches_hint(&content, "[trimmed]"));
+    }
+
+    #[test]
+    fn test_trim_boundary_breakpoint_placement() {
+        // Simulate a post-trim message array:
+        // [user] [trimmed assistant] [user] [trimmed assistant] [user] [real assistant] [user question]
+        let mut validator = CacheControlValidator::new();
+        let mut messages = vec![
+            user_msg("preserved user 1"),
+            assistant_msg("[trimmed]"),
+            user_msg("preserved user 2"),
+            assistant_msg("[trimmed]"),
+            user_msg("preserved user 3"),
+            assistant_msg("real answer"),
+            user_msg("new question"),
+        ];
+
+        // Find trim boundary (should be index 3 — last trimmed assistant)
+        let boundary_idx = find_last_trim_boundary(&messages, "[trimmed]");
+        assert_eq!(boundary_idx, Some(3));
+
+        // Place breakpoint on trim boundary
+        apply_tail_cache_to_message(&mut messages[3], &mut validator);
+        assert_eq!(validator.breakpoint_count(), 1);
+
+        // Place tail breakpoint on last message
+        apply_tail_cache_to_message(&mut messages[6], &mut validator);
+        assert_eq!(validator.breakpoint_count(), 2);
+
+        // Verify trim boundary message has cache control
+        match &messages[3].content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert!(blocks.last().is_some_and(|b| match b {
+                    AnthropicContent::Text { cache_control, .. } => cache_control.is_some(),
+                    _ => false,
+                }));
+            }
+            _ => panic!("Expected blocks after cache control application"),
+        }
+    }
+
+    #[test]
+    fn test_trim_boundary_reduces_tail_budget() {
+        // With trim boundary found: tail_count should be reduced by 1
+        let mut validator = CacheControlValidator::new();
+        let messages = vec![
+            user_msg("hello"),
+            assistant_msg("[trimmed]"),
+            user_msg("question"),
+            assistant_msg("answer"),
+            user_msg("follow-up"),
+        ];
+
+        // tail_count=2, trim boundary found → effective_tail_count=1
+        let boundary_idx = find_last_trim_boundary(&messages, "[trimmed]");
+        assert!(boundary_idx.is_some());
+
+        let effective_tail_count = 2usize.saturating_sub(1); // trim boundary consumes 1
+        assert_eq!(effective_tail_count, 1);
+
+        // Only the last message should get a tail breakpoint
+        let len = messages.len();
+        let cache_start = len.saturating_sub(effective_tail_count);
+        assert_eq!(cache_start, 4); // Only index 4 (last message)
+
+        // Verify: 1 (trim boundary) + 1 (tail) = 2 breakpoints
+        let mut msgs = messages;
+        apply_tail_cache_to_message(&mut msgs[1], &mut validator); // trim boundary
+        apply_tail_cache_to_message(&mut msgs[4], &mut validator); // tail
+        assert_eq!(validator.breakpoint_count(), 2);
+    }
+
+    #[test]
+    fn test_no_trim_boundary_preserves_full_tail_budget() {
+        // Without trim boundary: full tail_count is used
+        let messages = vec![
+            user_msg("hello"),
+            assistant_msg("real answer"),
+            user_msg("question"),
+            assistant_msg("another answer"),
+            user_msg("follow-up"),
+        ];
+
+        let boundary_idx = find_last_trim_boundary(&messages, "[trimmed]");
+        assert!(boundary_idx.is_none());
+
+        // tail_count stays at 2
+        let effective_tail_count = 2usize;
+        let len = messages.len();
+        let cache_start = len.saturating_sub(effective_tail_count);
+        assert_eq!(cache_start, 3); // Indices 3 and 4
     }
 }
