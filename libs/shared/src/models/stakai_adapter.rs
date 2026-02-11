@@ -14,7 +14,7 @@ use stakai::{
     AnthropicOptions, CacheStrategy, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
     Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
-    StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage, TRIMMED_CONTENT_PLACEHOLDER,
+    StreamEvent, TRIMMED_CONTENT_PLACEHOLDER, ThinkingOptions, Tool, ToolFunction, Usage,
     providers::anthropic::AnthropicConfig as StakaiAnthropicConfig, registry::ProviderRegistry,
 };
 
