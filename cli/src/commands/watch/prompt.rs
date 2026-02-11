@@ -14,9 +14,14 @@ use crate::commands::watch::{CheckResult, Trigger};
 /// ---
 /// Trigger: {trigger_name}
 /// [Check script: {check_path}]
-/// [Check output:
+/// [Check exit code: {exit_code}]
+/// [Check stdout:
 /// ```
 /// {stdout}
+/// ```]
+/// [Check stderr:
+/// ```
+/// {stderr}
 /// ```]
 ///
 /// [Board: {board_id}
@@ -47,11 +52,21 @@ pub fn assemble_prompt(trigger: &Trigger, check_result: Option<&CheckResult>) ->
         && let Some(check_path) = &trigger.check
     {
         context_lines.push(format!("Check script: {}", check_path));
+        context_lines.push(format!(
+            "Check exit code: {}",
+            result.exit_code.unwrap_or(-1)
+        ));
 
-        // Include check output if non-empty
+        // Include check stdout if non-empty
         let stdout = result.stdout.trim();
         if !stdout.is_empty() {
-            context_lines.push(format!("Check output:\n```\n{}\n```", stdout));
+            context_lines.push(format!("Check stdout:\n```\n{}\n```", stdout));
+        }
+
+        // Include check stderr if non-empty
+        let stderr = result.stderr.trim();
+        if !stderr.is_empty() {
+            context_lines.push(format!("Check stderr:\n```\n{}\n```", stderr));
         }
     }
 
@@ -88,6 +103,7 @@ mod tests {
             schedule: "*/15 * * * *".to_string(),
             check: Some("~/.stakpak/triggers/check-disk.sh".to_string()),
             check_timeout: Some(Duration::from_secs(30)),
+            check_trigger_on: None,
             prompt: "Analyze disk usage and safely free up space.".to_string(),
             profile: Some("infrastructure".to_string()),
             board_id: Some("board_abc123".to_string()),
@@ -105,6 +121,7 @@ mod tests {
             schedule: "0 * * * *".to_string(),
             check: None,
             check_timeout: None,
+            check_trigger_on: None,
             prompt: "Do something simple.".to_string(),
             profile: None,
             board_id: None,
@@ -141,8 +158,11 @@ mod tests {
         // Verify check script path
         assert!(prompt.contains("Check script: ~/.stakpak/triggers/check-disk.sh"));
 
-        // Verify check output
-        assert!(prompt.contains("Check output:"));
+        // Verify check exit code
+        assert!(prompt.contains("Check exit code: 0"));
+
+        // Verify check stdout
+        assert!(prompt.contains("Check stdout:"));
         assert!(prompt.contains("Disk usage: 92%"));
         assert!(prompt.contains("/var/log: 5GB"));
 
@@ -169,7 +189,8 @@ mod tests {
 
         // Check script section should NOT be included
         assert!(!prompt.contains("Check script:"));
-        assert!(!prompt.contains("Check output:"));
+        assert!(!prompt.contains("Check exit code:"));
+        assert!(!prompt.contains("Check stdout:"));
 
         // Board should still be included
         assert!(prompt.contains("Board: board_abc123"));
@@ -189,7 +210,8 @@ mod tests {
 
         // Check script should be included
         assert!(prompt.contains("Check script:"));
-        assert!(prompt.contains("Check output:"));
+        assert!(prompt.contains("Check exit code:"));
+        assert!(prompt.contains("Check stdout:"));
 
         // Board section should NOT be included
         assert!(!prompt.contains("Board:"));
@@ -211,7 +233,8 @@ mod tests {
 
         // No check script section
         assert!(!prompt.contains("Check script:"));
-        assert!(!prompt.contains("Check output:"));
+        assert!(!prompt.contains("Check exit code:"));
+        assert!(!prompt.contains("Check stdout:"));
 
         // No board section
         assert!(!prompt.contains("Board:"));
@@ -246,11 +269,12 @@ mod tests {
 
         let prompt = assemble_prompt(&trigger, Some(&check_result));
 
-        // Check script path should be included
+        // Check script path and exit code should be included
         assert!(prompt.contains("Check script: ~/.stakpak/triggers/check-disk.sh"));
+        assert!(prompt.contains("Check exit code: 0"));
 
-        // But check output section should be omitted when stdout is empty
-        assert!(!prompt.contains("Check output:"));
+        // But check stdout section should be omitted when stdout is empty
+        assert!(!prompt.contains("Check stdout:"));
     }
 
     #[test]
@@ -260,8 +284,49 @@ mod tests {
 
         let prompt = assemble_prompt(&trigger, Some(&check_result));
 
-        // Check output section should be omitted when stdout is only whitespace
-        assert!(!prompt.contains("Check output:"));
+        // Check stdout section should be omitted when stdout is only whitespace
+        assert!(!prompt.contains("Check stdout:"));
+    }
+
+    #[test]
+    fn test_check_stderr_included() {
+        let trigger = full_trigger();
+        let check_result = CheckResult {
+            exit_code: Some(1),
+            stdout: "stdout content".to_string(),
+            stderr: "stderr warning message".to_string(),
+            timed_out: false,
+        };
+
+        let prompt = assemble_prompt(&trigger, Some(&check_result));
+
+        // Both stdout and stderr should be included
+        assert!(prompt.contains("Check stdout:"));
+        assert!(prompt.contains("stdout content"));
+        assert!(prompt.contains("Check stderr:"));
+        assert!(prompt.contains("stderr warning message"));
+
+        // Exit code should reflect the actual value
+        assert!(prompt.contains("Check exit code: 1"));
+    }
+
+    #[test]
+    fn test_check_stderr_only() {
+        let trigger = full_trigger();
+        let check_result = CheckResult {
+            exit_code: Some(2),
+            stdout: "".to_string(),
+            stderr: "Error: something went wrong".to_string(),
+            timed_out: false,
+        };
+
+        let prompt = assemble_prompt(&trigger, Some(&check_result));
+
+        // Only stderr should be included (stdout is empty)
+        assert!(!prompt.contains("Check stdout:"));
+        assert!(prompt.contains("Check stderr:"));
+        assert!(prompt.contains("Error: something went wrong"));
+        assert!(prompt.contains("Check exit code: 2"));
     }
 
     #[test]

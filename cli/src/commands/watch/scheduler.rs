@@ -217,6 +217,7 @@ mod tests {
             schedule: schedule.to_string(),
             check: None,
             check_timeout: None,
+            check_trigger_on: None,
             prompt: "Test prompt".to_string(),
             profile: None,
             board_id: None,
