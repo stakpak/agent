@@ -5,8 +5,7 @@ use crate::commands::agent::run::helpers::{
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
-    AsyncManifest, AsyncOutcome, PauseReason, PendingToolCall, ResumeInput, build_resume_hint,
-    detect_pending_tool_calls, write_pause_manifest,
+    AsyncOutcome, ResumeInput, build_resume_hint, detect_pending_tool_calls, write_pause_manifest,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -18,6 +17,7 @@ use stakpak_api::{
 };
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::HashMap;
