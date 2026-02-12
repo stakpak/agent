@@ -618,17 +618,12 @@ fn sanitize_and_truncate(text: &str, max_bytes: usize) -> String {
 
 /// Truncate a string to a maximum byte length, respecting unicode character boundaries.
 fn truncate_string(s: &str, max_bytes: usize) -> String {
-    if s.len() <= max_bytes {
+    if s.chars().count() <= max_len {
         return s.to_string();
     }
 
-    // Find the last valid char boundary at or before max_bytes
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-
-    format!("{}... (truncated)", &s[..end])
+    let truncated: String = s.chars().take(max_len).collect();
+    format!("{}... (truncated)", truncated)
 }
 
 /// Wait for SIGTERM, SIGINT, or SIGHUP signal.

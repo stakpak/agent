@@ -701,14 +701,15 @@ fn format_tokens(tokens: u32) -> String {
     }
 }
 
-/// Truncate a string to fit within a given width
+/// Truncate a string to fit within a given width, respecting char boundaries.
 fn truncate_string(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
+    if s.chars().count() <= max_width {
         s.to_string()
     } else if max_width > 3 {
-        format!("{}...", &s[..max_width - 3])
+        let truncated: String = s.chars().take(max_width - 3).collect();
+        format!("{}...", truncated)
     } else {
-        s[..max_width].to_string()
+        s.chars().take(max_width).collect()
     }
 }
 
