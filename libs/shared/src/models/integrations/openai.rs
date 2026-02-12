@@ -806,11 +806,12 @@ impl From<LLMMessage> for ChatMessage {
             _ => Role::User,
         };
 
-        let (content, tool_calls) = match llm_message.content {
-            LLMMessageContent::String(text) => (Some(MessageContent::String(text)), None),
+        let (content, tool_calls, tool_call_id) = match llm_message.content {
+            LLMMessageContent::String(text) => (Some(MessageContent::String(text)), None, None),
             LLMMessageContent::List(items) => {
                 let mut text_parts = Vec::new();
                 let mut tool_call_parts = Vec::new();
+                let mut tool_result_id: Option<String> = None;
 
                 for item in items {
                     match item {
@@ -837,7 +838,13 @@ impl From<LLMMessage> for ChatMessage {
                                 metadata,
                             });
                         }
-                        LLMMessageTypedContent::ToolResult { content, .. } => {
+                        LLMMessageTypedContent::ToolResult {
+                            tool_use_id,
+                            content,
+                        } => {
+                            if tool_result_id.is_none() {
+                                tool_result_id = Some(tool_use_id);
+                            }
                             text_parts.push(ContentPart {
                                 r#type: "text".to_string(),
                                 text: Some(content),
@@ -872,7 +879,7 @@ impl From<LLMMessage> for ChatMessage {
                     None
                 };
 
-                (content, tool_calls)
+                (content, tool_calls, tool_result_id)
             }
         };
 
@@ -881,7 +888,7 @@ impl From<LLMMessage> for ChatMessage {
             content,
             name: None,
             tool_calls,
-            tool_call_id: None,
+            tool_call_id,
             usage: None,
             ..Default::default()
         }
@@ -1090,6 +1097,29 @@ mod tests {
             Some(MessageContent::String(text)) => assert_eq!(text, "Hello, world!"),
             _ => panic!("Expected string content"),
         }
+    }
+
+    #[test]
+    fn test_llm_message_to_chat_message_tool_result_preserves_tool_call_id() {
+        let llm_message = LLMMessage {
+            role: "tool".to_string(),
+            content: LLMMessageContent::List(vec![LLMMessageTypedContent::ToolResult {
+                tool_use_id: "toolu_01Abc123".to_string(),
+                content: "Tool execution result".to_string(),
+            }]),
+        };
+
+        let chat_message = ChatMessage::from(llm_message);
+        assert_eq!(chat_message.role, Role::Tool);
+        assert_eq!(chat_message.tool_call_id.as_deref(), Some("toolu_01Abc123"));
+        assert_eq!(
+            chat_message.content,
+            Some(MessageContent::Array(vec![ContentPart {
+                r#type: "text".to_string(),
+                text: Some("Tool execution result".to_string()),
+                image_url: None,
+            }]))
+        );
     }
 
     #[test]
