@@ -18,6 +18,74 @@ It bridges chat platforms (Telegram / Slack / Discord) to the Stakpak server API
 
 ---
 
+## Architecture & data flow
+
+```text
+Channel adapter (telegram/slack/discord)
+  └─ emits InboundMessage
+        │
+        ▼
+Dispatcher
+  ├─ resolve routing key (dm/group/thread)
+  ├─ load/create session mapping (GatewayStore)
+  ├─ send user message to stakpak server
+  ├─ subscribe to SSE events for the run
+  ├─ auto-resolve tool approvals (gateway policy)
+  └─ deliver assistant reply back to channel
+        │
+        ▼
+Channel adapter send(...)
+```
+
+### Core components
+
+- **`runtime.rs`**
+  - boots channels + dispatcher + prune loop
+  - mounts gateway API state
+- **`dispatcher.rs`**
+  - main orchestration loop for inbound messages and run events
+  - queues follow-up messages while a run is active for a session
+  - keeps per-session SSE cursor to resume safely
+- **`router.rs`**
+  - computes stable routing keys for direct/group/thread conversations
+  - supports bindings + DM scope behavior
+- **`store.rs`**
+  - SQLite persistence for routing key → session mapping
+  - stores one-shot `delivery_context` for watch notification replies
+- **`client.rs`**
+  - HTTP + SSE client to `stakpak serve`
+  - sends messages, receives run events, resolves tool decisions
+- **`api.rs`**
+  - gateway HTTP surface:
+    - `GET /status`
+    - `GET /channels`
+    - `GET /sessions`
+    - `POST /send`
+
+### Session model
+
+- Each chat target resolves to a **routing key**.
+- Routing key maps to one persistent Stakpak **session_id**.
+- For thread-aware channels, each thread can map to a separate session.
+- Delivery metadata is refreshed on inbound messages so replies go to the right target.
+
+### Tool approval model
+
+- Gateway receives `tool_calls_proposed` from SSE.
+- It builds decisions using configured policy (`allow_all`, `deny_all`, `allowlist`).
+- In integrated mode (`stakpak serve --gateway`), approval policy is derived from serve/profile auto-approve settings.
+
+### Embedded vs standalone mode
+
+- **Embedded (recommended):** `stakpak serve --gateway`
+  - server + gateway share one process
+  - gateway routes are exposed under server: `/v1/gateway/*`
+- **Standalone:** `stakpak gateway run`
+  - gateway runs separately and connects to an existing `stakpak serve`
+  - standalone API binds separately (default `127.0.0.1:4097`)
+
+---
+
 ## Recommended way to run
 
 ### 1) Create gateway config
