@@ -603,6 +603,28 @@ pub fn extract_bash_block_info(
             content_color: Color::LightRed,
             tool_type: "Delete File".to_string(),
         },
+        "dynamic_subagent_task" => {
+            let is_sandbox =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                    .unwrap_or(false);
+            if is_sandbox {
+                BubbleColors {
+                    border_color: Color::Green,
+                    title_color: Color::Green,
+                    content_color: term_color(Color::Gray),
+                    tool_type: "Subagent [sandboxed]".to_string(),
+                }
+            } else {
+                BubbleColors {
+                    border_color: Color::Magenta,
+                    title_color: Color::Magenta,
+                    content_color: term_color(Color::Gray),
+                    tool_type: "Subagent".to_string(),
+                }
+            }
+        }
         _ => BubbleColors {
             border_color: Color::Cyan,
             title_color: term_color(Color::White),
@@ -2400,25 +2422,35 @@ pub fn render_task_wait_block(
         };
 
         // Get description or fall back to truncated task_id
-        let display_name = task
+        let raw_description = task
             .description
             .as_ref()
-            .map(|d| {
-                // Truncate description if too long
-                if d.len() > 30 {
-                    format!("{}…", &d[..30])
-                } else {
-                    d.clone()
-                }
-            })
+            .cloned()
             .unwrap_or_else(|| task_id_display.clone());
 
-        // Build the task line: "│ ● description [duration] status │"
-        let task_content = format!("{} {} [{}]", display_name, task.status, duration_str);
+        // Detect and strip [sandboxed] tag for separate rendering
+        let is_sandboxed = raw_description.contains("[sandboxed]");
+        let clean_description = raw_description
+            .replace(" [sandboxed]", "")
+            .replace("[sandboxed]", "");
+
+        let display_name = if clean_description.len() > 30 {
+            format!("{}…", &clean_description[..30])
+        } else {
+            clean_description
+        };
+
+        let sandboxed_tag = if is_sandboxed { " [sandboxed]" } else { "" };
+
+        // Build the task line: "│ ● description [sandboxed] [duration] status │"
+        let task_content = format!(
+            "{}{} {} [{}]",
+            display_name, sandboxed_tag, task.status, duration_str
+        );
         let content_display_width = calculate_display_width(&task_content) + 2; // +2 for icon and space
         let padding_needed = inner_width.saturating_sub(content_display_width);
 
-        let line_spans = vec![
+        let mut line_spans = vec![
             Span::styled("│", Style::default().fg(border_color)),
             Span::from(" "),
             Span::styled(
@@ -2429,6 +2461,14 @@ pub fn render_task_wait_block(
             ),
             Span::from(" "),
             Span::styled(display_name, Style::default().fg(AdaptiveColors::text())),
+        ];
+        if is_sandboxed {
+            line_spans.push(Span::styled(
+                " [sandboxed]",
+                Style::default().fg(Color::Green),
+            ));
+        }
+        line_spans.extend([
             Span::styled(
                 format!(" [{}]", duration_str),
                 Style::default().fg(Color::DarkGray),
@@ -2439,7 +2479,7 @@ pub fn render_task_wait_block(
             ),
             Span::from(" ".repeat(padding_needed)),
             Span::styled(" │", Style::default().fg(border_color)),
-        ];
+        ]);
         formatted_lines.push(Line::from(line_spans));
 
         // If task is paused, show pause info (agent message and pending tool calls)
