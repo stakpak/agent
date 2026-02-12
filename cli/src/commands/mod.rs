@@ -851,9 +851,11 @@ impl Commands {
                         None
                     } else {
                         Some(Arc::new(
-                            stakpak_gateway::Gateway::new(gateway_cfg).map_err(|e| {
-                                format!("Failed to initialize gateway runtime: {}", e)
-                            })?,
+                            stakpak_gateway::Gateway::new(gateway_cfg)
+                                .await
+                                .map_err(|e| {
+                                    format!("Failed to initialize gateway runtime: {}", e)
+                                })?,
                         ))
                     }
                 } else {

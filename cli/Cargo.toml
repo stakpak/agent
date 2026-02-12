@@ -59,7 +59,7 @@ croner = "3.0"
 humantime-serde = "1.1"
 humantime = "2.1"
 thiserror = "2.0"
-libsql = "0.9.29"
+libsql = { workspace = true }
 tokio-cron-scheduler = "0.15"
 which = "7.0"
 

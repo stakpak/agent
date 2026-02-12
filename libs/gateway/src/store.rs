@@ -1,8 +1,8 @@
 use std::path::Path;
-use std::sync::Mutex;
 
-use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use anyhow::{Context, Result, anyhow};
+use libsql::Connection;
+use tokio::sync::Mutex;
 
 use crate::types::DeliveryContext;
 
@@ -19,220 +19,203 @@ pub struct GatewayStore {
 }
 
 impl GatewayStore {
-    pub fn open(path: &Path) -> Result<Self> {
+    pub async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
                 format!("failed to create store parent dir: {}", parent.display())
             })?;
         }
 
-        let conn = Connection::open(path)
+        let db = libsql::Builder::new_local(path)
+            .build()
+            .await
             .with_context(|| format!("failed to open sqlite db: {}", path.display()))?;
+        let conn = db.connect().context("failed to connect sqlite db")?;
+
         let store = Self {
             conn: Mutex::new(conn),
         };
-        store.run_migrations()?;
+        store.run_migrations().await?;
         Ok(store)
     }
 
-    pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("failed to open in-memory sqlite db")?;
+    pub async fn open_in_memory() -> Result<Self> {
+        let db = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .context("failed to open in-memory sqlite db")?;
+        let conn = db
+            .connect()
+            .context("failed to connect in-memory sqlite db")?;
+
         let store = Self {
             conn: Mutex::new(conn),
         };
-        store.run_migrations()?;
+        store.run_migrations().await?;
         Ok(store)
     }
 
-    pub fn get(&self, routing_key: &str) -> Result<Option<SessionMapping>> {
-        let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
-             FROM sessions
-             WHERE routing_key = ?1",
-        )?;
+    pub async fn get(&self, routing_key: &str) -> Result<Option<SessionMapping>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
+                 FROM sessions
+                 WHERE routing_key = ?",
+                [routing_key],
+            )
+            .await
+            .context("failed to fetch session mapping")?;
 
-        stmt.query_row(params![routing_key], |row| {
-            let chat_type_json: String = row.get(4)?;
-            let channel_meta_json: String = row.get(5)?;
-            let chat_type = parse_json_value(&chat_type_json)?;
-            let channel_meta = parse_json_value(&channel_meta_json)?;
+        let Some(row) = rows
+            .next()
+            .await
+            .context("failed to fetch session mapping row")?
+        else {
+            return Ok(None);
+        };
 
-            let channel: String = row.get(2)?;
-            let peer_id: String = row.get(3)?;
-
-            Ok(SessionMapping {
-                session_id: row.get(0)?,
-                title: row.get(1)?,
-                delivery: DeliveryContext {
-                    channel: channel.into(),
-                    peer_id: peer_id.into(),
-                    chat_type,
-                    channel_meta,
-                    updated_at: row.get(7)?,
-                },
-                created_at: row.get(6)?,
-            })
-        })
-        .optional()
-        .context("failed to fetch session mapping")
+        Ok(Some(parse_session_mapping_row(&row, 0)?))
     }
 
-    pub fn set(&self, routing_key: &str, mapping: &SessionMapping) -> Result<()> {
-        let conn = self.lock_conn()?;
+    pub async fn set(&self, routing_key: &str, mapping: &SessionMapping) -> Result<()> {
+        let chat_type = serde_json::to_string(&mapping.delivery.chat_type)
+            .context("failed to serialize chat_type")?;
+        let channel_meta = serde_json::to_string(&mapping.delivery.channel_meta)
+            .context("failed to serialize channel_meta")?;
+
+        let conn = self.conn.lock().await;
         conn.execute(
             "INSERT OR REPLACE INTO sessions
              (routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
                 routing_key,
-                mapping.session_id,
-                mapping.title,
-                mapping.delivery.channel.0,
-                mapping.delivery.peer_id.0,
-                serde_json::to_string(&mapping.delivery.chat_type).context("failed to serialize chat_type")?,
-                serde_json::to_string(&mapping.delivery.channel_meta)
-                    .context("failed to serialize channel_meta")?,
+                mapping.session_id.as_str(),
+                mapping.title.as_str(),
+                mapping.delivery.channel.0.as_str(),
+                mapping.delivery.peer_id.0.as_str(),
+                chat_type.as_str(),
+                channel_meta.as_str(),
                 mapping.created_at,
                 mapping.delivery.updated_at,
-            ],
+            ),
         )
+        .await
         .context("failed to upsert session mapping")?;
 
         Ok(())
     }
 
-    pub fn find_by_session_id(&self, session_id: &str) -> Result<Option<(String, SessionMapping)>> {
-        let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
-             FROM sessions
-             WHERE session_id = ?1
-             ORDER BY updated_at DESC
-             LIMIT 1",
-        )?;
+    pub async fn find_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(String, SessionMapping)>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
+                 FROM sessions
+                 WHERE session_id = ?
+                 ORDER BY updated_at DESC
+                 LIMIT 1",
+                [session_id],
+            )
+            .await
+            .context("failed to query by session_id")?;
 
-        stmt.query_row(params![session_id], |row| {
-            let routing_key: String = row.get(0)?;
-            let chat_type_json: String = row.get(5)?;
-            let channel_meta_json: String = row.get(6)?;
-            let chat_type = parse_json_value(&chat_type_json)?;
-            let channel_meta = parse_json_value(&channel_meta_json)?;
+        let Some(row) = rows.next().await.context("failed to read session_id row")? else {
+            return Ok(None);
+        };
 
-            let channel: String = row.get(3)?;
-            let peer_id: String = row.get(4)?;
+        let routing_key: String = row.get(0).context("failed to parse routing_key")?;
+        let mapping = parse_session_mapping_row(&row, 1)?;
 
-            Ok((
-                routing_key,
-                SessionMapping {
-                    session_id: row.get(1)?,
-                    title: row.get(2)?,
-                    delivery: DeliveryContext {
-                        channel: channel.into(),
-                        peer_id: peer_id.into(),
-                        chat_type,
-                        channel_meta,
-                        updated_at: row.get(8)?,
-                    },
-                    created_at: row.get(7)?,
-                },
-            ))
-        })
-        .optional()
-        .context("failed to query by session_id")
+        Ok(Some((routing_key, mapping)))
     }
 
-    pub fn update_delivery(&self, routing_key: &str, delivery: &DeliveryContext) -> Result<()> {
-        let conn = self.lock_conn()?;
+    pub async fn update_delivery(
+        &self,
+        routing_key: &str,
+        delivery: &DeliveryContext,
+    ) -> Result<()> {
+        let chat_type =
+            serde_json::to_string(&delivery.chat_type).context("failed to serialize chat_type")?;
+        let channel_meta = serde_json::to_string(&delivery.channel_meta)
+            .context("failed to serialize channel_meta")?;
+
+        let conn = self.conn.lock().await;
         conn.execute(
             "UPDATE sessions
-             SET channel = ?1,
-                 peer_id = ?2,
-                 chat_type = ?3,
-                 channel_meta = ?4,
-                 updated_at = ?5
-             WHERE routing_key = ?6",
-            params![
-                delivery.channel.0,
-                delivery.peer_id.0,
-                serde_json::to_string(&delivery.chat_type)
-                    .context("failed to serialize chat_type")?,
-                serde_json::to_string(&delivery.channel_meta)
-                    .context("failed to serialize channel_meta")?,
+             SET channel = ?,
+                 peer_id = ?,
+                 chat_type = ?,
+                 channel_meta = ?,
+                 updated_at = ?
+             WHERE routing_key = ?",
+            (
+                delivery.channel.0.as_str(),
+                delivery.peer_id.0.as_str(),
+                chat_type.as_str(),
+                channel_meta.as_str(),
                 delivery.updated_at,
                 routing_key,
-            ],
+            ),
         )
+        .await
         .context("failed to update delivery context")?;
 
         Ok(())
     }
 
-    pub fn list(&self, limit: usize) -> Result<Vec<(String, SessionMapping)>> {
-        let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
-             FROM sessions
-             ORDER BY updated_at DESC
-             LIMIT ?1",
-        )?;
+    pub async fn list(&self, limit: usize) -> Result<Vec<(String, SessionMapping)>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
+                 FROM sessions
+                 ORDER BY updated_at DESC
+                 LIMIT ?",
+                [limit as i64],
+            )
+            .await
+            .context("failed to list session mappings")?;
 
-        let mut rows = stmt.query(params![limit as i64])?;
         let mut out = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            let routing_key: String = row.get(0)?;
-            let chat_type_json: String = row.get(5)?;
-            let channel_meta_json: String = row.get(6)?;
-            let chat_type = parse_json_value(&chat_type_json)?;
-            let channel_meta = parse_json_value(&channel_meta_json)?;
-
-            let channel: String = row.get(3)?;
-            let peer_id: String = row.get(4)?;
-
-            out.push((
-                routing_key,
-                SessionMapping {
-                    session_id: row.get(1)?,
-                    title: row.get(2)?,
-                    delivery: DeliveryContext {
-                        channel: channel.into(),
-                        peer_id: peer_id.into(),
-                        chat_type,
-                        channel_meta,
-                        updated_at: row.get(8)?,
-                    },
-                    created_at: row.get(7)?,
-                },
-            ));
+        while let Some(row) = rows
+            .next()
+            .await
+            .context("failed to read session mappings row")?
+        {
+            let routing_key: String = row.get(0).context("failed to parse routing_key")?;
+            let mapping = parse_session_mapping_row(&row, 1)?;
+            out.push((routing_key, mapping));
         }
 
         Ok(out)
     }
 
-    pub fn delete(&self, routing_key: &str) -> Result<()> {
-        let conn = self.lock_conn()?;
-        conn.execute(
-            "DELETE FROM sessions WHERE routing_key = ?1",
-            params![routing_key],
-        )
-        .context("failed to delete routing key")?;
+    pub async fn delete(&self, routing_key: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute("DELETE FROM sessions WHERE routing_key = ?", [routing_key])
+            .await
+            .context("failed to delete routing key")?;
+
         Ok(())
     }
 
-    pub fn prune(&self, max_age_ms: i64) -> Result<usize> {
+    pub async fn prune(&self, max_age_ms: i64) -> Result<usize> {
         let cutoff = now_millis() - max_age_ms;
-        let conn = self.lock_conn()?;
+        let conn = self.conn.lock().await;
         let deleted = conn
-            .execute(
-                "DELETE FROM sessions WHERE updated_at < ?1",
-                params![cutoff],
-            )
+            .execute("DELETE FROM sessions WHERE updated_at < ?", [cutoff])
+            .await
             .context("failed to prune stale sessions")?;
-        Ok(deleted)
+
+        Ok(deleted as usize)
     }
 
-    pub fn set_delivery_context(
+    pub async fn set_delivery_context(
         &self,
         channel: &str,
         target_key: &str,
@@ -243,44 +226,60 @@ impl GatewayStore {
         let expires_at = delivered_at + (ttl_hours as i64 * 60 * 60 * 1000);
         let context_json = serde_json::to_string(context).context("failed to serialize context")?;
 
-        let conn = self.lock_conn()?;
+        let conn = self.conn.lock().await;
         conn.execute(
             "INSERT OR REPLACE INTO delivery_context
              (channel, target_key, context, delivered_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel, target_key, context_json, delivered_at, expires_at],
+             VALUES (?, ?, ?, ?, ?)",
+            (
+                channel,
+                target_key,
+                context_json.as_str(),
+                delivered_at,
+                expires_at,
+            ),
         )
+        .await
         .context("failed to set delivery context")?;
 
         Ok(())
     }
 
-    pub fn pop_delivery_context(
+    pub async fn pop_delivery_context(
         &self,
         channel: &str,
         target_key: &str,
     ) -> Result<Option<serde_json::Value>> {
-        let conn = self.lock_conn()?;
+        let conn = self.conn.lock().await;
 
-        let row: Option<(String, i64)> = conn
-            .query_row(
+        let mut rows = conn
+            .query(
                 "SELECT context, expires_at
                  FROM delivery_context
-                 WHERE channel = ?1 AND target_key = ?2",
-                params![channel, target_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                 WHERE channel = ? AND target_key = ?",
+                (channel, target_key),
             )
-            .optional()
+            .await
             .context("failed to fetch delivery context")?;
 
-        let Some((context_json, expires_at)) = row else {
+        let Some(row) = rows
+            .next()
+            .await
+            .context("failed to read delivery context row")?
+        else {
             return Ok(None);
         };
 
+        let context_json: String = row.get(0).context("failed to parse delivery context")?;
+        let expires_at: i64 = row
+            .get(1)
+            .context("failed to parse delivery context expiry")?;
+
         conn.execute(
-            "DELETE FROM delivery_context WHERE channel = ?1 AND target_key = ?2",
-            params![channel, target_key],
+            "DELETE FROM delivery_context WHERE channel = ? AND target_key = ?",
+            (channel, target_key),
         )
+        .await
         .context("failed to remove delivery context")?;
 
         if expires_at <= now_millis() {
@@ -292,19 +291,21 @@ impl GatewayStore {
         Ok(Some(value))
     }
 
-    pub fn prune_delivery_contexts(&self) -> Result<usize> {
-        let conn = self.lock_conn()?;
+    pub async fn prune_delivery_contexts(&self) -> Result<usize> {
+        let conn = self.conn.lock().await;
         let deleted = conn
             .execute(
-                "DELETE FROM delivery_context WHERE expires_at <= ?1",
-                params![now_millis()],
+                "DELETE FROM delivery_context WHERE expires_at <= ?",
+                [now_millis()],
             )
+            .await
             .context("failed to prune delivery contexts")?;
-        Ok(deleted)
+
+        Ok(deleted as usize)
     }
 
-    fn run_migrations(&self) -> Result<()> {
-        let conn = self.lock_conn()?;
+    async fn run_migrations(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS sessions (
@@ -332,26 +333,67 @@ impl GatewayStore {
             );
             ",
         )
+        .await
         .context("failed to run gateway store migrations")?;
 
         Ok(())
     }
+}
 
-    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
-        self.conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("failed to lock sqlite connection"))
-    }
+fn parse_session_mapping_row(row: &libsql::Row, start_idx: usize) -> Result<SessionMapping> {
+    let col = |offset: usize| -> Result<i32> {
+        i32::try_from(start_idx + offset)
+            .map_err(|_| anyhow!("column index overflow at {}", start_idx + offset))
+    };
+
+    let session_id: String = row
+        .get(col(0)?)
+        .with_context(|| format!("failed to parse session_id at column {start_idx}"))?;
+    let title: String = row
+        .get(col(1)?)
+        .with_context(|| format!("failed to parse title at column {}", start_idx + 1))?;
+    let channel: String = row
+        .get(col(2)?)
+        .with_context(|| format!("failed to parse channel at column {}", start_idx + 2))?;
+    let peer_id: String = row
+        .get(col(3)?)
+        .with_context(|| format!("failed to parse peer_id at column {}", start_idx + 3))?;
+    let chat_type_json: String = row
+        .get(col(4)?)
+        .with_context(|| format!("failed to parse chat_type at column {}", start_idx + 4))?;
+    let channel_meta_json: String = row
+        .get(col(5)?)
+        .with_context(|| format!("failed to parse channel_meta at column {}", start_idx + 5))?;
+    let created_at: i64 = row
+        .get(col(6)?)
+        .with_context(|| format!("failed to parse created_at at column {}", start_idx + 6))?;
+    let updated_at: i64 = row
+        .get(col(7)?)
+        .with_context(|| format!("failed to parse updated_at at column {}", start_idx + 7))?;
+
+    let chat_type = parse_json_value(&chat_type_json, "chat_type")?;
+    let channel_meta = parse_json_value(&channel_meta_json, "channel_meta")?;
+
+    Ok(SessionMapping {
+        session_id,
+        title,
+        delivery: DeliveryContext {
+            channel: channel.into(),
+            peer_id: peer_id.into(),
+            chat_type,
+            channel_meta,
+            updated_at,
+        },
+        created_at,
+    })
+}
+
+fn parse_json_value<T: serde::de::DeserializeOwned>(value: &str, field: &str) -> Result<T> {
+    serde_json::from_str(value).map_err(|error| anyhow!("failed to parse {field} JSON: {error}"))
 }
 
 fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
-}
-
-fn parse_json_value<T: serde::de::DeserializeOwned>(value: &str) -> rusqlite::Result<T> {
-    serde_json::from_str(value).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
-    })
 }
 
 #[cfg(test)]
@@ -376,61 +418,45 @@ mod tests {
         }
     }
 
-    #[test]
-    fn set_get_round_trip() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn set_get_round_trip() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
         let mapping = sample_mapping("s1", now_millis());
 
-        if let Err(error) = store.set("rk", &mapping) {
-            panic!("set failed: {error}");
-        }
+        store.set("rk", &mapping).await.expect("set");
+        let fetched = store.get("rk").await.expect("get").expect("mapping");
 
-        let fetched = match store.get("rk") {
-            Ok(value) => value,
-            Err(error) => panic!("get failed: {error}"),
-        };
-
-        assert!(fetched.is_some());
-        let fetched = fetched.unwrap_or_else(|| panic!("expected mapping"));
         assert_eq!(fetched.session_id, "s1");
         assert_eq!(fetched.delivery.channel.0, "telegram");
     }
 
-    #[test]
-    fn find_by_session_id_returns_mapping() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn find_by_session_id_returns_mapping() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set("rk", &sample_mapping("s1", now_millis())) {
-            panic!("set failed: {error}");
-        }
+        store
+            .set("rk", &sample_mapping("s1", now_millis()))
+            .await
+            .expect("set");
 
-        let found = match store.find_by_session_id("s1") {
-            Ok(value) => value,
-            Err(error) => panic!("find_by_session_id failed: {error}"),
-        };
+        let (routing_key, mapping) = store
+            .find_by_session_id("s1")
+            .await
+            .expect("find")
+            .expect("mapping");
 
-        assert!(found.is_some());
-        let (routing_key, mapping) = found.unwrap_or_else(|| panic!("expected mapping"));
         assert_eq!(routing_key, "rk");
         assert_eq!(mapping.session_id, "s1");
     }
 
-    #[test]
-    fn update_delivery_only_changes_delivery_fields() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn update_delivery_only_changes_delivery_fields() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set("rk", &sample_mapping("s1", now_millis() - 1000)) {
-            panic!("set failed: {error}");
-        }
+        store
+            .set("rk", &sample_mapping("s1", now_millis() - 1000))
+            .await
+            .expect("set");
 
         let delivery = DeliveryContext {
             channel: ChannelId::from("discord"),
@@ -442,257 +468,189 @@ mod tests {
             updated_at: now_millis(),
         };
 
-        if let Err(error) = store.update_delivery("rk", &delivery) {
-            panic!("update_delivery failed: {error}");
-        }
+        store
+            .update_delivery("rk", &delivery)
+            .await
+            .expect("update_delivery");
 
-        let fetched = match store.get("rk") {
-            Ok(value) => value,
-            Err(error) => panic!("get failed: {error}"),
-        };
-
-        let fetched = fetched.unwrap_or_else(|| panic!("expected mapping"));
+        let fetched = store.get("rk").await.expect("get").expect("mapping");
         assert_eq!(fetched.session_id, "s1");
         assert_eq!(fetched.delivery.channel.0, "discord");
         assert_eq!(fetched.delivery.peer_id.0, "456");
     }
 
-    #[test]
-    fn get_unknown_returns_none() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
-
-        let fetched = match store.get("missing") {
-            Ok(value) => value,
-            Err(error) => panic!("get failed: {error}"),
-        };
-
+    #[tokio::test]
+    async fn get_unknown_returns_none() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
+        let fetched = store.get("missing").await.expect("get");
         assert!(fetched.is_none());
     }
 
-    #[test]
-    fn prune_removes_old_entries() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
-
+    #[tokio::test]
+    async fn prune_removes_old_entries() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
         let now = now_millis();
 
-        if let Err(error) = store.set("old", &sample_mapping("s-old", now - 20_000)) {
-            panic!("set old failed: {error}");
-        }
+        store
+            .set("old", &sample_mapping("s-old", now - 20_000))
+            .await
+            .expect("set old");
+        store
+            .set("new", &sample_mapping("s-new", now))
+            .await
+            .expect("set new");
 
-        if let Err(error) = store.set("new", &sample_mapping("s-new", now)) {
-            panic!("set new failed: {error}");
-        }
-
-        let deleted = match store.prune(5_000) {
-            Ok(value) => value,
-            Err(error) => panic!("prune failed: {error}"),
-        };
-
+        let deleted = store.prune(5_000).await.expect("prune");
         assert_eq!(deleted, 1);
 
-        let old_exists = match store.get("old") {
-            Ok(value) => value.is_some(),
-            Err(error) => panic!("get old failed: {error}"),
-        };
-        let new_exists = match store.get("new") {
-            Ok(value) => value.is_some(),
-            Err(error) => panic!("get new failed: {error}"),
-        };
-
-        assert!(!old_exists);
-        assert!(new_exists);
+        assert!(store.get("old").await.expect("get old").is_none());
+        assert!(store.get("new").await.expect("get new").is_some());
     }
 
-    #[test]
-    fn set_overwrites_existing_key() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn set_overwrites_existing_key() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set("rk", &sample_mapping("s1", now_millis())) {
-            panic!("set first failed: {error}");
-        }
-        if let Err(error) = store.set("rk", &sample_mapping("s2", now_millis())) {
-            panic!("set second failed: {error}");
-        }
+        store
+            .set("rk", &sample_mapping("s1", now_millis()))
+            .await
+            .expect("set 1");
+        store
+            .set("rk", &sample_mapping("s2", now_millis()))
+            .await
+            .expect("set 2");
 
-        let fetched = match store.get("rk") {
-            Ok(value) => value,
-            Err(error) => panic!("get failed: {error}"),
-        };
-
-        let fetched = fetched.unwrap_or_else(|| panic!("expected mapping"));
+        let fetched = store.get("rk").await.expect("get").expect("mapping");
         assert_eq!(fetched.session_id, "s2");
     }
 
-    #[test]
-    fn list_orders_by_updated_at_desc() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn list_orders_by_updated_at_desc() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
         let now = now_millis();
 
-        if let Err(error) = store.set("rk1", &sample_mapping("s1", now - 100)) {
-            panic!("set rk1 failed: {error}");
-        }
-        if let Err(error) = store.set("rk2", &sample_mapping("s2", now)) {
-            panic!("set rk2 failed: {error}");
-        }
+        store
+            .set("rk1", &sample_mapping("s1", now - 100))
+            .await
+            .expect("set rk1");
+        store
+            .set("rk2", &sample_mapping("s2", now))
+            .await
+            .expect("set rk2");
 
-        let rows = match store.list(10) {
-            Ok(value) => value,
-            Err(error) => panic!("list failed: {error}"),
-        };
+        let rows = store.list(10).await.expect("list");
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].0, "rk2");
         assert_eq!(rows[1].0, "rk1");
     }
 
-    #[test]
-    fn delete_removes_mapping() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn delete_removes_mapping() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set("rk", &sample_mapping("s1", now_millis())) {
-            panic!("set failed: {error}");
-        }
-        if let Err(error) = store.delete("rk") {
-            panic!("delete failed: {error}");
-        }
+        store
+            .set("rk", &sample_mapping("s1", now_millis()))
+            .await
+            .expect("set");
+        store.delete("rk").await.expect("delete");
 
-        let exists = match store.get("rk") {
-            Ok(value) => value.is_some(),
-            Err(error) => panic!("get failed: {error}"),
-        };
-
-        assert!(!exists);
+        assert!(store.get("rk").await.expect("get").is_none());
     }
 
-    #[test]
-    fn set_and_pop_delivery_context_round_trip() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn set_and_pop_delivery_context_round_trip() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set_delivery_context(
-            "telegram",
-            "telegram:chat:1",
-            &json!({"trigger": "cleanup"}),
-            4,
-        ) {
-            panic!("set_delivery_context failed: {error}");
-        }
+        store
+            .set_delivery_context(
+                "telegram",
+                "telegram:chat:1",
+                &json!({"trigger": "cleanup"}),
+                4,
+            )
+            .await
+            .expect("set_delivery_context");
 
-        let popped = match store.pop_delivery_context("telegram", "telegram:chat:1") {
-            Ok(value) => value,
-            Err(error) => panic!("pop_delivery_context failed: {error}"),
-        };
-
-        let popped = popped.unwrap_or_else(|| panic!("expected delivery context"));
+        let popped = store
+            .pop_delivery_context("telegram", "telegram:chat:1")
+            .await
+            .expect("pop_delivery_context")
+            .expect("delivery context");
         assert_eq!(popped["trigger"], "cleanup");
 
-        let popped_again = match store.pop_delivery_context("telegram", "telegram:chat:1") {
-            Ok(value) => value,
-            Err(error) => panic!("second pop_delivery_context failed: {error}"),
-        };
-
+        let popped_again = store
+            .pop_delivery_context("telegram", "telegram:chat:1")
+            .await
+            .expect("second pop");
         assert!(popped_again.is_none());
     }
 
-    #[test]
-    fn pop_delivery_context_returns_none_for_expired_rows() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn pop_delivery_context_returns_none_for_expired_rows() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) = store.set_delivery_context(
-            "telegram",
-            "telegram:chat:1",
-            &json!({"trigger": "cleanup"}),
-            0,
-        ) {
-            panic!("set_delivery_context failed: {error}");
-        }
+        store
+            .set_delivery_context(
+                "telegram",
+                "telegram:chat:1",
+                &json!({"trigger": "cleanup"}),
+                0,
+            )
+            .await
+            .expect("set_delivery_context");
 
-        let popped = match store.pop_delivery_context("telegram", "telegram:chat:1") {
-            Ok(value) => value,
-            Err(error) => panic!("pop_delivery_context failed: {error}"),
-        };
-
+        let popped = store
+            .pop_delivery_context("telegram", "telegram:chat:1")
+            .await
+            .expect("pop_delivery_context");
         assert!(popped.is_none());
     }
 
-    #[test]
-    fn set_delivery_context_replaces_existing_target() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn set_delivery_context_replaces_existing_target() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) =
-            store.set_delivery_context("telegram", "telegram:chat:1", &json!({"trigger": "old"}), 4)
-        {
-            panic!("set first context failed: {error}");
-        }
+        store
+            .set_delivery_context("telegram", "telegram:chat:1", &json!({"trigger": "old"}), 4)
+            .await
+            .expect("set old");
+        store
+            .set_delivery_context("telegram", "telegram:chat:1", &json!({"trigger": "new"}), 4)
+            .await
+            .expect("set new");
 
-        if let Err(error) =
-            store.set_delivery_context("telegram", "telegram:chat:1", &json!({"trigger": "new"}), 4)
-        {
-            panic!("set second context failed: {error}");
-        }
-
-        let popped = match store.pop_delivery_context("telegram", "telegram:chat:1") {
-            Ok(value) => value,
-            Err(error) => panic!("pop_delivery_context failed: {error}"),
-        };
-
-        let popped = popped.unwrap_or_else(|| panic!("expected delivery context"));
+        let popped = store
+            .pop_delivery_context("telegram", "telegram:chat:1")
+            .await
+            .expect("pop")
+            .expect("delivery context");
         assert_eq!(popped["trigger"], "new");
     }
 
-    #[test]
-    fn prune_delivery_contexts_removes_expired_only() {
-        let store = match GatewayStore::open_in_memory() {
-            Ok(value) => value,
-            Err(error) => panic!("failed to open in-memory store: {error}"),
-        };
+    #[tokio::test]
+    async fn prune_delivery_contexts_removes_expired_only() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
 
-        if let Err(error) =
-            store.set_delivery_context("telegram", "telegram:chat:expired", &json!({"id": 1}), 0)
-        {
-            panic!("set expired context failed: {error}");
-        }
+        store
+            .set_delivery_context("telegram", "telegram:chat:expired", &json!({"id": 1}), 0)
+            .await
+            .expect("set expired");
+        store
+            .set_delivery_context("telegram", "telegram:chat:valid", &json!({"id": 2}), 4)
+            .await
+            .expect("set valid");
 
-        if let Err(error) =
-            store.set_delivery_context("telegram", "telegram:chat:valid", &json!({"id": 2}), 4)
-        {
-            panic!("set valid context failed: {error}");
-        }
-
-        let deleted = match store.prune_delivery_contexts() {
-            Ok(value) => value,
-            Err(error) => panic!("prune_delivery_contexts failed: {error}"),
-        };
-
+        let deleted = store
+            .prune_delivery_contexts()
+            .await
+            .expect("prune_delivery_contexts");
         assert_eq!(deleted, 1);
 
-        let valid = match store.pop_delivery_context("telegram", "telegram:chat:valid") {
-            Ok(value) => value,
-            Err(error) => panic!("pop valid context failed: {error}"),
-        };
+        let valid = store
+            .pop_delivery_context("telegram", "telegram:chat:valid")
+            .await
+            .expect("pop valid");
         assert!(valid.is_some());
     }
 }

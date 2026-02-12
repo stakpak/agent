@@ -23,10 +23,10 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub fn new(config: GatewayConfig) -> Result<Self> {
+    pub async fn new(config: GatewayConfig) -> Result<Self> {
         config.validate()?;
 
-        let store = Arc::new(GatewayStore::open(&config.gateway.store_path)?);
+        let store = Arc::new(GatewayStore::open(&config.gateway.store_path).await?);
         let channels = build_channels(&config)?;
 
         if channels.is_empty() {
@@ -108,10 +108,10 @@ impl Gateway {
                     _ = prune_cancel.cancelled() => break,
                     _ = tokio::time::sleep(std::time::Duration::from_secs(60 * 60)) => {
                         let max_age_ms = (prune_after_hours as i64) * 60 * 60 * 1000;
-                        if let Err(error) = prune_store.prune(max_age_ms) {
+                        if let Err(error) = prune_store.prune(max_age_ms).await {
                             warn!(error = %error, "failed to prune gateway sessions");
                         }
-                        if let Err(error) = prune_store.prune_delivery_contexts() {
+                        if let Err(error) = prune_store.prune_delivery_contexts().await {
                             warn!(error = %error, "failed to prune gateway delivery contexts");
                         }
                     }

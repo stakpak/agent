@@ -149,6 +149,7 @@ impl Dispatcher {
         let enriched_text = match self
             .store
             .pop_delivery_context(&inbound.channel.0, &target_key)
+            .await
         {
             Ok(Some(context)) => enrich_with_context(&context, &inbound.text),
             Ok(None) => inbound.text.clone(),
@@ -161,11 +162,12 @@ impl Dispatcher {
         let maybe_mapping = self
             .store
             .get(&routing_key)
+            .await
             .map_err(|error| format!("failed to get mapping: {error}"))?;
 
         let mapping = if let Some(mapping) = maybe_mapping {
             let delivery = self.delivery_context_from_inbound(&inbound);
-            if let Err(error) = self.store.update_delivery(&routing_key, &delivery) {
+            if let Err(error) = self.store.update_delivery(&routing_key, &delivery).await {
                 warn!(error = %error, "failed to update delivery context");
             }
             mapping
@@ -187,6 +189,7 @@ impl Dispatcher {
 
             self.store
                 .set(&routing_key, &mapping)
+                .await
                 .map_err(|error| format!("failed to persist mapping: {error}"))?;
 
             mapping
@@ -361,7 +364,7 @@ impl Dispatcher {
                 &latest.inbound.chat_type,
             );
             let delivery = self.delivery_context_from_inbound(&latest.inbound);
-            if let Err(error) = self.store.update_delivery(&routing_key, &delivery) {
+            if let Err(error) = self.store.update_delivery(&routing_key, &delivery).await {
                 warn!(error = %error, "failed to refresh delivery context from queue");
             }
         }
@@ -382,7 +385,7 @@ impl Dispatcher {
     }
 
     async fn deliver_reply(&self, session_id: &str, text: String) {
-        let mapping = match self.store.find_by_session_id(session_id) {
+        let mapping = match self.store.find_by_session_id(session_id).await {
             Ok(Some((_routing_key, mapping))) => mapping,
             Ok(None) => return,
             Err(error) => {

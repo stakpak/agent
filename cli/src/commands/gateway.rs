@@ -326,8 +326,9 @@ async fn handle_run(
     let config = GatewayConfig::load(config_path.as_deref(), &cli)
         .map_err(|error| format!("Failed to load gateway config: {error}"))?;
 
-    let gateway =
-        Gateway::new(config).map_err(|error| format!("Failed to initialize gateway: {error}"))?;
+    let gateway = Gateway::new(config)
+        .await
+        .map_err(|error| format!("Failed to initialize gateway: {error}"))?;
 
     gateway
         .health()

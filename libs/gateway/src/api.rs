@@ -196,12 +196,16 @@ async fn send_handler(
 
     if let Some(context) = request.context {
         let target_key = target.target_key();
-        if let Err(error) = state.store.set_delivery_context(
-            &request.channel,
-            &target_key,
-            &context,
-            state.delivery_context_ttl_hours,
-        ) {
+        if let Err(error) = state
+            .store
+            .set_delivery_context(
+                &request.channel,
+                &target_key,
+                &context,
+                state.delivery_context_ttl_hours,
+            )
+            .await
+        {
             warn!(
                 channel = %request.channel,
                 target_key = %target_key,
@@ -239,6 +243,7 @@ async fn status_handler(state: Arc<GatewayApiState>) -> impl IntoResponse {
     let active_sessions = state
         .store
         .list(10_000)
+        .await
         .map(|rows| rows.len())
         .unwrap_or_default();
 
@@ -260,6 +265,7 @@ async fn sessions_handler(state: Arc<GatewayApiState>, headers: HeaderMap) -> im
     let sessions = state
         .store
         .list(1000)
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|(routing_key, mapping)| GatewaySessionItem {
