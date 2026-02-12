@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
@@ -437,7 +435,9 @@ pub struct AgentState {
     pub llm_input: Option<LLMInput>,
     pub llm_output: Option<LLMOutput>,
 
-    pub metadata: Option<HashMap<String, Value>>,
+    /// Metadata for checkpoint persistence (context trimming state, etc.)
+    /// Loaded from checkpoint on session resume and saved back after inference
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -504,14 +504,19 @@ impl From<&LLMOutput> for ChatMessage {
 }
 
 impl AgentState {
-    pub fn new(active_model: Model, messages: Vec<ChatMessage>, tools: Option<Vec<Tool>>) -> Self {
+    pub fn new(
+        active_model: Model,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+        metadata: Option<Value>,
+    ) -> Self {
         Self {
             active_model,
             messages,
             tools,
+            metadata,
             llm_input: None,
             llm_output: None,
-            metadata: None,
         }
     }
 

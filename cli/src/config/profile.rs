@@ -100,12 +100,29 @@ impl ProfileConfig {
     }
 
     /// Create a readonly profile based on the default profile.
+    /// This creates a replica of the default profile with warden enabled for sandboxed execution.
     pub(crate) fn readonly_profile(default_profile: Option<&ProfileConfig>) -> Self {
-        ProfileConfig {
-            api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
-            api_key: default_profile.and_then(|p| p.api_key.clone()),
-            warden: Some(WardenConfig::readonly_profile()),
-            ..ProfileConfig::default()
+        match default_profile {
+            Some(default) => ProfileConfig {
+                // Copy all provider-related fields from default
+                api_endpoint: default.api_endpoint.clone(),
+                api_key: default.api_key.clone(),
+                provider: default.provider,
+                providers: default.providers.clone(),
+                // Copy model fields
+                model: default.model.clone(),
+                smart_model: default.smart_model.clone(),
+                eco_model: default.eco_model.clone(),
+                recovery_model: default.recovery_model.clone(),
+                // Enable warden for readonly sandboxed execution
+                warden: Some(WardenConfig::readonly_profile()),
+                // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
+                ..ProfileConfig::default()
+            },
+            None => ProfileConfig {
+                warden: Some(WardenConfig::readonly_profile()),
+                ..ProfileConfig::default()
+            },
         }
     }
 
@@ -299,8 +316,7 @@ impl ProfileConfig {
                 .or_else(|| other.and_then(|config| config.warden.clone())),
             provider: self
                 .provider
-                .clone()
-                .or_else(|| other.and_then(|config| config.provider.clone())),
+                .or_else(|| other.and_then(|config| config.provider)),
             providers: merged_providers,
             // Legacy fields - merge for backward compatibility during transition
             openai: self

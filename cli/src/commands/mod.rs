@@ -139,6 +139,9 @@ pub enum Commands {
     /// Get current account
     Account,
 
+    /// Analyze your infrastructure setup
+    Init,
+
     /// MCP commands
     #[command(subcommand)]
     Mcp(McpCommands),
@@ -461,6 +464,10 @@ impl Commands {
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }
+            Commands::Init => {
+                // Handled in main: starts interactive session with init prompt sent on start
+                unreachable!("stakpak init is handled before Commands::run()")
+            }
             Commands::Version => {
                 println!(
                     "stakpak v{} (https://github.com/stakpak/agent)",
@@ -486,7 +493,7 @@ impl Commands {
                 board::run_board(args).await?;
             }
             Commands::Update => {
-                auto_update::run_auto_update().await?;
+                auto_update::run_auto_update(false).await?;
             }
             Commands::Serve {
                 bind,

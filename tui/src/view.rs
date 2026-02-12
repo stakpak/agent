@@ -83,8 +83,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate shell popup height (goes above input)
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
-    // Calculate approval bar height
-    let approval_bar_height = state.approval_bar.calculate_height();
+    // Calculate approval bar height (needs terminal width for wrapping calculation)
+    let approval_bar_height = state.approval_bar.calculate_height(main_area.width);
     let approval_bar_visible = state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible

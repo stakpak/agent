@@ -147,12 +147,21 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
 
                     if result.timed_out {
                         println!("\n\x1b[31mCheck script timed out\x1b[0m");
-                    } else if result.failed() {
-                        println!("\n\x1b[31mCheck script failed (exit {})\x1b[0m", exit_code);
-                    } else if result.skipped() {
-                        println!(
-                            "\n\x1b[33mCheck script returned skip (exit 1) - agent would not be woken\x1b[0m"
-                        );
+                    } else {
+                        let check_trigger_on = trigger.effective_check_trigger_on(&config.defaults);
+                        let should_trigger = check_trigger_on.should_trigger(exit_code);
+                        println!("Check trigger_on: {}", check_trigger_on);
+                        if should_trigger {
+                            println!(
+                                "\n\x1b[32mCheck passed (exit {} matches trigger_on={}) - agent would be woken\x1b[0m",
+                                exit_code, check_trigger_on
+                            );
+                        } else {
+                            println!(
+                                "\n\x1b[33mCheck skipped (exit {} does not match trigger_on={}) - agent would not be woken\x1b[0m",
+                                exit_code, check_trigger_on
+                            );
+                        }
                     }
 
                     Some(result)

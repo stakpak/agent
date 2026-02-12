@@ -28,6 +28,10 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
+
+/// Bundled infrastructure analysis prompt (embedded at compile time)
+/// analyze the infrastructure and provide a summary of the current state
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -125,6 +129,8 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    /// When true, send init_prompt_content as first user message on session start (stakpak init)
+    pub send_init_prompt_on_start: bool,
 }
 
 pub async fn run_interactive(
@@ -187,6 +193,11 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+
+        // Use  init prompt (loaded at module level as const)
+        let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
+
+        let send_init_prompt_on_start = config.send_init_prompt_on_start;
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -205,6 +216,8 @@ pub async fn run_interactive(
                 model_for_tui,
                 editor_command,
                 auth_display_info_for_tui,
+                init_prompt_content_for_tui,
+                send_init_prompt_on_start,
             )
             .await
             .map_err(|e| e.to_string())
@@ -238,6 +251,7 @@ pub async fn run_interactive(
         let ctx_clone = ctx.clone(); // Clone ctx for use in client task
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
+            let mut current_metadata: Option<serde_json::Value> = None;
 
             // Build unified AgentClient config
             let providers = ctx_clone.get_llm_provider_config();
@@ -324,11 +338,12 @@ pub async fn run_interactive(
             }
 
             if let Some(session_id_str) = session_id {
-                let (chat_messages, tool_calls, session_id_uuid) =
+                let (chat_messages, tool_calls, session_id_uuid, checkpoint_metadata) =
                     resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
                         .await?;
 
                 current_session_id = Some(session_id_uuid);
+                current_metadata = checkpoint_metadata;
                 should_update_rulebooks_on_next_message = true;
                 tools_queue.extend(tool_calls.clone());
 
@@ -354,8 +369,9 @@ pub async fn run_interactive(
                     current_session_id = Some(checkpoint.session_id);
                 }
 
-                let checkpoint_messages =
+                let (checkpoint_messages, checkpoint_metadata) =
                     get_checkpoint_messages(client.as_ref(), &checkpoint_id_str).await?;
+                current_metadata = checkpoint_metadata;
 
                 let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
                     &checkpoint_id_str,
@@ -688,9 +704,15 @@ pub async fn run_interactive(
                             )
                             .await
                             {
-                                Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                                Ok((
+                                    chat_messages,
+                                    tool_calls,
+                                    session_id_uuid,
+                                    checkpoint_metadata,
+                                )) => {
                                     // Track the current session ID
                                     current_session_id = Some(session_id_uuid);
+                                    current_metadata = checkpoint_metadata;
 
                                     // Mark that we need to update rulebooks on the next user message
                                     should_update_rulebooks_on_next_message = true;
@@ -757,9 +779,15 @@ pub async fn run_interactive(
                         )
                         .await
                         {
-                            Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                            Ok((
+                                chat_messages,
+                                tool_calls,
+                                session_id_uuid,
+                                checkpoint_metadata,
+                            )) => {
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
+                                current_metadata = checkpoint_metadata;
 
                                 // Mark that we need to update rulebooks on the next user message
                                 should_update_rulebooks_on_next_message = true;
@@ -992,6 +1020,7 @@ pub async fn run_interactive(
                             Some(tools.clone()),
                             headers.clone(),
                             current_session_id,
+                            current_metadata.clone(),
                         )
                         .await;
 
@@ -1102,6 +1131,16 @@ pub async fn run_interactive(
                             .and_then(|value| Uuid::parse_str(value).ok())
                         {
                             current_session_id = Some(session_id);
+                        }
+
+                        // Update metadata from checkpoint state so the next
+                        // turn sees the latest trimming state.
+                        if let Some(state_metadata) = response
+                            .metadata
+                            .as_ref()
+                            .and_then(|meta| meta.get("state_metadata"))
+                        {
+                            current_metadata = Some(state_metadata.clone());
                         }
 
                         // Accumulate usage from response

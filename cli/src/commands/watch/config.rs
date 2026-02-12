@@ -57,6 +57,40 @@ fn default_log_dir() -> String {
     "~/.stakpak/watch/logs".to_string()
 }
 
+/// Determines which check script exit codes trigger the agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckTriggerOn {
+    /// Trigger agent only on exit code 0 (default behavior).
+    #[default]
+    Success,
+    /// Trigger agent on any non-zero exit code (1+).
+    Failure,
+    /// Trigger agent regardless of exit code (only timeout/error prevents trigger).
+    Any,
+}
+
+impl CheckTriggerOn {
+    /// Returns true if the given exit code should trigger the agent.
+    pub fn should_trigger(&self, exit_code: i32) -> bool {
+        match self {
+            CheckTriggerOn::Success => exit_code == 0,
+            CheckTriggerOn::Failure => exit_code != 0,
+            CheckTriggerOn::Any => true,
+        }
+    }
+}
+
+impl std::fmt::Display for CheckTriggerOn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CheckTriggerOn::Success => write!(f, "success"),
+            CheckTriggerOn::Failure => write!(f, "failure"),
+            CheckTriggerOn::Any => write!(f, "any"),
+        }
+    }
+}
+
 /// Default values applied to triggers when not specified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchDefaults {
@@ -84,6 +118,13 @@ pub struct WatchDefaults {
     /// When true, the agent will pause and exit with code 10 when tools need approval.
     #[serde(default = "default_pause_on_approval")]
     pub pause_on_approval: bool,
+
+    /// Determines which check script exit codes trigger the agent.
+    /// - "success" (default): trigger on exit 0
+    /// - "failure": trigger on non-zero exit codes (1+)
+    /// - "any": trigger regardless of exit code
+    #[serde(default)]
+    pub check_trigger_on: CheckTriggerOn,
 }
 
 impl Default for WatchDefaults {
@@ -95,6 +136,7 @@ impl Default for WatchDefaults {
             enable_slack_tools: false,
             enable_subagents: false,
             pause_on_approval: default_pause_on_approval(),
+            check_trigger_on: CheckTriggerOn::default(),
         }
     }
 }
@@ -132,6 +174,13 @@ pub struct Trigger {
     /// Falls back to defaults.check_timeout if not specified.
     #[serde(default, with = "option_humantime_serde")]
     pub check_timeout: Option<Duration>,
+
+    /// Determines which check script exit codes trigger the agent.
+    /// Falls back to defaults.check_trigger_on if not specified.
+    /// - "success" (default): trigger on exit 0
+    /// - "failure": trigger on non-zero exit codes (1+)
+    /// - "any": trigger regardless of exit code
+    pub check_trigger_on: Option<CheckTriggerOn>,
 
     /// Prompt to pass to the agent when triggered.
     pub prompt: String,
@@ -175,6 +224,11 @@ impl Trigger {
     /// Get the effective check timeout, falling back to defaults.
     pub fn effective_check_timeout(&self, defaults: &WatchDefaults) -> Duration {
         self.check_timeout.unwrap_or(defaults.check_timeout)
+    }
+
+    /// Get the effective check_trigger_on, falling back to defaults.
+    pub fn effective_check_trigger_on(&self, defaults: &WatchDefaults) -> CheckTriggerOn {
+        self.check_trigger_on.unwrap_or(defaults.check_trigger_on)
     }
 
     /// Get the effective enable_slack_tools, falling back to defaults.
@@ -627,6 +681,134 @@ prompt = "Test"
 [[triggers]]
 name = "test"
 schedule = "0 * * * *"
+"#;
+
+        let result = WatchConfig::parse(config_str);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
+    }
+
+    #[test]
+    fn test_check_trigger_on_should_trigger() {
+        // Success mode: only exit 0 triggers
+        assert!(CheckTriggerOn::Success.should_trigger(0));
+        assert!(!CheckTriggerOn::Success.should_trigger(1));
+        assert!(!CheckTriggerOn::Success.should_trigger(2));
+        assert!(!CheckTriggerOn::Success.should_trigger(-1));
+
+        // Failure mode: any non-zero triggers
+        assert!(!CheckTriggerOn::Failure.should_trigger(0));
+        assert!(CheckTriggerOn::Failure.should_trigger(1));
+        assert!(CheckTriggerOn::Failure.should_trigger(2));
+        assert!(CheckTriggerOn::Failure.should_trigger(-1));
+
+        // Any mode: all exit codes trigger
+        assert!(CheckTriggerOn::Any.should_trigger(0));
+        assert!(CheckTriggerOn::Any.should_trigger(1));
+        assert!(CheckTriggerOn::Any.should_trigger(2));
+        assert!(CheckTriggerOn::Any.should_trigger(-1));
+    }
+
+    #[test]
+    fn test_check_trigger_on_default() {
+        assert_eq!(CheckTriggerOn::default(), CheckTriggerOn::Success);
+    }
+
+    #[test]
+    fn test_check_trigger_on_display() {
+        assert_eq!(CheckTriggerOn::Success.to_string(), "success");
+        assert_eq!(CheckTriggerOn::Failure.to_string(), "failure");
+        assert_eq!(CheckTriggerOn::Any.to_string(), "any");
+    }
+
+    #[test]
+    fn test_check_trigger_on_parsing() {
+        // Test parsing from TOML
+        let config_str = r#"
+[[triggers]]
+name = "success-trigger"
+schedule = "0 * * * *"
+prompt = "Test"
+check_trigger_on = "success"
+
+[[triggers]]
+name = "failure-trigger"
+schedule = "0 * * * *"
+prompt = "Test"
+check_trigger_on = "failure"
+
+[[triggers]]
+name = "any-trigger"
+schedule = "0 * * * *"
+prompt = "Test"
+check_trigger_on = "any"
+
+[[triggers]]
+name = "default-trigger"
+schedule = "0 * * * *"
+prompt = "Test"
+"#;
+
+        let config = WatchConfig::parse(config_str).expect("Should parse check_trigger_on values");
+        assert_eq!(config.triggers.len(), 4);
+
+        assert_eq!(
+            config.triggers[0].check_trigger_on,
+            Some(CheckTriggerOn::Success)
+        );
+        assert_eq!(
+            config.triggers[1].check_trigger_on,
+            Some(CheckTriggerOn::Failure)
+        );
+        assert_eq!(
+            config.triggers[2].check_trigger_on,
+            Some(CheckTriggerOn::Any)
+        );
+        assert_eq!(config.triggers[3].check_trigger_on, None);
+    }
+
+    #[test]
+    fn test_check_trigger_on_defaults_fallback() {
+        let config_str = r#"
+[defaults]
+check_trigger_on = "failure"
+
+[[triggers]]
+name = "uses-default"
+schedule = "0 * * * *"
+prompt = "Test"
+
+[[triggers]]
+name = "overrides-default"
+schedule = "0 * * * *"
+prompt = "Test"
+check_trigger_on = "success"
+"#;
+
+        let config =
+            WatchConfig::parse(config_str).expect("Should parse check_trigger_on with defaults");
+
+        // First trigger should use default (failure)
+        assert_eq!(
+            config.triggers[0].effective_check_trigger_on(&config.defaults),
+            CheckTriggerOn::Failure
+        );
+
+        // Second trigger should override to success
+        assert_eq!(
+            config.triggers[1].effective_check_trigger_on(&config.defaults),
+            CheckTriggerOn::Success
+        );
+    }
+
+    #[test]
+    fn test_check_trigger_on_invalid_value() {
+        let config_str = r#"
+[[triggers]]
+name = "invalid"
+schedule = "0 * * * *"
+prompt = "Test"
+check_trigger_on = "invalid"
 "#;
 
         let result = WatchConfig::parse(config_str);

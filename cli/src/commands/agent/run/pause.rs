@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason};
 use stakpak_shared::models::integrations::openai::{ChatMessage, Role, ToolCall};
-use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::HashSet;
 
 /// Exit code indicating the agent has paused and needs input or approval to resume.
@@ -27,66 +26,6 @@ pub enum AsyncOutcome {
     },
     /// Agent failed.
     Failed { error: String },
-}
-
-/// Why the agent paused.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum PauseReason {
-    /// One or more tool calls require approval before execution.
-    #[serde(rename = "tool_approval_required")]
-    ToolApprovalRequired {
-        pending_tool_calls: Vec<PendingToolCall>,
-    },
-    /// The agent responded with text only (asking a question or requesting input).
-    #[serde(rename = "input_required")]
-    InputRequired,
-}
-
-/// A tool call pending approval.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-impl From<&ToolCall> for PendingToolCall {
-    fn from(tc: &ToolCall) -> Self {
-        let arguments = serde_json::from_str(&tc.function.arguments)
-            .unwrap_or(serde_json::Value::String(tc.function.arguments.clone()));
-        PendingToolCall {
-            id: tc.id.clone(),
-            name: tc.function.name.clone(),
-            arguments,
-        }
-    }
-}
-
-/// Unified JSON output for async agent runs (both pause and completion).
-/// All fields are always present for consistent parsing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AsyncManifest {
-    /// "paused" or "completed"
-    pub outcome: String,
-    pub checkpoint_id: Option<String>,
-    pub session_id: Option<String>,
-    /// Model ID used for this execution (e.g., "claude-sonnet-4-5-20250929").
-    pub model: String,
-    /// The agent's text response (if any) in this execution.
-    pub agent_message: Option<String>,
-    /// Steps taken in this execution (current run only).
-    pub steps: usize,
-    /// Total steps across all executions in this session (including resumed runs).
-    pub total_steps: usize,
-    /// Token usage for this execution only.
-    pub usage: LLMTokenUsage,
-    /// Present when outcome is "paused" — why the agent paused.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pause_reason: Option<PauseReason>,
-    /// Present when outcome is "paused" — CLI command hint to resume.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume_hint: Option<String>,
 }
 
 /// Resume input provided via CLI flags when resuming from a paused checkpoint.

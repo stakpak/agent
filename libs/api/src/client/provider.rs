@@ -181,8 +181,12 @@ impl AgentProvider for AgentClient {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         session_id: Option<Uuid>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<ChatCompletionResponse, String> {
-        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
+        let mut ctx = HookContext::new(
+            session_id,
+            AgentState::new(model, messages, tools, metadata),
+        );
 
         // Execute before request hooks
         self.hook_registry
@@ -201,7 +205,11 @@ impl AgentProvider for AgentClient {
 
         // Save checkpoint
         let result = self
-            .save_checkpoint(&current_session, ctx.state.messages.clone())
+            .save_checkpoint(
+                &current_session,
+                ctx.state.messages.clone(),
+                ctx.state.metadata.clone(),
+            )
             .await?;
         let checkpoint_created_at = result.checkpoint_created_at.timestamp() as u64;
         ctx.set_new_checkpoint_id(result.checkpoint_id);
@@ -225,6 +233,9 @@ impl AgentProvider for AgentClient {
                 "checkpoint_id".to_string(),
                 serde_json::Value::String(checkpoint_id.to_string()),
             );
+        }
+        if let Some(state_metadata) = &ctx.state.metadata {
+            meta.insert("state_metadata".to_string(), state_metadata.clone());
         }
 
         Ok(ChatCompletionResponse {
@@ -265,6 +276,7 @@ impl AgentProvider for AgentClient {
         tools: Option<Vec<Tool>>,
         _headers: Option<HeaderMap>,
         session_id: Option<Uuid>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<
         (
             Pin<
@@ -274,7 +286,10 @@ impl AgentProvider for AgentClient {
         ),
         String,
     > {
-        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
+        let mut ctx = HookContext::new(
+            session_id,
+            AgentState::new(model, messages, tools, metadata),
+        );
 
         // Execute before request hooks
         self.hook_registry
@@ -332,7 +347,11 @@ impl AgentProvider for AgentClient {
                     }
 
                     let result = client
-                        .save_checkpoint(&current_session, ctx_clone.state.messages.clone())
+                        .save_checkpoint(
+                            &current_session,
+                            ctx_clone.state.messages.clone(),
+                            ctx_clone.state.metadata.clone(),
+                        )
                         .await;
 
                     match result {
@@ -361,6 +380,9 @@ impl AgentProvider for AgentClient {
                                 meta.insert("session_id".to_string(), serde_json::Value::String(session_id.to_string()));
                                 if let Some(checkpoint_id) = ctx.new_checkpoint_id {
                                     meta.insert("checkpoint_id".to_string(), serde_json::Value::String(checkpoint_id.to_string()));
+                                }
+                                if let Some(state_metadata) = &ctx.state.metadata {
+                                    meta.insert("state_metadata".to_string(), state_metadata.clone());
                                 }
                                 yield Ok(ChatCompletionStreamResponse {
                                     id: ctx.request_id.to_string(),
@@ -660,8 +682,7 @@ impl crate::storage::SessionStorage for super::AgentClient {
 // Helper Methods
 // =============================================================================
 
-const TITLE_GENERATOR_PROMPT: &str =
-    include_str!("../local/prompts/session_title_generator.v1.txt");
+const TITLE_GENERATOR_PROMPT: &str = include_str!("../prompts/session_title_generator.v1.txt");
 
 impl AgentClient {
     /// Initialize or resume a session based on context
@@ -784,9 +805,14 @@ impl AgentClient {
         &self,
         current: &SessionInfo,
         messages: Vec<ChatMessage>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<SessionInfo, String> {
-        let checkpoint_request =
+        let mut checkpoint_request =
             StorageCreateCheckpointRequest::new(messages).with_parent(current.checkpoint_id);
+
+        if let Some(meta) = metadata {
+            checkpoint_request = checkpoint_request.with_metadata(meta);
+        }
 
         let checkpoint = self
             .session_storage

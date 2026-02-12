@@ -278,37 +278,38 @@ async fn handle_trigger_event(
                     return Ok(());
                 }
 
-                if result.failed() {
-                    warn!(
+                // Determine if we should trigger based on check_trigger_on setting
+                let exit_code = result.exit_code.unwrap_or(-1);
+                let check_trigger_on = trigger.effective_check_trigger_on(&config.defaults);
+                let should_trigger = check_trigger_on.should_trigger(exit_code);
+
+                if !should_trigger {
+                    info!(
                         trigger = %trigger.name,
-                        exit_code = ?result.exit_code,
-                        "Check script failed"
+                        exit_code = exit_code,
+                        check_trigger_on = %check_trigger_on,
+                        "Check script did not meet trigger condition"
                     );
                     print_event(
-                        "fail",
+                        "skip",
                         &trigger.name,
-                        &format!("Check failed (exit {})", result.exit_code.unwrap_or(-1)),
+                        &format!(
+                            "Skipped (exit {} does not match trigger_on={})",
+                            exit_code, check_trigger_on
+                        ),
                     );
-                    db.update_run_finished(
-                        run_id,
-                        RunStatus::Failed,
-                        Some("Check script failed"),
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to update run status: {}", e))?;
-                    return Ok(());
-                }
-
-                if result.skipped() {
-                    info!(trigger = %trigger.name, "Check script returned skip (exit 1)");
-                    print_event("skip", &trigger.name, "Skipped (check returned exit 1)");
                     db.update_run_finished(run_id, RunStatus::Skipped, None, None, None)
                         .await
                         .map_err(|e| format!("Failed to update run status: {}", e))?;
                     return Ok(());
                 }
+
+                info!(
+                    trigger = %trigger.name,
+                    exit_code = exit_code,
+                    check_trigger_on = %check_trigger_on,
+                    "Check script met trigger condition"
+                );
 
                 Some(result)
             }

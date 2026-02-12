@@ -11,9 +11,16 @@ use std::path::Path;
 /// Handle the login command
 pub async fn handle_login(
     config_dir: &Path,
-    provider: Option<&str>,
+    provider: &str,
     profile: Option<&str>,
+    api_key: Option<String>,
 ) -> Result<(), String> {
+    // Non-interactive mode when --api-key is provided
+    if let Some(key) = api_key {
+        return handle_non_interactive_setup(config_dir, provider, profile, key).await;
+    }
+
+    // Interactive mode (existing behavior)
     // Select profile if not specified
     let profile = match profile {
         Some(p) => p.to_string(),
@@ -22,32 +29,27 @@ pub async fn handle_login(
 
     let registry = ProviderRegistry::new();
 
-    // Select provider if not specified
-    let provider_id = match provider {
-        Some(p) => p.to_string(),
-        None => {
-            let providers = registry.list();
-            let options: Vec<(String, String, bool)> = providers
-                .iter()
-                .map(|p| (p.id().to_string(), p.name().to_string(), false))
-                .collect();
+    // Always prompt for provider selection in interactive mode
+    let providers = registry.list();
+    let options: Vec<(String, String, bool)> = providers
+        .iter()
+        .map(|p| (p.id().to_string(), p.name().to_string(), false))
+        .collect();
 
-            let options_refs: Vec<(String, &str, bool)> = options
-                .iter()
-                .map(|(id, name, recommended)| (id.clone(), name.as_str(), *recommended))
-                .collect();
+    let options_refs: Vec<(String, &str, bool)> = options
+        .iter()
+        .map(|(id, name, recommended)| (id.clone(), name.as_str(), *recommended))
+        .collect();
 
-            println!();
-            println!("Select provider:");
-            println!();
+    println!();
+    println!("Select provider:");
+    println!();
 
-            match select_option_no_header(&options_refs, false) {
-                NavResult::Forward(selected) => selected,
-                NavResult::Back | NavResult::Cancel => {
-                    println!("Cancelled.");
-                    return Ok(());
-                }
-            }
+    let provider_id = match select_option_no_header(&options_refs, false) {
+        NavResult::Forward(selected) => selected,
+        NavResult::Back | NavResult::Cancel => {
+            println!("Cancelled.");
+            return Ok(());
         }
     };
 
@@ -197,6 +199,83 @@ async fn handle_oauth_login(
         println!("Credentials saved as shared default (all profiles).");
     } else {
         println!("Credentials saved for profile '{}'.", profile);
+    }
+
+    Ok(())
+}
+
+/// Handle non-interactive setup with --api-key and --provider flags
+/// This initializes config and saves credentials in one step, mirroring interactive setup
+async fn handle_non_interactive_setup(
+    config_dir: &Path,
+    provider_id: &str,
+    profile: Option<&str>,
+    api_key: String,
+) -> Result<(), String> {
+    use crate::config::{ProfileConfig, ProviderType};
+    use crate::onboarding::config_templates::{
+        generate_anthropic_profile, generate_gemini_profile, generate_openai_profile,
+    };
+    use crate::onboarding::save_config::save_to_profile;
+
+    // Default to "default" profile for non-interactive setup
+    let profile_name = profile.unwrap_or("default");
+
+    // Ensure config directory exists
+    std::fs::create_dir_all(config_dir)
+        .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+    // Determine profile config based on provider
+    let profile_config = match provider_id {
+        "stakpak" => {
+            // Stakpak API key -> Remote provider (key stored in config.toml)
+            ProfileConfig {
+                provider: Some(ProviderType::Remote),
+                api_key: Some(api_key.clone()),
+                ..ProfileConfig::default()
+            }
+        }
+        "anthropic" => generate_anthropic_profile(),
+        "openai" => generate_openai_profile(),
+        "gemini" => generate_gemini_profile(),
+        _ => {
+            return Err(format!(
+                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak",
+                provider_id
+            ));
+        }
+    };
+
+    // Save API key to auth.toml for local providers (not stakpak)
+    if provider_id != "stakpak" {
+        let mut auth_manager = AuthManager::new(config_dir)
+            .map_err(|e| format!("Failed to load auth manager: {}", e))?;
+
+        let auth = ProviderAuth::api_key(api_key);
+        auth_manager
+            .set(profile_name, provider_id, auth)
+            .map_err(|e| format!("Failed to save credentials: {}", e))?;
+    }
+
+    // Save profile config to config.toml (this also creates readonly profile)
+    let config_path = config_dir.join("config.toml");
+    let config_path_str = config_path
+        .to_str()
+        .ok_or_else(|| "Invalid config path".to_string())?;
+
+    save_to_profile(config_path_str, profile_name, profile_config)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    println!(
+        "Successfully configured {} for profile '{}'.",
+        provider_id, profile_name
+    );
+    println!("Config saved to: {}", config_path.display());
+    if provider_id != "stakpak" {
+        println!(
+            "Credentials saved to: {}",
+            config_dir.join("auth.toml").display()
+        );
     }
 
     Ok(())

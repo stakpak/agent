@@ -1844,7 +1844,14 @@ impl acp::Agent for StakpakAcpAgent {
         let model = self.model.read().await.clone();
         let session_id = self.current_session_id.get();
         let (stream, _request_id) = client
-            .chat_completion_stream(model, messages, tools_option.clone(), None, session_id)
+            .chat_completion_stream(
+                model,
+                messages,
+                tools_option.clone(),
+                None,
+                session_id,
+                None,
+            )
             .await
             .map_err(|e| {
                 log::error!("Chat completion stream failed: {e}");
@@ -2032,6 +2039,7 @@ impl acp::Agent for StakpakAcpAgent {
                         tools_option.clone(),
                         None,
                         session_id,
+                        None,
                     )
                     .await
                     .map_err(|e| {

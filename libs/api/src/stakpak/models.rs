@@ -91,6 +91,9 @@ pub struct CheckpointSummary {
 pub struct CheckpointState {
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Optional metadata for context trimming state, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 // =============================================================================

@@ -396,25 +396,38 @@ Multi-step tasks, complex implementations, cross-session work. Skip for simple Q
 # Stakpak Watch: `stakpak watch`
 Run yourself autonomously on a schedule with optional trigger scripts. Config: `~/.stakpak/watch.toml`
 
+## Installing stakpak cli on remote servers
+```bash
+curl -sSL https://stakpak.dev/install.sh | sh
+```
+
+## Authentication
+```bash
+# With your Stakpak account
+stakpak auth login --api-key <stakpak_api_key>
+# Or if using Anthropic provider directly
+stakpak auth login --provider anthropic --api-key <anthropic_api_key>
+```
+
 ## Commands
 ```bash
 stakpak watch init              # Create sample config
 stakpak watch run               # Start watch service (foreground)
 stakpak watch install           # Install as system service (launchd/systemd)
+stakpak watch reload            # Reload config after modifying triggers
 stakpak watch get triggers      # List configured triggers
 stakpak watch get runs          # View run history
 stakpak watch fire <name>       # Manually fire a trigger
 ```
 
-## Adding a Trigger
-Edit `~/.stakpak/watch.toml`, then reload the watch service if it's already running:
-```bash
-stakpak watch reload            # Reload config without full restart
-```
+**IMPORTANT:** Always use `stakpak watch install` to set up the system service. Do NOT manually create systemd unit files or launchd plist files.
+
+## Trigger Configuration
+Edit `~/.stakpak/watch.toml`:
 ```toml
 [[triggers]]
 name = "daily-backup-check"      # Required: unique identifier
-schedule = "0 6 * * *"           # Required: cron expression
+schedule = "0 6 * * *"           # Required: cron expression (minute hour day month weekday)
 prompt = """                     # Required: prompt sent to agent
 Check backup status for all databases.
 Verify last backup < 24h old.
@@ -422,10 +435,12 @@ Verify last backup < 24h old.
 # Optional fields:
 profile = "prod"                 # Profile from ~/.stakpak/config.toml (default: "default")
 timeout = "1h"                   # Agent execution timeout (default: 30m)
-check = "~/.stakpak/checks/weekday.sh"  # Gate script (exit 0=run, 1=skip, 2+=error) stdout/stderr is included in agent context after the prompt
+check = "~/.stakpak/checks/weekday.sh"  # Gate script that determines if agent should run
 check_timeout = "1m"             # Check script timeout (default: 30s)
+check_trigger_on = "success"     # "success" (exit 0), "failure" (exit 1+), or "any"
 board_id = "board_abc123"        # Task board for tracking
-enable_slack_tools = true        # Enable Slack tools (experimental, default: false)
+enable_slack_tools = true        # Enable Slack MCP tools (default: false)
+                                 # No token needed - uses backend integration from https://stakpak.dev/stakpak/settings/integrations
 enable_subagents = true          # Enable subagents (default: false)
 ```
 

@@ -26,8 +26,13 @@ cli/                          # Main binary crate (`stakpak`)
 │   │   │   └── helpers.rs            # Shared helpers
 │   │   ├── acp/              # Agent Client Protocol (Zed integration)
 │   │   ├── mcp/              # MCP server/proxy commands
-│   │   └── auth/             # Login/account commands
-│   └── config.rs             # CLI configuration
+│   │   ├── auth/             # Login/account commands (interactive + non-interactive setup)
+│   │   └── watch/            # Scheduled trigger system
+│   ├── config/               # Configuration management
+│   │   ├── file.rs           # ConfigFile with profiles + ensure_readonly()
+│   │   ├── profile.rs        # ProfileConfig + readonly_profile()
+│   │   └── types.rs          # ProviderType (Remote/Local)
+│   └── onboarding/           # Interactive setup wizard + save_config.rs
 tui/                          # TUI crate (ratatui-based)
 ├── src/
 │   ├── app/events.rs         # InputEvent / OutputEvent enums
@@ -73,6 +78,7 @@ Vec<ChatMessage>                    # OpenAI-shaped messages (cli/mode_interacti
 ContextManager::reduce_context()   # History reduction (libs/api/context_managers/)
     ↓  merge_consecutive_same_role()  # Merge tool messages
     ↓  dedup_tool_results()           # Deduplicate within merged messages
+    ↓  reduce_context_with_budget()   # Budget-aware trimming (if over threshold)
     ↓
 Vec<LLMMessage>                    # Provider-neutral messages
     ↓
@@ -177,6 +183,22 @@ The codebase uses **three layers** to prevent invalid message sequences:
 2. **Pre-API sanitization** (`sanitize_tool_results`): Dedup and remove orphans from `Vec<ChatMessage>` before every API call
 3. **Context manager** (`task_board_context_manager.rs`): Merge consecutive same-role messages and dedup tool_results in the `reduce_context()` pipeline
 
+### Context Trimming with Cache Preservation
+
+Long sessions accumulate messages that approach the context window limit. The `TaskBoardContextManager` implements budget-aware trimming:
+
+1. **Lazy trimming**: Only triggers when estimated tokens exceed `context_window × threshold` (default 80%)
+2. **Stable prefix**: Trimmed messages are replaced with `[trimmed]` placeholders, preserving message structure (roles, tool_call_ids) for API validity
+3. **Cache-friendly**: The trimmed prefix produces identical output across turns, so Anthropic's prompt cache stays valid
+4. **Metadata persistence**: Trimming state (`trimmed_up_to_message_index`) is stored in `CheckpointState.metadata` and flows through:
+   - `CheckpointState.metadata` → `AgentState.metadata` → Hook updates → `save_checkpoint()` → persisted
+
+Key files:
+- `libs/api/src/local/context_managers/task_board_context_manager.rs` — `reduce_context_with_budget()`, `estimate_tokens()`, `trim_message()`
+- `libs/api/src/local/hooks/task_board_context/mod.rs` — Wires budget-aware trimming into the hook lifecycle
+- `libs/api/src/storage.rs` — `CheckpointState.metadata` field
+- `libs/api/src/models.rs` — `AgentState.metadata` field
+
 ## Build & Test
 
 ```bash
@@ -198,3 +220,26 @@ cargo clippy --all-targets
 # Quick check (no codegen)
 cargo check
 ```
+
+## Non-Interactive Setup
+
+The `stakpak auth login` command supports non-interactive setup for CI/scripts:
+
+```bash
+# Stakpak API (remote provider, default)
+stakpak auth login --api-key $STAKPAK_API_KEY
+
+# Local providers (BYOK)
+stakpak auth login --provider anthropic --api-key $ANTHROPIC_API_KEY
+stakpak auth login --provider openai --api-key $OPENAI_API_KEY
+stakpak auth login --provider gemini --api-key $GEMINI_API_KEY
+```
+
+This creates:
+- `~/.stakpak/config.toml` with `default` + `readonly` profiles
+- `~/.stakpak/auth.toml` for local provider credentials
+
+Key files:
+- `cli/src/commands/auth/login.rs` — `handle_non_interactive_setup()`
+- `cli/src/onboarding/save_config.rs` — `save_to_profile()` + `update_readonly()`
+- `cli/src/config/profile.rs` — `readonly_profile()` creates sandbox replica of default

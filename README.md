@@ -120,16 +120,16 @@ stakpak
 >
 > Copy your new key from the browser paste it in your terminal
 
-#### You could also set the environment variable `STAKPAK_API_KEY`
+#### Non-interactive setup (CI/scripts)
+
+```bash
+stakpak auth login --api-key $STAKPAK_API_KEY
+```
+
+#### Or set the environment variable
 
 ```bash
 export STAKPAK_API_KEY=<mykey>
-```
-
-#### Or save your API key to `~/.stakpak/config.toml`
-
-```bash
-stakpak login --api-key $STAKPAK_API_KEY
 ```
 
 #### View current account (Optional)
@@ -139,6 +139,21 @@ stakpak account
 ```
 
 ### Option B: Running Without a Stakpak API Key
+
+#### Non-interactive setup (CI/scripts)
+
+```bash
+# Anthropic
+stakpak auth login --provider anthropic --api-key $ANTHROPIC_API_KEY
+
+# OpenAI
+stakpak auth login --provider openai --api-key $OPENAI_API_KEY
+
+# Gemini
+stakpak auth login --provider gemini --api-key $GEMINI_API_KEY
+```
+
+#### Manual configuration
 
 Create `~/.stakpak/config.toml` with one of these configurations:
 

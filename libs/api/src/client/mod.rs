@@ -230,9 +230,8 @@ impl AgentClient {
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {
-                history_action_message_size_limit: Some(100),
-                history_action_message_keep_last_n: Some(50),
-                history_action_result_keep_last_n: Some(50),
+                keep_last_n_assistant_messages: Some(5), // Keep the last 5 assistant messages in context
+                context_budget_threshold: Some(0.8),     // defaults to 0.8 (80%)
             })),
         );
         let hook_registry = Arc::new(hook_registry);

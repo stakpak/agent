@@ -5,8 +5,7 @@ use crate::commands::agent::run::helpers::{
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
-    AsyncManifest, AsyncOutcome, PauseReason, PendingToolCall, ResumeInput, build_resume_hint,
-    detect_pending_tool_calls, write_pause_manifest,
+    AsyncOutcome, ResumeInput, build_resume_hint, detect_pending_tool_calls, write_pause_manifest,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -18,6 +17,7 @@ use stakpak_api::{
 };
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::HashMap;
@@ -235,6 +235,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
     let mut current_session_id: Option<Uuid> = None;
     let mut current_checkpoint_id: Option<Uuid> = None;
+    let mut current_metadata: Option<serde_json::Value> = None;
     let mut prior_steps: usize = 0;
 
     // Load checkpoint/session messages if provided
@@ -250,6 +251,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
         current_session_id = Some(checkpoint.session_id);
         current_checkpoint_id = Some(checkpoint.id);
+        current_metadata = checkpoint.state.metadata;
         chat_messages.extend(checkpoint.state.messages);
 
         llm_response_time += checkpoint_start.elapsed();
@@ -269,6 +271,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
             Ok(checkpoint) => {
                 current_session_id = Some(checkpoint.session_id);
                 current_checkpoint_id = Some(checkpoint_uuid);
+                current_metadata = checkpoint.state.metadata;
                 prior_steps = checkpoint
                     .state
                     .messages
@@ -452,6 +455,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 chat_messages.clone(),
                 Some(tools.clone()),
                 current_session_id,
+                current_metadata.clone(),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -481,6 +485,16 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
         }
 
         chat_messages.push(response.choices[0].message.clone());
+
+        // Update metadata from checkpoint state so the next
+        // turn sees the latest trimming state.
+        if let Some(state_metadata) = response
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.get("state_metadata"))
+        {
+            current_metadata = Some(state_metadata.clone());
+        }
 
         // Get session_id and checkpoint_id from the response
         // response.id is the checkpoint_id created by chat_completion
