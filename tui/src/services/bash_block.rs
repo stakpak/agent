@@ -3176,14 +3176,17 @@ mod tests {
             ToolCallStreamInfo {
                 name: "stakpak__create".to_string(),
                 args_tokens: 3241,
+                description: None,
             },
             ToolCallStreamInfo {
                 name: "stakpak__run_command".to_string(),
                 args_tokens: 412,
+                description: None,
             },
             ToolCallStreamInfo {
                 name: "".to_string(),
                 args_tokens: 0,
+                description: None,
             },
         ];
 
@@ -3213,6 +3216,7 @@ mod tests {
             .map(|i| ToolCallStreamInfo {
                 name: format!("stakpak__tool_{}", i),
                 args_tokens: 100 * (i + 1),
+                description: None,
             })
             .collect();
 
