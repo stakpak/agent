@@ -2,6 +2,52 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::Command;
 
+// ---------------------------------------------------------------------------
+// Container image references — single source of truth
+// ---------------------------------------------------------------------------
+
+/// Base image reference for the Stakpak agent container (without tag).
+const AGENT_IMAGE_REPO: &str = "ghcr.io/stakpak/agent";
+
+/// Base image reference for the Warden sidecar container (without tag).
+const WARDEN_SIDECAR_IMAGE_REPO: &str = "ghcr.io/stakpak/warden-sidecar";
+
+/// Returns the fully-tagged agent image for the current CLI version.
+/// Example: `ghcr.io/stakpak/agent:v0.3.40`
+pub fn agent_image() -> String {
+    format!("{}:v{}", AGENT_IMAGE_REPO, env!("CARGO_PKG_VERSION"))
+}
+
+/// Returns the fully-tagged warden sidecar image for the given warden version.
+/// `warden_version` should include the leading `v` (e.g. `"v0.1.15"`).
+/// Example: `ghcr.io/stakpak/warden-sidecar:v0.1.15`
+pub fn warden_sidecar_image(warden_version: &str) -> String {
+    format!("{}:{}", WARDEN_SIDECAR_IMAGE_REPO, warden_version)
+}
+
+/// Detect the installed warden version by running `warden version` (or a full
+/// path to the binary). Returns the version token as printed by warden,
+/// e.g. `"v0.1.15"`. Returns `None` if warden is not installed or the
+/// version cannot be determined.
+pub fn detect_warden_version(warden_path: &str) -> Option<String> {
+    let output = Command::new(warden_path)
+        .arg("version")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Output format: "warden v0.1.15 (https://github.com/stakpak/agent)"
+    stdout.split_whitespace().nth(1).map(|s| s.to_string())
+}
+
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
     pub image: String,

@@ -8,6 +8,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use stakpak_shared::container::agent_image;
 use stakpak_shared::local_store::LocalStore;
 use tracing::error;
 use uuid::Uuid;
@@ -482,8 +483,7 @@ NOTES:
 
         // If sandbox mode is enabled, wrap the command in warden
         if enable_sandbox {
-            // Use standard stakpak image (no special warden image needed with wrap)
-            let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
+            let stakpak_image = agent_image();
 
             let mut warden_command = format!("{} warden wrap {}", current_exe, stakpak_image);
 

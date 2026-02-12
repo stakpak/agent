@@ -13,6 +13,8 @@ pub struct PluginConfig {
     pub base_url: String,
     pub targets: Vec<String>,
     pub version: Option<String>,
+    /// When true, suppress all stderr output (for background tasks behind a TUI).
+    pub silent: bool,
 }
 
 /// Get the path to a plugin, downloading it if necessary
@@ -22,6 +24,7 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         base_url: config.base_url.trim_end_matches('/').to_string(), // Remove trailing slash
         targets: config.targets,
         version: config.version,
+        silent: config.silent,
     };
 
     // Get the target version from the server
@@ -30,10 +33,12 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         None => match get_latest_version(&config).await {
             Ok(version) => version,
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to check latest version for {}: {}",
-                    config.name, e
-                );
+                if !config.silent {
+                    eprintln!(
+                        "Warning: Failed to check latest version for {}: {}",
+                        config.name, e
+                    );
+                }
                 // Continue with existing logic if version check fails
                 return get_plugin_path_without_version_check(&config).await;
             }
@@ -41,51 +46,42 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
     };
 
     // First check if plugin is available in PATH
-    if let Ok(system_version) = get_version_from_command(&config.name, &config.name) {
-        if is_same_version(&system_version, &target_version) {
-            return config.name.clone();
-        } else {
-            // println!(
-            //     "{} v{} is outdated (target: v{}), checking plugins directory...",
-            //     config.name, system_version, target_version
-            // );
-        }
+    if let Ok(system_version) = get_version_from_command(&config.name, &config.name)
+        && is_same_version(&system_version, &target_version)
+    {
+        return config.name.clone();
     }
 
     // Check if plugin already exists in plugins directory
     if let Ok(existing_path) = get_existing_plugin_path(&config.name)
         && let Ok(current_version) = get_version_from_command(&existing_path, &config.name)
+        && is_same_version(&current_version, &target_version)
     {
-        if is_same_version(&current_version, &target_version) {
-            return existing_path;
-        } else {
-            // println!(
-            //     "{} {} is outdated (target: v{}), updating...",
-            //     config.name, current_version, target_version
-            // );
-        }
+        return existing_path;
     }
 
     // Try to download and install the latest version
     match download_and_install_plugin(&config).await {
-        Ok(path) => {
-            // println!(
-            //     "Successfully installed {} v{} -> {}",
-            //     config.name, target_version, path
-            // );
-            path
-        }
+        Ok(path) => path,
         Err(e) => {
-            eprintln!("Failed to download {}: {}", config.name, e);
+            if !config.silent {
+                eprintln!("Failed to download {}: {}", config.name, e);
+            }
             // Try to use existing version if available
             if let Ok(existing_path) = get_existing_plugin_path(&config.name) {
-                eprintln!("Using existing {} version", config.name);
+                if !config.silent {
+                    eprintln!("Using existing {} version", config.name);
+                }
                 existing_path
             } else if is_plugin_available(&config.name) {
-                eprintln!("Using system PATH version of {}", config.name);
+                if !config.silent {
+                    eprintln!("Using system PATH version of {}", config.name);
+                }
                 config.name.clone()
             } else {
-                eprintln!("No fallback available for {}", config.name);
+                if !config.silent {
+                    eprintln!("No fallback available for {}", config.name);
+                }
                 config.name.clone() // Last resort fallback
             }
         }
@@ -108,7 +104,9 @@ async fn get_plugin_path_without_version_check(config: &PluginConfig) -> String 
     match download_and_install_plugin(config).await {
         Ok(path) => path,
         Err(e) => {
-            eprintln!("Failed to download {}: {}", config.name, e);
+            if !config.silent {
+                eprintln!("Failed to download {}: {}", config.name, e);
+            }
             config.name.clone() // Fallback to system PATH (may not work)
         }
     }
