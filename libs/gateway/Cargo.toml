@@ -15,7 +15,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = "0.32"
 toml = { workspace = true }
 dirs = "5.0"
 reqwest = { workspace = true }
