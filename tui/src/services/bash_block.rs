@@ -2415,8 +2415,9 @@ pub fn render_task_wait_block(
             .unwrap_or_else(|| "...".to_string());
 
         // Truncate task_id for display (show first 8 chars)
-        let task_id_display = if task.task_id.len() > 8 {
-            format!("{}…", &task.task_id[..8])
+        let task_id_display = if task.task_id.chars().count() > 8 {
+            let truncated: String = task.task_id.chars().take(8).collect();
+            format!("{}…", truncated)
         } else {
             task.task_id.clone()
         };
@@ -2434,8 +2435,9 @@ pub fn render_task_wait_block(
             .replace(" [sandboxed]", "")
             .replace("[sandboxed]", "");
 
-        let display_name = if clean_description.len() > 30 {
-            format!("{}…", &clean_description[..30])
+        let display_name = if clean_description.chars().count() > 30 {
+            let truncated: String = clean_description.chars().take(30).collect();
+            format!("{}…", truncated)
         } else {
             clean_description
         };
