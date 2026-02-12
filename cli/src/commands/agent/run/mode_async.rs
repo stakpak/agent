@@ -486,6 +486,16 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
         chat_messages.push(response.choices[0].message.clone());
 
+        // Update metadata from checkpoint state so the next
+        // turn sees the latest trimming state.
+        if let Some(state_metadata) = response
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.get("state_metadata"))
+        {
+            current_metadata = Some(state_metadata.clone());
+        }
+
         // Get session_id and checkpoint_id from the response
         // response.id is the checkpoint_id created by chat_completion
         if let Ok(checkpoint_uuid) = Uuid::parse_str(&response.id) {

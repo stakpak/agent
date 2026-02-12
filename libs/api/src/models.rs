@@ -504,14 +504,19 @@ impl From<&LLMOutput> for ChatMessage {
 }
 
 impl AgentState {
-    pub fn new(active_model: Model, messages: Vec<ChatMessage>, tools: Option<Vec<Tool>>) -> Self {
+    pub fn new(
+        active_model: Model,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+        metadata: Option<Value>,
+    ) -> Self {
         Self {
             active_model,
             messages,
             tools,
+            metadata,
             llm_input: None,
             llm_output: None,
-            metadata: None,
         }
     }
 
