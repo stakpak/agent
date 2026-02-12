@@ -8,6 +8,7 @@ members = [
   "libs/ai",
   "libs/agent-core",
   "libs/server",
+  "libs/gateway",
   "libs/mcp/client",
   "libs/mcp/server",
   "libs/mcp/proxy",
@@ -28,6 +29,7 @@ homepage = "https://stakpak.io"
 stakai = { path = "libs/ai", version = "0.3.38" }
 stakpak-agent-core = { path = "libs/agent-core", version = "0.3.38" }
 stakpak-server = { path = "libs/server", version = "0.3.38" }
+stakpak-gateway = { path = "libs/gateway", version = "0.3.38" }
 stakpak-api = { path = "libs/api", version = "0.3.38" }
 stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.38" }
 stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.38" }
