@@ -104,7 +104,6 @@ pub use types::{
     Role,
     StreamEvent,
     SystemMessageMode,
-    TRIMMED_CONTENT_PLACEHOLDER,
     ThinkingOptions,
     Tool,
     ToolCall,

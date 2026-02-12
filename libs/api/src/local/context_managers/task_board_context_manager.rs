@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use stakai::TRIMMED_CONTENT_PLACEHOLDER;
 use stakpak_shared::models::{
     integrations::openai::{ChatMessage, MessageContent},
     llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTool},
@@ -27,6 +26,8 @@ impl super::ContextManager for TaskBoardContextManager {
         dedup_tool_results(llm_messages)
     }
 }
+
+const TRIMMED_CONTENT_PLACEHOLDER: &str = "[trimmed]";
 
 impl TaskBoardContextManager {
     /// Remove `<checkpoint_id>...</checkpoint_id>` XML tags from message content.
@@ -130,19 +131,18 @@ impl TaskBoardContextManager {
     /// Trim a single message's content, replacing it with a placeholder.
     /// Preserves message structure (role, tool_call_ids) for API validity.
     fn trim_message(msg: &mut LLMMessage) {
-        let placeholder = TRIMMED_CONTENT_PLACEHOLDER;
         match &mut msg.content {
             LLMMessageContent::String(s) => {
-                *s = placeholder.to_string();
+                *s = TRIMMED_CONTENT_PLACEHOLDER.to_string();
             }
             LLMMessageContent::List(parts) => {
                 for part in parts.iter_mut() {
                     match part {
                         LLMMessageTypedContent::Text { text } => {
-                            *text = placeholder.to_string();
+                            *text = TRIMMED_CONTENT_PLACEHOLDER.to_string();
                         }
                         LLMMessageTypedContent::ToolResult { content, .. } => {
-                            *content = placeholder.to_string();
+                            *content = TRIMMED_CONTENT_PLACEHOLDER.to_string();
                         }
                         // Preserve ToolCall structure - needed for API to match tool_use/tool_result
                         LLMMessageTypedContent::ToolCall { .. } => {}
@@ -218,7 +218,7 @@ impl TaskBoardContextManager {
         let tool_overhead = Self::estimate_tool_overhead(tools);
         let threshold = (context_window as f32 * self.context_budget_threshold) as u64;
 
-        // Read previous trimming state
+        // Read previous trimming state from metadata
         let prev_trimmed_up_to = metadata
             .as_ref()
             .and_then(|m| m.get("trimmed_up_to_message_index"))
