@@ -568,6 +568,9 @@ pub fn update(
         InputEvent::MessageToolCalls(tool_calls) => {
             tool::handle_message_tool_calls(state, tool_calls);
         }
+        InputEvent::StreamToolCallProgress(infos) => {
+            tool::handle_stream_tool_call_progress(state, infos);
+        }
         InputEvent::RetryLastToolCall => {
             tool::handle_retry_tool_call(state, input_tx, cancel_tx);
         }

@@ -119,6 +119,8 @@ pub struct AppState {
     pub completed_tool_calls: std::collections::HashSet<Uuid>,
     pub is_streaming: bool,
     pub latest_tool_call: Option<ToolCall>,
+    /// Stable message ID for the tool call streaming preview block
+    pub tool_call_stream_preview_id: Option<Uuid>,
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
@@ -390,6 +392,7 @@ impl AppState {
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
+            tool_call_stream_preview_id: None,
             retry_attempts: 0,
             max_retry_attempts: 3,
             last_user_message_for_retry: None,
