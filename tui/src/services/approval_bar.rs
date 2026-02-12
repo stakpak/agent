@@ -42,18 +42,37 @@ impl ApprovalAction {
     pub fn new(tool_call: ToolCall) -> Self {
         let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
 
-        // Convert snake_case to Title Case (e.g., "get_pak_content" -> "Get Pak Content")
-        let label = tool_name
-            .split('_')
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                    None => String::new(),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
+        let label = if tool_name == "dynamic_subagent_task" {
+            // Parse description and sandbox flag from arguments for a meaningful label
+            let args =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let desc = args
+                .as_ref()
+                .and_then(|a| a.get("description").and_then(|v| v.as_str()))
+                .unwrap_or("Subagent");
+            let is_sandbox = args
+                .as_ref()
+                .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if is_sandbox {
+                format!("{} [sandboxed]", desc)
+            } else {
+                desc.to_string()
+            }
+        } else {
+            // Convert snake_case to Title Case (e.g., "get_pak_content" -> "Get Pak Content")
+            tool_name
+                .split('_')
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
 
         Self {
             tool_call,

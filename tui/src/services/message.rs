@@ -1368,7 +1368,29 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
         MessageContent::UserMessage(text) => {
             // Render user message with cyan bar prefix and proper word wrapping
             let rendered = render_user_message_lines(text, width);
-            lines.extend(rendered);
+            let total_lines = rendered.len();
+            const MAX_PREVIEW_LINES: usize = 15;
+
+            if total_lines > MAX_PREVIEW_LINES {
+                lines.extend(rendered.into_iter().take(MAX_PREVIEW_LINES));
+                // Add collapsed hint line
+                let hidden = total_lines - MAX_PREVIEW_LINES;
+                let accent_color = Color::DarkGray;
+                lines.push((
+                    Line::from(vec![
+                        Span::styled("┃ ".to_string(), Style::default().fg(accent_color)),
+                        Span::styled(
+                            format!("... {} more lines (ctrl+t to expand)", hidden),
+                            Style::default()
+                                .fg(accent_color)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ]),
+                    Style::default(),
+                ));
+            } else {
+                lines.extend(rendered);
+            }
         }
         MessageContent::BashBubble {
             title,
@@ -2106,6 +2128,29 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<String>) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
+
+    // For subagent tasks, show description + tools summary instead of raw args
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "dynamic_subagent_task"
+        && let Ok(ref args) = arguments
+    {
+        let desc = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("subagent");
+        let tools_count = args
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let is_sandbox = args
+            .get("enable_sandbox")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let sandbox_tag = if is_sandbox { " [sandboxed]" } else { "" };
+        return format!("{}{} ({} tools)", desc, sandbox_tag, tools_count);
+    }
+
     const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
 
     if let Ok(arguments) = arguments {
@@ -2378,6 +2423,23 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
         "delete_file" => "Delete file".to_string(),
         "list_directory" => "List directory".to_string(),
         "search_files" => "Search files".to_string(),
+        "dynamic_subagent_task" => {
+            let args =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let desc = args
+                .as_ref()
+                .and_then(|a| a.get("description").and_then(|v| v.as_str()))
+                .unwrap_or("Subagent");
+            let is_sandbox = args
+                .as_ref()
+                .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if is_sandbox {
+                format!("Subagent [sandboxed]: {}", desc)
+            } else {
+                format!("Subagent: {}", desc)
+            }
+        }
         _ => {
             // Convert function name to title case
             crate::utils::strip_tool_name(&tool_call.function.name)

@@ -31,7 +31,7 @@ use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v2.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;

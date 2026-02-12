@@ -149,6 +149,56 @@ Launch these discovery tasks **in parallel**:
 - Check `~/.ssh/config` -- list host aliases only, **never read private key files**
 - **CRITICAL: Never read, log, or output actual secret values, tokens, passwords, or private keys. Only report the existence and type of secrets management, not the secrets themselves.**
 
+#### 9. Running Services & Applications
+
+This is the most important discovery domain -- it answers "what's actually running and where?"
+
+**Kubernetes workloads** (if any cluster is reachable -- may overlap with 2a, that's fine):
+- `kubectl get deployments,statefulsets -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,REPLICAS:.status.readyReplicas,IMAGE:.spec.template.spec.containers[*].image`
+- Identify the main application services vs infrastructure services (ingress controllers, cert-manager, monitoring agents, etc.)
+- Check for service mesh (Istio, Linkerd): `kubectl get virtualservices,destinationrules -A` or `linkerd check`
+
+**Docker / Compose** (if Docker is available):
+- `docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'` -- running containers
+- If `docker-compose.yml` / `compose.yaml` exists: `docker compose ps` -- compose service status
+- Note any containers that look like application services vs databases/caches/queues
+
+**Cloud compute services** (use whichever cloud CLIs are available):
+- AWS:
+  - `aws ecs list-clusters` → for each cluster: `aws ecs list-services --cluster <name>` → `aws ecs describe-services` to get task counts and load balancers
+  - `aws lambda list-functions --query 'Functions[].{Name:FunctionName,Runtime:Runtime,LastModified:LastModified}'` -- serverless functions
+  - `aws ec2 describe-instances --filters Name=instance-state-name,Values=running --query 'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,Name:Tags[?Key==\`Name\`].Value|[0],AZ:Placement.AvailabilityZone}'` -- running VMs
+  - `aws elasticbeanstalk describe-environments --query 'Environments[].{Name:EnvironmentName,Status:Status,Platform:PlatformArn}'`
+  - `aws lightsail get-instances` (if applicable)
+- GCP:
+  - `gcloud run services list` -- Cloud Run services
+  - `gcloud compute instances list` -- running VMs
+  - `gcloud functions list` -- Cloud Functions
+  - `gcloud app services list` -- App Engine services
+- Azure:
+  - `az webapp list --query '[].{Name:name,State:state,URL:defaultHostName}'`
+  - `az functionapp list --query '[].{Name:name,State:state}'`
+  - `az container list` -- Container Instances
+  - `az aks list` → check for managed k8s (may already be covered by 2a)
+
+**Managed data services** (databases, caches, queues that applications depend on):
+- AWS: `aws rds describe-db-instances`, `aws elasticache describe-cache-clusters`, `aws sqs list-queues`, `aws sns list-topics`, `aws s3 ls`
+- GCP: `gcloud sql instances list`, `gcloud redis instances list`
+- Azure: `az sql server list`, `az redis list`
+- Note: only list names, types, and regions -- **never output connection strings or credentials**
+
+**Local dev services**:
+- Check for listening ports: `lsof -i -P -n | grep LISTEN` (macOS) or `ss -tlnp` (Linux)
+- Identify common dev server ports (3000, 4200, 5000, 5173, 8000, 8080, 8443, 9090)
+- Cross-reference with running Docker containers and compose services
+
+**Service routing & ingress**:
+- `kubectl get ingress,gateway,virtualservice -A` -- how traffic reaches services
+- Check for API gateways: AWS API Gateway (`aws apigateway get-rest-apis`, `aws apigatewayv2 get-apis`), Kong, Traefik
+- Check for CDN/edge: CloudFront distributions (`aws cloudfront list-distributions`), Cloudflare zones
+
+**Goal**: Build a map of service name → runtime (EKS, ECS, Lambda, VM, Docker, etc.) → location (region/cluster) → endpoints (if discoverable). This is the foundation for understanding the user's actual application topology.
+
 ### Subagent Instructions Template
 
 Each subagent should:
@@ -174,9 +224,14 @@ Structure your questions as a numbered list grouped by topic. For example:
 > 1. I see AWS profiles for `dev` and `prod` -- are these separate accounts or the same account with different roles?
 > 2. ...
 >
-> **Application**
-> 3. Where does your application source code live? (a) this directory, (b) another local directory, (c) a remote git repo, (d) other
-> 4. ...
+> **Services & Applications**
+> 3. I found N deployments on your EKS cluster and M Lambda functions. Are these all your services, or are there others running elsewhere (other accounts, third-party hosting, on-prem)?
+> 4. What are your main customer-facing services/APIs?
+> 5. ...
+>
+> **Application Source Code**
+> 6. Where does your application source code live? (a) this directory, (b) another local directory, (c) a remote git repo, (d) other
+> 7. ...
 >
 > Feel free to skip any you'd rather not answer right now -- I'll note them as unknown and we can revisit later.
 
@@ -187,6 +242,13 @@ Structure your questions as a numbered list grouped by topic. For example:
 - Always give the user an out ("skip if you prefer")
 - Never ask about things you already discovered with high confidence
 - Always ask where the application source code lives if you couldn't determine it from the current directory
+- Always ask about services/applications -- this is the highest-value gap to fill. Examples:
+  - "I found N services on EKS and M Lambda functions. Are these all your services, or are there others running elsewhere (other accounts, third-party hosting, on-prem)?"
+  - "What are your main customer-facing services/APIs?"
+  - "I couldn't reach cluster X -- what runs there?"
+  - "I see RDS and ElastiCache -- which services depend on them?"
+  - "Are there any services running on VMs, bare metal, or third-party platforms (Heroku, Vercel, Netlify, etc.) that I wouldn't have found?"
+  - "Do you have any background workers, cron jobs, or async processors beyond what's deployed on the clusters?"
 
 ---
 
@@ -263,6 +325,22 @@ Use this structure:
 | Database  | ...       | ...     |
 | Cache     | ...       | ...     |
 | Queue     | ...       | ...     |
+
+## Running Services
+
+| Service | Runtime | Location | Replicas | Endpoints |
+|---------|---------|----------|----------|-----------|
+| ...     | EKS/ECS/Lambda/VM/Docker | region/cluster | ... | ... |
+
+### Managed Data Services
+
+| Service | Type | Provider | Region |
+|---------|------|----------|--------|
+| ...     | RDS/ElastiCache/SQS/S3 | ... | ... |
+
+### Service Dependencies
+- service-a → database (postgres), cache (redis), queue (sqs)
+- service-b → database (postgres), object-store (s3)
 
 ## Networking & DNS
 
