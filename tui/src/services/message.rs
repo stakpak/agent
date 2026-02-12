@@ -1378,10 +1378,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 let accent_color = Color::DarkGray;
                 lines.push((
                     Line::from(vec![
-                        Span::styled(
-                            "┃ ".to_string(),
-                            Style::default().fg(accent_color),
-                        ),
+                        Span::styled("┃ ".to_string(), Style::default().fg(accent_color)),
                         Span::styled(
                             format!("... {} more lines (ctrl+t to expand)", hidden),
                             Style::default()
@@ -2134,24 +2131,24 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 
     // For subagent tasks, show description + tools summary instead of raw args
     let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
-    if tool_name == "dynamic_subagent_task" {
-        if let Ok(ref args) = arguments {
-            let desc = args
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("subagent");
-            let tools_count = args
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            let is_sandbox = args
-                .get("enable_sandbox")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let sandbox_tag = if is_sandbox { " [sandboxed]" } else { "" };
-            return format!("{}{} ({} tools)", desc, sandbox_tag, tools_count);
-        }
+    if tool_name == "dynamic_subagent_task"
+        && let Ok(ref args) = arguments
+    {
+        let desc = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("subagent");
+        let tools_count = args
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let is_sandbox = args
+            .get("enable_sandbox")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let sandbox_tag = if is_sandbox { " [sandboxed]" } else { "" };
+        return format!("{}{} ({} tools)", desc, sandbox_tag, tools_count);
     }
 
     const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];

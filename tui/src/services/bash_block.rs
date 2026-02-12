@@ -604,10 +604,11 @@ pub fn extract_bash_block_info(
             tool_type: "Delete File".to_string(),
         },
         "dynamic_subagent_task" => {
-            let is_sandbox = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-                .ok()
-                .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
-                .unwrap_or(false);
+            let is_sandbox =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                    .unwrap_or(false);
             if is_sandbox {
                 BubbleColors {
                     border_color: Color::Green,
@@ -2429,7 +2430,9 @@ pub fn render_task_wait_block(
 
         // Detect and strip [sandboxed] tag for separate rendering
         let is_sandboxed = raw_description.contains("[sandboxed]");
-        let clean_description = raw_description.replace(" [sandboxed]", "").replace("[sandboxed]", "");
+        let clean_description = raw_description
+            .replace(" [sandboxed]", "")
+            .replace("[sandboxed]", "");
 
         let display_name = if clean_description.len() > 30 {
             format!("{}…", &clean_description[..30])
@@ -2437,14 +2440,13 @@ pub fn render_task_wait_block(
             clean_description
         };
 
-        let sandboxed_tag = if is_sandboxed {
-            " [sandboxed]"
-        } else {
-            ""
-        };
+        let sandboxed_tag = if is_sandboxed { " [sandboxed]" } else { "" };
 
         // Build the task line: "│ ● description [sandboxed] [duration] status │"
-        let task_content = format!("{}{} {} [{}]", display_name, sandboxed_tag, task.status, duration_str);
+        let task_content = format!(
+            "{}{} {} [{}]",
+            display_name, sandboxed_tag, task.status, duration_str
+        );
         let content_display_width = calculate_display_width(&task_content) + 2; // +2 for icon and space
         let padding_needed = inner_width.saturating_sub(content_display_width);
 
