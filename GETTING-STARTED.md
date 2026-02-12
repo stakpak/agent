@@ -64,6 +64,30 @@ stakpak
 stakpak --async "Help me understand this codebase"
 ```
 
+### 4. Autopilot (24/7 Mode)
+
+```bash
+# One-time setup (gateway + watch + runtime defaults)
+stakpak onboard
+
+# Start autonomous runtime
+stakpak up
+
+# Stop autonomous runtime
+stakpak down
+```
+
+Canonical subcommands are also available:
+
+```bash
+stakpak autopilot setup
+stakpak autopilot start
+stakpak autopilot status
+stakpak autopilot logs
+stakpak autopilot stop
+stakpak autopilot doctor
+```
+
 ## 🎯 Operation Modes
 
 Stakpak offers multiple operation modes to fit different workflows:

@@ -13,13 +13,17 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod autopilot;
 pub mod board;
 pub mod gateway;
 pub mod mcp;
 pub mod warden;
 pub mod watch;
 
+use autopilot::{SetupArgs, StartArgs, StopArgs};
+
 pub use auth::AuthCommands;
+pub use autopilot::AutopilotCommands;
 pub use gateway::GatewayCommands;
 pub use mcp::McpCommands;
 pub use watch::WatchCommands;
@@ -214,39 +218,30 @@ pub enum Commands {
         gateway_config: Option<std::path::PathBuf>,
     },
 
-    /// Start everything: serve + gateway + watch
+    /// Autonomous 24/7 lifecycle commands
+    #[command(subcommand)]
+    Autopilot(AutopilotCommands),
+
+    /// Alias for `stakpak autopilot setup`
+    Onboard {
+        #[command(flatten)]
+        args: SetupArgs,
+    },
+
+    /// Alias for `stakpak autopilot start`
     Up {
-        /// Bind address, e.g. 127.0.0.1:4096
-        #[arg(long, default_value = "127.0.0.1:4096")]
-        bind: String,
+        #[command(flatten)]
+        args: StartArgs,
 
-        /// Show generated auth token in stdout (local dev only)
-        #[arg(long, default_value_t = false)]
-        show_token: bool,
+        /// Run in background/service mode (legacy `up` defaults to foreground)
+        #[arg(long, default_value_t = false, conflicts_with = "foreground")]
+        background: bool,
+    },
 
-        /// Disable auth checks for protected routes (local dev only)
-        #[arg(long, default_value_t = false)]
-        no_auth: bool,
-
-        /// Override default model for server runs (provider/model or model id)
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Auto-approve all tools (CI/headless only)
-        #[arg(long, default_value_t = false)]
-        auto_approve_all: bool,
-
-        /// Don't start gateway runtime
-        #[arg(long, default_value_t = false)]
-        no_gateway: bool,
-
-        /// Don't start watch scheduler
-        #[arg(long, default_value_t = false)]
-        no_watch: bool,
-
-        /// Path to gateway config file
-        #[arg(long)]
-        gateway_config: Option<std::path::PathBuf>,
+    /// Alias for `stakpak autopilot stop`
+    Down {
+        #[command(flatten)]
+        args: StopArgs,
     },
 
     /// Run the autonomous watch agent with scheduled triggers
@@ -317,6 +312,26 @@ fn loopback_server_url(listener_addr: SocketAddr) -> String {
     }
 }
 
+fn normalize_up_alias_start_args(
+    mut args: StartArgs,
+    background: bool,
+) -> Result<StartArgs, String> {
+    // Defense-in-depth: clap already enforces this at parse time, but keep this for
+    // programmatic construction paths (tests/internal callers).
+    if background && args.foreground {
+        return Err("Cannot combine --background with --foreground.".to_string());
+    }
+
+    // Backwards-compatibility: historically `stakpak up` was a foreground/blocking command.
+    // Keep that behavior unless --background is requested.
+    // For machine output (--json), prefer background/service mode.
+    if !background && !args.json {
+        args.foreground = true;
+    }
+
+    Ok(args)
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -331,7 +346,10 @@ impl Commands {
                 | Commands::Auth(_)
                 | Commands::Gateway(_)
                 | Commands::Serve { .. }
+                | Commands::Autopilot(_)
+                | Commands::Onboard { .. }
                 | Commands::Up { .. }
+                | Commands::Down { .. }
                 | Commands::Watch(_)
         )
     }
@@ -578,74 +596,24 @@ impl Commands {
             Commands::Gateway(gateway_command) => {
                 gateway_command.run(config).await?;
             }
-            Commands::Up {
-                bind,
-                show_token,
-                no_auth,
-                model,
-                auto_approve_all,
-                no_gateway,
-                no_watch,
-                gateway_config,
-            } => {
-                let watch_task = if no_watch {
-                    None
-                } else {
-                    Some(tokio::spawn(async {
-                        if let Err(error) = crate::commands::watch::commands::run_watch().await {
-                            eprintln!("Watch runtime exited: {}", error);
-                        }
-                    }))
-                };
+            Commands::Autopilot(autopilot_command) => {
+                autopilot_command.run(config).await?;
+            }
+            Commands::Onboard { args } => {
+                AutopilotCommands::Setup { args }.run(config).await?;
+            }
+            Commands::Up { args, background } => {
+                let args = normalize_up_alias_start_args(args, background)?;
 
-                let current_exe = std::env::current_exe()
-                    .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
-
-                let mut serve_cmd = tokio::process::Command::new(current_exe);
-                if config.profile_name != "default" {
-                    serve_cmd.arg("--profile").arg(&config.profile_name);
+                AutopilotCommands::Start {
+                    args,
+                    from_service: false,
                 }
-                serve_cmd.arg("serve");
-                serve_cmd.arg("--bind").arg(bind);
-
-                if show_token {
-                    serve_cmd.arg("--show-token");
-                }
-                if no_auth {
-                    serve_cmd.arg("--no-auth");
-                }
-                if auto_approve_all {
-                    serve_cmd.arg("--auto-approve-all");
-                }
-                if !no_gateway {
-                    serve_cmd.arg("--gateway");
-                }
-                if let Some(model) = model {
-                    serve_cmd.arg("--model").arg(model);
-                }
-                if let Some(path) = gateway_config {
-                    serve_cmd.arg("--gateway-config").arg(path);
-                }
-
-                let status = serve_cmd
-                    .status()
-                    .await
-                    .map_err(|e| format!("Failed to start serve runtime: {}", e))?;
-
-                if let Some(task) = watch_task {
-                    task.abort();
-                    let _ = task.await;
-                }
-
-                if !status.success() {
-                    return Err(format!(
-                        "Serve runtime exited with status {}",
-                        status
-                            .code()
-                            .map(|code| code.to_string())
-                            .unwrap_or_else(|| "signal".to_string())
-                    ));
-                }
+                .run(config)
+                .await?;
+            }
+            Commands::Down { args } => {
+                AutopilotCommands::Stop { args }.run(config).await?;
             }
             Commands::Serve {
                 bind,
@@ -1256,5 +1224,69 @@ fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path
         Err(_) => {
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_start_args() -> StartArgs {
+        StartArgs {
+            bind: "127.0.0.1:4096".to_string(),
+            show_token: false,
+            no_auth: false,
+            model: None,
+            auto_approve_all: false,
+            no_gateway: false,
+            no_watch: false,
+            gateway_config: None,
+            json: false,
+            foreground: false,
+        }
+    }
+
+    #[test]
+    fn normalize_up_alias_defaults_to_foreground_for_legacy_compat() {
+        let args = base_start_args();
+        let normalized = normalize_up_alias_start_args(args, false);
+        assert!(normalized.is_ok());
+
+        if let Ok(normalized) = normalized {
+            assert!(normalized.foreground);
+        }
+    }
+
+    #[test]
+    fn normalize_up_alias_background_keeps_non_foreground() {
+        let args = base_start_args();
+        let normalized = normalize_up_alias_start_args(args, true);
+        assert!(normalized.is_ok());
+
+        if let Ok(normalized) = normalized {
+            assert!(!normalized.foreground);
+        }
+    }
+
+    #[test]
+    fn normalize_up_alias_json_does_not_force_foreground() {
+        let mut args = base_start_args();
+        args.json = true;
+
+        let normalized = normalize_up_alias_start_args(args, false);
+        assert!(normalized.is_ok());
+
+        if let Ok(normalized) = normalized {
+            assert!(!normalized.foreground);
+        }
+    }
+
+    #[test]
+    fn normalize_up_alias_rejects_background_foreground_conflict() {
+        let mut args = base_start_args();
+        args.foreground = true;
+
+        let normalized = normalize_up_alias_start_args(args, true);
+        assert!(normalized.is_err());
     }
 }
