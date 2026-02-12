@@ -222,13 +222,13 @@ pub enum Commands {
     #[command(subcommand)]
     Autopilot(AutopilotCommands),
 
-    /// Alias for `stakpak autopilot setup`
+    /// Alias for `stakpak autopilot init`
     Onboard {
         #[command(flatten)]
         args: SetupArgs,
     },
 
-    /// Alias for `stakpak autopilot start`
+    /// Alias for `stakpak autopilot up`
     Up {
         #[command(flatten)]
         args: StartArgs,
@@ -238,7 +238,7 @@ pub enum Commands {
         background: bool,
     },
 
-    /// Alias for `stakpak autopilot stop`
+    /// Alias for `stakpak autopilot down`
     Down {
         #[command(flatten)]
         args: StopArgs,
@@ -600,12 +600,12 @@ impl Commands {
                 autopilot_command.run(config).await?;
             }
             Commands::Onboard { args } => {
-                AutopilotCommands::Setup { args }.run(config).await?;
+                AutopilotCommands::Init { args }.run(config).await?;
             }
             Commands::Up { args, background } => {
                 let args = normalize_up_alias_start_args(args, background)?;
 
-                AutopilotCommands::Start {
+                AutopilotCommands::Up {
                     args,
                     from_service: false,
                 }
@@ -613,7 +613,7 @@ impl Commands {
                 .await?;
             }
             Commands::Down { args } => {
-                AutopilotCommands::Stop { args }.run(config).await?;
+                AutopilotCommands::Down { args }.run(config).await?;
             }
             Commands::Serve {
                 bind,

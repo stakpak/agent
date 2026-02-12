@@ -80,11 +80,11 @@ stakpak down
 Canonical subcommands are also available:
 
 ```bash
-stakpak autopilot setup
-stakpak autopilot start
+stakpak autopilot init
+stakpak autopilot up
 stakpak autopilot status
 stakpak autopilot logs
-stakpak autopilot stop
+stakpak autopilot down
 stakpak autopilot doctor
 ```
 

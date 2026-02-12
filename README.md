@@ -57,19 +57,19 @@ curl -sSL https://stakpak.dev/install.sh | sh
 Use the new lifecycle aliases for one-command setup/start/stop:
 
 ```bash
-stakpak onboard   # alias for: stakpak autopilot setup
-stakpak up        # alias for: stakpak autopilot start
-stakpak down      # alias for: stakpak autopilot stop
+stakpak onboard   # alias for: stakpak autopilot init
+stakpak up        # alias for: stakpak autopilot up
+stakpak down      # alias for: stakpak autopilot down
 ```
 
 You can also use the canonical subcommands:
 
 ```bash
-stakpak autopilot setup
-stakpak autopilot start
+stakpak autopilot init
+stakpak autopilot up
 stakpak autopilot status
 stakpak autopilot logs
-stakpak autopilot stop
+stakpak autopilot down
 stakpak autopilot doctor
 ```
 
