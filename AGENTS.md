@@ -151,6 +151,22 @@ All tools done → fall through to API call
 - Collapse nested `if` + `if let` into combined conditions where readable
 - Use `std::mem::take` for efficient ownership transfer in place
 
+### String Slicing & UTF-8 Char Boundaries
+
+Rust strings are UTF-8. Characters can be 1–4 bytes, so **never slice with a raw byte index** (`&s[..80]`, `&s[..n-3]`) — it panics if the index lands mid-character. Safe approaches:
+
+```rust
+// ✅ Truncate by character count
+let truncated: String = s.chars().take(80).collect();
+
+// ✅ Validate boundary before slicing (when you need byte-position slicing)
+let mut end = max_bytes;
+while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+let truncated = &s[..end];
+```
+
+Indices from `.find()` / `.rfind()` on the same string are always safe. See `cli/src/commands/watch/commands/run.rs:truncate_string()` for the canonical pattern.
+
 ### Testing
 
 - Tests live in `#[cfg(test)] mod tests` at the bottom of each file
