@@ -14,8 +14,10 @@ use crate::commands::watch::{
 };
 use chrono::{DateTime, Utc};
 use croner::Cron;
+use stakpak_shared::utils::sanitize_text_output;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::signal;
 use tracing::{error, info, warn};
 
@@ -492,7 +494,9 @@ async fn maybe_send_notification(
     let context = serde_json::json!({
         "trigger": trigger.name,
         "summary": extract_summary(result, error_override),
-        "check_output": check_result.map(|value| value.stdout.trim()).filter(|value| !value.is_empty()),
+        "check_output": check_result
+            .map(|value| sanitize_text_output(value.stdout.trim()))
+            .filter(|value| !value.is_empty()),
         "status": if success { "completed" } else { "failed" },
     });
 
@@ -503,7 +507,21 @@ async fn maybe_send_notification(
         "context": context,
     });
 
-    let client = reqwest::Client::new();
+    let client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            warn!(
+                trigger = %trigger.name,
+                error = %error,
+                "Failed to create notification HTTP client"
+            );
+            return;
+        }
+    };
     let mut request = client.post(format!("{}/v1/gateway/send", notifications.gateway_url));
 
     if let Some(token) = notifications.gateway_token.as_deref()
@@ -579,18 +597,23 @@ fn extract_summary(
     error_override: Option<&str>,
 ) -> String {
     if let Some(error) = error_override {
-        return truncate_string(error, 500);
+        return sanitize_and_truncate(error, 500);
     }
 
     if !result.stdout.trim().is_empty() {
-        return truncate_string(result.stdout.trim(), 500);
+        return sanitize_and_truncate(result.stdout.trim(), 500);
     }
 
     if !result.stderr.trim().is_empty() {
-        return truncate_string(result.stderr.trim(), 500);
+        return sanitize_and_truncate(result.stderr.trim(), 500);
     }
 
     String::new()
+}
+
+fn sanitize_and_truncate(text: &str, max_bytes: usize) -> String {
+    let sanitized = sanitize_text_output(text);
+    truncate_string(&sanitized, max_bytes)
 }
 
 /// Truncate a string to a maximum byte length, respecting unicode character boundaries.

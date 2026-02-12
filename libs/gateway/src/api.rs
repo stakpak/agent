@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::{
     channels::Channel, store::GatewayStore, targeting::ChannelTarget, types::OutboundReply,
@@ -201,14 +202,12 @@ async fn send_handler(
             &context,
             state.delivery_context_ttl_hours,
         ) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError {
-                    error: "context_store_failed".to_string(),
-                    message: error.to_string(),
-                }),
-            )
-                .into_response();
+            warn!(
+                channel = %request.channel,
+                target_key = %target_key,
+                error = %error,
+                "failed to persist gateway delivery context after successful send"
+            );
         }
     }
 

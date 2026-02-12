@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -307,6 +308,15 @@ fn expand_gateway_approval_allowlist(tools: &[String]) -> Vec<String> {
     normalized.into_iter().collect()
 }
 
+fn loopback_server_url(listener_addr: SocketAddr) -> String {
+    let port = listener_addr.port();
+    if listener_addr.ip().is_ipv6() {
+        format!("http://[::1]:{port}")
+    } else {
+        format!("http://127.0.0.1:{port}")
+    }
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -592,6 +602,9 @@ impl Commands {
                     .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
 
                 let mut serve_cmd = tokio::process::Command::new(current_exe);
+                if config.profile_name != "default" {
+                    serve_cmd.arg("--profile").arg(&config.profile_name);
+                }
                 serve_cmd.arg("serve");
                 serve_cmd.arg("--bind").arg(bind);
 
@@ -612,9 +625,6 @@ impl Commands {
                 }
                 if let Some(path) = gateway_config {
                     serve_cmd.arg("--gateway-config").arg(path);
-                }
-                if config.profile_name != "default" {
-                    serve_cmd.arg("--profile").arg(&config.profile_name);
                 }
 
                 let status = serve_cmd
@@ -805,7 +815,7 @@ impl Commands {
                     let listener_addr = listener
                         .local_addr()
                         .map_err(|e| format!("Failed to inspect listener address: {}", e))?;
-                    let loopback_url = format!("http://127.0.0.1:{}", listener_addr.port());
+                    let loopback_url = loopback_server_url(listener_addr);
                     let loopback_token = if no_auth {
                         String::new()
                     } else {
