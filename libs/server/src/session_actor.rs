@@ -180,8 +180,9 @@ async fn run_session_actor(
 
     match &run_result {
         Ok(result) => {
+            checkpoint_runtime.update_messages(&result.messages).await;
             checkpoint_runtime
-                .persist_with_messages(&result.messages)
+                .persist_snapshot()
                 .await
                 .map_err(|error| format!("Failed to persist terminal checkpoint: {error}"))?;
         }
@@ -242,6 +243,8 @@ struct CheckpointRuntime {
 struct CheckpointRuntimeInner {
     parent_checkpoint_id: Option<Uuid>,
     latest_messages: Vec<Message>,
+    last_persisted_signature: Option<String>,
+    dirty: bool,
 }
 
 impl CheckpointRuntime {
@@ -259,29 +262,40 @@ impl CheckpointRuntime {
             inner: Mutex::new(CheckpointRuntimeInner {
                 parent_checkpoint_id,
                 latest_messages,
+                last_persisted_signature: None,
+                dirty: true,
             }),
         }
     }
 
-    async fn persist_snapshot(&self) -> Result<Uuid, String> {
-        let mut guard = self.inner.lock().await;
-
-        let checkpoint_id = persist_checkpoint(
-            &self.state,
-            self.session_id,
-            self.run_id,
-            guard.parent_checkpoint_id,
-            &guard.latest_messages,
-        )
-        .await?;
-
-        guard.parent_checkpoint_id = Some(checkpoint_id);
-        Ok(checkpoint_id)
-    }
-
-    async fn persist_with_messages(&self, messages: &[Message]) -> Result<Uuid, String> {
+    async fn update_messages(&self, messages: &[Message]) {
         let mut guard = self.inner.lock().await;
         guard.latest_messages = messages.to_vec();
+        guard.dirty = true;
+    }
+
+    async fn persist_snapshot(&self) -> Result<Uuid, String> {
+        let mut guard = self.inner.lock().await;
+        self.persist_if_needed(&mut guard).await
+    }
+
+    async fn persist_if_needed(&self, guard: &mut CheckpointRuntimeInner) -> Result<Uuid, String> {
+        if !guard.dirty
+            && let Some(checkpoint_id) = guard.parent_checkpoint_id
+        {
+            return Ok(checkpoint_id);
+        }
+
+        let signature = checkpoint_signature(&guard.latest_messages)?;
+        let changed = guard.last_persisted_signature.as_deref() != Some(signature.as_str());
+        let should_persist = guard.parent_checkpoint_id.is_none() || (guard.dirty && changed);
+
+        if !should_persist {
+            guard.dirty = false;
+            if let Some(checkpoint_id) = guard.parent_checkpoint_id {
+                return Ok(checkpoint_id);
+            }
+        }
 
         let checkpoint_id = persist_checkpoint(
             &self.state,
@@ -293,6 +307,9 @@ impl CheckpointRuntime {
         .await?;
 
         guard.parent_checkpoint_id = Some(checkpoint_id);
+        guard.last_persisted_signature = Some(signature);
+        guard.dirty = false;
+
         Ok(checkpoint_id)
     }
 }
@@ -309,10 +326,7 @@ impl AgentHook for ServerCheckpointHook {
         messages: &[Message],
         _model: &stakai::Model,
     ) -> Result<(), stakpak_agent_core::AgentError> {
-        self.checkpoint_runtime
-            .persist_with_messages(messages)
-            .await
-            .map_err(stakpak_agent_core::AgentError::Hook)?;
+        self.checkpoint_runtime.update_messages(messages).await;
         Ok(())
     }
 
@@ -322,10 +336,7 @@ impl AgentHook for ServerCheckpointHook {
         messages: &[Message],
         _model: &stakai::Model,
     ) -> Result<(), stakpak_agent_core::AgentError> {
-        self.checkpoint_runtime
-            .persist_with_messages(messages)
-            .await
-            .map_err(stakpak_agent_core::AgentError::Hook)?;
+        self.checkpoint_runtime.update_messages(messages).await;
         Ok(())
     }
 
@@ -335,10 +346,7 @@ impl AgentHook for ServerCheckpointHook {
         _tool_call: &ProposedToolCall,
         messages: &[Message],
     ) -> Result<(), stakpak_agent_core::AgentError> {
-        self.checkpoint_runtime
-            .persist_with_messages(messages)
-            .await
-            .map_err(stakpak_agent_core::AgentError::Hook)?;
+        self.checkpoint_runtime.update_messages(messages).await;
         Ok(())
     }
 
@@ -348,10 +356,8 @@ impl AgentHook for ServerCheckpointHook {
         _error: &stakpak_agent_core::AgentError,
         messages: &[Message],
     ) -> Result<(), stakpak_agent_core::AgentError> {
-        let _ = self
-            .checkpoint_runtime
-            .persist_with_messages(messages)
-            .await;
+        self.checkpoint_runtime.update_messages(messages).await;
+        let _ = self.checkpoint_runtime.persist_snapshot().await;
         Ok(())
     }
 }
@@ -470,6 +476,11 @@ fn render_call_tool_result(result: &rmcp::model::CallToolResult) -> String {
     "<non-text tool result omitted for safety>".to_string()
 }
 
+fn checkpoint_signature(messages: &[Message]) -> Result<String, String> {
+    serde_json::to_string(messages)
+        .map_err(|error| format!("Failed to serialize checkpoint messages: {error}"))
+}
+
 async fn persist_checkpoint(
     state: &AppState,
     session_id: Uuid,
@@ -477,6 +488,8 @@ async fn persist_checkpoint(
     parent_id: Option<Uuid>,
     messages: &[Message],
 ) -> Result<Uuid, String> {
+    // TODO(ahmed): Migrate server/session checkpoint storage to `Vec<stakai::Message>` directly
+    // and remove the ChatMessage adapter conversion (`message_store::stakai_to_chat`).
     let mut request = CreateCheckpointRequest::new(message_store::stakai_to_chat(messages));
 
     if let Some(parent_id) = parent_id {
@@ -557,5 +570,21 @@ mod tests {
             render_call_tool_result(&result),
             "<non-text tool result omitted for safety>"
         );
+    }
+
+    #[test]
+    fn checkpoint_signature_changes_when_messages_change() {
+        let messages_a = vec![Message::new(Role::User, "hello")];
+        let messages_b = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "hi"),
+        ];
+
+        let sig_a = checkpoint_signature(&messages_a)
+            .unwrap_or_else(|error| panic!("signature failed: {error}"));
+        let sig_b = checkpoint_signature(&messages_b)
+            .unwrap_or_else(|error| panic!("signature failed: {error}"));
+
+        assert_ne!(sig_a, sig_b);
     }
 }
