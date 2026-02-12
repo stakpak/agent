@@ -5,6 +5,7 @@ use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// In-memory runtime run coordinator (not persistent session storage).
 #[derive(Clone, Default)]
 pub struct SessionManager {
     states: Arc<RwLock<HashMap<Uuid, SessionRuntimeState>>>,

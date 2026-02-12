@@ -938,10 +938,9 @@ impl Commands {
 
                     gateway_cancel_for_shutdown.cancel();
 
-                    for (session_id, run_id) in shutdown_state.session_manager.running_runs().await
-                    {
+                    for (session_id, run_id) in shutdown_state.run_manager.running_runs().await {
                         let _ = shutdown_state
-                            .session_manager
+                            .run_manager
                             .cancel_run(session_id, run_id)
                             .await;
                     }
@@ -949,11 +948,7 @@ impl Commands {
                     let drain_deadline =
                         tokio::time::Instant::now() + std::time::Duration::from_secs(5);
                     loop {
-                        if shutdown_state
-                            .session_manager
-                            .running_runs()
-                            .await
-                            .is_empty()
+                        if shutdown_state.run_manager.running_runs().await.is_empty()
                             || tokio::time::Instant::now() >= drain_deadline
                         {
                             break;

@@ -7,8 +7,8 @@ const TRUNCATED_ASSISTANT_PLACEHOLDER: &str = "[assistant message truncated]";
 pub fn reduce_context(messages: Vec<Message>, config: &ContextConfig) -> Vec<Message> {
     let messages = dedup_tool_results(messages);
     let messages = merge_consecutive_same_role(messages);
-    let messages = truncate_old_tool_results(messages, config.keep_last_tool_results);
-    let messages = truncate_old_assistant_messages(messages, config.keep_last_assistant_messages);
+    let messages = truncate_old_tool_results(messages, config.keep_last_messages);
+    let messages = truncate_old_assistant_messages(messages, config.keep_last_messages);
     let messages = strip_dangling_tool_calls(messages);
     remove_orphaned_tool_results(messages)
 }
@@ -430,8 +430,7 @@ mod tests {
     #[test]
     fn full_reduce_pipeline_runs_in_expected_order() {
         let config = ContextConfig {
-            keep_last_tool_results: 1,
-            keep_last_assistant_messages: 2,
+            keep_last_messages: 2,
         };
 
         let reduced = reduce_context(

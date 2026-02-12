@@ -1,8 +1,8 @@
 use crate::{
     auth::{AuthConfig, require_bearer},
     idempotency::{IdempotencyRequest, LookupResult, StoredResponse},
-    message_store,
-    session_actor::spawn_session_actor,
+    message_bridge,
+    session_actor::{ACTIVE_MODEL_METADATA_KEY, spawn_session_actor},
     state::AppState,
     types::SessionRuntimeState,
 };
@@ -315,14 +315,14 @@ async fn list_sessions_handler(
     }
 
     let result = state
-        .storage
+        .session_store
         .list_sessions(&query)
         .await
         .map_err(storage_error)?;
 
     let mut sessions = Vec::with_capacity(result.sessions.len());
     for summary in result.sessions {
-        let run_status = state.session_manager.state(summary.id).await;
+        let run_status = state.run_manager.state(summary.id).await;
         sessions.push(SessionDto {
             id: summary.id,
             title: summary.title,
@@ -363,13 +363,13 @@ async fn create_session_handler(
     }
 
     let created = state
-        .storage
+        .session_store
         .create_session(&request)
         .await
         .map_err(storage_error)?;
 
     let session = state
-        .storage
+        .session_store
         .get_session(created.session_id)
         .await
         .map_err(storage_error)?;
@@ -393,12 +393,12 @@ async fn get_session_handler(
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<SessionDetailResponse>, Response> {
     let session = state
-        .storage
+        .session_store
         .get_session(session_id)
         .await
         .map_err(storage_error)?;
 
-    let run_status = state.session_manager.state(session_id).await;
+    let run_status = state.run_manager.state(session_id).await;
 
     Ok(Json(SessionDetailResponse {
         session: SessionDto {
@@ -427,12 +427,12 @@ async fn update_session_handler(
     }
 
     let session = state
-        .storage
+        .session_store
         .update_session(session_id, &request)
         .await
         .map_err(storage_error)?;
 
-    let run_status = state.session_manager.state(session_id).await;
+    let run_status = state.run_manager.state(session_id).await;
 
     Ok(Json(SessionDetailResponse {
         session: SessionDto {
@@ -451,12 +451,12 @@ async fn delete_session_handler(
     State(state): State<AppState>,
     Path(session_id): Path<Uuid>,
 ) -> Result<StatusCode, Response> {
-    if let Some(run_id) = state.session_manager.active_run_id(session_id).await {
-        let _ = state.session_manager.cancel_run(session_id, run_id).await;
+    if let Some(run_id) = state.run_manager.active_run_id(session_id).await {
+        let _ = state.run_manager.cancel_run(session_id, run_id).await;
     }
 
     state
-        .storage
+        .session_store
         .delete_session(session_id)
         .await
         .map_err(storage_error)?;
@@ -471,7 +471,7 @@ async fn sessions_message_handler(
     Json(request): Json<SessionMessageRequest>,
 ) -> Result<Response, Response> {
     let _ = state
-        .storage
+        .session_store
         .get_session(session_id)
         .await
         .map_err(storage_error)?;
@@ -493,7 +493,7 @@ async fn sessions_message_handler(
         return Ok(replayed);
     }
 
-    let active_run_id = state.session_manager.active_run_id(session_id).await;
+    let active_run_id = state.run_manager.active_run_id(session_id).await;
 
     match request.r#type {
         SessionMessageType::Message => {
@@ -509,8 +509,13 @@ async fn sessions_message_handler(
 
             let _ = state.refresh_mcp_tools().await;
 
+            let requested_or_persisted_model = match request.model.as_deref() {
+                Some(model) => Some(model.to_string()),
+                None => load_persisted_model_for_session(&state, session_id).await,
+            };
+
             let model = state
-                .resolve_model(request.model.as_deref())
+                .resolve_model(requested_or_persisted_model.as_deref())
                 .ok_or_else(|| {
                     api_error(StatusCode::BAD_REQUEST, "invalid_model", "Unknown model")
                 })?;
@@ -519,7 +524,7 @@ async fn sessions_message_handler(
             let message_for_spawn = request.message;
 
             let run_id = state
-                .session_manager
+                .run_manager
                 .start_run(session_id, move |allocated_run_id| {
                     let state = state_for_spawn.clone();
                     let message = message_for_spawn.clone();
@@ -529,7 +534,7 @@ async fn sessions_message_handler(
                     }
                 })
                 .await
-                .map_err(session_manager_error)?;
+                .map_err(run_manager_error)?;
 
             let payload = SessionMessageResponse { run_id };
             save_idempotency_response(&state, idempotency.request, StatusCode::OK, &payload).await;
@@ -553,10 +558,10 @@ async fn sessions_message_handler(
             };
 
             state
-                .session_manager
+                .run_manager
                 .send_command(session_id, run_id, command)
                 .await
-                .map_err(session_manager_error)?;
+                .map_err(run_manager_error)?;
 
             let payload = SessionMessageResponse { run_id };
             save_idempotency_response(&state, idempotency.request, StatusCode::OK, &payload).await;
@@ -574,11 +579,11 @@ async fn get_session_messages_handler(
         Ok(Some(envelope)) => envelope.messages,
         Ok(None) => {
             let checkpoint = state
-                .storage
+                .session_store
                 .get_active_checkpoint(session_id)
                 .await
                 .map_err(storage_error)?;
-            message_store::chat_to_stakai(checkpoint.state.messages)
+            message_bridge::chat_to_stakai(checkpoint.state.messages)
         }
         Err(error) => {
             return Err(api_error(
@@ -676,7 +681,7 @@ async fn tool_decision_handler(
     }
 
     state
-        .session_manager
+        .run_manager
         .send_command(
             session_id,
             request.run_id,
@@ -687,7 +692,7 @@ async fn tool_decision_handler(
             },
         )
         .await
-        .map_err(session_manager_error)?;
+        .map_err(run_manager_error)?;
 
     let payload = ToolDecisionResponse {
         accepted: true,
@@ -726,14 +731,14 @@ async fn tool_decisions_handler(
     }
 
     state
-        .session_manager
+        .run_manager
         .send_command(
             session_id,
             request.run_id,
             AgentCommand::ResolveTools { decisions },
         )
         .await
-        .map_err(session_manager_error)?;
+        .map_err(run_manager_error)?;
 
     let payload = ToolDecisionResponse {
         accepted: true,
@@ -764,10 +769,10 @@ async fn cancel_handler(
     }
 
     state
-        .session_manager
+        .run_manager
         .cancel_run(session_id, request.run_id)
         .await
-        .map_err(session_manager_error)?;
+        .map_err(run_manager_error)?;
 
     let payload = CancelResponse {
         cancelled: true,
@@ -802,10 +807,10 @@ async fn model_switch_handler(
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_model", "Unknown model"))?;
 
     state
-        .session_manager
+        .run_manager
         .send_command(session_id, request.run_id, AgentCommand::SwitchModel(model))
         .await
-        .map_err(session_manager_error)?;
+        .map_err(run_manager_error)?;
 
     let payload = ModelSwitchResponse {
         accepted: true,
@@ -825,6 +830,17 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
 
 async fn config_handler(State(state): State<AppState>) -> Json<ConfigResponse> {
     Json(runtime_config(&state))
+}
+
+async fn load_persisted_model_for_session(state: &AppState, session_id: Uuid) -> Option<String> {
+    match state.checkpoint_store.load_latest(session_id).await {
+        Ok(Some(envelope)) => envelope
+            .metadata
+            .get(ACTIVE_MODEL_METADATA_KEY)
+            .and_then(serde_json::Value::as_str)
+            .map(std::string::ToString::to_string),
+        Ok(None) | Err(_) => None,
+    }
 }
 
 fn runtime_config(state: &AppState) -> ConfigResponse {
@@ -895,7 +911,7 @@ fn storage_error(error: stakpak_api::StorageError) -> Response {
     }
 }
 
-fn session_manager_error(error: crate::error::SessionManagerError) -> Response {
+fn run_manager_error(error: crate::error::SessionManagerError) -> Response {
     match error {
         crate::error::SessionManagerError::SessionAlreadyRunning
         | crate::error::SessionManagerError::SessionStarting => api_error(
@@ -1988,7 +2004,7 @@ mod tests {
         };
 
         let active_run_id = match state
-            .session_manager
+            .run_manager
             .start_run(session_id, |_run_id| async move {
                 let (command_tx, _command_rx) = tokio::sync::mpsc::channel(8);
                 Ok(crate::SessionHandle::new(
@@ -2034,11 +2050,11 @@ mod tests {
         assert_eq!(cancel_json.get("code"), Some(&json!("run_mismatch")));
 
         let _ = state
-            .session_manager
+            .run_manager
             .cancel_run(session_id, active_run_id)
             .await;
         let _ = state
-            .session_manager
+            .run_manager
             .mark_run_finished(session_id, active_run_id, Ok(()))
             .await;
     }
@@ -2234,7 +2250,7 @@ mod tests {
         };
 
         let active_run_id = match state
-            .session_manager
+            .run_manager
             .start_run(session_uuid, |_run_id| async move {
                 let (command_tx, _command_rx) = tokio::sync::mpsc::channel(8);
                 Ok(crate::SessionHandle::new(
@@ -2288,11 +2304,11 @@ mod tests {
         assert_eq!(mismatch_json.get("code"), Some(&json!("run_mismatch")));
 
         let _ = state
-            .session_manager
+            .run_manager
             .cancel_run(session_uuid, active_run_id)
             .await;
         let _ = state
-            .session_manager
+            .run_manager
             .mark_run_finished(session_uuid, active_run_id, Ok(()))
             .await;
     }
@@ -2441,7 +2457,7 @@ mod tests {
         };
 
         let active_run_id = match state
-            .session_manager
+            .run_manager
             .start_run(session_uuid, |_run_id| async move {
                 let (command_tx, _command_rx) = tokio::sync::mpsc::channel(8);
                 Ok(crate::SessionHandle::new(
@@ -2491,11 +2507,11 @@ mod tests {
         assert_eq!(switch_json.get("code"), Some(&json!("run_mismatch")));
 
         let _ = state
-            .session_manager
+            .run_manager
             .cancel_run(session_uuid, active_run_id)
             .await;
         let _ = state
-            .session_manager
+            .run_manager
             .mark_run_finished(session_uuid, active_run_id, Ok(()))
             .await;
     }

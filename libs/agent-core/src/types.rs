@@ -26,15 +26,13 @@ pub struct AgentConfig {
 
 #[derive(Debug, Clone)]
 pub struct ContextConfig {
-    pub keep_last_tool_results: usize,
-    pub keep_last_assistant_messages: usize,
+    pub keep_last_messages: usize,
 }
 
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            keep_last_tool_results: 64,
-            keep_last_assistant_messages: 64,
+            keep_last_messages: 64,
         }
     }
 }

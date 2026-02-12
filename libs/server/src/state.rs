@@ -17,11 +17,13 @@ pub struct PendingToolApprovals {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub session_manager: SessionManager,
-    pub storage: Arc<dyn SessionStorage>,
+    pub run_manager: SessionManager,
+    /// Durable session/checkpoint backend (SQLite/remote API).
+    pub session_store: Arc<dyn SessionStorage>,
     pub events: Arc<EventLog>,
     pub idempotency: Arc<IdempotencyStore>,
     pub inference: Arc<stakai::Inference>,
+    /// Server-side latest-envelope cache (`stakai::Message` + runtime metadata).
     pub checkpoint_store: Arc<CheckpointStore>,
     pub models: Arc<Vec<stakai::Model>>,
     pub default_model: Option<stakai::Model>,
@@ -37,7 +39,7 @@ pub struct AppState {
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        storage: Arc<dyn SessionStorage>,
+        session_store: Arc<dyn SessionStorage>,
         events: Arc<EventLog>,
         idempotency: Arc<IdempotencyStore>,
         inference: Arc<stakai::Inference>,
@@ -46,8 +48,8 @@ impl AppState {
         auto_approve_policy: AutoApprovePolicy,
     ) -> Self {
         Self {
-            session_manager: SessionManager::new(),
-            storage,
+            run_manager: SessionManager::new(),
+            session_store,
             events,
             idempotency,
             inference,
