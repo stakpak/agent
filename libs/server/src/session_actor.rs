@@ -1,4 +1,4 @@
-use crate::{message_store, state::AppState, types::SessionHandle};
+use crate::{message_bridge, state::AppState, types::SessionHandle};
 use async_trait::async_trait;
 use rmcp::model::{
     CallToolRequestParam, CancelledNotification, CancelledNotificationMethod,
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 const MAX_TURNS: usize = 64;
 const CHECKPOINT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const ACTIVE_MODEL_METADATA_KEY: &str = "active_model";
 
 pub fn build_run_context(session_id: Uuid, run_id: Uuid) -> AgentRunContext {
     AgentRunContext { run_id, session_id }
@@ -60,7 +61,7 @@ pub fn spawn_session_actor(
 
         let finish_result = actor_result.map(|_| ());
         let _ = state_for_task
-            .session_manager
+            .run_manager
             .mark_run_finished(session_id, run_id, finish_result)
             .await;
     });
@@ -77,13 +78,17 @@ async fn run_session_actor(
     command_rx: mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
 ) -> Result<(), String> {
-    let active_checkpoint = state.storage.get_active_checkpoint(session_id).await.ok();
+    let active_checkpoint = state
+        .session_store
+        .get_active_checkpoint(session_id)
+        .await
+        .ok();
     let parent_checkpoint_id = active_checkpoint.as_ref().map(|checkpoint| checkpoint.id);
 
     let initial_messages = match state.checkpoint_store.load_latest(session_id).await {
         Ok(Some(envelope)) => envelope.messages,
         Ok(None) => active_checkpoint
-            .map(|checkpoint| message_store::chat_to_stakai(checkpoint.state.messages))
+            .map(|checkpoint| message_bridge::chat_to_stakai(checkpoint.state.messages))
             .unwrap_or_default(),
         Err(error) => {
             return Err(format!("Failed to load checkpoint envelope: {error}"));
@@ -97,6 +102,7 @@ async fn run_session_actor(
         state.clone(),
         session_id,
         run_id,
+        model.clone(),
         parent_checkpoint_id,
         baseline_messages,
     ));
@@ -236,6 +242,7 @@ struct CheckpointRuntime {
     state: AppState,
     session_id: Uuid,
     run_id: Uuid,
+    active_model: stakai::Model,
     inner: Mutex<CheckpointRuntimeInner>,
 }
 
@@ -249,6 +256,7 @@ impl CheckpointRuntime {
         state: AppState,
         session_id: Uuid,
         run_id: Uuid,
+        active_model: stakai::Model,
         parent_checkpoint_id: Option<Uuid>,
         latest_messages: Vec<Message>,
     ) -> Self {
@@ -256,6 +264,7 @@ impl CheckpointRuntime {
             state,
             session_id,
             run_id,
+            active_model,
             inner: Mutex::new(CheckpointRuntimeInner {
                 parent_checkpoint_id,
                 latest_messages,
@@ -270,6 +279,7 @@ impl CheckpointRuntime {
             &self.state,
             self.session_id,
             self.run_id,
+            &self.active_model,
             guard.parent_checkpoint_id,
             &guard.latest_messages,
         )
@@ -287,6 +297,7 @@ impl CheckpointRuntime {
             &self.state,
             self.session_id,
             self.run_id,
+            &self.active_model,
             guard.parent_checkpoint_id,
             &guard.latest_messages,
         )
@@ -474,17 +485,18 @@ async fn persist_checkpoint(
     state: &AppState,
     session_id: Uuid,
     run_id: Uuid,
+    active_model: &stakai::Model,
     parent_id: Option<Uuid>,
     messages: &[Message],
 ) -> Result<Uuid, String> {
-    let mut request = CreateCheckpointRequest::new(message_store::stakai_to_chat(messages));
+    let mut request = CreateCheckpointRequest::new(message_bridge::stakai_to_chat(messages));
 
     if let Some(parent_id) = parent_id {
         request = request.with_parent(parent_id);
     }
 
     let checkpoint = state
-        .storage
+        .session_store
         .create_checkpoint(session_id, &request)
         .await
         .map_err(|error| error.to_string())?;
@@ -495,6 +507,7 @@ async fn persist_checkpoint(
         json!({
             "session_id": session_id.to_string(),
             "checkpoint_id": checkpoint.id.to_string(),
+            (ACTIVE_MODEL_METADATA_KEY): format!("{}/{}", active_model.provider, active_model.id),
         }),
     );
 

@@ -5692,7 +5692,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-agent-core"
-version = "0.3.31"
+version = "0.3.38"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5799,7 +5799,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-server"
-version = "0.3.31"
+version = "0.3.38"
 dependencies = [
  "async-stream",
  "async-trait",

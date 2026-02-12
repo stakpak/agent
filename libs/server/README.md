@@ -58,7 +58,7 @@ EventLog
 - `event_log.rs` — durable replay + live pub/sub
 - `checkpoint_store.rs` — latest checkpoint envelope storage
 - `idempotency.rs` — `Idempotency-Key` lookup/replay/conflict logic
-- `message_store.rs` — temporary storage edge adapters (`ChatMessage` <-> `stakai::Message`)
+- `message_bridge.rs` — temporary storage edge adapters (`ChatMessage` <-> `stakai::Message`)
 - `auth.rs` — bearer auth middleware
 - `openapi.rs` — generated OpenAPI document definitions
 - `state.rs` — shared `AppState` and MCP tool cache helpers
