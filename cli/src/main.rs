@@ -159,10 +159,22 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Initialize rustls crypto provider
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+    // Use a custom runtime with larger worker stack size to avoid stack overflows when
+    // deserializing large checkpoints or processing big message lists (e.g. resume with -s).
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024) // 8 MiB (avoids overflow when resuming large sessions)
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    rt.block_on(async_main());
+}
+
+async fn async_main() {
 
     // Handle default for "stakpak config" -> "stakpak config list"
     let args: Vec<String> = std::env::args().collect();
