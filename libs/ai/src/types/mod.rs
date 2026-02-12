@@ -13,7 +13,7 @@ mod stream;
 
 // Cache control types
 pub use cache::{CacheControl, CacheWarning, CacheWarningType, PromptCacheRetention};
-pub use cache_strategy::{AnthropicCacheConfig, CacheStrategy, TRIMMED_CONTENT_PLACEHOLDER};
+pub use cache_strategy::{AnthropicCacheConfig, CacheStrategy};
 pub use cache_validator::{CacheContext, CacheControlValidator};
 
 // Headers
