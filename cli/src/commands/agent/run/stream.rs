@@ -244,11 +244,14 @@ pub async fn process_responses_stream(
                     for delta_tool_call in tool_calls {
                         tool_call_accumulator.process_delta(delta_tool_call);
                     }
-                    // Send streaming progress to TUI so users see what's being generated
+                    // Send streaming progress to TUI so users see what's being generated.
+                    // Use try_send (non-blocking) to avoid backpressure stalling the HTTP
+                    // stream. Progress updates are cosmetic — dropping some is fine; the
+                    // next delta will carry the latest snapshot.
                     let snapshot = tool_call_accumulator.progress_snapshot();
                     if !snapshot.is_empty() {
-                        send_input_event(input_tx, InputEvent::StreamToolCallProgress(snapshot))
-                            .await?;
+                        let _ = input_tx
+                            .try_send(InputEvent::StreamToolCallProgress(snapshot));
                     }
                 }
             }
