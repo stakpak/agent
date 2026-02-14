@@ -170,12 +170,40 @@ pub enum Commands {
     },
     /// Update Stakpak Agent to the latest version
     Update,
+
+    /// Start the HTTP/SSE server runtime
+    Serve {
+        /// Bind address, e.g. 127.0.0.1:4096
+        #[arg(long, default_value = "127.0.0.1:4096")]
+        bind: String,
+
+        /// Bearer token required for protected routes. If omitted, a secure token is generated.
+        #[arg(long)]
+        auth_token: Option<String>,
+
+        /// Show generated auth token in stdout (local dev only)
+        #[arg(long, default_value_t = false)]
+        show_token: bool,
+
+        /// Disable auth checks for protected routes (local dev only)
+        #[arg(long, default_value_t = false)]
+        no_auth: bool,
+
+        /// Override default model for server runs (provider/model or model id)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Auto-approve all tools (CI/headless only)
+        #[arg(long, default_value_t = false)]
+        auto_approve_all: bool,
+    },
+
     /// Run the autonomous watch agent with scheduled triggers
     #[command(subcommand)]
     Watch(WatchCommands),
 }
 
-async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
+async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
     // Use credential resolution with auth.toml fallback chain
     // Refresh OAuth tokens in parallel to minimize startup delay
     let providers = config.get_llm_provider_config_async().await;
@@ -185,7 +213,7 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
         api_endpoint: config.api_endpoint.clone(),
     });
 
-    let client = AgentClient::new(AgentClientConfig {
+    AgentClient::new(AgentClientConfig {
         stakpak,
         providers,
         eco_model: config.eco_model.clone(),
@@ -195,8 +223,11 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
         hook_registry: None,
     })
     .await
-    .map_err(|e| format!("Failed to create agent client: {}", e))?;
-    Ok(Arc::new(client))
+    .map_err(|e| format!("Failed to create agent client: {}", e))
+}
+
+async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
+    Ok(Arc::new(build_agent_client(config).await?))
 }
 
 /// Helper function to convert AppConfig's config_path to Option<&Path>
@@ -220,6 +251,7 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
+                | Commands::Serve { .. }
                 | Commands::Watch(_)
         )
     }
@@ -462,6 +494,256 @@ impl Commands {
             }
             Commands::Update => {
                 auto_update::run_auto_update(false).await?;
+            }
+            Commands::Serve {
+                bind,
+                auth_token,
+                show_token,
+                no_auth,
+                model,
+                auto_approve_all,
+            } => {
+                if no_auth && auth_token.is_some() {
+                    return Err(
+                        "Cannot combine --no-auth with --auth-token. Remove one of them."
+                            .to_string(),
+                    );
+                }
+
+                let (auth_config, generated_auth_token) = if no_auth {
+                    (stakpak_server::AuthConfig::disabled(), None)
+                } else {
+                    let token = auth_token
+                        .unwrap_or_else(|| stakpak_shared::utils::generate_password(64, true));
+                    (
+                        stakpak_server::AuthConfig::token(token.clone()),
+                        Some(token),
+                    )
+                };
+
+                let listener = tokio::net::TcpListener::bind(&bind)
+                    .await
+                    .map_err(|e| format!("Failed to bind {}: {}", bind, e))?;
+
+                let runtime_client = build_agent_client(&config).await?;
+                let storage = runtime_client.session_storage().clone();
+
+                let events = Arc::new(stakpak_server::EventLog::new(4096));
+                let idempotency = Arc::new(stakpak_server::IdempotencyStore::new(
+                    std::time::Duration::from_secs(24 * 60 * 60),
+                ));
+                let inference = Arc::new(
+                    stakai::Inference::builder()
+                        .with_registry(runtime_client.stakai().registry().clone())
+                        .build()
+                        .map_err(|e| format!("Failed to initialize inference runtime: {}", e))?,
+                );
+
+                let mut models = runtime_client.list_models().await;
+                let requested_model = model.or(config.model.clone());
+                let auto_approve_tools = config.auto_approve.clone();
+                let allowed_tools = config.allowed_tools.clone();
+
+                let requested_model_from_catalog = requested_model.as_deref().and_then(|name| {
+                    if let Some((provider, id)) = name.split_once('/') {
+                        return models
+                            .iter()
+                            .find(|model| model.provider == provider && model.id == id)
+                            .cloned();
+                    }
+
+                    models.iter().find(|model| model.id == name).cloned()
+                });
+
+                let requested_custom_model = requested_model.as_deref().and_then(|name| {
+                    name.split_once('/')
+                        .map(|(provider, id)| stakai::Model::custom(id, provider))
+                });
+
+                let default_model = requested_model_from_catalog
+                    .clone()
+                    .or(requested_custom_model)
+                    .or_else(|| models.first().cloned())
+                    .or_else(|| Some(stakai::Model::custom("gpt-4o-mini", "openai")));
+
+                if let Some(requested) = requested_model.as_deref()
+                    && requested_model_from_catalog.is_none()
+                {
+                    if requested.contains('/') {
+                        eprintln!(
+                            "⚠ Requested model '{}' is not in the catalog; using it as a custom model id.",
+                            requested
+                        );
+                    } else if let Some(resolved) = default_model.as_ref() {
+                        eprintln!(
+                            "⚠ Requested model '{}' not found in catalog; using fallback '{}/{}'.",
+                            requested, resolved.provider, resolved.id
+                        );
+                    }
+                }
+
+                if models.is_empty()
+                    && let Some(default_model) = default_model.clone()
+                {
+                    models.push(default_model);
+                }
+
+                let tool_approval_policy = if auto_approve_all {
+                    stakpak_server::ToolApprovalPolicy::All
+                } else {
+                    let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
+                    if let Some(auto_approve_tools) = auto_approve_tools {
+                        policy.with_overrides(
+                            auto_approve_tools
+                                .into_iter()
+                                .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
+                        )
+                    } else {
+                        policy
+                    }
+                };
+
+                let mcp_init_config = crate::commands::agent::run::mcp_init::McpInitConfig {
+                    redact_secrets: true,
+                    privacy_mode: false,
+                    enabled_tools: stakpak_mcp_server::EnabledToolsConfig { slack: false },
+                    enable_mtls: true,
+                    enable_subagents: true,
+                    allowed_tools,
+                };
+
+                let mcp_init_result =
+                    crate::commands::agent::run::mcp_init::initialize_mcp_server_and_tools(
+                        &config,
+                        mcp_init_config,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to initialize MCP stack: {}", e))?;
+
+                let mcp_tools = mcp_init_result
+                    .mcp_tools
+                    .iter()
+                    .map(|tool| stakai::Tool {
+                        tool_type: "function".to_string(),
+                        function: stakai::ToolFunction {
+                            name: tool.name.as_ref().to_string(),
+                            description: tool
+                                .description
+                                .as_ref()
+                                .map(|value| value.to_string())
+                                .unwrap_or_default(),
+                            parameters: serde_json::Value::Object((*tool.input_schema).clone()),
+                        },
+                        provider_options: None,
+                    })
+                    .collect();
+
+                let app_state = stakpak_server::AppState::new(
+                    storage,
+                    events,
+                    idempotency,
+                    inference,
+                    models,
+                    default_model,
+                    tool_approval_policy,
+                )
+                .with_mcp(
+                    mcp_init_result.client,
+                    mcp_tools,
+                    Some(mcp_init_result.server_shutdown_tx),
+                    Some(mcp_init_result.proxy_shutdown_tx),
+                );
+
+                let refresh_state = app_state.clone();
+                let (refresh_shutdown_tx, mut refresh_shutdown_rx) =
+                    tokio::sync::watch::channel(false);
+                let refresh_task = tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                                if let Err(error) = refresh_state.refresh_mcp_tools().await {
+                                    eprintln!("[mcp-refresh] {}", error);
+                                }
+                            }
+                            changed = refresh_shutdown_rx.changed() => {
+                                if changed.is_err() || *refresh_shutdown_rx.borrow() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                });
+
+                let shutdown_state = app_state.clone();
+                let shutdown_refresh_tx = refresh_shutdown_tx.clone();
+                let app = stakpak_server::router(app_state, auth_config);
+                println!("Stakpak server listening on http://{}", bind);
+                println!("Profile: {}", config.profile_name);
+                println!(
+                    "Session backend: {}",
+                    if runtime_client.has_stakpak() {
+                        "stakpak remote"
+                    } else {
+                        "local sqlite"
+                    }
+                );
+
+                if no_auth {
+                    println!("Auth: disabled (--no-auth)");
+                } else if let Some(token) = generated_auth_token {
+                    println!("Auth: enabled (Bearer token required)");
+                    if show_token {
+                        println!("Authorization: Bearer {}", token);
+                    } else {
+                        println!(
+                            "Use --show-token to print the generated token in local development."
+                        );
+                    }
+                }
+
+                let shutdown = async move {
+                    let _ = tokio::signal::ctrl_c().await;
+
+                    for (session_id, run_id) in shutdown_state.run_manager.running_runs().await {
+                        let _ = shutdown_state
+                            .run_manager
+                            .cancel_run(session_id, run_id)
+                            .await;
+                    }
+
+                    let drain_deadline =
+                        tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+                    loop {
+                        if shutdown_state.run_manager.running_runs().await.is_empty()
+                            || tokio::time::Instant::now() >= drain_deadline
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+
+                    let _ = shutdown_refresh_tx.send(true);
+
+                    if let Some(tx) = shutdown_state.mcp_server_shutdown_tx.as_ref() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(tx) = shutdown_state.mcp_proxy_shutdown_tx.as_ref() {
+                        let _ = tx.send(());
+                    }
+                };
+
+                let serve_result = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await;
+
+                let _ = refresh_shutdown_tx.send(true);
+                if !refresh_task.is_finished() {
+                    refresh_task.abort();
+                }
+                let _ = refresh_task.await;
+
+                serve_result.map_err(|e| format!("Server error: {}", e))?;
             }
             Commands::Watch(watch_command) => {
                 use crate::commands::watch::commands::{

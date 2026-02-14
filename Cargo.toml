@@ -1,14 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "cli",
-    "tui",
-    "libs/shared",
-    "libs/api",
-    "libs/ai",
-    "libs/mcp/client",
-    "libs/mcp/server",
-    "libs/mcp/proxy",
+  "cli",
+  "tui",
+  "libs/shared",
+  "libs/api",
+  "libs/ai",
+  "libs/agent-core",
+  "libs/server",
+  "libs/mcp/client",
+  "libs/mcp/server",
+  "libs/mcp/proxy",
 ]
 default-members = ["cli"]
 
@@ -28,6 +30,8 @@ stakpak-api = { path = "libs/api", version = "0.3.42" }
 stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.42" }
 stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.42" }
 stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.42" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.42" }
+stakpak-server = { path = "libs/server", version = "0.3.42" }
 stakpak-tui = { path = "tui", version = "0.3.42" }
 stakpak-shared = { path = "libs/shared", version = "0.3.42" }
 serde = { version = "1.0.215", features = ["derive"] }
@@ -38,32 +42,32 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
 rmcp = { version = "0.11.0", features = [
-    "base64",
-    "macros",
-    "client",
-    "server",
-    "reqwest",
-    "transport-io",
-    "transport-child-process",
-    "transport-streamable-http-client",
-    "transport-streamable-http-client-reqwest",
-    "transport-streamable-http-server",
-    "transport-streamable-http-server-session",
-    "transport-worker",
+  "base64",
+  "macros",
+  "client",
+  "server",
+  "reqwest",
+  "transport-io",
+  "transport-child-process",
+  "transport-streamable-http-client",
+  "transport-streamable-http-client-reqwest",
+  "transport-streamable-http-server",
+  "transport-streamable-http-server-session",
+  "transport-worker",
 ], default-features = false }
 futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
 reqwest = { version = "=0.12.15", features = [
-    "json",
-    "stream",
-    "rustls-tls",
+  "json",
+  "stream",
+  "rustls-tls",
 ], default-features = false }
 ratatui = { version = "0.29.0", features = [
-    "scrolling-regions",
-    "unstable-rendered-line-info",
-    "unstable-widget-ref",
+  "scrolling-regions",
+  "unstable-rendered-line-info",
+  "unstable-widget-ref",
 ] }
 toml = "0.8.0"
 rand = "0.9.1"
