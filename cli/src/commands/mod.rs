@@ -710,21 +710,20 @@ impl Commands {
                     models.push(default_model);
                 }
 
-                let auto_approve_policy = if auto_approve_all {
-                    stakpak_server::AutoApprovePolicy::All
-                } else if let Some(auto_approve_tools) = auto_approve_tools.as_ref() {
-                    let rules = auto_approve_tools
-                        .iter()
-                        .cloned()
-                        .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve))
-                        .collect();
-
-                    stakpak_server::AutoApprovePolicy::Custom {
-                        rules,
-                        default: stakpak_server::ToolApprovalAction::Ask,
-                    }
+                let tool_approval_policy = if auto_approve_all {
+                    stakpak_server::ToolApprovalPolicy::All
                 } else {
-                    stakpak_server::AutoApprovePolicy::None
+                    let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
+                    if let Some(ref auto_approve_tools) = auto_approve_tools {
+                        policy.with_overrides(
+                            auto_approve_tools
+                                .iter()
+                                .cloned()
+                                .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
+                        )
+                    } else {
+                        policy
+                    }
                 };
 
                 let mcp_init_config = crate::commands::agent::run::mcp_init::McpInitConfig {
@@ -770,7 +769,7 @@ impl Commands {
                     inference,
                     models,
                     default_model,
-                    auto_approve_policy,
+                    tool_approval_policy,
                 )
                 .with_mcp(
                     mcp_init_result.client,

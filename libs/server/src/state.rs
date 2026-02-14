@@ -2,7 +2,7 @@ use crate::{
     checkpoint_store::CheckpointStore, event_log::EventLog, idempotency::IdempotencyStore,
     session_manager::SessionManager,
 };
-use stakpak_agent_core::{AutoApprovePolicy, ProposedToolCall};
+use stakpak_agent_core::{ProposedToolCall, ToolApprovalPolicy};
 use stakpak_api::SessionStorage;
 use stakpak_mcp_client::McpClient;
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -27,7 +27,7 @@ pub struct AppState {
     pub checkpoint_store: Arc<CheckpointStore>,
     pub models: Arc<Vec<stakai::Model>>,
     pub default_model: Option<stakai::Model>,
-    pub auto_approve_policy: AutoApprovePolicy,
+    pub tool_approval_policy: ToolApprovalPolicy,
     pub started_at: Instant,
     pub mcp_client: Option<Arc<McpClient>>,
     pub mcp_tools: Arc<RwLock<Vec<stakai::Tool>>>,
@@ -45,7 +45,7 @@ impl AppState {
         inference: Arc<stakai::Inference>,
         models: Vec<stakai::Model>,
         default_model: Option<stakai::Model>,
-        auto_approve_policy: AutoApprovePolicy,
+        tool_approval_policy: ToolApprovalPolicy,
     ) -> Self {
         Self {
             run_manager: SessionManager::new(),
@@ -56,7 +56,7 @@ impl AppState {
             checkpoint_store: Arc::new(CheckpointStore::default_local()),
             models: Arc::new(models),
             default_model,
-            auto_approve_policy,
+            tool_approval_policy,
             started_at: Instant::now(),
             mcp_client: None,
             mcp_tools: Arc::new(RwLock::new(Vec::new())),

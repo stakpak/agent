@@ -473,7 +473,7 @@ async fn run_tool_cycle(
         .collect();
 
     let mut approvals =
-        ApprovalStateMachine::new(proposed_tool_calls.clone(), &config.auto_approve);
+        ApprovalStateMachine::new(proposed_tool_calls.clone(), &config.tool_approval);
 
     let mut initial_decisions = HashMap::new();
     for tool_call_id in &current_tool_ids {

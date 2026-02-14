@@ -86,18 +86,13 @@ struct UpdateSessionBody {
     visibility: Option<stakpak_api::SessionVisibility>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SessionMessageType {
+    #[default]
     Message,
     Steering,
     FollowUp,
-}
-
-impl Default for SessionMessageType {
-    fn default() -> Self {
-        Self::Message
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -849,10 +844,10 @@ fn runtime_config(state: &AppState) -> ConfigResponse {
             .default_model
             .as_ref()
             .map(|model| format!("{}/{}", model.provider, model.id)),
-        auto_approve_mode: match &state.auto_approve_policy {
-            stakpak_agent_core::AutoApprovePolicy::None => AutoApproveMode::None,
-            stakpak_agent_core::AutoApprovePolicy::All => AutoApproveMode::All,
-            stakpak_agent_core::AutoApprovePolicy::Custom { .. } => AutoApproveMode::Custom,
+        auto_approve_mode: match &state.tool_approval_policy {
+            stakpak_agent_core::ToolApprovalPolicy::None => AutoApproveMode::None,
+            stakpak_agent_core::ToolApprovalPolicy::All => AutoApproveMode::All,
+            stakpak_agent_core::ToolApprovalPolicy::Custom { .. } => AutoApproveMode::Custom,
         },
     }
 }
@@ -1124,7 +1119,7 @@ mod tests {
         },
     };
     use http_body_util::BodyExt as _;
-    use stakpak_agent_core::{AutoApprovePolicy, ToolApprovalAction};
+    use stakpak_agent_core::{ToolApprovalAction, ToolApprovalPolicy};
     use stakpak_api::SessionStorage;
     use std::sync::Arc;
     use tower::ServiceExt;
@@ -1152,7 +1147,7 @@ mod tests {
             inference,
             vec![model.clone()],
             Some(model),
-            AutoApprovePolicy::Custom {
+            ToolApprovalPolicy::Custom {
                 rules: HashMap::from([("stakpak__view".to_string(), ToolApprovalAction::Approve)]),
                 default: ToolApprovalAction::Ask,
             },
