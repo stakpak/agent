@@ -163,19 +163,25 @@ fn main() {
     // Initialize rustls crypto provider
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 
-    // Use a custom runtime with larger worker stack size to avoid stack overflows when
-    // deserializing large checkpoints or processing big message lists (e.g. resume with -s).
-    let rt = match tokio::runtime::Builder::new_multi_thread()
+    // Prefer a larger worker stack (8 MiB) to avoid overflows when resuming large sessions (-s).
+    // Fall back to default stack size if the OS or environment rejects 8 MiB.
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_stack_size(8 * 1024 * 1024) // 8 MiB (avoids overflow when resuming large sessions)
+        .thread_stack_size(8 * 1024 * 1024) // 8 MiB
         .build()
-    {
-        Ok(runtime) => runtime,
-        Err(e) => {
+        .or_else(|e| {
+            eprintln!(
+                "Warning: could not create runtime with 8 MiB stack ({}), using default stack size.",
+                e
+            );
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+        })
+        .unwrap_or_else(|e| {
             eprintln!("Failed to create tokio runtime: {}", e);
             std::process::exit(1);
-        }
-    };
+        });
 
     rt.block_on(async_main());
 }
