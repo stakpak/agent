@@ -165,17 +165,22 @@ fn main() {
 
     // Use a custom runtime with larger worker stack size to avoid stack overflows when
     // deserializing large checkpoints or processing big message lists (e.g. resume with -s).
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024) // 8 MiB (avoids overflow when resuming large sessions)
         .build()
-        .expect("Failed to create tokio runtime");
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("Failed to create tokio runtime: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     rt.block_on(async_main());
 }
 
 async fn async_main() {
-
     // Handle default for "stakpak config" -> "stakpak config list"
     let args: Vec<String> = std::env::args().collect();
     let mut modified_args = args.clone();
@@ -222,8 +227,18 @@ async fn async_main() {
         .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
         .unwrap_or_else(|| "default".to_string());
 
+    // Set so child processes (e.g. MCP server, dynamic subagents) inherit the same profile
+    // SAFETY: Single-threaded at this point; no other thread reads STAKPAK_PROFILE during startup.
+    unsafe { std::env::set_var("STAKPAK_PROFILE", &profile_name) };
+
     match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
+            // Set config path so child processes (MCP server, subagents) use the same config file
+            // SAFETY: Single-threaded; no other thread reads STAKPAK_CONFIG_PATH during startup.
+            unsafe {
+                std::env::set_var("STAKPAK_CONFIG_PATH", &config.config_path);
+            }
+
             // Check if warden is enabled in profile and we're not already inside warden
             let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
                 && std::env::var("STAKPAK_SKIP_WARDEN").is_err()

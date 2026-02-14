@@ -172,6 +172,10 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         }
 
         let session_id = self.get_session_id(&ctx);
+        // Use the main agent's profile and config path: the CLI sets STAKPAK_PROFILE and
+        // STAKPAK_CONFIG_PATH at startup; the MCP server (spawned by the same CLI) inherits them.
+        let profile_name = std::env::var("STAKPAK_PROFILE").ok();
+        let config_path = std::env::var("STAKPAK_CONFIG_PATH").ok();
         let max_steps = max_steps.unwrap_or(30);
 
         let model = if let Some(serde_json::Value::String(model_id)) = ctx.meta.get("model_id") {
@@ -197,6 +201,8 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             max_steps,
             enable_sandbox,
             session_id.as_deref(),
+            profile_name.as_deref(),
+            config_path.as_deref(),
         ) {
             Ok(command) => command,
             Err(e) => {
@@ -409,6 +415,8 @@ NOTES:
         max_steps: usize,
         enable_sandbox: bool,
         session_id: Option<&str>,
+        profile_name: Option<&str>,
+        config_path: Option<&str>,
     ) -> Result<String, McpError> {
         // Combine instruction and context into the prompt
         let full_prompt = match context {
@@ -454,7 +462,17 @@ NOTES:
         };
 
         // Build the stakpak command arguments
-        let mut args = vec![exe_for_command.clone(), "-a".to_string()];
+        let mut args = vec![exe_for_command.clone()];
+
+        // Add profile and config so subagent uses same profile/config as main agent
+        if let Some(profile) = profile_name {
+            args.extend(["--profile".to_string(), profile.to_string()]);
+        }
+        if let Some(path) = config_path {
+            args.extend(["--config".to_string(), path.to_string()]);
+        }
+
+        args.push("-a".to_string());
 
         // --pause-on-approval only when NOT in sandbox mode
         if !enable_sandbox {
@@ -491,6 +509,27 @@ NOTES:
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
             warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
 
+            // When a config path was passed, the host path is not visible inside the container.
+            // Mount the config file's parent dir so the subagent can read the same config.
+            let config_mount = config_path.and_then(|p| {
+                let path = Path::new(p);
+                let parent = path.parent()?;
+                let filename = path.file_name()?.to_string_lossy().into_owned();
+                if parent.exists() {
+                    Some((parent.to_path_buf(), filename))
+                } else {
+                    None
+                }
+            });
+            if let Some((ref parent, ref _filename)) = config_mount {
+                warden_command.push_str(&format!(
+                    " -v {}:/agent/host-stakpak-config:ro",
+                    parent.display()
+                ));
+            }
+            let container_config_path = config_mount
+                .map(|(_parent, filename)| format!("/agent/host-stakpak-config/{}", filename));
+
             // Add default sandbox volumes for read-only access
             // Working directory (read-only)
             warden_command.push_str(" -v ./:/agent:ro");
@@ -523,12 +562,18 @@ NOTES:
                 }
             }
 
+            // Replace host paths in the inner command with container paths
+            let inner_command = command.replace(&prompt_file_path, &warden_prompt_path);
+            let inner_command = if let (Some(host_cfg), Some(ref container_cfg)) =
+                (config_path, container_config_path)
+            {
+                inner_command.replace(host_cfg, container_cfg)
+            } else {
+                inner_command
+            };
+
             // wrap uses -- separator before the command
-            command = format!(
-                "{} -- {}",
-                warden_command,
-                command.replace(&prompt_file_path, &warden_prompt_path)
-            );
+            command = format!("{} -- {}", warden_command, inner_command);
         }
 
         Ok(command)
