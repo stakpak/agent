@@ -6019,7 +6019,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stakai"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6048,7 +6048,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
@@ -6105,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-api"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6130,7 +6130,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "anyhow",
  "futures",
@@ -6147,7 +6147,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-proxy"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6166,7 +6166,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6197,7 +6197,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6241,7 +6241,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.3.41"
+version = "0.3.42"
 dependencies = [
  "ansi-to-tui",
  "arboard",
