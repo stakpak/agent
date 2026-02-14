@@ -847,6 +847,7 @@ pub async fn run_interactive(
                             tool_call_result.call.clone().id,
                             tool_call_result.result.clone(),
                         ));
+
                         send_input_event(
                             &input_tx,
                             InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
