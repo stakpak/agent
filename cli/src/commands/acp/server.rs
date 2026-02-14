@@ -74,11 +74,6 @@ impl StakpakAcpAgent {
         let current_model = self.model.read().await;
 
         let available_models = client.list_models().await;
-        log::debug!(
-            "Available models for ACP: {} models, current: {}",
-            available_models.len(),
-            current_model.id
-        );
 
         let acp_models: Vec<ModelInfo> = available_models
             .iter()
@@ -90,11 +85,6 @@ impl StakpakAcpAgent {
         let current_model_id = if available_models.iter().any(|m| m.id == current_model.id) {
             current_model.id.clone()
         } else if let Some(first_model) = available_models.first() {
-            log::debug!(
-                "Current model '{}' not in available models, using '{}'",
-                current_model.id,
-                first_model.id
-            );
             first_model.id.clone()
         } else {
             // Fallback if no models available

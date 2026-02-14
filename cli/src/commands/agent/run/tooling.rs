@@ -42,12 +42,6 @@ pub async fn run_tool_call(
     model_id: Option<String>,
 ) -> Result<Option<CallToolResult>, String> {
     let tool_name = &tool_call.function.name;
-    let tool_id = &tool_call.id;
-    tracing::debug!(
-        tool = %tool_name,
-        tool_call_id = %tool_id,
-        "tool_run_start (agent executing tool)"
-    );
     let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
 
     if tool_exists {
@@ -57,12 +51,6 @@ pub async fn run_tool_call(
             Err(e) => {
                 let error_msg = format!("Failed to parse tool arguments as JSON: {}", e);
                 log::error!("{}", error_msg);
-                tracing::debug!(
-                    tool = %tool_name,
-                    tool_call_id = %tool_id,
-                    error = %error_msg,
-                    "tool_run_failed (parse error, result still sent to client)"
-                );
                 return Ok(Some(CallToolResult::error(vec![
                     rmcp::model::Content::text("INVALID_ARGUMENTS"),
                     rmcp::model::Content::text(error_msg),
@@ -98,12 +86,6 @@ pub async fn run_tool_call(
             Err(e) => {
                 let error_msg = format!("Failed to call MCP tool '{}': {}", tool_name, e);
                 log::error!("{}", error_msg);
-                tracing::debug!(
-                    tool = %tool_name,
-                    tool_call_id = %tool_id,
-                    error = %error_msg,
-                    "tool_run_failed (MCP call error, result still sent to client)"
-                );
                 return Ok(Some(CallToolResult::error(vec![
                     rmcp::model::Content::text("MCP_TOOL_CALL_ERROR"),
                     rmcp::model::Content::text(error_msg),
@@ -121,23 +103,11 @@ pub async fn run_tool_call(
                         Ok(server_result) => {
                             match server_result {
                                 ServerResult::CallToolResult(result) => {
-                                    let status = result.get_status();
-                                    tracing::debug!(
-                                        tool = %tool_name,
-                                        tool_call_id = %tool_id,
-                                        status = ?status,
-                                        "tool_run_ok (result will be pushed to messages and sent to client)"
-                                    );
                                     return Ok(Some(result));
                                 },
                                 _ => {
                                     let error_msg = "Unexpected response type from MCP server".to_string();
                                     log::error!("{}", error_msg);
-                                    tracing::debug!(
-                                        tool = %tool_name,
-                                        tool_call_id = %tool_id,
-                                        "tool_run_failed (unexpected response, result still sent to client)"
-                                    );
                                     return Ok(Some(CallToolResult::error(vec![
                                         rmcp::model::Content::text("UNEXPECTED_RESPONSE"),
                                         rmcp::model::Content::text(error_msg),
@@ -148,12 +118,6 @@ pub async fn run_tool_call(
                         Err(e) => {
                             let error_msg = format!("MCP tool execution error: {}", e);
                             log::error!("{}", error_msg);
-                            tracing::debug!(
-                                tool = %tool_name,
-                                tool_call_id = %tool_id,
-                                error = %error_msg,
-                                "tool_run_failed (MCP error, result still sent to client)"
-                            );
                             return Ok(Some(CallToolResult::error(vec![
                                 rmcp::model::Content::text("MCP_ERROR"),
                                 rmcp::model::Content::text(error_msg),
@@ -162,11 +126,6 @@ pub async fn run_tool_call(
                     }
                 },
                 _ = cancel_rx.recv() => {
-                    tracing::debug!(
-                        tool = %tool_name,
-                        tool_call_id = %tool_id,
-                        "tool_run_cancelled (user cancel, cancel result sent to client)"
-                    );
                     let notification = CancelledNotification {
                         params: CancelledNotificationParam {
                             request_id,
@@ -183,23 +142,11 @@ pub async fn run_tool_call(
             match handle.await_response().await {
                 Ok(server_result) => match server_result {
                     ServerResult::CallToolResult(result) => {
-                        let status = result.get_status();
-                        tracing::debug!(
-                            tool = %tool_name,
-                            tool_call_id = %tool_id,
-                            status = ?status,
-                            "tool_run_ok (result will be pushed to messages and sent to client)"
-                        );
                         return Ok(Some(result));
                     }
                     _ => {
                         let error_msg = "Unexpected response type from MCP server".to_string();
                         log::error!("{}", error_msg);
-                        tracing::debug!(
-                            tool = %tool_name,
-                            tool_call_id = %tool_id,
-                            "tool_run_failed (unexpected response, result still sent to client)"
-                        );
                         return Ok(Some(CallToolResult::error(vec![
                             rmcp::model::Content::text("UNEXPECTED_RESPONSE"),
                             rmcp::model::Content::text(error_msg),
@@ -209,12 +156,6 @@ pub async fn run_tool_call(
                 Err(e) => {
                     let error_msg = format!("MCP tool execution error: {}", e);
                     log::error!("{}", error_msg);
-                    tracing::debug!(
-                        tool = %tool_name,
-                        tool_call_id = %tool_id,
-                        error = %error_msg,
-                        "tool_run_failed (MCP error, result still sent to client)"
-                    );
                     return Ok(Some(CallToolResult::error(vec![
                         rmcp::model::Content::text("MCP_ERROR"),
                         rmcp::model::Content::text(error_msg),
@@ -224,10 +165,5 @@ pub async fn run_tool_call(
         }
     }
 
-    tracing::debug!(
-        tool = %tool_name,
-        tool_call_id = %tool_id,
-        "tool_run_skipped (tool not in list, no result sent)"
-    );
     Ok(None)
 }
