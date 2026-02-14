@@ -12,6 +12,7 @@
 //! - `openai` - OpenAI API
 //! - `anthropic` - Anthropic API (supports OAuth via `access_token`)
 //! - `gemini` - Google Gemini API
+//! - `bedrock` - AWS Bedrock (uses AWS credential chain, no API key)
 //!
 //! For built-in providers, you can use the model name directly without a prefix:
 //! - `claude-sonnet-4-5` → auto-detected as Anthropic
@@ -160,6 +161,29 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
     },
+    /// AWS Bedrock provider configuration
+    ///
+    /// Uses AWS credential chain for authentication (no API key needed).
+    /// Supports env vars, shared credentials, SSO, and instance roles.
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.amazon-bedrock]
+    /// type = "amazon-bedrock"
+    /// region = "us-east-1"
+    /// profile_name = "my-aws-profile"  # optional
+    ///
+    /// # Then use models as (friendly aliases work):
+    /// model = "amazon-bedrock/claude-sonnet-4-5"
+    /// ```
+    #[serde(rename = "amazon-bedrock")]
+    Bedrock {
+        /// AWS region (e.g., "us-east-1")
+        region: String,
+        /// Optional AWS named profile (from ~/.aws/config)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        profile_name: Option<String>,
+    },
 }
 
 impl ProviderConfig {
@@ -171,6 +195,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { .. } => "gemini",
             ProviderConfig::Custom { .. } => "custom",
             ProviderConfig::Stakpak { .. } => "stakpak",
+            ProviderConfig::Bedrock { .. } => "amazon-bedrock",
         }
     }
 
@@ -182,6 +207,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => Some(api_key.as_str()),
+            ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
         }
     }
 
@@ -193,6 +219,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
+            ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
         }
     }
 
@@ -242,6 +269,30 @@ impl ProviderConfig {
         ProviderConfig::Stakpak {
             api_key,
             api_endpoint,
+        }
+    }
+
+    /// Create a Bedrock provider config
+    pub fn bedrock(region: String, profile_name: Option<String>) -> Self {
+        ProviderConfig::Bedrock {
+            region,
+            profile_name,
+        }
+    }
+
+    /// Get the AWS region (Bedrock only)
+    pub fn region(&self) -> Option<&str> {
+        match self {
+            ProviderConfig::Bedrock { region, .. } => Some(region.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Get the AWS profile name (Bedrock only)
+    pub fn profile_name(&self) -> Option<&str> {
+        match self {
+            ProviderConfig::Bedrock { profile_name, .. } => profile_name.as_deref(),
+            _ => None,
         }
     }
 }
@@ -827,5 +878,133 @@ mod tests {
             providers.get("litellm"),
             Some(ProviderConfig::Custom { .. })
         ));
+    }
+
+    // =========================================================================
+    // Bedrock ProviderConfig Tests
+    // =========================================================================
+
+    #[test]
+    fn test_provider_config_bedrock_serialization() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-east-1".to_string(),
+            profile_name: Some("my-profile".to_string()),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"type\":\"amazon-bedrock\""));
+        assert!(json.contains("\"region\":\"us-east-1\""));
+        assert!(json.contains("\"profile_name\":\"my-profile\""));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_serialization_without_profile() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-west-2".to_string(),
+            profile_name: None,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"type\":\"amazon-bedrock\""));
+        assert!(json.contains("\"region\":\"us-west-2\""));
+        assert!(!json.contains("profile_name")); // Should be skipped when None
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_deserialization() {
+        let json = r#"{"type":"amazon-bedrock","region":"us-east-1","profile_name":"prod"}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert!(matches!(config, ProviderConfig::Bedrock { .. }));
+        assert_eq!(config.region(), Some("us-east-1"));
+        assert_eq!(config.profile_name(), Some("prod"));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_deserialization_minimal() {
+        let json = r#"{"type":"amazon-bedrock","region":"eu-west-1"}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert!(matches!(config, ProviderConfig::Bedrock { .. }));
+        assert_eq!(config.region(), Some("eu-west-1"));
+        assert_eq!(config.profile_name(), None);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_no_api_key() {
+        let config = ProviderConfig::bedrock("us-east-1".to_string(), None);
+        assert_eq!(config.api_key(), None); // Bedrock uses AWS credential chain
+        assert_eq!(config.api_endpoint(), None); // No custom endpoint
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_helper_methods() {
+        let bedrock = ProviderConfig::bedrock("us-east-1".to_string(), Some("prod".to_string()));
+        assert_eq!(bedrock.provider_type(), "amazon-bedrock");
+        assert_eq!(bedrock.region(), Some("us-east-1"));
+        assert_eq!(bedrock.profile_name(), Some("prod"));
+        assert_eq!(bedrock.api_key(), None);
+        assert_eq!(bedrock.api_endpoint(), None);
+        assert_eq!(bedrock.access_token(), None);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_toml_roundtrip() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-east-1".to_string(),
+            profile_name: Some("my-profile".to_string()),
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: ProviderConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_toml_parsing() {
+        let toml_str = r#"
+            type = "amazon-bedrock"
+            region = "us-east-1"
+            profile_name = "production"
+        "#;
+        let config: ProviderConfig = toml::from_str(toml_str).unwrap();
+        assert!(matches!(
+            config,
+            ProviderConfig::Bedrock {
+                ref region,
+                ref profile_name,
+            } if region == "us-east-1" && profile_name.as_deref() == Some("production")
+        ));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_missing_region_fails() {
+        let json = r#"{"type":"amazon-bedrock"}"#;
+        let result: Result<ProviderConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err()); // region is required
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_in_providers_map() {
+        let json = r#"{
+            "anthropic": {"type": "anthropic", "api_key": "sk-ant"},
+            "amazon-bedrock": {"type": "amazon-bedrock", "region": "us-east-1"}
+        }"#;
+        let providers: HashMap<String, ProviderConfig> = serde_json::from_str(json).unwrap();
+        assert_eq!(providers.len(), 2);
+        assert!(matches!(
+            providers.get("amazon-bedrock"),
+            Some(ProviderConfig::Bedrock { .. })
+        ));
+    }
+
+    #[test]
+    fn test_region_returns_none_for_non_bedrock() {
+        let openai = ProviderConfig::openai(Some("key".to_string()));
+        assert_eq!(openai.region(), None);
+
+        let anthropic = ProviderConfig::anthropic(Some("key".to_string()), None);
+        assert_eq!(anthropic.region(), None);
+    }
+
+    #[test]
+    fn test_profile_name_returns_none_for_non_bedrock() {
+        let openai = ProviderConfig::openai(Some("key".to_string()));
+        assert_eq!(openai.profile_name(), None);
     }
 }

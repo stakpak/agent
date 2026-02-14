@@ -256,6 +256,9 @@ impl ProfileConfig {
                         }
                     }
                 }
+                ProviderConfig::Bedrock { .. } => {
+                    // Bedrock has no API endpoint to clean
+                }
             }
         }
 
