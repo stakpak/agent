@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -12,11 +14,13 @@ pub mod agent;
 pub mod auth;
 pub mod auto_update;
 pub mod board;
+pub mod gateway;
 pub mod mcp;
 pub mod warden;
 pub mod watch;
 
 pub use auth::AuthCommands;
+pub use gateway::GatewayCommands;
 pub use mcp::McpCommands;
 pub use watch::WatchCommands;
 
@@ -150,6 +154,10 @@ pub enum Commands {
     #[command(subcommand)]
     Auth(AuthCommands),
 
+    /// Messaging gateway commands
+    #[command(subcommand)]
+    Gateway(GatewayCommands),
+
     /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
     Warden {
         /// Environment variables to pass to container
@@ -196,6 +204,49 @@ pub enum Commands {
         /// Auto-approve all tools (CI/headless only)
         #[arg(long, default_value_t = false)]
         auto_approve_all: bool,
+
+        /// Also start the messaging gateway
+        #[arg(long, default_value_t = false)]
+        gateway: bool,
+
+        /// Path to gateway config file (requires --gateway)
+        #[arg(long)]
+        gateway_config: Option<std::path::PathBuf>,
+    },
+
+    /// Start everything: serve + gateway + watch
+    Up {
+        /// Bind address, e.g. 127.0.0.1:4096
+        #[arg(long, default_value = "127.0.0.1:4096")]
+        bind: String,
+
+        /// Show generated auth token in stdout (local dev only)
+        #[arg(long, default_value_t = false)]
+        show_token: bool,
+
+        /// Disable auth checks for protected routes (local dev only)
+        #[arg(long, default_value_t = false)]
+        no_auth: bool,
+
+        /// Override default model for server runs (provider/model or model id)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Auto-approve all tools (CI/headless only)
+        #[arg(long, default_value_t = false)]
+        auto_approve_all: bool,
+
+        /// Don't start gateway runtime
+        #[arg(long, default_value_t = false)]
+        no_gateway: bool,
+
+        /// Don't start watch scheduler
+        #[arg(long, default_value_t = false)]
+        no_watch: bool,
+
+        /// Path to gateway config file
+        #[arg(long)]
+        gateway_config: Option<std::path::PathBuf>,
     },
 
     /// Run the autonomous watch agent with scheduled triggers
@@ -239,6 +290,33 @@ fn get_config_path_option(config: &AppConfig) -> Option<&Path> {
     }
 }
 
+fn expand_gateway_approval_allowlist(tools: &[String]) -> Vec<String> {
+    let mut normalized = BTreeSet::new();
+
+    for tool in tools {
+        let trimmed = tool.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        normalized.insert(trimmed.to_string());
+        if !trimmed.starts_with("stakpak__") {
+            normalized.insert(format!("stakpak__{trimmed}"));
+        }
+    }
+
+    normalized.into_iter().collect()
+}
+
+fn loopback_server_url(listener_addr: SocketAddr) -> String {
+    let port = listener_addr.port();
+    if listener_addr.ip().is_ipv6() {
+        format!("http://[::1]:{port}")
+    } else {
+        format!("http://127.0.0.1:{port}")
+    }
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -251,7 +329,9 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
+                | Commands::Gateway(_)
                 | Commands::Serve { .. }
+                | Commands::Up { .. }
                 | Commands::Watch(_)
         )
     }
@@ -495,6 +575,78 @@ impl Commands {
             Commands::Update => {
                 auto_update::run_auto_update(false).await?;
             }
+            Commands::Gateway(gateway_command) => {
+                gateway_command.run(config).await?;
+            }
+            Commands::Up {
+                bind,
+                show_token,
+                no_auth,
+                model,
+                auto_approve_all,
+                no_gateway,
+                no_watch,
+                gateway_config,
+            } => {
+                let watch_task = if no_watch {
+                    None
+                } else {
+                    Some(tokio::spawn(async {
+                        if let Err(error) = crate::commands::watch::commands::run_watch().await {
+                            eprintln!("Watch runtime exited: {}", error);
+                        }
+                    }))
+                };
+
+                let current_exe = std::env::current_exe()
+                    .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+
+                let mut serve_cmd = tokio::process::Command::new(current_exe);
+                if config.profile_name != "default" {
+                    serve_cmd.arg("--profile").arg(&config.profile_name);
+                }
+                serve_cmd.arg("serve");
+                serve_cmd.arg("--bind").arg(bind);
+
+                if show_token {
+                    serve_cmd.arg("--show-token");
+                }
+                if no_auth {
+                    serve_cmd.arg("--no-auth");
+                }
+                if auto_approve_all {
+                    serve_cmd.arg("--auto-approve-all");
+                }
+                if !no_gateway {
+                    serve_cmd.arg("--gateway");
+                }
+                if let Some(model) = model {
+                    serve_cmd.arg("--model").arg(model);
+                }
+                if let Some(path) = gateway_config {
+                    serve_cmd.arg("--gateway-config").arg(path);
+                }
+
+                let status = serve_cmd
+                    .status()
+                    .await
+                    .map_err(|e| format!("Failed to start serve runtime: {}", e))?;
+
+                if let Some(task) = watch_task {
+                    task.abort();
+                    let _ = task.await;
+                }
+
+                if !status.success() {
+                    return Err(format!(
+                        "Serve runtime exited with status {}",
+                        status
+                            .code()
+                            .map(|code| code.to_string())
+                            .unwrap_or_else(|| "signal".to_string())
+                    ));
+                }
+            }
             Commands::Serve {
                 bind,
                 auth_token,
@@ -502,6 +654,8 @@ impl Commands {
                 no_auth,
                 model,
                 auto_approve_all,
+                gateway,
+                gateway_config,
             } => {
                 if no_auth && auth_token.is_some() {
                     return Err(
@@ -592,10 +746,11 @@ impl Commands {
                     stakpak_server::ToolApprovalPolicy::All
                 } else {
                     let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
-                    if let Some(auto_approve_tools) = auto_approve_tools {
+                    if let Some(ref auto_approve_tools) = auto_approve_tools {
                         policy.with_overrides(
                             auto_approve_tools
-                                .into_iter()
+                                .iter()
+                                .cloned()
                                 .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
                         )
                     } else {
@@ -655,6 +810,57 @@ impl Commands {
                     Some(mcp_init_result.proxy_shutdown_tx),
                 );
 
+                let gateway_runtime = if gateway {
+                    let listener_addr = listener
+                        .local_addr()
+                        .map_err(|e| format!("Failed to inspect listener address: {}", e))?;
+                    let loopback_url = loopback_server_url(listener_addr);
+                    let loopback_token = if no_auth {
+                        String::new()
+                    } else {
+                        generated_auth_token.clone().unwrap_or_default()
+                    };
+
+                    let gateway_cli = stakpak_gateway::GatewayCliFlags {
+                        url: Some(loopback_url),
+                        token: Some(loopback_token),
+                        ..Default::default()
+                    };
+
+                    let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(
+                        gateway_config.as_deref(),
+                        &gateway_cli,
+                    )
+                    .map_err(|e| format!("Failed to load gateway config: {}", e))?;
+
+                    if auto_approve_all {
+                        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::AllowAll;
+                        gateway_cfg.gateway.approval_allowlist.clear();
+                    } else if let Some(auto_approve_tools) = auto_approve_tools.as_ref() {
+                        gateway_cfg.gateway.approval_mode =
+                            stakpak_gateway::ApprovalMode::Allowlist;
+                        gateway_cfg.gateway.approval_allowlist =
+                            expand_gateway_approval_allowlist(auto_approve_tools);
+                    }
+
+                    if !gateway_cfg.has_channels() {
+                        println!(
+                            "Gateway enabled but no channels configured. Skipping gateway runtime."
+                        );
+                        None
+                    } else {
+                        Some(Arc::new(
+                            stakpak_gateway::Gateway::new(gateway_cfg)
+                                .await
+                                .map_err(|e| {
+                                    format!("Failed to initialize gateway runtime: {}", e)
+                                })?,
+                        ))
+                    }
+                } else {
+                    None
+                };
+
                 let refresh_state = app_state.clone();
                 let (refresh_shutdown_tx, mut refresh_shutdown_rx) =
                     tokio::sync::watch::channel(false);
@@ -677,7 +883,15 @@ impl Commands {
 
                 let shutdown_state = app_state.clone();
                 let shutdown_refresh_tx = refresh_shutdown_tx.clone();
-                let app = stakpak_server::router(app_state, auth_config);
+
+                let base_app = stakpak_server::router(app_state, auth_config);
+                let app = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
+                    let gateway_routes = gateway_runtime.api_router();
+                    base_app.nest_service("/v1/gateway", gateway_routes.into_service())
+                } else {
+                    base_app
+                };
+
                 println!("Stakpak server listening on http://{}", bind);
                 println!("Profile: {}", config.profile_name);
                 println!(
@@ -702,8 +916,26 @@ impl Commands {
                     }
                 }
 
+                if gateway_runtime.is_some() {
+                    println!("Gateway: enabled");
+                }
+
+                let gateway_cancel = tokio_util::sync::CancellationToken::new();
+                let gateway_task = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
+                    let gateway_runtime = gateway_runtime.clone();
+                    let cancel = gateway_cancel.clone();
+                    Some(tokio::spawn(
+                        async move { gateway_runtime.run(cancel).await },
+                    ))
+                } else {
+                    None
+                };
+                let gateway_cancel_for_shutdown = gateway_cancel.clone();
+
                 let shutdown = async move {
                     let _ = tokio::signal::ctrl_c().await;
+
+                    gateway_cancel_for_shutdown.cancel();
 
                     for (session_id, run_id) in shutdown_state.run_manager.running_runs().await {
                         let _ = shutdown_state
@@ -736,6 +968,15 @@ impl Commands {
                 let serve_result = axum::serve(listener, app)
                     .with_graceful_shutdown(shutdown)
                     .await;
+
+                gateway_cancel.cancel();
+                if let Some(task) = gateway_task {
+                    match task.await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => eprintln!("Gateway runtime error: {}", e),
+                        Err(e) => eprintln!("Gateway runtime task failed: {}", e),
+                    }
+                }
 
                 let _ = refresh_shutdown_tx.send(true);
                 if !refresh_task.is_finished() {

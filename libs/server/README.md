@@ -103,6 +103,67 @@ Auth middleware is applied only to the protected router.
 
 ---
 
+## Running `stakpak serve` (operator quickstart)
+
+Use these commands from the repo root (or installed CLI):
+
+```bash
+# Local dev, no auth
+stakpak serve --no-auth
+
+# Local dev with gateway enabled
+stakpak serve --gateway --no-auth
+
+# Use a non-default profile (root option must come before subcommand)
+stakpak --profile local serve --gateway --no-auth
+
+# Force auto-approve all tools (CI/headless)
+stakpak serve --auto-approve-all --no-auth
+```
+
+Default bind is `127.0.0.1:4096`.
+
+If auth is enabled, provide a bearer token (`Authorization: Bearer <token>`) for protected routes.
+
+### Useful endpoints while serving
+
+- `GET /v1/health`
+- `GET /v1/openapi.json`
+- `POST /v1/sessions`
+- `POST /v1/sessions/{id}/messages`
+- `GET /v1/sessions/{id}/events` (SSE)
+- `GET /v1/sessions/{id}/messages`
+- `POST /v1/sessions/{id}/cancel`
+
+When gateway is enabled, these are also mounted:
+
+- `GET /v1/gateway/status`
+- `GET /v1/gateway/channels`
+- `GET /v1/gateway/sessions`
+- `POST /v1/gateway/send`
+
+## Gateway-related CLI commands
+
+```bash
+# Initialize gateway config (~/.stakpak/gateway.toml)
+stakpak gateway init --force
+
+# Non-interactive init
+stakpak gateway init \
+  --telegram-token "$TELEGRAM_BOT_TOKEN" \
+  --discord-token "$DISCORD_BOT_TOKEN" \
+  --slack-bot-token "$SLACK_BOT_TOKEN" \
+  --slack-app-token "$SLACK_APP_TOKEN" \
+  --force
+
+# Validate configured channels
+stakpak gateway channels list
+stakpak gateway channels test
+
+# Run gateway standalone (if serve is already running)
+stakpak gateway run
+```
+
 ## Relationship to core
 
 `stakpak-server` should be treated as a runtime adapter + API shell.

@@ -18,7 +18,7 @@ mod utils;
 
 pub use agent::{SpawnConfig, spawn_agent};
 pub use commands::WatchCommands;
-pub use config::{Trigger, WatchConfig};
+pub use config::{DeliveryConfig, Trigger, WatchConfig};
 pub use db::{ListRunsFilter, RunStatus, WatchDb};
 pub use executor::{CheckResult, run_check_script};
 pub use prompt::assemble_prompt;

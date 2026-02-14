@@ -14,8 +14,10 @@ use crate::commands::watch::{
 };
 use chrono::{DateTime, Utc};
 use croner::Cron;
+use stakpak_shared::utils::sanitize_text_output;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::signal;
 use tracing::{error, info, warn};
 
@@ -416,6 +418,8 @@ async fn handle_trigger_event(
             .await
             .map_err(|e| format!("Failed to update run status: {}", e))?;
 
+            maybe_send_notification(config, trigger, &result, check_result.as_ref(), None).await;
+
             info!(
                 trigger = %trigger.name,
                 status = ?status,
@@ -440,13 +444,179 @@ async fn handle_trigger_event(
             )
             .await
             .map_err(|e| format!("Failed to update run status: {}", e))?;
+
+            maybe_send_notification(
+                config,
+                trigger,
+                &crate::commands::watch::agent::AgentResult {
+                    exit_code: Some(1),
+                    session_id: None,
+                    checkpoint_id: None,
+                    timed_out: false,
+                    paused: false,
+                    pause_reason: None,
+                    resume_hint: None,
+                    stdout: String::new(),
+                    stderr: format!("Failed to spawn agent: {}", e),
+                },
+                check_result.as_ref(),
+                Some(&format!("Failed to spawn agent: {}", e)),
+            )
+            .await;
         }
     }
 
     Ok(())
 }
 
-/// Truncate a string to a maximum length, respecting char boundaries.
+async fn maybe_send_notification(
+    config: &WatchConfig,
+    trigger: &crate::commands::watch::Trigger,
+    result: &crate::commands::watch::agent::AgentResult,
+    check_result: Option<&crate::commands::watch::CheckResult>,
+    error_override: Option<&str>,
+) {
+    let Some(notifications) = &config.notifications else {
+        return;
+    };
+
+    let success = result.success();
+    if !notifications.should_notify(trigger, success) {
+        return;
+    }
+
+    let Some(delivery) = trigger.effective_delivery(notifications) else {
+        warn!(trigger = %trigger.name, "Notification enabled but delivery target is missing");
+        return;
+    };
+
+    let text = format_notification(trigger, result, check_result, error_override);
+    let context = serde_json::json!({
+        "trigger": trigger.name,
+        "summary": extract_summary(result, error_override),
+        "check_output": check_result
+            .map(|value| sanitize_text_output(value.stdout.trim()))
+            .filter(|value| !value.is_empty()),
+        "status": if success { "completed" } else { "failed" },
+    });
+
+    let payload = serde_json::json!({
+        "channel": delivery.channel,
+        "target": build_gateway_target(&delivery),
+        "text": text,
+        "context": context,
+    });
+
+    let client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            warn!(
+                trigger = %trigger.name,
+                error = %error,
+                "Failed to create notification HTTP client"
+            );
+            return;
+        }
+    };
+    let mut request = client.post(format!("{}/v1/gateway/send", notifications.gateway_url));
+
+    if let Some(token) = notifications.gateway_token.as_deref()
+        && !token.is_empty()
+    {
+        request = request.bearer_auth(token);
+    }
+
+    match request.json(&payload).send().await {
+        Ok(response) => {
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                warn!(
+                    trigger = %trigger.name,
+                    status = %status,
+                    body = %body,
+                    "Gateway notification request failed"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                trigger = %trigger.name,
+                error = %error,
+                "Failed to send watch notification"
+            );
+        }
+    }
+}
+
+fn build_gateway_target(delivery: &crate::commands::watch::DeliveryConfig) -> serde_json::Value {
+    match delivery.channel.as_str() {
+        "telegram" => serde_json::json!({ "chat_id": delivery.chat_id }),
+        "discord" => serde_json::json!({ "channel_id": delivery.chat_id }),
+        "slack" => serde_json::json!({ "channel": delivery.chat_id }),
+        _ => serde_json::json!({ "chat_id": delivery.chat_id }),
+    }
+}
+
+fn format_notification(
+    trigger: &crate::commands::watch::Trigger,
+    result: &crate::commands::watch::agent::AgentResult,
+    check_result: Option<&crate::commands::watch::CheckResult>,
+    error_override: Option<&str>,
+) -> String {
+    let emoji = if result.success() { "✅" } else { "❌" };
+    let status = if result.success() {
+        "completed"
+    } else {
+        "failed"
+    };
+
+    let mut text = format!("{} {} {}\n", emoji, trigger.name, status);
+
+    if let Some(check) = check_result
+        && let Some(exit) = check.exit_code
+    {
+        text.push_str(&format!("Check exit code: {}\n", exit));
+    }
+
+    let summary = extract_summary(result, error_override);
+    if !summary.is_empty() {
+        text.push('\n');
+        text.push_str(&summary);
+    }
+
+    text
+}
+
+fn extract_summary(
+    result: &crate::commands::watch::agent::AgentResult,
+    error_override: Option<&str>,
+) -> String {
+    if let Some(error) = error_override {
+        return sanitize_and_truncate(error, 500);
+    }
+
+    if !result.stdout.trim().is_empty() {
+        return sanitize_and_truncate(result.stdout.trim(), 500);
+    }
+
+    if !result.stderr.trim().is_empty() {
+        return sanitize_and_truncate(result.stderr.trim(), 500);
+    }
+
+    String::new()
+}
+
+fn sanitize_and_truncate(text: &str, max_bytes: usize) -> String {
+    let sanitized = sanitize_text_output(text);
+    truncate_string(&sanitized, max_bytes)
+}
+
+/// Truncate a string to a maximum byte length, respecting unicode character boundaries.
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         return s.to_string();
