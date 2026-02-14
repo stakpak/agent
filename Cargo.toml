@@ -30,7 +30,8 @@ stakpak-api = { path = "libs/api", version = "0.3.42" }
 stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.42" }
 stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.42" }
 stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.42" }
-stakpak-agent-core = { path = "libs/agent-core", version = "0.3.40" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.42" }
+stakpak-server = { path = "libs/server", version = "0.3.42" }
 stakpak-tui = { path = "tui", version = "0.3.42" }
 stakpak-shared = { path = "libs/shared", version = "0.3.42" }
 serde = { version = "1.0.215", features = ["derive"] }

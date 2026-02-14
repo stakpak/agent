@@ -21,12 +21,20 @@ impl SessionHandle {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum SessionRuntimeState {
+    #[default]
     Idle,
-    Starting { run_id: Uuid },
-    Running { run_id: Uuid, handle: SessionHandle },
-    Failed { last_error: String },
+    Starting {
+        run_id: Uuid,
+    },
+    Running {
+        run_id: Uuid,
+        handle: SessionHandle,
+    },
+    Failed {
+        last_error: String,
+    },
 }
 
 impl SessionRuntimeState {
@@ -43,11 +51,5 @@ impl SessionRuntimeState {
             self,
             SessionRuntimeState::Starting { .. } | SessionRuntimeState::Running { .. }
         )
-    }
-}
-
-impl Default for SessionRuntimeState {
-    fn default() -> Self {
-        Self::Idle
     }
 }

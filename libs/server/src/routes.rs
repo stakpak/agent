@@ -86,18 +86,13 @@ struct UpdateSessionBody {
     visibility: Option<stakpak_api::SessionVisibility>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SessionMessageType {
+    #[default]
     Message,
     Steering,
     FollowUp,
-}
-
-impl Default for SessionMessageType {
-    fn default() -> Self {
-        Self::Message
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
