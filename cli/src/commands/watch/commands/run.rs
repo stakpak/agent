@@ -617,7 +617,7 @@ fn sanitize_and_truncate(text: &str, max_bytes: usize) -> String {
 }
 
 /// Truncate a string to a maximum byte length, respecting unicode character boundaries.
-fn truncate_string(s: &str, max_bytes: usize) -> String {
+fn truncate_string(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         return s.to_string();
     }

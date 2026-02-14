@@ -20,6 +20,6 @@ pub use openapi::generate_openapi;
 pub use routes::{protected_router, public_router, router};
 pub use session_actor::{build_checkpoint_envelope, build_run_context, spawn_session_actor};
 pub use session_manager::SessionManager;
-pub use stakpak_agent_core::{AutoApprovePolicy, ToolApprovalAction};
+pub use stakpak_agent_core::{ToolApprovalAction, ToolApprovalPolicy};
 pub use state::AppState;
 pub use types::{SessionHandle, SessionRuntimeState};

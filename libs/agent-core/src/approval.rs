@@ -1,5 +1,5 @@
 use crate::types::{
-    AgentCommand, AutoApprovePolicy, ProposedToolCall, ToolApprovalAction, ToolDecision,
+    AgentCommand, ProposedToolCall, ToolApprovalAction, ToolApprovalPolicy, ToolDecision,
 };
 use thiserror::Error;
 
@@ -41,7 +41,7 @@ pub enum ApprovalError {
 }
 
 impl ApprovalStateMachine {
-    pub fn new(tool_calls: Vec<ProposedToolCall>, policy: &AutoApprovePolicy) -> Self {
+    pub fn new(tool_calls: Vec<ProposedToolCall>, policy: &ToolApprovalPolicy) -> Self {
         let entries = tool_calls
             .into_iter()
             .map(|tool_call| {
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn incremental_decisions_buffer_until_prior_call_is_resolved() {
         let calls = vec![tool_call("tc_1", "tool_a"), tool_call("tc_2", "tool_b")];
-        let mut machine = ApprovalStateMachine::new(calls, &AutoApprovePolicy::None);
+        let mut machine = ApprovalStateMachine::new(calls, &ToolApprovalPolicy::None);
 
         let out_of_order = machine.resolve_tool("tc_2", ToolDecision::Accept);
         assert!(out_of_order.is_ok());
@@ -215,7 +215,7 @@ mod tests {
             tool_call("tc_2", "tool_b"),
             tool_call("tc_3", "tool_c"),
         ];
-        let mut machine = ApprovalStateMachine::new(calls, &AutoApprovePolicy::None);
+        let mut machine = ApprovalStateMachine::new(calls, &ToolApprovalPolicy::None);
 
         let mut decisions = HashMap::new();
         decisions.insert("tc_1".to_string(), ToolDecision::Accept);
@@ -256,7 +256,7 @@ mod tests {
         rules.insert("safe_tool".to_string(), ToolApprovalAction::Approve);
         rules.insert("danger_tool".to_string(), ToolApprovalAction::Deny);
 
-        let policy = AutoApprovePolicy::Custom {
+        let policy = ToolApprovalPolicy::Custom {
             rules,
             default: ToolApprovalAction::Ask,
         };
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn resolve_unknown_tool_call_returns_error() {
         let calls = vec![tool_call("tc_1", "tool_a")];
-        let mut machine = ApprovalStateMachine::new(calls, &AutoApprovePolicy::None);
+        let mut machine = ApprovalStateMachine::new(calls, &ToolApprovalPolicy::None);
 
         let error = machine.resolve_tool("tc_missing", ToolDecision::Accept);
 
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn resolve_same_decision_is_idempotent() {
         let calls = vec![tool_call("tc_1", "tool_a")];
-        let mut machine = ApprovalStateMachine::new(calls, &AutoApprovePolicy::None);
+        let mut machine = ApprovalStateMachine::new(calls, &ToolApprovalPolicy::None);
 
         assert!(machine.resolve_tool("tc_1", ToolDecision::Accept).is_ok());
         assert!(machine.resolve_tool("tc_1", ToolDecision::Accept).is_ok());
