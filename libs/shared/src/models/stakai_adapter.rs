@@ -477,6 +477,27 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                 // InferenceConfig doesn't support custom providers directly
                 let _ = name; // Suppress unused warning
             }
+            ProviderConfig::Bedrock {
+                region,
+                profile_name,
+            } => {
+                #[cfg(feature = "bedrock")]
+                {
+                    use stakai::providers::bedrock::BedrockConfig;
+                    let mut bedrock_config = BedrockConfig::new(region.clone());
+                    if let Some(profile) = profile_name {
+                        bedrock_config = bedrock_config.with_profile_name(profile.clone());
+                    }
+                    inference_config = inference_config.bedrock_config(bedrock_config);
+                }
+                #[cfg(not(feature = "bedrock"))]
+                {
+                    let _ = (name, region, profile_name);
+                    tracing::warn!(
+                        "Bedrock provider configured but bedrock feature is not enabled"
+                    );
+                }
+            }
         }
     }
 
@@ -586,6 +607,28 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
 
                 // Register with the config key as provider ID (e.g., "litellm", "ollama")
                 registry = registry.register(name, provider);
+            }
+            ProviderConfig::Bedrock {
+                region,
+                profile_name,
+            } => {
+                #[cfg(feature = "bedrock")]
+                {
+                    use stakai::providers::bedrock::{BedrockConfig, BedrockProvider};
+                    let mut bedrock_config = BedrockConfig::new(region.clone());
+                    if let Some(profile) = profile_name {
+                        bedrock_config = bedrock_config.with_profile_name(profile.clone());
+                    }
+                    let provider = BedrockProvider::new(bedrock_config);
+                    registry = registry.register("amazon-bedrock", provider);
+                }
+                #[cfg(not(feature = "bedrock"))]
+                {
+                    let _ = (name, region, profile_name);
+                    tracing::warn!(
+                        "Bedrock provider configured but bedrock feature is not enabled"
+                    );
+                }
             }
         }
     }
