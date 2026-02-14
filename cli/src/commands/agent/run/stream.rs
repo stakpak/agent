@@ -6,6 +6,7 @@ use stakpak_shared::models::{
     integrations::openai::{
         ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
         FinishReason, FunctionCall, MessageContent, Role, ToolCall, ToolCallDelta,
+        ToolCallStreamInfo,
     },
     llm::LLMTokenUsage,
 };
@@ -104,6 +105,27 @@ impl ToolCallAccumulator {
         self.tool_calls
             .into_iter()
             .filter(|tc| !tc.id.is_empty())
+            .collect()
+    }
+
+    /// Get a snapshot of current streaming progress for each tool call.
+    /// Used to send progress updates to the TUI during streaming.
+    pub fn progress_snapshot(&self) -> Vec<ToolCallStreamInfo> {
+        self.tool_calls
+            .iter()
+            .filter(|tc| !tc.id.is_empty())
+            .map(|tc| {
+                // Best-effort: try to extract "description" from partial JSON args
+                let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                    .ok()
+                    .and_then(|v| v.get("description")?.as_str().map(String::from));
+
+                ToolCallStreamInfo {
+                    name: tc.function.name.clone(),
+                    args_tokens: tc.function.arguments.len() / 4, // rough chars-to-tokens estimate
+                    description,
+                }
+            })
             .collect()
     }
 }
@@ -221,6 +243,12 @@ pub async fn process_responses_stream(
                 if let Some(tool_calls) = &delta.tool_calls {
                     for delta_tool_call in tool_calls {
                         tool_call_accumulator.process_delta(delta_tool_call);
+                    }
+                    // Send streaming progress to TUI so users see what's being generated
+                    let snapshot = tool_call_accumulator.progress_snapshot();
+                    if !snapshot.is_empty() {
+                        send_input_event(input_tx, InputEvent::StreamToolCallProgress(snapshot))
+                            .await?;
                     }
                 }
             }

@@ -9,6 +9,9 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 
+#[cfg(feature = "bedrock")]
+use crate::providers::bedrock::BedrockProvider;
+
 /// Builder for creating an Inference client
 #[derive(Default)]
 pub struct ClientBuilder {
@@ -67,6 +70,13 @@ impl ClientBuilder {
             && let Ok(provider) = StakpakProvider::new(config)
         {
             registry = registry.register("stakpak", provider);
+        }
+
+        // Register Bedrock if configured
+        #[cfg(feature = "bedrock")]
+        if let Some(config) = inference_config.bedrock_config {
+            let provider = BedrockProvider::new(config);
+            registry = registry.register("amazon-bedrock", provider);
         }
 
         self.registry = Some(registry);

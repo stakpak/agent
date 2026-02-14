@@ -8,6 +8,10 @@ repository = { workspace = true }
 homepage = { workspace = true }
 readme = "../README.md"
 
+[features]
+default = ["bedrock"]
+bedrock = ["stakpak-shared/bedrock", "stakai/bedrock"]
+
 [dependencies]
 stakpak-api = { workspace = true }
 stakpak-mcp-server = { workspace = true }

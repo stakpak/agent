@@ -348,6 +348,16 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
                     toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
                 }
             }
+            ProviderConfig::Bedrock {
+                region,
+                profile_name,
+            } => {
+                toml.push_str("type = \"amazon-bedrock\"\n");
+                toml.push_str(&format!("region = \"{}\"\n", region));
+                if let Some(profile) = profile_name {
+                    toml.push_str(&format!("profile_name = \"{}\"\n", profile));
+                }
+            }
         }
     }
 
