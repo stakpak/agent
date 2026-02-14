@@ -17,7 +17,7 @@ pub struct AgentConfig {
     pub max_turns: usize,
     pub max_output_tokens: u32,
     pub provider_options: Option<stakai::ProviderOptions>,
-    pub auto_approve: AutoApprovePolicy,
+    pub tool_approval: ToolApprovalPolicy,
     pub context: ContextConfig,
     pub retry: RetryConfig,
     pub compaction: CompactionConfig,
@@ -68,7 +68,7 @@ impl Default for CompactionConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AutoApprovePolicy {
+pub enum ToolApprovalPolicy {
     None,
     All,
     Custom {
@@ -77,14 +77,86 @@ pub enum AutoApprovePolicy {
     },
 }
 
-impl AutoApprovePolicy {
+/// Read-only tools that are safe to auto-approve by default.
+const DEFAULT_AUTO_APPROVE_TOOLS: &[&str] = &[
+    "view",
+    "generate_password",
+    "search_docs",
+    "search_memory",
+    "read_rulebook",
+    "local_code_search",
+    "get_all_tasks",
+    "get_task_details",
+    "wait_for_tasks",
+];
+
+/// Mutating tools that require explicit approval by default.
+const DEFAULT_ASK_TOOLS: &[&str] = &[
+    "create",
+    "str_replace",
+    "generate_code",
+    "run_command",
+    "run_command_task",
+    "subagent_task",
+    "dynamic_subagent_task",
+    "cancel_task",
+    "remove",
+];
+
+impl ToolApprovalPolicy {
+    /// Build a policy with sane defaults: read-only tools auto-approved,
+    /// mutating tools require approval, unknown tools require approval.
+    pub fn with_defaults() -> Self {
+        let mut rules = HashMap::new();
+
+        for name in DEFAULT_AUTO_APPROVE_TOOLS {
+            rules.insert((*name).to_string(), ToolApprovalAction::Approve);
+        }
+        for name in DEFAULT_ASK_TOOLS {
+            rules.insert((*name).to_string(), ToolApprovalAction::Ask);
+        }
+
+        Self::Custom {
+            rules,
+            default: ToolApprovalAction::Ask,
+        }
+    }
+
+    /// Layer overrides on top of an existing policy.
+    /// Only meaningful for `Custom` — returns `self` unchanged for `None`/`All`.
+    pub fn with_overrides(
+        self,
+        overrides: impl IntoIterator<Item = (String, ToolApprovalAction)>,
+    ) -> Self {
+        match self {
+            Self::Custom { mut rules, default } => {
+                for (name, action) in overrides {
+                    rules.insert(name, action);
+                }
+                Self::Custom { rules, default }
+            }
+            other => other,
+        }
+    }
+
     pub fn action_for(&self, tool_name: &str) -> ToolApprovalAction {
+        let stripped = strip_tool_prefix(tool_name);
         match self {
             Self::None => ToolApprovalAction::Ask,
             Self::All => ToolApprovalAction::Approve,
-            Self::Custom { rules, default } => rules.get(tool_name).copied().unwrap_or(*default),
+            Self::Custom { rules, default } => rules.get(stripped).copied().unwrap_or(*default),
         }
     }
+}
+
+/// Strip MCP server prefix from tool name (e.g. "stakpak__run_command" -> "run_command").
+fn strip_tool_prefix(name: &str) -> &str {
+    if let Some(pos) = name.find("__")
+        && pos + 2 < name.len()
+    {
+        return &name[pos + 2..];
+    }
+    name
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,4 +320,111 @@ pub struct AgentLoopResult {
     pub total_usage: TokenUsage,
     pub stop_reason: StopReason,
     pub messages: Vec<stakai::Message>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_defaults_auto_approves_readonly_tools() {
+        let policy = ToolApprovalPolicy::with_defaults();
+        for tool in DEFAULT_AUTO_APPROVE_TOOLS {
+            assert_eq!(
+                policy.action_for(tool),
+                ToolApprovalAction::Approve,
+                "{tool} should be auto-approved"
+            );
+        }
+    }
+
+    #[test]
+    fn with_defaults_asks_for_mutating_tools() {
+        let policy = ToolApprovalPolicy::with_defaults();
+        for tool in DEFAULT_ASK_TOOLS {
+            assert_eq!(
+                policy.action_for(tool),
+                ToolApprovalAction::Ask,
+                "{tool} should require approval"
+            );
+        }
+    }
+
+    #[test]
+    fn with_defaults_asks_for_unknown_tools() {
+        let policy = ToolApprovalPolicy::with_defaults();
+        assert_eq!(
+            policy.action_for("some_unknown_tool"),
+            ToolApprovalAction::Ask
+        );
+    }
+
+    #[test]
+    fn with_overrides_promotes_tool_to_approve() {
+        let policy = ToolApprovalPolicy::with_defaults()
+            .with_overrides([("run_command".to_string(), ToolApprovalAction::Approve)]);
+        assert_eq!(
+            policy.action_for("run_command"),
+            ToolApprovalAction::Approve
+        );
+        // Other mutating tools unchanged
+        assert_eq!(policy.action_for("create"), ToolApprovalAction::Ask);
+    }
+
+    #[test]
+    fn with_overrides_can_deny_tool() {
+        let policy = ToolApprovalPolicy::with_defaults()
+            .with_overrides([("remove".to_string(), ToolApprovalAction::Deny)]);
+        assert_eq!(policy.action_for("remove"), ToolApprovalAction::Deny);
+    }
+
+    #[test]
+    fn with_overrides_noop_on_none_and_all() {
+        let none = ToolApprovalPolicy::None
+            .with_overrides([("view".to_string(), ToolApprovalAction::Approve)]);
+        assert_eq!(none.action_for("view"), ToolApprovalAction::Ask);
+
+        let all = ToolApprovalPolicy::All
+            .with_overrides([("view".to_string(), ToolApprovalAction::Deny)]);
+        assert_eq!(all.action_for("view"), ToolApprovalAction::Approve);
+    }
+
+    #[test]
+    fn action_for_strips_mcp_prefix() {
+        let policy = ToolApprovalPolicy::with_defaults();
+        assert_eq!(
+            policy.action_for("stakpak__view"),
+            ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            policy.action_for("stakpak__run_command"),
+            ToolApprovalAction::Ask
+        );
+    }
+
+    #[test]
+    fn action_for_handles_edge_case_prefixes() {
+        let policy = ToolApprovalPolicy::with_defaults();
+        // No prefix — works as-is
+        assert_eq!(policy.action_for("view"), ToolApprovalAction::Approve);
+        // Double-underscore at end — no stripping (nothing after __)
+        assert_eq!(policy.action_for("view__"), ToolApprovalAction::Ask);
+        // Prefix with unknown tool
+        assert_eq!(
+            policy.action_for("other__unknown_tool"),
+            ToolApprovalAction::Ask
+        );
+    }
+
+    #[test]
+    fn strip_tool_prefix_cases() {
+        assert_eq!(strip_tool_prefix("stakpak__run_command"), "run_command");
+        assert_eq!(strip_tool_prefix("run_command"), "run_command");
+        assert_eq!(strip_tool_prefix("view"), "view");
+        assert_eq!(strip_tool_prefix("prefix__tool"), "tool");
+        // Edge: __ at end with nothing after — returns original
+        assert_eq!(strip_tool_prefix("bad__"), "bad__");
+        // Edge: starts with __
+        assert_eq!(strip_tool_prefix("__tool"), "tool");
+    }
 }

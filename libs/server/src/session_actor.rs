@@ -146,7 +146,7 @@ async fn run_session_actor(
         max_turns: MAX_TURNS,
         max_output_tokens: 0,
         provider_options: None,
-        auto_approve: state.auto_approve_policy.clone(),
+        tool_approval: state.tool_approval_policy.clone(),
         context: ContextConfig::default(),
         retry: RetryConfig::default(),
         compaction: CompactionConfig::default(),
