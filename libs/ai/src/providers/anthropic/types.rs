@@ -413,9 +413,14 @@ pub struct AnthropicSource {
 }
 
 /// Anthropic usage statistics
+///
+/// Both `input_tokens` and `output_tokens` default to 0 when absent.
+/// The `message_start` event includes both, but `message_delta` only has `output_tokens`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnthropicUsage {
+    #[serde(default)]
     pub input_tokens: u32,
+    #[serde(default)]
     pub output_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u32>,

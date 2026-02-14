@@ -921,6 +921,7 @@ impl AgentClient {
         let cheap_models: &[(&str, &str)] = &[
             ("stakpak", "claude-haiku-4-5"),
             ("anthropic", "claude-haiku-4-5"),
+            ("amazon-bedrock", "claude-haiku-4-5"),
             ("openai", "gpt-4.1-mini"),
             ("google", "gemini-2.5-flash"),
         ];
