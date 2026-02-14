@@ -90,7 +90,7 @@ Content creators will be featured on our social media and newsletter.
 
 ### Prerequisites
 
-- **Rust 1.89.0 or later** - Install from [rustup.rs](https://rustup.rs/)
+- **Rust 1.91.0 or later** - Install from [rustup.rs](https://rustup.rs/)
 - **Git** - For version control
 - **Cargo** - Comes with Rust
 - **OpenSSL development libraries** (Linux only):

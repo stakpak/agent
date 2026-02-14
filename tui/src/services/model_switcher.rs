@@ -82,6 +82,8 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
             "anthropic" => "Anthropic",
             "openai" => "OpenAI",
             "google" => "Google",
+            "gemini" => "Google Gemini",
+            "amazon-bedrock" => "Amazon Bedrock",
             "stakpak" => "Stakpak",
             _ => *provider,
         };

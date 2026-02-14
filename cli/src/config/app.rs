@@ -641,7 +641,10 @@ impl AppConfig {
     /// Add custom providers (non-built-in) from the providers HashMap.
     fn add_custom_providers(&self, config: &mut LLMProviderConfig) {
         for (name, provider_config) in &self.providers {
-            if !matches!(name.as_str(), "openai" | "anthropic" | "gemini") {
+            if !matches!(
+                name.as_str(),
+                "openai" | "anthropic" | "gemini" | "amazon-bedrock"
+            ) {
                 config.add_provider(name, provider_config.clone());
             }
         }
@@ -683,6 +686,23 @@ impl AppConfig {
                 },
             );
         }
+        // Bedrock uses AWS credential chain — no API key resolution needed.
+        // Just pass through the config if present.
+        if let Some(bedrock) = self.get_bedrock_config() {
+            config.add_provider("amazon-bedrock", bedrock);
+        }
+    }
+
+    /// Get Bedrock provider config if configured.
+    ///
+    /// Unlike other providers, Bedrock does not need credential resolution —
+    /// authentication is handled by the AWS credential chain (env vars, shared
+    /// credentials, SSO, instance roles).
+    pub fn get_bedrock_config(&self) -> Option<ProviderConfig> {
+        self.providers
+            .get("amazon-bedrock")
+            .filter(|p| matches!(p, ProviderConfig::Bedrock { .. }))
+            .cloned()
     }
 
     /// Build LLMProviderConfig from the app configuration.
@@ -799,8 +819,11 @@ impl AppConfig {
             .or(self.smart_model.as_deref())
             .unwrap_or("claude-opus-4-5");
 
+        // Extract explicit provider prefix if present (e.g., "amazon-bedrock/claude-sonnet-4-5")
+        let explicit_provider = model_str.find('/').map(|idx| &model_str[..idx]);
+
         // Search the model catalog
-        stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {
+        let model = stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {
             // Model not found in catalog - create a custom model
             // Extract provider from prefix if present
             let (provider, model_id) = if let Some(idx) = model_str.find('/') {
@@ -818,7 +841,22 @@ impl AppConfig {
             };
 
             stakpak_api::Model::custom(final_id, final_provider)
-        })
+        });
+
+        // If the user specified an explicit provider prefix (e.g., "amazon-bedrock/..."),
+        // ensure the resolved model uses that provider — the catalog may have returned
+        // the model under a different provider (e.g., "anthropic" instead of "amazon-bedrock").
+        if let Some(prefix) = explicit_provider
+            && !use_stakpak
+            && model.provider != prefix
+        {
+            return stakpak_api::Model {
+                provider: prefix.to_string(),
+                ..model
+            };
+        }
+
+        model
     }
 }
 
