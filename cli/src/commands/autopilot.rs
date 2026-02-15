@@ -216,6 +216,9 @@ pub enum AutopilotChannelCommands {
     List,
 
     /// Add a channel
+    #[command(
+        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add scopes: app_mentions:read, chat:write, im:history, im:read, im:write\n    4. Event Subscriptions → subscribe to: app_mention, message.im\n    5. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n"
+    )]
     Add {
         /// Channel type (slack, telegram, discord)
         #[arg(value_enum)]
@@ -1489,7 +1492,7 @@ async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), St
                 ChannelType::Telegram => {
                     let tok = token
                         .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok())
-                        .ok_or("Telegram token required. Use --token or set TELEGRAM_BOT_TOKEN")?;
+                        .ok_or("Telegram token required. Use --token or set TELEGRAM_BOT_TOKEN\n\n  To get a token: message @BotFather on Telegram → /newbot → copy the bot token")?;
                     config.channels.telegram = Some(stakpak_gateway::config::TelegramConfig {
                         token: tok,
                         require_mention: false,
@@ -1498,7 +1501,7 @@ async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), St
                 ChannelType::Discord => {
                     let tok = token
                         .or_else(|| std::env::var("DISCORD_BOT_TOKEN").ok())
-                        .ok_or("Discord token required. Use --token or set DISCORD_BOT_TOKEN")?;
+                        .ok_or("Discord token required. Use --token or set DISCORD_BOT_TOKEN\n\n  To get a token: https://discord.com/developers/applications → create app → Bot tab → copy token")?;
                     config.channels.discord = Some(stakpak_gateway::config::DiscordConfig {
                         token: tok,
                         guilds: Vec::new(),
@@ -1508,12 +1511,12 @@ async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), St
                     let bot = bot_token
                         .or_else(|| std::env::var("SLACK_BOT_TOKEN").ok())
                         .ok_or(
-                            "Slack bot token required. Use --bot-token or set SLACK_BOT_TOKEN",
+                            "Slack bot token required. Use --bot-token or set SLACK_BOT_TOKEN\n\n  To get tokens: https://api.slack.com/apps → create app → enable Socket Mode\n  → OAuth & Permissions → Install to Workspace → copy Bot User OAuth Token (xoxb-...)",
                         )?;
                     let app = app_token
                         .or_else(|| std::env::var("SLACK_APP_TOKEN").ok())
                         .ok_or(
-                            "Slack app token required. Use --app-token or set SLACK_APP_TOKEN",
+                            "Slack app token required. Use --app-token or set SLACK_APP_TOKEN\n\n  To get tokens: https://api.slack.com/apps → your app → Socket Mode\n  → generate app-level token with connections:write scope (xapp-...)",
                         )?;
                     config.channels.slack = Some(stakpak_gateway::config::SlackConfig {
                         bot_token: bot,
