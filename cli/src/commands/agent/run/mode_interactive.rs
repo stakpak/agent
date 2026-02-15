@@ -286,6 +286,8 @@ pub async fn run_interactive(
                 enable_mtls,
                 enable_subagents,
                 allowed_tools: allowed_tools_for_tui.clone(),
+                profile_name: Some(ctx_clone.profile_name.clone()),
+                config_path: Some(ctx_clone.config_path.clone()),
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
             let (mcp_client, mcp_tools, tools, _server_shutdown_tx, _proxy_shutdown_tx) =
@@ -1301,12 +1303,6 @@ pub async fn run_interactive(
                 && std::env::var("STAKPAK_SKIP_WARDEN").is_err();
 
             if should_use_warden {
-                // Set the profile environment variable so warden knows which profile to use
-                // This is safe because we're setting it for the current process before re-execution
-                unsafe {
-                    std::env::set_var("STAKPAK_PROFILE", &ctx.profile_name);
-                }
-
                 // Re-execute stakpak inside warden container
                 if let Err(e) =
                     warden::run_stakpak_in_warden(ctx, &std::env::args().collect::<Vec<_>>()).await

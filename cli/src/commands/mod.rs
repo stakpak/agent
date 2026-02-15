@@ -765,6 +765,8 @@ impl Commands {
                     enable_mtls: true,
                     enable_subagents: true,
                     allowed_tools,
+                    profile_name: Some(config.profile_name.clone()),
+                    config_path: Some(config.config_path.clone()),
                 };
 
                 let mcp_init_result =

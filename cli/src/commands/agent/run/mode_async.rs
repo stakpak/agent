@@ -200,6 +200,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
         enable_mtls: config.enable_mtls,
         enable_subagents: config.enable_subagents,
         allowed_tools: config.allowed_tools.clone(),
+        profile_name: Some(ctx.profile_name.clone()),
+        config_path: Some(ctx.config_path.clone()),
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;

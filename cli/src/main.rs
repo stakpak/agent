@@ -210,18 +210,8 @@ async fn main() {
         .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
         .unwrap_or_else(|| "default".to_string());
 
-    // Set so child processes (e.g. MCP server, dynamic subagents) inherit the same profile
-    // SAFETY: Single-threaded at this point; no other thread reads STAKPAK_PROFILE during startup.
-    unsafe { std::env::set_var("STAKPAK_PROFILE", &profile_name) };
-
     match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
-            // Set config path so child processes (MCP server, subagents) use the same config file
-            // SAFETY: Single-threaded; no other thread reads STAKPAK_CONFIG_PATH during startup.
-            unsafe {
-                std::env::set_var("STAKPAK_CONFIG_PATH", &config.config_path);
-            }
-
             // Check if warden is enabled in profile and we're not already inside warden
             let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
                 && std::env::var("STAKPAK_SKIP_WARDEN").is_err()

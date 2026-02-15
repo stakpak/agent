@@ -38,6 +38,10 @@ pub struct McpInitConfig {
     pub enable_subagents: bool,
     /// Optional list of allowed tool names (filters tools if specified)
     pub allowed_tools: Option<Vec<String>>,
+    /// Profile name for subagent inheritance
+    pub profile_name: Option<String>,
+    /// Config file path for subagent inheritance
+    pub config_path: Option<String>,
 }
 
 impl Default for McpInitConfig {
@@ -49,6 +53,8 @@ impl Default for McpInitConfig {
             enable_mtls: true,
             enable_subagents: true,
             allowed_tools: None,
+            profile_name: None,
+            config_path: None,
         }
     }
 }
@@ -133,6 +139,8 @@ async fn start_mcp_server(
     let privacy_mode = mcp_config.privacy_mode;
     let enabled_tools = mcp_config.enabled_tools.clone();
     let enable_subagents = mcp_config.enable_subagents;
+    let profile_name = mcp_config.profile_name.clone();
+    let config_path = mcp_config.config_path.clone();
 
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
@@ -144,6 +152,8 @@ async fn start_mcp_server(
             tool_mode: ToolMode::Combined,
             enable_subagents,
             certificate_chain: cert_chain,
+            profile_name,
+            config_path,
         };
 
         // Signal that we're about to start

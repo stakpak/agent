@@ -127,6 +127,10 @@ pub struct MCPServerConfig {
     pub tool_mode: ToolMode,
     pub enable_subagents: bool,
     pub certificate_chain: Arc<Option<CertificateChain>>,
+    /// Profile name for subagent inheritance (avoids unsafe env var mutation)
+    pub profile_name: Option<String>,
+    /// Config file path for subagent inheritance (avoids unsafe env var mutation)
+    pub config_path: Option<String>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -239,6 +243,8 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                config.profile_name.clone(),
+                config.config_path.clone(),
             )
         }
         ToolMode::RemoteOnly => {
@@ -258,6 +264,8 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                config.profile_name.clone(),
+                config.config_path.clone(),
             )
         }
         ToolMode::Combined => {
@@ -279,6 +287,8 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                config.profile_name.clone(),
+                config.config_path.clone(),
             )
         }
     }

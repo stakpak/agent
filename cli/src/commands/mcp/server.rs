@@ -59,6 +59,8 @@ pub async fn run_server(
             enable_subagents: true,
             bind_address,
             certificate_chain: Arc::new(certificate_chain),
+            profile_name: Some(config.profile_name.clone()),
+            config_path: Some(config.config_path.clone()),
         },
         Some(listener),
         None,
