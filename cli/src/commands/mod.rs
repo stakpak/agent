@@ -17,7 +17,7 @@ pub mod mcp;
 pub mod warden;
 pub mod watch;
 
-use autopilot::{SetupArgs, StartArgs, StopArgs};
+use autopilot::{StartArgs, StopArgs};
 
 pub use auth::AuthCommands;
 pub use autopilot::AutopilotCommands;
@@ -178,13 +178,6 @@ pub enum Commands {
     #[command(subcommand)]
     Autopilot(AutopilotCommands),
 
-    /// Alias for `stakpak autopilot init`
-    #[command(hide = true)]
-    Onboard {
-        #[command(flatten)]
-        args: SetupArgs,
-    },
-
     /// Start autopilot — auto-configures on first run (alias: stakpak autopilot up)
     Up {
         #[command(flatten)]
@@ -247,7 +240,6 @@ impl Commands {
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
                 | Commands::Autopilot(_)
-                | Commands::Onboard { .. }
                 | Commands::Up { .. }
                 | Commands::Down { .. }
         )
@@ -495,9 +487,6 @@ impl Commands {
             Commands::Autopilot(autopilot_command) => {
                 autopilot_command.run(config).await?;
             }
-            Commands::Onboard { args } => {
-                AutopilotCommands::Init { args }.run(config).await?;
-            }
             Commands::Up { args } => {
                 AutopilotCommands::Up {
                     args,
@@ -738,8 +727,9 @@ mod tests {
             no_auth: false,
             model: None,
             auto_approve_all: false,
-            json: false,
             foreground: false,
+            non_interactive: false,
+            force: false,
         };
         // Without --foreground, args.foreground should be false (background/service mode)
         assert!(!args.foreground);

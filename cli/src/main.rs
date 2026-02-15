@@ -581,22 +581,6 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_onboard_alias_flags() {
-        let parsed = Cli::try_parse_from(["stakpak", "onboard", "--non-interactive", "--json"]);
-        assert!(parsed.is_ok());
-
-        if let Ok(cli) = parsed {
-            match cli.command {
-                Some(Commands::Onboard { args }) => {
-                    assert!(args.non_interactive);
-                    assert!(args.json);
-                }
-                _ => panic!("Expected onboard command"),
-            }
-        }
-    }
-
-    #[test]
     fn cli_parses_up_alias_foreground_flag() {
         let parsed = Cli::try_parse_from(["stakpak", "up", "--foreground"]);
         assert!(parsed.is_ok());
@@ -642,14 +626,16 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_up_json_and_foreground_flags() {
-        let parsed = Cli::try_parse_from(["stakpak", "up", "--json", "--foreground"]);
+    fn cli_parses_up_non_interactive_and_force_flags() {
+        let parsed =
+            Cli::try_parse_from(["stakpak", "up", "--non-interactive", "--force", "--foreground"]);
         assert!(parsed.is_ok());
 
         if let Ok(cli) = parsed {
             match cli.command {
                 Some(Commands::Up { args }) => {
-                    assert!(args.json);
+                    assert!(args.non_interactive);
+                    assert!(args.force);
                     assert!(args.foreground);
                 }
                 _ => panic!("Expected up command"),
@@ -668,24 +654,6 @@ mod tests {
         );
 
         assert!(
-            !Commands::Onboard {
-                args: commands::autopilot::SetupArgs {
-                    force: false,
-                    non_interactive: true,
-                    yes: false,
-                    skip_service_install: true,
-                    bind: None,
-                    show_token: false,
-                    no_auth: false,
-                    model: None,
-                    auto_approve_all: false,
-                    json: true,
-                }
-            }
-            .requires_auth()
-        );
-
-        assert!(
             !Commands::Up {
                 args: commands::autopilot::StartArgs {
                     bind: "127.0.0.1:4096".to_string(),
@@ -693,8 +661,9 @@ mod tests {
                     no_auth: false,
                     model: None,
                     auto_approve_all: false,
-                    json: false,
                     foreground: false,
+                    non_interactive: false,
+                    force: false,
                 },
             }
             .requires_auth()
