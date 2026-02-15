@@ -1,7 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
-    user_message,
+    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command,
+    tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
