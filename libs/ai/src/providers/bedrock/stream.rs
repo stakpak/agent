@@ -78,7 +78,7 @@ pub async fn create_stream(
                     break;
                 }
                 Err(e) => {
-                    yield Err(Error::stream_error(format!("Bedrock stream error: {}", e)));
+                    yield Err(Error::stream_error(format!("Bedrock stream error: {:?}", e)));
                     break;
                 }
             }
