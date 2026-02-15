@@ -286,8 +286,10 @@ pub async fn run_interactive(
                 enable_mtls,
                 enable_subagents,
                 allowed_tools: allowed_tools_for_tui.clone(),
-                profile_name: Some(ctx_clone.profile_name.clone()),
-                config_path: Some(ctx_clone.config_path.clone()),
+                subagent_config: stakpak_mcp_server::SubagentConfig {
+                    profile_name: Some(ctx_clone.profile_name.clone()),
+                    config_path: Some(ctx_clone.config_path.clone()),
+                },
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
             let (mcp_client, mcp_tools, tools, _server_shutdown_tx, _proxy_shutdown_tx) =

@@ -173,8 +173,8 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
 
         let session_id = self.get_session_id(&ctx);
         // Use the main agent's profile and config path, passed explicitly through config structs.
-        let profile_name = self.profile_name.clone();
-        let config_path = self.config_path.clone();
+        let profile_name = self.subagent_config.profile_name.clone();
+        let config_path = self.subagent_config.config_path.clone();
         let max_steps = max_steps.unwrap_or(30);
 
         let model = if let Some(serde_json::Value::String(model_id)) = ctx.meta.get("model_id") {

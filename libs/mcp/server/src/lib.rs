@@ -118,6 +118,13 @@ impl AuthConfig {
     }
 }
 
+/// Configuration inherited by subagents so they use the same profile and config as the parent.
+#[derive(Clone, Debug, Default)]
+pub struct SubagentConfig {
+    pub profile_name: Option<String>,
+    pub config_path: Option<String>,
+}
+
 pub struct MCPServerConfig {
     pub client: Option<Arc<dyn AgentProvider>>,
     pub bind_address: String,
@@ -127,10 +134,7 @@ pub struct MCPServerConfig {
     pub tool_mode: ToolMode,
     pub enable_subagents: bool,
     pub certificate_chain: Arc<Option<CertificateChain>>,
-    /// Profile name for subagent inheritance (avoids unsafe env var mutation)
-    pub profile_name: Option<String>,
-    /// Config file path for subagent inheritance (avoids unsafe env var mutation)
-    pub config_path: Option<String>,
+    pub subagent_config: SubagentConfig,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -243,8 +247,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
-                config.profile_name.clone(),
-                config.config_path.clone(),
+                config.subagent_config.clone(),
             )
         }
         ToolMode::RemoteOnly => {
@@ -264,8 +267,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
-                config.profile_name.clone(),
-                config.config_path.clone(),
+                config.subagent_config.clone(),
             )
         }
         ToolMode::Combined => {
@@ -287,8 +289,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
-                config.profile_name.clone(),
-                config.config_path.clone(),
+                config.subagent_config.clone(),
             )
         }
     }

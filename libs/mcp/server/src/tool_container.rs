@@ -1,4 +1,4 @@
-use super::EnabledToolsConfig;
+use super::{EnabledToolsConfig, SubagentConfig};
 use rmcp::tool_handler;
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
@@ -18,10 +18,7 @@ pub struct ToolContainer {
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
-    /// Profile name for subagent inheritance (passed explicitly instead of env var)
-    pub profile_name: Option<String>,
-    /// Config file path for subagent inheritance (passed explicitly instead of env var)
-    pub config_path: Option<String>,
+    pub subagent_config: SubagentConfig,
 }
 
 #[tool_router]
@@ -33,8 +30,7 @@ impl ToolContainer {
         enabled_tools: EnabledToolsConfig,
         task_manager: Arc<TaskManagerHandle>,
         tool_router: ToolRouter<Self>,
-        profile_name: Option<String>,
-        config_path: Option<String>,
+        subagent_config: SubagentConfig,
     ) -> Result<Self, String> {
         Ok(Self {
             client,
@@ -43,8 +39,7 @@ impl ToolContainer {
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
             enabled_tools,
             tool_router,
-            profile_name,
-            config_path,
+            subagent_config,
         })
     }
 

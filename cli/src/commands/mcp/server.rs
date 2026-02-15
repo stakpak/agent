@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 
 use crate::utils::network;
@@ -59,8 +59,10 @@ pub async fn run_server(
             enable_subagents: true,
             bind_address,
             certificate_chain: Arc::new(certificate_chain),
-            profile_name: Some(config.profile_name.clone()),
-            config_path: Some(config.config_path.clone()),
+            subagent_config: SubagentConfig {
+                profile_name: Some(config.profile_name.clone()),
+                config_path: Some(config.config_path.clone()),
+            },
         },
         Some(listener),
         None,
