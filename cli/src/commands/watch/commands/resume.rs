@@ -8,8 +8,8 @@ use crate::commands::watch::{RunStatus, ScheduleConfig, ScheduleDb};
 /// take over the session interactively where the autopilot service left off.
 pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
     // Load configuration
-    let config =
-        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();

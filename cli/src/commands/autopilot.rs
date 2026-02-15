@@ -584,10 +584,7 @@ struct AutopilotChannelStatusJson {
     alerts_only: bool,
 }
 
-async fn start_autopilot(
-    config: &mut AppConfig,
-    options: StartOptions,
-) -> Result<(), String> {
+async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Result<(), String> {
     let autopilot_config_path = AutopilotConfigFile::path();
     let needs_setup = !autopilot_config_path.exists() || options.force;
 
@@ -615,7 +612,10 @@ async fn start_autopilot(
 
         // Write default config template (or overwrite with --force)
         write_default_autopilot_config(&autopilot_config_path, options.force).await?;
-        println!("✓ Autopilot config created: {}", autopilot_config_path.display());
+        println!(
+            "✓ Autopilot config created: {}",
+            autopilot_config_path.display()
+        );
 
         // Pick up channel tokens from environment
         let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN").ok();
@@ -635,18 +635,16 @@ async fn start_autopilot(
             .unwrap_or_default();
 
             if let Some(token) = telegram_token {
-                gateway_config.channels.telegram =
-                    Some(stakpak_gateway::config::TelegramConfig {
-                        token,
-                        require_mention: false,
-                    });
+                gateway_config.channels.telegram = Some(stakpak_gateway::config::TelegramConfig {
+                    token,
+                    require_mention: false,
+                });
             }
             if let Some(token) = discord_token {
-                gateway_config.channels.discord =
-                    Some(stakpak_gateway::config::DiscordConfig {
-                        token,
-                        guilds: Vec::new(),
-                    });
+                gateway_config.channels.discord = Some(stakpak_gateway::config::DiscordConfig {
+                    token,
+                    guilds: Vec::new(),
+                });
             }
             if let (Some(bot_token), Some(app_token)) = (slack_bot_token, slack_app_token) {
                 gateway_config.channels.slack = Some(stakpak_gateway::config::SlackConfig {
@@ -777,34 +775,30 @@ async fn start_foreground_runtime(
 
         // Each component gets its own fmt layer with a target-based filter.
         let scheduler_layer = tracing_subscriber::fmt::layer()
-            .with_writer(
-                scheduler_nb.with_filter(|meta: &tracing::Metadata<'_>| {
-                    meta.target().starts_with("stakpak::commands::watch")
-                }),
-            )
+            .with_writer(scheduler_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                meta.target().starts_with("stakpak::commands::watch")
+            }))
             .with_target(true)
             .with_ansi(false);
 
         let server_layer = tracing_subscriber::fmt::layer()
-            .with_writer(
-                server_nb.with_filter(|meta: &tracing::Metadata<'_>| {
-                    meta.target().starts_with("stakpak_server")
-                }),
-            )
+            .with_writer(server_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                meta.target().starts_with("stakpak_server")
+            }))
             .with_target(true)
             .with_ansi(false);
 
         let gateway_layer = tracing_subscriber::fmt::layer()
-            .with_writer(
-                gateway_nb.with_filter(|meta: &tracing::Metadata<'_>| {
-                    meta.target().starts_with("stakpak_gateway")
-                }),
-            )
+            .with_writer(gateway_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                meta.target().starts_with("stakpak_gateway")
+            }))
             .with_target(true)
             .with_ansi(false);
 
-        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "info,stakpak=info,stakpak_server=info,stakpak_gateway=info".into());
+        let env_filter =
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "info,stakpak=info,stakpak_server=info,stakpak_gateway=info".into()
+            });
 
         // Best-effort: if a global subscriber is already set (e.g. --debug), skip.
         let _ = tracing_subscriber::registry()
@@ -1311,12 +1305,12 @@ async fn restart_autopilot() -> Result<(), String> {
         println!("✓ Autopilot service restarted (scheduler, server, gateway)");
     } else if let Some(pid) = is_autopilot_running() {
         println!("\nAutopilot is running in foreground mode (PID {}).", pid);
-        println!("Stop it with Ctrl-C or `stakpak autopilot down`, then start again with `stakpak up`.");
+        println!(
+            "Stop it with Ctrl-C or `stakpak autopilot down`, then start again with `stakpak up`."
+        );
         println!("Configuration has been validated and will take effect on next start.");
     } else {
-        return Err(
-            "Autopilot is not running. Start it with `stakpak up`.".to_string(),
-        );
+        return Err("Autopilot is not running. Start it with `stakpak up`.".to_string());
     }
 
     Ok(())
@@ -1964,11 +1958,17 @@ async fn logs_autopilot(
         vec![file]
     } else {
         // Show all component logs plus legacy stdout/stderr
-        ["scheduler.log", "server.log", "gateway.log", "stdout.log", "stderr.log"]
-            .iter()
-            .map(|f| log_dir.join(f))
-            .filter(|p| p.exists())
-            .collect()
+        [
+            "scheduler.log",
+            "server.log",
+            "gateway.log",
+            "stdout.log",
+            "stderr.log",
+        ]
+        .iter()
+        .map(|f| log_dir.join(f))
+        .filter(|p| p.exists())
+        .collect()
     };
 
     if log_files.is_empty() {

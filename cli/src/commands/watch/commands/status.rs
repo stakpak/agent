@@ -1,6 +1,8 @@
 //! Autopilot status command - shows autopilot status and schedule information.
 
-use crate::commands::watch::{ListRunsFilter, RunStatus, ScheduleConfig, ScheduleDb, is_process_running};
+use crate::commands::watch::{
+    ListRunsFilter, RunStatus, ScheduleConfig, ScheduleDb, is_process_running,
+};
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use std::str::FromStr;
@@ -111,7 +113,10 @@ fn calculate_next_run(cron_expr: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Get the last run info for a schedule.
-async fn get_last_run_info(db: &ScheduleDb, schedule_name: &str) -> Option<(DateTime<Utc>, String)> {
+async fn get_last_run_info(
+    db: &ScheduleDb,
+    schedule_name: &str,
+) -> Option<(DateTime<Utc>, String)> {
     let filter = ListRunsFilter {
         schedule_name: Some(schedule_name.to_string()),
         status: None,

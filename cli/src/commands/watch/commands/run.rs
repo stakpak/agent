@@ -9,7 +9,7 @@
 //! 6. Handles graceful shutdown on SIGTERM/SIGINT
 
 use crate::commands::watch::{
-    RunStatus, SpawnConfig, ScheduleConfig, ScheduleDb, Scheduler, assemble_prompt,
+    RunStatus, ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig, assemble_prompt,
     is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};

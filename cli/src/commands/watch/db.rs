@@ -830,7 +830,9 @@ mod tests {
         assert!(state.is_none());
 
         // Set state
-        db.set_autopilot_state(12345).await.expect("Set state failed");
+        db.set_autopilot_state(12345)
+            .await
+            .expect("Set state failed");
 
         let state = db
             .get_autopilot_state()
@@ -853,7 +855,9 @@ mod tests {
         assert!(state2.last_heartbeat >= state.last_heartbeat);
 
         // Clear state
-        db.clear_autopilot_state().await.expect("Clear state failed");
+        db.clear_autopilot_state()
+            .await
+            .expect("Clear state failed");
 
         let state = db.get_autopilot_state().await.expect("Get state failed");
         assert!(state.is_none());

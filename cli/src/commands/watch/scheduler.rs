@@ -242,9 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_schedule() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Standard 5-part cron expression (converted internally to 6-part)
         let schedule = create_test_schedule("test-schedule", "0 * * * *");
@@ -256,9 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_multiple_schedules() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Standard 5-part cron expressions
         let schedules = vec![
@@ -275,9 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_cron_expression() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         let schedule = create_test_schedule("bad-schedule", "invalid cron");
         let result = scheduler.register_schedule(schedule).await;
@@ -291,9 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_start_and_shutdown() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Standard 5-part cron expression
         let schedule = create_test_schedule("test-schedule", "0 * * * *");
@@ -316,9 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_job_execution() {
-        let (mut scheduler, mut rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, mut rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Use a very frequent schedule - must use 6-part here since 5-part can't express "every second"
         // This is the only case where 6-part is needed (sub-minute scheduling)
@@ -348,9 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_various_cron_expressions() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Standard 5-part cron expressions (converted internally)
         let expressions = [
@@ -379,9 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_tick_for_job() {
-        let (mut scheduler, _rx) = Scheduler::new()
-            .await
-            .expect("Failed to create scheduler");
+        let (mut scheduler, _rx) = Scheduler::new().await.expect("Failed to create scheduler");
 
         // Standard 5-part cron expression
         let schedule = create_test_schedule("test-schedule", "0 * * * *");

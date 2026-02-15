@@ -26,7 +26,10 @@ pub async fn init_config(force: bool) -> Result<(), String> {
     std::fs::write(&config_path, SAMPLE_CONFIG)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
-    println!("Created autopilot configuration at: {}", config_path.display());
+    println!(
+        "Created autopilot configuration at: {}",
+        config_path.display()
+    );
     println!("\nEdit this file to configure your schedules, then run:");
     println!("  stakpak autopilot up");
     println!("\nOr install as a system service:");

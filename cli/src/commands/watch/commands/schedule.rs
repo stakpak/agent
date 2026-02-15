@@ -7,8 +7,8 @@ use crate::commands::watch::{
 /// Show detailed information about a schedule.
 pub async fn show_schedule(name: &str) -> Result<(), String> {
     // Load configuration
-    let config =
-        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the schedule
     let schedule = config
@@ -108,8 +108,8 @@ pub async fn show_schedule(name: &str) -> Result<(), String> {
 /// Manually fire a schedule or perform a dry run.
 pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
     // Load configuration
-    let config =
-        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the schedule
     let schedule = config

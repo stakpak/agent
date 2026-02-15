@@ -715,7 +715,8 @@ check_timeout = "2m"
 db_path = "/custom/path/watch.db"
 "#;
 
-        let config = ScheduleConfig::parse(config_str).expect("Should parse config with no schedules");
+        let config =
+            ScheduleConfig::parse(config_str).expect("Should parse config with no schedules");
         assert!(config.schedules.is_empty());
     }
 
@@ -874,7 +875,8 @@ prompt = "Test"
 trigger_on = "success"
 "#;
 
-        let config = ScheduleConfig::parse(config_str).expect("Should parse trigger_on with defaults");
+        let config =
+            ScheduleConfig::parse(config_str).expect("Should parse trigger_on with defaults");
 
         // First schedule should use default (failure)
         assert_eq!(

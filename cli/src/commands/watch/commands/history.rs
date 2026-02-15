@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 /// Show run history for all schedules or a specific schedule.
 pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Result<(), String> {
     // Load configuration
-    let config =
-        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -91,8 +91,8 @@ pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Re
 /// Show detailed information about a specific run.
 pub async fn show_run(run_id: i64) -> Result<(), String> {
     // Load configuration
-    let config =
-        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();

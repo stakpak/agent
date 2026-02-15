@@ -627,8 +627,13 @@ mod tests {
 
     #[test]
     fn cli_parses_up_non_interactive_and_force_flags() {
-        let parsed =
-            Cli::try_parse_from(["stakpak", "up", "--non-interactive", "--force", "--foreground"]);
+        let parsed = Cli::try_parse_from([
+            "stakpak",
+            "up",
+            "--non-interactive",
+            "--force",
+            "--foreground",
+        ]);
         assert!(parsed.is_ok());
 
         if let Ok(cli) = parsed {

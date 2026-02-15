@@ -32,10 +32,7 @@ pub async fn reload_autopilot() -> Result<(), String> {
 
     // 2. Check if a system service is installed and restart it
     if let Some(service_path) = installed_service_path() {
-        println!(
-            "  ✓ Service installed ({})",
-            service_path.display()
-        );
+        println!("  ✓ Service installed ({})", service_path.display());
         println!();
         println!("Restarting autopilot service...");
         stop_service()?;
@@ -96,7 +93,10 @@ fn stop_service() -> Result<(), String> {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // "could not find service" is fine — means it wasn't running
-            if stderr.to_ascii_lowercase().contains("could not find service") {
+            if stderr
+                .to_ascii_lowercase()
+                .contains("could not find service")
+            {
                 Ok(())
             } else {
                 Err(format!("Failed to stop launchd service: {}", stderr))
