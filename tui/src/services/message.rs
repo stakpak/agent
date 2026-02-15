@@ -333,7 +333,13 @@ pub struct Message {
 }
 
 /// Tags to strip from user message display
-const HIDDEN_XML_TAGS: &[&str] = &["local_context", "rulebooks", "agent_mode", "agents_md"];
+const HIDDEN_XML_TAGS: &[&str] = &[
+    "local_context",
+    "rulebooks",
+    "agent_mode",
+    "agents_md",
+    "apps_md",
+];
 
 /// Strip XML-style blocks from text (e.g., <tag>...</tag>)
 fn strip_xml_block(text: &mut String, tag: &str) {

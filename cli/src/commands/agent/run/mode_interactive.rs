@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command,
+    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command,
     extract_last_checkpoint_id, refresh_billing_info, tool_call_history_string, tool_result,
     user_message,
 };
@@ -16,6 +16,7 @@ use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
+use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
@@ -31,7 +32,7 @@ use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v2.md");
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v3.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -129,6 +130,7 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    pub apps_md: Option<AppsMdInfo>,
     /// When true, send init_prompt_content as first user message on session start (stakpak init)
     pub send_init_prompt_on_start: bool,
 }
@@ -162,6 +164,7 @@ pub async fn run_interactive(
         let system_prompt = config.system_prompt.clone();
         let enable_subagents = config.enable_subagents;
         let agents_md = config.agents_md.clone();
+        let apps_md = config.apps_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let session_id = config.session_id.clone();
         let allowed_tools = config.allowed_tools.clone();
@@ -443,6 +446,15 @@ pub async fn run_interactive(
                             && let Some(agents_md_info) = &agents_md
                         {
                             let (user_input, _) = add_agents_md(&user_input, agents_md_info);
+                            user_input
+                        } else {
+                            user_input
+                        };
+
+                        let user_input = if messages.is_empty()
+                            && let Some(apps_md_info) = &apps_md
+                        {
+                            let (user_input, _) = add_apps_md(&user_input, apps_md_info);
                             user_input
                         } else {
                             user_input

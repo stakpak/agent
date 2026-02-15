@@ -1,7 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
-    user_message,
+    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command,
+    tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -11,6 +11,7 @@ use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
+use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::local_context::LocalContext;
 use stakpak_api::{
     AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
@@ -42,6 +43,7 @@ pub struct RunAsyncConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
+    pub apps_md: Option<AppsMdInfo>,
     /// When true, respect auto-approve config and pause when tools require approval.
     pub pause_on_approval: bool,
     /// Resume input (tool decisions or text prompt) when resuming from a paused checkpoint.
@@ -420,6 +422,15 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
             && let Some(agents_md) = &config.agents_md
         {
             let (user_input, _agents_md_text) = add_agents_md(&user_input, agents_md);
+            user_input
+        } else {
+            user_input
+        };
+
+        let user_input = if chat_messages.is_empty()
+            && let Some(apps_md) = &config.apps_md
+        {
+            let (user_input, _apps_md_text) = add_apps_md(&user_input, apps_md);
             user_input
         } else {
             user_input

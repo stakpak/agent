@@ -29,6 +29,7 @@ use commands::{
 use config::{AppConfig, ModelsCache};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agents_md::discover_agents_md;
+use utils::apps_md::discover_apps_md;
 use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
@@ -127,6 +128,10 @@ struct Cli {
     /// Ignore AGENTS.md files (skip discovery and injection)
     #[arg(long = "ignore-agents-md", default_value_t = false)]
     ignore_agents_md: bool,
+
+    /// Ignore APPS.md files (skip discovery and injection)
+    #[arg(long = "ignore-apps-md", default_value_t = false)]
+    ignore_apps_md: bool,
 
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
@@ -273,6 +278,14 @@ async fn main() {
                     std::env::current_dir()
                         .ok()
                         .and_then(|cwd| discover_agents_md(&cwd))
+                };
+
+                let apps_md = if cli.ignore_apps_md {
+                    None
+                } else {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| discover_apps_md(&cwd))
                 };
 
                 // Use credential resolution with auth.toml fallback chain
@@ -454,6 +467,7 @@ async fn main() {
                                 },
                                 model: default_model.clone(),
                                 agents_md: agents_md.clone(),
+                                apps_md: apps_md.clone(),
                                 pause_on_approval: cli.pause_on_approval,
                                 resume_input: if cli.approve.is_some()
                                     || cli.reject.is_some()
@@ -518,6 +532,7 @@ async fn main() {
                                 },
                                 model: default_model,
                                 agents_md,
+                                apps_md,
                                 send_init_prompt_on_start,
                             },
                         )

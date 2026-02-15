@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Maximum number of parent directories to traverse when searching for AGENTS.md
+const MAX_TRAVERSAL_DEPTH: usize = 5;
+
 /// Information about a discovered AGENTS.md file
 #[derive(Debug, Clone)]
 pub struct AgentsMdInfo {
@@ -8,7 +11,7 @@ pub struct AgentsMdInfo {
     pub path: PathBuf,
 }
 
-/// Discovers and reads AGENTS.md file from the given directory upward.
+/// Discovers and reads AGENTS.md file from the given directory upward (up to 5 levels).
 /// Returns the nearest AGENTS.md found (closest to start_dir wins per spec).
 ///
 /// Search order at each directory level:
@@ -17,7 +20,7 @@ pub struct AgentsMdInfo {
 pub fn discover_agents_md(start_dir: &Path) -> Option<AgentsMdInfo> {
     let mut current = start_dir.to_path_buf();
 
-    loop {
+    for _ in 0..=MAX_TRAVERSAL_DEPTH {
         // Check canonical AGENTS.md first
         let agents_file = current.join("AGENTS.md");
         if agents_file.exists()
@@ -132,6 +135,61 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let result = discover_agents_md(temp_dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_discover_agents_md_respects_max_depth() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create AGENTS.md 7 levels up — should NOT be found (max depth is 5)
+        let agents_path = temp_dir.path().join("AGENTS.md");
+        let mut file = File::create(&agents_path).unwrap();
+        writeln!(file, "# Too far AGENTS.md").unwrap();
+
+        let deep_dir = temp_dir
+            .path()
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f")
+            .join("g");
+        fs::create_dir_all(&deep_dir).unwrap();
+
+        let result = discover_agents_md(&deep_dir);
+        if let Some(info) = result {
+            assert!(
+                !info.content.contains("Too far"),
+                "Should not discover AGENTS.md beyond max traversal depth"
+            );
+        }
+    }
+
+    #[test]
+    fn test_discover_agents_md_within_max_depth() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create AGENTS.md 5 levels up — should be found
+        let agents_path = temp_dir.path().join("AGENTS.md");
+        let mut file = File::create(&agents_path).unwrap();
+        writeln!(file, "# Reachable AGENTS.md").unwrap();
+
+        let deep_dir = temp_dir
+            .path()
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e");
+        fs::create_dir_all(&deep_dir).unwrap();
+
+        let result = discover_agents_md(&deep_dir);
+        assert!(result.is_some());
+        assert!(
+            result.unwrap().content.contains("Reachable"),
+            "Should discover AGENTS.md within max traversal depth"
+        );
     }
 
     #[test]
