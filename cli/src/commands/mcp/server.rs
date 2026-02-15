@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server};
+use stakpak_mcp_server::{
+    EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server,
+};
 use stakpak_shared::cert_utils::CertificateChain;
 
 use crate::utils::network;

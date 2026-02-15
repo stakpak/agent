@@ -14,7 +14,9 @@ use crate::utils::network;
 use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server};
+use stakpak_mcp_server::{
+    EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server,
+};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::collections::HashMap;
