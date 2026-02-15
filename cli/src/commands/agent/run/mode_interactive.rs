@@ -4,9 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command,
-    extract_last_checkpoint_id, refresh_billing_info, tool_call_history_string, tool_result,
-    user_message,
+    add_agents_md, add_local_context, add_skills, build_resume_command, extract_last_checkpoint_id,
+    refresh_billing_info, tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -19,7 +18,9 @@ use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
+use stakpak_api::local::skills::{default_skill_directories, discover_skills};
 use stakpak_api::models::ApiStreamError;
+use stakpak_api::models::Skill;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
 
 use stakpak_mcp_server::EnabledToolsConfig;
@@ -120,6 +121,7 @@ pub struct RunInteractiveConfig {
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+    pub skills: Option<Vec<Skill>>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
@@ -158,6 +160,7 @@ pub async fn run_interactive(
         let _mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
         let mut rulebooks = config.rulebooks.clone();
+        let mut skills = config.skills.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let enable_subagents = config.enable_subagents;
@@ -337,6 +340,25 @@ pub async fn run_interactive(
                     send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
             }
 
+            // Build unified skills list: convert remote rulebooks + discover local skills
+            if skills.is_none() {
+                let mut merged_skills: Vec<Skill> = Vec::new();
+
+                // Convert remote rulebooks to skills
+                if let Some(rbs) = &rulebooks {
+                    merged_skills.extend(rbs.iter().cloned().map(Skill::from));
+                }
+
+                // Discover local skills
+                let skill_dirs = stakpak_api::local::skills::default_skill_directories();
+                let local_skills = stakpak_api::local::skills::discover_skills(&skill_dirs);
+                merged_skills.extend(local_skills);
+
+                if !merged_skills.is_empty() {
+                    skills = Some(merged_skills);
+                }
+            }
+
             if let Some(session_id_str) = session_id {
                 let (chat_messages, tool_calls, session_id_uuid, checkpoint_metadata) =
                     resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
@@ -416,7 +438,6 @@ pub async fn run_interactive(
                         }
 
                         // Add local context to user input for new sessions
-                        // Add rulebooks to user input for new sessions or when rulebook settings change
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
                                 let (user_input_with_context, _) =
@@ -426,15 +447,14 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                let (user_input_with_rulebooks, _) =
-                                    if let Some(rulebooks) = &rulebooks {
-                                        add_rulebooks(&user_input_with_context, rulebooks)
-                                    } else {
-                                        (user_input_with_context, None)
-                                    };
+                                let (user_input_with_skills, _) = if let Some(skills) = &skills {
+                                    add_skills(&user_input_with_context, skills)
+                                } else {
+                                    (user_input_with_context, None)
+                                };
 
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
-                                (user_input_with_rulebooks, None::<String>)
+                                (user_input_with_skills, None::<String>)
                             } else {
                                 (user_input.to_string(), None::<String>)
                             };
@@ -953,7 +973,15 @@ pub async fn run_interactive(
                                 .collect();
 
                             // Update the rulebooks with the filtered list
-                            rulebooks = Some(filtered_rulebooks);
+                            rulebooks = Some(filtered_rulebooks.clone());
+
+                            // Rebuild unified skills: filtered remote + all local
+                            let mut merged_skills: Vec<Skill> =
+                                filtered_rulebooks.into_iter().map(Skill::from).collect();
+                            let skill_dirs = default_skill_directories();
+                            let local_skills = discover_skills(&skill_dirs);
+                            merged_skills.extend(local_skills);
+                            skills = Some(merged_skills);
 
                             // Set flag to update rulebooks on next message
                             should_update_rulebooks_on_next_message = true;
@@ -1288,8 +1316,22 @@ pub async fn run_interactive(
                 }
             });
 
-            // Update config with new rulebooks
-            config.rulebooks = new_rulebooks;
+            // Update config with new rulebooks and rebuild skills
+            config.rulebooks = new_rulebooks.clone();
+            // Rebuild unified skills for the new profile
+            let mut new_skills: Vec<Skill> = new_rulebooks
+                .unwrap_or_default()
+                .into_iter()
+                .map(Skill::from)
+                .collect();
+            let skill_dirs = default_skill_directories();
+            let local_skills = discover_skills(&skill_dirs);
+            new_skills.extend(local_skills);
+            config.skills = if new_skills.is_empty() {
+                None
+            } else {
+                Some(new_skills)
+            };
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
 

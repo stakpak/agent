@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use stakpak_api::local::skills::default_skill_directories;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 
@@ -59,6 +60,7 @@ pub async fn run_server(
             enable_subagents: true,
             bind_address,
             certificate_chain: Arc::new(certificate_chain),
+            skill_directories: default_skill_directories(),
         },
         Some(listener),
         None,

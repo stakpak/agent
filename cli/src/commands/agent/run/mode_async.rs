@@ -1,7 +1,6 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_local_context, add_rulebooks, build_resume_command, tool_result,
-    user_message,
+    add_agents_md, add_local_context, add_skills, build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -12,9 +11,8 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
-};
+use stakpak_api::models::Skill;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
@@ -32,8 +30,8 @@ pub struct RunAsyncConfig {
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+    pub skills: Option<Vec<Skill>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -78,7 +76,7 @@ impl AsyncAutoApproveConfig {
             "generate_password",
             "search_docs",
             "search_memory",
-            "read_rulebook",
+            "load_skill",
             "local_code_search",
             "get_all_tasks",
             "get_task_details",
@@ -105,7 +103,12 @@ impl AsyncAutoApproveConfig {
         // Apply profile overrides
         if let Some(profile_tools) = auto_approve_tools {
             for tool_name in profile_tools {
-                tools.insert(tool_name.clone(), AsyncApprovePolicy::Auto);
+                let name = if tool_name == "read_rulebook" {
+                    "load_skill".to_string()
+                } else {
+                    tool_name.clone()
+                };
+                tools.insert(name, AsyncApprovePolicy::Auto);
             }
         }
 
@@ -117,9 +120,15 @@ impl AsyncAutoApproveConfig {
             && let Some(session_tools) = session_config.get("tools").and_then(|t| t.as_object())
         {
             for (name, policy_val) in session_tools {
+                let mapped_name = if name == "read_rulebook" {
+                    "load_skill"
+                } else {
+                    name
+                };
+
                 // Don't override profile-specified tools
                 if auto_approve_tools
-                    .map(|pt| pt.contains(name))
+                    .map(|pt| pt.iter().any(|s| s == mapped_name))
                     .unwrap_or(false)
                 {
                     continue;
@@ -129,7 +138,7 @@ impl AsyncAutoApproveConfig {
                     Some("Never") => AsyncApprovePolicy::Never,
                     _ => AsyncApprovePolicy::Prompt,
                 };
-                tools.insert(name.clone(), policy);
+                tools.insert(mapped_name.to_string(), policy);
             }
         }
 
@@ -151,7 +160,10 @@ impl AsyncAutoApproveConfig {
     }
 
     fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
-        let stripped = Self::strip_prefix(tool_name);
+        let mut stripped = Self::strip_prefix(tool_name);
+        if stripped == "read_rulebook" {
+            stripped = "load_skill";
+        }
         self.tools.get(stripped).unwrap_or(&self.default_policy)
     }
 
@@ -408,10 +420,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 .await
                 .map_err(|e| e.to_string())?;
 
-        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
-            && chat_messages.is_empty()
+        let (user_input, _skills_text) = if chat_messages.is_empty()
+            && let Some(skills) = &config.skills
         {
-            add_rulebooks(&user_input, rulebooks)
+            add_skills(&user_input, skills)
         } else {
             (user_input, None)
         };

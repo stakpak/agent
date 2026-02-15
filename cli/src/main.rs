@@ -1,6 +1,8 @@
 use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
+use stakpak_api::local::skills::{default_skill_directories, discover_skills};
+use stakpak_api::models::Skill;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
 use std::{
@@ -347,6 +349,24 @@ async fn main() {
                 let rulebooks = rulebooks_result;
 
                 let enable_subagents = !cli.disable_subagents;
+                let skills: Option<Vec<Skill>> = {
+                    let mut merged: Vec<Skill> = rulebooks
+                        .iter()
+                        .flatten()
+                        .cloned()
+                        .map(Skill::from)
+                        .collect();
+
+                    let skill_dirs = default_skill_directories();
+                    let local_skills = discover_skills(&skill_dirs);
+                    merged.extend(local_skills);
+
+                    if merged.is_empty() {
+                        None
+                    } else {
+                        Some(merged)
+                    }
+                };
 
                 // match get_or_build_local_code_index(&config, None, cli.index_big_project)
                 //     .await
@@ -442,8 +462,8 @@ async fn main() {
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
-                                rulebooks,
                                 enable_subagents,
+                                skills,
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
@@ -503,10 +523,11 @@ async fn main() {
                                 checkpoint_id,
                                 session_id,
                                 local_context,
+                                rulebooks,
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
-                                rulebooks,
                                 enable_subagents,
+                                skills,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
                                 study_mode: cli.study_mode,

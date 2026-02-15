@@ -7,6 +7,7 @@ use rmcp::{
     },
 };
 use std::hash::Hash;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
@@ -30,13 +31,13 @@ pub mod tool_names {
     pub const EDIT_FILE: &str = "edit_file";
     pub const RUN_COMMAND: &str = "run_command";
     pub const SEARCH_DOCS: &str = "search_docs";
-    pub const READ_RULEBOOK: &str = "read_rulebook";
+    pub const LOAD_SKILL: &str = "load_skill";
     pub const LOCAL_CODE_SEARCH: &str = "local_code_search";
     pub const DELETE_FILE: &str = "delete_file";
 
     const FS_FILE_READ: &[&str] = &[VIEW];
     const FS_FILE_WRITE: &[&str] = &[CREATE, CREATE_FILE, STR_REPLACE, EDIT_FILE];
-    pub const AUTO_APPROVED: &[&str] = &[VIEW, SEARCH_DOCS, READ_RULEBOOK, LOCAL_CODE_SEARCH];
+    pub const AUTO_APPROVED: &[&str] = &[VIEW, SEARCH_DOCS, LOAD_SKILL, LOCAL_CODE_SEARCH];
 
     pub fn is_fs_file_read(name: &str) -> bool {
         FS_FILE_READ.contains(&name)
@@ -127,6 +128,7 @@ pub struct MCPServerConfig {
     pub tool_mode: ToolMode,
     pub enable_subagents: bool,
     pub certificate_chain: Arc<Option<CertificateChain>>,
+    pub skill_directories: Vec<PathBuf>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -224,6 +226,7 @@ fn build_tool_container(
     config: &MCPServerConfig,
     task_manager_handle: Arc<TaskManagerHandle>,
 ) -> Result<ToolContainer> {
+    let skill_directories = config.skill_directories.clone();
     let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => {
             let mut tool_router = ToolContainer::tool_router_local();
@@ -239,6 +242,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                skill_directories,
             )
         }
         ToolMode::RemoteOnly => {
@@ -258,6 +262,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                skill_directories,
             )
         }
         ToolMode::Combined => {
@@ -279,6 +284,7 @@ fn build_tool_container(
                 config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 tool_router,
+                skill_directories,
             )
         }
     }

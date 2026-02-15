@@ -17,6 +17,11 @@ pub fn strip_tool_name(name: &str) -> &str {
         result = &result[..result.len() - 2];
     }
 
+    // Backward compatibility mapping
+    if result == "read_rulebook" {
+        result = "load_skill";
+    }
+
     result
 }
 

@@ -11,6 +11,7 @@ use crate::commands::agent::run::helpers::convert_tools_with_filter;
 use crate::commands::get_client;
 use crate::config::AppConfig;
 use crate::utils::network;
+use stakpak_api::local::skills::default_skill_directories;
 use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
@@ -144,6 +145,7 @@ async fn start_mcp_server(
             tool_mode: ToolMode::Combined,
             enable_subagents,
             certificate_chain: cert_chain,
+            skill_directories: default_skill_directories(),
         };
 
         // Signal that we're about to start
