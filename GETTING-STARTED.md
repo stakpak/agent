@@ -67,7 +67,7 @@ stakpak --async "Help me understand this codebase"
 ### 4. Autopilot (24/7 Mode)
 
 ```bash
-# One-time setup (gateway + watch + runtime defaults)
+# One-time setup (channels + schedules + runtime defaults)
 stakpak onboard
 
 # Start autonomous runtime
