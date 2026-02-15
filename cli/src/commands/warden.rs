@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use crate::utils::plugins::{PluginConfig, get_plugin_path};
 use clap::Subcommand;
+use stakpak_shared::container::agent_image;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -52,7 +53,7 @@ pub enum WardenCommands {
 impl WardenCommands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         // Get warden path (will download if not available)
-        let warden_path = get_warden_plugin_path().await;
+        let warden_path = get_warden_plugin_path(false).await;
 
         let mut cmd = Command::new(warden_path);
         let mut needs_tty = false;
@@ -138,7 +139,9 @@ impl WardenCommands {
     }
 }
 
-async fn get_warden_plugin_path() -> String {
+/// Resolve the warden plugin path, auto-updating if needed.
+/// When `silent` is true, all stderr output is suppressed (safe for background tasks behind TUI).
+pub async fn get_warden_plugin_path(silent: bool) -> String {
     let warden_config = PluginConfig {
         name: "warden".to_string(),
         base_url: "https://warden-cli-releases.s3.amazonaws.com/".to_string(),
@@ -149,6 +152,7 @@ async fn get_warden_plugin_path() -> String {
             "windows-x86_64".to_string(),
         ],
         version: None,
+        silent,
     };
 
     get_plugin_path(warden_config).await
@@ -318,14 +322,14 @@ pub async fn run_default_warden(
     extra_env: Vec<String>,
 ) -> Result<(), String> {
     // Get warden path (will download if not available)
-    let warden_path = get_warden_plugin_path().await;
+    let warden_path = get_warden_plugin_path(false).await;
 
     // Run warden wrap with default configuration
     let mut cmd = Command::new(warden_path);
     cmd.arg("wrap");
 
     // Use standard stakpak image with current CLI version (no special warden image needed)
-    let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
+    let stakpak_image = agent_image();
     cmd.arg(&stakpak_image);
 
     // Enable TTY by default for convenience command
@@ -357,14 +361,14 @@ pub async fn run_default_warden(
 /// Re-execute the stakpak command inside warden container
 pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result<(), String> {
     // Get warden path (will download if not available)
-    let warden_path = get_warden_plugin_path().await;
+    let warden_path = get_warden_plugin_path(false).await;
 
     // Build warden wrap command
     let mut cmd = Command::new(warden_path);
     cmd.arg("wrap");
 
     // Use standard stakpak image with current CLI version (no special warden image needed)
-    let stakpak_image = format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"));
+    let stakpak_image = agent_image();
     cmd.arg(&stakpak_image);
 
     // Determine if we need TTY (interactive mode) based on CLI args.

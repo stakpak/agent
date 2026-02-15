@@ -292,6 +292,7 @@ async fn update_binary_atomic(
         base_url: base_url.to_string(),
         targets: vec![target.to_string()],
         version: Some(version.clone()),
+        silent: false,
     };
 
     // 3. Get current executable path

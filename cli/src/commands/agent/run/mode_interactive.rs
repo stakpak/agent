@@ -35,6 +35,7 @@ const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
+use tokio::process::Command as TokioCommand;
 use uuid::Uuid;
 
 type ClientTaskResult = Result<
@@ -71,6 +72,37 @@ async fn end_tool_execution_loading_if_none(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Pre-pull container images needed for sandboxed subagents in the background.
+/// Runs silently — any failure (Docker not installed, network issues, image not found)
+/// is swallowed so it never disrupts the TUI or blocks the session.
+fn spawn_sandbox_image_prepull() {
+    use stakpak_shared::container::{agent_image, detect_warden_version, warden_sidecar_image};
+
+    tokio::spawn(async move {
+        async fn pull_image(image: &str) {
+            let _ = TokioCommand::new("docker")
+                .args(["pull", "--quiet", image])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+
+        // Resolve warden plugin (auto-updates silently if needed), then detect
+        // its version so we can pin the sidecar image tag.
+        let warden_path = warden::get_warden_plugin_path(true).await;
+        let sidecar = detect_warden_version(&warden_path)
+            .map(|v| warden_sidecar_image(&v));
+
+        let agent = agent_image();
+        let agent_pull = pull_image(&agent);
+        match sidecar {
+            Some(ref img) => { tokio::join!(agent_pull, pull_image(img)); }
+            None => { agent_pull.await; }
+        }
+    });
 }
 
 /// Returns the IDs of tool_calls from the last assistant message that don't have corresponding tool_results.
@@ -311,6 +343,12 @@ pub async fn run_interactive(
                         (None, Vec::new(), Vec::new(), None, None)
                     }
                 };
+
+            // Warm up sandbox container images in the background so the first
+            // sandboxed subagent doesn't pay the full docker-pull cost.
+            if enable_subagents {
+                spawn_sandbox_image_prepull();
+            }
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
