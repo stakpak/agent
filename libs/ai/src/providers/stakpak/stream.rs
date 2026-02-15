@@ -10,6 +10,7 @@ use crate::types::{
 use futures::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 use serde::Deserialize;
+use std::error::Error as StdError;
 
 /// Stakpak streaming chunk
 #[derive(Debug, Deserialize)]
@@ -99,6 +100,35 @@ pub async fn create_stream(event_source: EventSource) -> Result<GenerateStream> 
                         .unwrap_or_else(|_| "Unable to read error body".to_string());
                     let friendly_error = parse_stakpak_error(&error_body, status.as_u16());
                     yield Err(Error::provider_error(friendly_error));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Transport(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "Transport error: {} | source: {:?}",
+                        e,
+                        e.source()
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Utf8(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "UTF-8 decode error in stream: {}",
+                        e
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Parser(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "SSE parser error: {}",
+                        e
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::InvalidContentType(content_type, _)) => {
+                    yield Err(Error::stream_error(format!(
+                        "Invalid content type from server: {:?} (expected text/event-stream)",
+                        content_type
+                    )));
                     break;
                 }
                 Err(e) => {

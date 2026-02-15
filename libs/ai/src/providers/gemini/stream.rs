@@ -8,6 +8,7 @@ use crate::types::{
 };
 use futures::stream::StreamExt;
 use reqwest::Response;
+use std::error::Error as StdError;
 
 /// Create a stream from Gemini response
 /// Gemini uses SSE framing (`data: {json}` events).
@@ -57,7 +58,11 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
                     }
                 }
                 Err(e) => {
-                    yield Err(Error::stream_error(format!("Stream error: {}", e)));
+                    yield Err(Error::stream_error(format!(
+                        "Stream error: {} | source: {:?}",
+                        e,
+                        e.source()
+                    )));
                     break;
                 }
             }
