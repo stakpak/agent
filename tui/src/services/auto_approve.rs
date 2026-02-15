@@ -332,9 +332,12 @@ impl AutoApproveManager {
         // Apply profile auto-approve tools (these override default config)
         if let Some(profile_tools) = auto_approve_tools {
             for tool_name in profile_tools {
-                config
-                    .tools
-                    .insert(tool_name.clone(), AutoApprovePolicy::Auto);
+                let name = if tool_name == "read_rulebook" {
+                    "load_skill".to_string()
+                } else {
+                    tool_name.clone()
+                };
+                config.tools.insert(name, AutoApprovePolicy::Auto);
             }
         }
 
@@ -347,14 +350,20 @@ impl AutoApproveManager {
 
             // Session tool policies override both default and profile settings
             for (tool_name, policy) in &session.tools {
+                let mapped_name = if tool_name == "read_rulebook" {
+                    "load_skill"
+                } else {
+                    tool_name
+                };
+
                 // Only override if this tool is NOT in the profile auto_approve list
                 // This ensures profile settings take precedence over session for profile-specified tools
                 if let Some(profile_tools) = auto_approve_tools {
-                    if !profile_tools.contains(tool_name) {
-                        config.tools.insert(tool_name.clone(), policy.clone());
+                    if !profile_tools.iter().any(|s| s == mapped_name) {
+                        config.tools.insert(mapped_name.to_string(), policy.clone());
                     }
                 } else {
-                    config.tools.insert(tool_name.clone(), policy.clone());
+                    config.tools.insert(mapped_name.to_string(), policy.clone());
                 }
             }
         }

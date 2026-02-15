@@ -493,16 +493,30 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         // Try loading as a local skill first (URI is a file path to SKILL.md)
         let path = std::path::Path::new(&uri);
         if path.exists() && path.is_file() {
-            match stakpak_api::local::skills::load_skill_from_path(path) {
-                Ok((skill_dir, body)) => {
-                    let response = format!("Skill directory: {}\n\n{}", skill_dir.display(), body);
-                    return Ok(CallToolResult::success(vec![Content::text(response)]));
+            // Restrict to configured skill directories
+            let is_allowed = self.skill_directories.iter().any(|dir| {
+                if let (Ok(abs_path), Ok(abs_dir)) =
+                    (std::fs::canonicalize(path), std::fs::canonicalize(dir))
+                {
+                    abs_path.starts_with(abs_dir)
+                } else {
+                    false
                 }
-                Err(e) => {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("LOAD_SKILL_ERROR"),
-                        Content::text(format!("Failed to load local skill: {}", e)),
-                    ]));
+            });
+
+            if is_allowed {
+                match stakpak_api::local::skills::load_skill_from_path(path) {
+                    Ok((skill_dir, body)) => {
+                        let response =
+                            format!("Skill directory: {}\n\n{}", skill_dir.display(), body);
+                        return Ok(CallToolResult::success(vec![Content::text(response)]));
+                    }
+                    Err(e) => {
+                        return Ok(CallToolResult::error(vec![
+                            Content::text("LOAD_SKILL_ERROR"),
+                            Content::text(format!("Failed to load local skill: {}", e)),
+                        ]));
+                    }
                 }
             }
         }

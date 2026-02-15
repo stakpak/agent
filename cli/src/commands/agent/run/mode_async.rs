@@ -76,7 +76,7 @@ impl AsyncAutoApproveConfig {
             "generate_password",
             "search_docs",
             "search_memory",
-            "read_rulebook",
+            "load_skill",
             "local_code_search",
             "get_all_tasks",
             "get_task_details",
@@ -103,7 +103,12 @@ impl AsyncAutoApproveConfig {
         // Apply profile overrides
         if let Some(profile_tools) = auto_approve_tools {
             for tool_name in profile_tools {
-                tools.insert(tool_name.clone(), AsyncApprovePolicy::Auto);
+                let name = if tool_name == "read_rulebook" {
+                    "load_skill".to_string()
+                } else {
+                    tool_name.clone()
+                };
+                tools.insert(name, AsyncApprovePolicy::Auto);
             }
         }
 
@@ -115,9 +120,15 @@ impl AsyncAutoApproveConfig {
             && let Some(session_tools) = session_config.get("tools").and_then(|t| t.as_object())
         {
             for (name, policy_val) in session_tools {
+                let mapped_name = if name == "read_rulebook" {
+                    "load_skill"
+                } else {
+                    name
+                };
+
                 // Don't override profile-specified tools
                 if auto_approve_tools
-                    .map(|pt| pt.contains(name))
+                    .map(|pt| pt.iter().any(|s| s == mapped_name))
                     .unwrap_or(false)
                 {
                     continue;
@@ -127,7 +138,7 @@ impl AsyncAutoApproveConfig {
                     Some("Never") => AsyncApprovePolicy::Never,
                     _ => AsyncApprovePolicy::Prompt,
                 };
-                tools.insert(name.clone(), policy);
+                tools.insert(mapped_name.to_string(), policy);
             }
         }
 
@@ -149,7 +160,10 @@ impl AsyncAutoApproveConfig {
     }
 
     fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
-        let stripped = Self::strip_prefix(tool_name);
+        let mut stripped = Self::strip_prefix(tool_name);
+        if stripped == "read_rulebook" {
+            stripped = "load_skill";
+        }
         self.tools.get(stripped).unwrap_or(&self.default_policy)
     }
 
