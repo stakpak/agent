@@ -37,9 +37,6 @@ use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Bundled infrastructure analysis prompt for `stakpak init` (embedded at compile time).
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
-
 type ClientTaskResult = Result<
     (
         Vec<ChatMessage>,
