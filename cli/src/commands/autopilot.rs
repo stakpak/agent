@@ -93,7 +93,7 @@ pub enum AutopilotCommands {
     /// Stream autopilot logs
     Logs {
         /// Follow log output
-        #[arg(short = 'f', long, default_value_t = true)]
+        #[arg(short = 'f', long)]
         follow: bool,
 
         /// Number of lines to show initially
