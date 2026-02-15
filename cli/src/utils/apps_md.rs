@@ -33,7 +33,7 @@ pub fn discover_apps_md(start_dir: &Path) -> Option<AppsMdInfo> {
         {
             return Some(AppsMdInfo {
                 content,
-                path: apps_file,
+                path: apps_file.canonicalize().unwrap_or(apps_file),
             });
         }
 
@@ -44,7 +44,7 @@ pub fn discover_apps_md(start_dir: &Path) -> Option<AppsMdInfo> {
         {
             return Some(AppsMdInfo {
                 content,
-                path: apps_file_lower,
+                path: apps_file_lower.canonicalize().unwrap_or(apps_file_lower),
             });
         }
 
@@ -62,7 +62,7 @@ pub fn discover_apps_md(start_dir: &Path) -> Option<AppsMdInfo> {
         {
             return Some(AppsMdInfo {
                 content,
-                path: global_apps,
+                path: global_apps.canonicalize().unwrap_or(global_apps),
             });
         }
     }
@@ -97,7 +97,7 @@ mod tests {
         assert!(result.is_some());
         let info = result.unwrap();
         assert!(info.content.contains("Test APPS.md"));
-        assert_eq!(info.path, apps_path);
+        assert_eq!(info.path, apps_path.canonicalize().unwrap());
     }
 
     #[test]
@@ -206,7 +206,7 @@ mod tests {
         let info = result.unwrap();
         // Nearest (child) should win
         assert!(info.content.contains("Child APPS.md"));
-        assert_eq!(info.path, child_apps);
+        assert_eq!(info.path, child_apps.canonicalize().unwrap());
     }
 
     #[test]
