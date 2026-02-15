@@ -2,17 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 use stakpak_api::models::ListRuleBook;
+use stakpak_shared::utils::matches_glob;
 
 /// Check if a string matches a glob pattern.
 /// Supports: `*` (any chars), `?` (single char), `[abc]` (char class).
 /// Falls back to exact match if pattern is invalid.
+///
+/// Re-exported from `stakpak_shared::utils::matches_glob` for backward compatibility.
 pub(crate) fn matches_pattern(value: &str, pattern: &str) -> bool {
-    if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-        glob_pattern.matches(value)
-    } else {
-        // Fallback to exact match if glob pattern is invalid
-        value == pattern
-    }
+    matches_glob(value, pattern)
 }
 
 /// Configuration for filtering which rulebooks are loaded.

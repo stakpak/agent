@@ -12,10 +12,18 @@ pub mod client;
 pub mod error;
 pub mod local;
 pub mod models;
-pub mod predefined_commands;
 pub mod prompts;
+pub mod slash_commands;
 pub mod stakpak;
 pub mod storage;
+
+// Re-export for backward compatibility (old: stakpak_api::predefined_commands::PREDEFINED_COMMANDS)
+pub mod predefined_commands {
+    pub use super::slash_commands::PREDEFINED_COMMANDS;
+}
+
+// Re-export slash_commands as commands for shorter imports
+pub use slash_commands as commands;
 
 // Re-export unified AgentClient as the primary client
 pub use client::{

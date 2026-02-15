@@ -113,14 +113,8 @@ pub struct HelperCommand {
     pub description: &'static str,
 }
 
-/// User-defined command loaded from .stakpak/commands/*.md or ~/.stakpak/commands/*.md
-#[derive(Debug, Clone)]
-pub struct CustomCommand {
-    pub id: String,
-    pub description: String,
-    /// Cached file content (loaded at init to keep execute_command sync)
-    pub content: String,
-}
+// Re-export CustomCommand from shared crate
+pub use stakpak_shared::models::commands::CustomCommand;
 
 /// Unified entry for the helper dropdown: built-in or custom command.
 #[derive(Debug, Clone)]

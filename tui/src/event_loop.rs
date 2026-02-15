@@ -26,57 +26,18 @@ use tokio::time::interval;
 use crate::app::ToolCallStatus;
 use crate::terminal::TerminalGuard;
 
-// Rulebook config struct (re-defined here to avoid circular dependency)
+// Re-export shared types for use by TUI consumers
+pub use stakpak_shared::models::commands::CommandsConfig;
+
+/// Rulebook config struct for TUI.
+/// Note: This is a simplified version for TUI use. The full RulebookConfig
+/// with filtering logic lives in cli/src/config/rulebook.rs.
 #[derive(Clone, Debug)]
 pub struct RulebookConfig {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub include_tags: Option<Vec<String>>,
     pub exclude_tags: Option<Vec<String>>,
-}
-
-/// Custom commands configuration (re-defined here to avoid circular dependency with CLI)
-#[derive(Clone, Debug, Default)]
-pub struct CommandsConfig {
-    /// Include only these commands by name (supports glob patterns, empty = all allowed)
-    pub include: Option<Vec<String>>,
-    /// Exclude specific commands by name (supports glob patterns, empty = none excluded)
-    pub exclude: Option<Vec<String>>,
-    /// Command definitions: name → file path (e.g., "security-review" → "~/.stakpak/prompts/security.md")
-    pub definitions: std::collections::HashMap<String, String>,
-}
-
-impl CommandsConfig {
-    /// Check if a command should be loaded based on include/exclude patterns.
-    pub fn should_load(&self, command_name: &str) -> bool {
-        self.matches_include(command_name) && self.matches_exclude(command_name)
-    }
-
-    fn matches_include(&self, name: &str) -> bool {
-        match &self.include {
-            Some(patterns) if !patterns.is_empty() => {
-                patterns.iter().any(|p| Self::matches_pattern(name, p))
-            }
-            _ => true, // No include filter = allow all
-        }
-    }
-
-    fn matches_exclude(&self, name: &str) -> bool {
-        match &self.exclude {
-            Some(patterns) if !patterns.is_empty() => {
-                !patterns.iter().any(|p| Self::matches_pattern(name, p))
-            }
-            _ => true, // No exclude filter = exclude none
-        }
-    }
-
-    fn matches_pattern(value: &str, pattern: &str) -> bool {
-        if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-            glob_pattern.matches(value)
-        } else {
-            value == pattern
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

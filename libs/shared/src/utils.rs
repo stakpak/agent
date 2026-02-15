@@ -107,6 +107,32 @@ pub fn pattern_matches_glob(pattern: &str, text: &str) -> bool {
     true
 }
 
+/// Check if a string matches a glob pattern using the glob crate.
+///
+/// This is the canonical glob matching function used by both `RulebookConfig`
+/// and `CommandsConfig` for include/exclude pattern filtering.
+///
+/// Supports: `*` (any chars), `?` (single char), `[abc]` (char class).
+/// Falls back to exact match if pattern is invalid.
+///
+/// # Examples
+///
+/// ```
+/// use stakpak_shared::utils::matches_glob;
+///
+/// assert!(matches_glob("security-review", "security-*"));
+/// assert!(matches_glob("code-review", "*-review"));
+/// assert!(!matches_glob("write-tests", "security-*"));
+/// ```
+pub fn matches_glob(value: &str, pattern: &str) -> bool {
+    if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+        glob_pattern.matches(value)
+    } else {
+        // Fallback to exact match if glob pattern is invalid
+        value == pattern
+    }
+}
+
 /// Check if a directory entry represents a supported file type
 pub fn is_supported_file(file_path: &Path) -> bool {
     match file_path.file_name().and_then(|name| name.to_str()) {
