@@ -1,6 +1,6 @@
-//! Watch CLI commands.
+//! Autopilot CLI commands.
 //!
-//! This module contains all the CLI subcommands for the watch feature.
+//! This module contains all the CLI subcommands for the autopilot feature.
 
 pub mod history;
 mod init;
@@ -14,16 +14,16 @@ mod stop;
 
 use clap::Subcommand;
 
-pub use run::run_watch;
+pub use run::run_scheduler;
 
-/// Watch subcommands for managing the autonomous agent scheduler.
+/// Autopilot subcommands for managing the autonomous agent scheduler.
 #[derive(Subcommand, PartialEq, Debug)]
-pub enum WatchCommands {
-    /// Start the watch service in foreground mode
+pub enum ScheduleCommands {
+    /// Start the autopilot service in foreground mode
     Run,
-    /// Stop a running watch service
+    /// Stop a running autopilot service
     Stop,
-    /// Show watch status overview
+    /// Show autopilot status overview
     Status,
     /// List resources (schedules, runs)
     Get {
@@ -63,7 +63,7 @@ pub enum WatchCommands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Reload watch configuration (restarts the service)
+    /// Reload autopilot configuration (restarts the service)
     Reload,
 }
 

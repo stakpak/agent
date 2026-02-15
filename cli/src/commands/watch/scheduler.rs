@@ -1,4 +1,4 @@
-//! Cron scheduler integration for watch schedules.
+//! Cron scheduler integration for autopilot schedules.
 //!
 //! Uses tokio-cron-scheduler to schedule and execute schedules based on cron expressions.
 //! Users provide standard 5-part cron expressions (min hour day month weekday),
@@ -60,7 +60,7 @@ impl From<JobSchedulerError> for SchedulerError {
 }
 
 /// Watch scheduler that manages schedule jobs.
-pub struct WatchScheduler {
+pub struct Scheduler {
     scheduler: JobScheduler,
     /// Channel to send schedule events when jobs fire.
     event_tx: mpsc::Sender<SchedulerEvent>,
@@ -68,7 +68,7 @@ pub struct WatchScheduler {
     job_ids: Vec<Uuid>,
 }
 
-impl WatchScheduler {
+impl Scheduler {
     /// Create a new scheduler with an event channel.
     ///
     /// Returns the scheduler and a receiver for schedule events.
@@ -161,7 +161,7 @@ impl WatchScheduler {
 
     /// Start the scheduler.
     pub async fn start(&self) -> Result<(), SchedulerError> {
-        info!("Starting watch scheduler");
+        info!("Starting autopilot scheduler");
 
         self.scheduler
             .start()
@@ -173,7 +173,7 @@ impl WatchScheduler {
 
     /// Shutdown the scheduler gracefully.
     pub async fn shutdown(&mut self) -> Result<(), SchedulerError> {
-        info!("Shutting down watch scheduler");
+        info!("Shutting down autopilot scheduler");
 
         self.scheduler
             .shutdown()
@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_creation() {
-        let result = WatchScheduler::new().await;
+        let result = Scheduler::new().await;
         assert!(result.is_ok());
 
         let (scheduler, _rx) = result.unwrap();
@@ -242,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_schedule() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -256,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_multiple_schedules() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -275,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_cron_expression() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -291,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_start_and_shutdown() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -316,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_job_execution() {
-        let (mut scheduler, mut rx) = WatchScheduler::new()
+        let (mut scheduler, mut rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_various_cron_expressions() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 
@@ -379,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_tick_for_job() {
-        let (mut scheduler, _rx) = WatchScheduler::new()
+        let (mut scheduler, _rx) = Scheduler::new()
             .await
             .expect("Failed to create scheduler");
 

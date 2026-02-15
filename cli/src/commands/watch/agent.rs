@@ -1,4 +1,4 @@
-//! Agent spawner for watch schedules.
+//! Agent spawner for autopilot schedules.
 //!
 //! Spawns the stakpak agent as a child process when a schedule fires,
 //! capturing session and checkpoint information from JSON output.

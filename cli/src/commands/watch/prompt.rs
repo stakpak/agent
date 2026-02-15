@@ -1,4 +1,4 @@
-//! Prompt assembly for watch schedules.
+//! Prompt assembly for autopilot schedules.
 //!
 //! Assembles the final prompt passed to the agent, combining the user's prompt
 //! with context about the schedule and check script results.

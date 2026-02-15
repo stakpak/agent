@@ -1,13 +1,13 @@
-//! Watch history command - show run history.
+//! Autopilot history command - show run history.
 
-use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb};
+use crate::commands::watch::{ListRunsFilter, RunStatus, ScheduleConfig, ScheduleDb};
 use chrono::{DateTime, Utc};
 
 /// Show run history for all schedules or a specific schedule.
 pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Result<(), String> {
     // Load configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -15,7 +15,7 @@ pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Re
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -92,7 +92,7 @@ pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Re
 pub async fn show_run(run_id: i64) -> Result<(), String> {
     // Load configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -100,7 +100,7 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 

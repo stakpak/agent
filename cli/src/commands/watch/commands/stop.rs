@@ -1,13 +1,13 @@
 //! Autopilot stop command - stops a running autopilot service.
 
-use crate::commands::watch::{WatchConfig, is_process_running};
+use crate::commands::watch::{ScheduleConfig, is_process_running};
 use std::path::Path;
 
 /// Stop a running autopilot service by sending SIGTERM.
-pub async fn stop_watch() -> Result<(), String> {
+pub async fn stop_autopilot() -> Result<(), String> {
     // Load config to find PID file location
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
 
     let pid_file = config
         .db_path()

@@ -9,7 +9,7 @@
 //! 6. Handles graceful shutdown on SIGTERM/SIGINT
 
 use crate::commands::watch::{
-    RunStatus, SpawnConfig, WatchConfig, WatchDb, WatchScheduler, assemble_prompt,
+    RunStatus, SpawnConfig, ScheduleConfig, ScheduleDb, Scheduler, assemble_prompt,
     is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};
@@ -24,12 +24,12 @@ use tracing::{error, info, warn};
 /// Run the autopilot service in foreground mode.
 ///
 /// This function blocks until the autopilot service receives a shutdown signal (SIGTERM/SIGINT).
-pub async fn run_watch() -> Result<(), String> {
+pub async fn run_scheduler() -> Result<(), String> {
     print_banner();
 
     // Load and validate configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
 
     info!(
         schedules = config.schedules.len(),
@@ -47,8 +47,8 @@ pub async fn run_watch() -> Result<(), String> {
     let pid_file = db_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join("watch.pid");
-    if let Some(existing_pid) = check_existing_watch(&pid_file) {
+        .join("autopilot.pid");
+    if let Some(existing_pid) = check_existing_autopilot(&pid_file) {
         return Err(format!(
             "Another autopilot instance is already running (PID {}). \
              Stop it first with 'kill {}' or remove the stale PID file at {}",
@@ -70,12 +70,12 @@ pub async fn run_watch() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
     // Set autopilot state
-    db.set_watch_state(pid as i64)
+    db.set_autopilot_state(pid as i64)
         .await
         .map_err(|e| format!("Failed to set autopilot state: {}", e))?;
 
@@ -85,7 +85,7 @@ pub async fn run_watch() -> Result<(), String> {
     print_config_summary(&config, pid as i64);
 
     // Create scheduler (returns scheduler and event receiver)
-    let (mut scheduler, mut event_rx) = WatchScheduler::new()
+    let (mut scheduler, mut event_rx) = Scheduler::new()
         .await
         .map_err(|e| format!("Failed to create scheduler: {}", e))?;
 
@@ -207,8 +207,8 @@ pub async fn run_watch() -> Result<(), String> {
     pending_poller.abort();
 
     // Clear autopilot state
-    if let Err(e) = db.clear_watch_state().await {
-        warn!(error = %e, "Failed to clear watch state");
+    if let Err(e) = db.clear_autopilot_state().await {
+        warn!(error = %e, "Failed to clear autopilot state");
     }
 
     // Remove PID file
@@ -223,8 +223,8 @@ pub async fn run_watch() -> Result<(), String> {
 
 /// Handle a schedule event by running the check script and spawning the agent if needed.
 async fn handle_schedule_event(
-    db: &WatchDb,
-    config: &WatchConfig,
+    db: &ScheduleDb,
+    config: &ScheduleConfig,
     schedule: &crate::commands::watch::Schedule,
 ) -> Result<(), String> {
     // Singleton guard: skip if this schedule already has a running run
@@ -495,7 +495,7 @@ async fn handle_schedule_event(
 }
 
 async fn maybe_send_notification(
-    config: &WatchConfig,
+    config: &ScheduleConfig,
     schedule: &crate::commands::watch::Schedule,
     result: &crate::commands::watch::agent::AgentResult,
     check_result: Option<&crate::commands::watch::CheckResult>,
@@ -696,9 +696,9 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-/// Check if an existing watch service is running by reading the PID file.
-/// Returns Some(pid) if a watch service is running, None otherwise.
-fn check_existing_watch(pid_file: &std::path::Path) -> Option<u32> {
+/// Check if an existing autopilot service is running by reading the PID file.
+/// Returns Some(pid) if an autopilot service is running, None otherwise.
+fn check_existing_autopilot(pid_file: &std::path::Path) -> Option<u32> {
     let pid_str = std::fs::read_to_string(pid_file).ok()?;
     let pid: u32 = pid_str.trim().parse().ok()?;
 
@@ -729,7 +729,7 @@ fn print_banner() {
 }
 
 /// Print configuration summary.
-fn print_config_summary(config: &WatchConfig, pid: i64) {
+fn print_config_summary(config: &ScheduleConfig, pid: i64) {
     println!("\x1b[1mConfiguration:\x1b[0m");
     println!("  PID:        {}", pid);
     println!("  Database:   {}", config.db_path().display());

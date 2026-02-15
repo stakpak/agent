@@ -530,9 +530,9 @@ fn binding_to_runtime(binding: &BindingConfig) -> Binding {
 
 fn default_store_path() -> PathBuf {
     if let Some(home) = dirs::home_dir() {
-        return home.join(".stakpak").join("gateway").join("gateway.db");
+        return home.join(".stakpak").join("autopilot").join("gateway.db");
     }
-    PathBuf::from(".stakpak/gateway/gateway.db")
+    PathBuf::from(".stakpak/autopilot/gateway.db")
 }
 
 fn expand_tilde_path(path: &Path) -> PathBuf {

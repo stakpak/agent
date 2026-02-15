@@ -1,8 +1,8 @@
-//! Watch init command - create a sample configuration file.
+//! Autopilot init command - create a sample configuration file.
 
 use std::path::PathBuf;
 
-/// Create a sample watch configuration file.
+/// Create a sample autopilot configuration file.
 pub async fn init_config(force: bool) -> Result<(), String> {
     let config_path = get_config_path();
 
@@ -26,7 +26,7 @@ pub async fn init_config(force: bool) -> Result<(), String> {
     std::fs::write(&config_path, SAMPLE_CONFIG)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
-    println!("Created watch configuration at: {}", config_path.display());
+    println!("Created autopilot configuration at: {}", config_path.display());
     println!("\nEdit this file to configure your schedules, then run:");
     println!("  stakpak autopilot up");
     println!("\nOr install as a system service:");
@@ -40,13 +40,13 @@ fn get_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".stakpak")
-        .join("watch.toml")
+        .join("autopilot.toml")
 }
 
-const SAMPLE_CONFIG: &str = r#"# Stakpak Watch Configuration
+const SAMPLE_CONFIG: &str = r#"# Stakpak Autopilot Configuration
 # 
-# This file configures the autonomous agent watch service that runs scheduled tasks.
-# Place this file at ~/.stakpak/watch.toml
+# This file configures the autonomous agent autopilot service that runs scheduled tasks.
+# Place this file at ~/.stakpak/autopilot.toml
 
 # Default settings applied to all schedules (can be overridden per-schedule)
 [defaults]

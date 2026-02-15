@@ -1,6 +1,6 @@
 //! Autopilot status command - shows autopilot status and schedule information.
 
-use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb, is_process_running};
+use crate::commands::watch::{ListRunsFilter, RunStatus, ScheduleConfig, ScheduleDb, is_process_running};
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use std::str::FromStr;
 /// Show autopilot status and upcoming schedule runs.
 pub async fn show_status() -> Result<(), String> {
     // Load configuration
-    let config = match WatchConfig::load_default() {
+    let config = match ScheduleConfig::load_default() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to load autopilot config: {}", e);
@@ -23,17 +23,17 @@ pub async fn show_status() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = (WatchDb::new(db_path_str).await).ok();
+    let db = (ScheduleDb::new(db_path_str).await).ok();
 
     // Check autopilot state
-    let watch_state = if let Some(ref db) = db {
-        db.get_watch_state().await.ok().flatten()
+    let autopilot_state = if let Some(ref db) = db {
+        db.get_autopilot_state().await.ok().flatten()
     } else {
         None
     };
 
     // Print autopilot status
-    if let Some(state) = watch_state {
+    if let Some(state) = autopilot_state {
         // Check if process is actually running
         if is_process_running(state.pid as u32) {
             println!(
@@ -111,7 +111,7 @@ fn calculate_next_run(cron_expr: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Get the last run info for a schedule.
-async fn get_last_run_info(db: &WatchDb, schedule_name: &str) -> Option<(DateTime<Utc>, String)> {
+async fn get_last_run_info(db: &ScheduleDb, schedule_name: &str) -> Option<(DateTime<Utc>, String)> {
     let filter = ListRunsFilter {
         schedule_name: Some(schedule_name.to_string()),
         status: None,

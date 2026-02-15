@@ -1,14 +1,14 @@
-//! Watch schedule command - inspect or manually fire a schedule.
+//! Autopilot schedule command - inspect or manually fire a schedule.
 
 use crate::commands::watch::{
-    RunStatus, WatchConfig, WatchDb, assemble_prompt, is_process_running, run_check_script,
+    RunStatus, ScheduleConfig, ScheduleDb, assemble_prompt, is_process_running, run_check_script,
 };
 
 /// Show detailed information about a schedule.
 pub async fn show_schedule(name: &str) -> Result<(), String> {
     // Load configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the schedule
     let schedule = config
@@ -68,7 +68,7 @@ pub async fn show_schedule(name: &str) -> Result<(), String> {
     // Show recent runs
     let db_path = config.db_path();
     if let Ok(db_path_str) = db_path.to_str().ok_or("Invalid path")
-        && let Ok(db) = WatchDb::new(db_path_str).await
+        && let Ok(db) = ScheduleDb::new(db_path_str).await
     {
         let filter = crate::commands::watch::ListRunsFilter {
             schedule_name: Some(name.to_string()),
@@ -109,7 +109,7 @@ pub async fn show_schedule(name: &str) -> Result<(), String> {
 pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
     // Load configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Find the schedule
     let schedule = config
@@ -197,17 +197,17 @@ pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
-    // Check if watch service is running
-    let watch_state = db
-        .get_watch_state()
+    // Check if autopilot service is running
+    let autopilot_state = db
+        .get_autopilot_state()
         .await
-        .map_err(|e| format!("Failed to check watch state: {}", e))?;
+        .map_err(|e| format!("Failed to check autopilot state: {}", e))?;
 
-    match watch_state {
+    match autopilot_state {
         None => {
             return Err(
                 "Autopilot is not running. Start it with 'stakpak autopilot up' first, or use --dry-run to preview."
@@ -225,13 +225,13 @@ pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
         }
     }
 
-    // Queue the schedule for the watch service to pick up
+    // Queue the schedule for the autopilot service to pick up
     db.insert_pending_schedule(name)
         .await
         .map_err(|e| format!("Failed to queue schedule: {}", e))?;
 
     println!(
-        "\x1b[32m✓\x1b[0m Schedule '{}' queued for execution by watch service",
+        "\x1b[32m✓\x1b[0m Schedule '{}' queued for execution by autopilot service",
         name
     );
     println!(

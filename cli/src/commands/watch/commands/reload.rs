@@ -9,12 +9,12 @@ const AUTOPILOT_LAUNCHD_LABEL: &str = "dev.stakpak.autopilot";
 ///
 /// Validates the config file, then restarts the running service.
 /// If no service is installed, reloads in-process (for foreground mode).
-pub async fn reload_watch() -> Result<(), String> {
+pub async fn reload_autopilot() -> Result<(), String> {
     let config_path = expand_tilde(STAKPAK_AUTOPILOT_CONFIG_PATH);
 
     // 1. Validate configuration
     println!("Validating configuration...");
-    match crate::commands::watch::WatchConfig::load_default() {
+    match crate::commands::watch::ScheduleConfig::load_default() {
         Ok(config) => {
             println!(
                 "  ✓ Configuration valid ({} schedules)",

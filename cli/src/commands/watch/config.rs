@@ -1,6 +1,6 @@
-//! Configuration parsing and validation for the watch service.
+//! Configuration parsing and validation for the autopilot service.
 //!
-//! Handles loading and validating `watch.toml` configuration files.
+//! Handles loading and validating `autopilot.toml` configuration files.
 
 use croner::Cron;
 use serde::{Deserialize, Serialize};
@@ -12,16 +12,16 @@ use std::time::Duration;
 /// Default path for autopilot configuration file.
 pub const STAKPAK_AUTOPILOT_CONFIG_PATH: &str = "~/.stakpak/autopilot.toml";
 
-/// Main watch configuration structure.
+/// Main autopilot configuration structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WatchConfig {
-    /// Watch-level settings (database path, log directory).
+pub struct ScheduleConfig {
+    /// Autopilot-level settings (database path, log directory).
     #[serde(default)]
-    pub watch: WatchSettings,
+    pub watch: ScheduleSettings,
 
     /// Default values for schedules.
     #[serde(default)]
-    pub defaults: WatchDefaults,
+    pub defaults: ScheduleDefaults,
 
     /// Optional outbound notifications routed through gateway API.
     #[serde(default)]
@@ -32,9 +32,9 @@ pub struct WatchConfig {
     pub schedules: Vec<Schedule>,
 }
 
-/// Watch-level settings.
+/// Autopilot-level settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WatchSettings {
+pub struct ScheduleSettings {
     /// Path to SQLite database file.
     #[serde(default = "default_db_path")]
     pub db_path: String,
@@ -44,7 +44,7 @@ pub struct WatchSettings {
     pub log_dir: String,
 }
 
-impl Default for WatchSettings {
+impl Default for ScheduleSettings {
     fn default() -> Self {
         Self {
             db_path: default_db_path(),
@@ -54,11 +54,11 @@ impl Default for WatchSettings {
 }
 
 fn default_db_path() -> String {
-    "~/.stakpak/watch/watch.db".to_string()
+    "~/.stakpak/autopilot/autopilot.db".to_string()
 }
 
 fn default_log_dir() -> String {
-    "~/.stakpak/watch/logs".to_string()
+    "~/.stakpak/autopilot/logs".to_string()
 }
 
 /// Determines which check script exit codes trigger the agent.
@@ -97,7 +97,7 @@ impl std::fmt::Display for CheckTriggerOn {
 
 /// Default values applied to schedules when not specified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WatchDefaults {
+pub struct ScheduleDefaults {
     /// Default profile to use for agent invocation.
     #[serde(default = "default_profile")]
     pub profile: String,
@@ -131,7 +131,7 @@ pub struct WatchDefaults {
     pub trigger_on: CheckTriggerOn,
 }
 
-impl Default for WatchDefaults {
+impl Default for ScheduleDefaults {
     fn default() -> Self {
         Self {
             profile: default_profile(),
@@ -277,38 +277,38 @@ pub struct Schedule {
 
 impl Schedule {
     /// Get the effective profile, falling back to defaults.
-    pub fn effective_profile<'a>(&'a self, defaults: &'a WatchDefaults) -> &'a str {
+    pub fn effective_profile<'a>(&'a self, defaults: &'a ScheduleDefaults) -> &'a str {
         self.profile.as_deref().unwrap_or(&defaults.profile)
     }
 
     /// Get the effective timeout, falling back to defaults.
-    pub fn effective_timeout(&self, defaults: &WatchDefaults) -> Duration {
+    pub fn effective_timeout(&self, defaults: &ScheduleDefaults) -> Duration {
         self.timeout.unwrap_or(defaults.timeout)
     }
 
     /// Get the effective check timeout, falling back to defaults.
-    pub fn effective_check_timeout(&self, defaults: &WatchDefaults) -> Duration {
+    pub fn effective_check_timeout(&self, defaults: &ScheduleDefaults) -> Duration {
         self.check_timeout.unwrap_or(defaults.check_timeout)
     }
 
     /// Get the effective trigger_on, falling back to defaults.
-    pub fn effective_trigger_on(&self, defaults: &WatchDefaults) -> CheckTriggerOn {
+    pub fn effective_trigger_on(&self, defaults: &ScheduleDefaults) -> CheckTriggerOn {
         self.trigger_on.unwrap_or(defaults.trigger_on)
     }
 
     /// Get the effective enable_slack_tools, falling back to defaults.
-    pub fn effective_enable_slack_tools(&self, defaults: &WatchDefaults) -> bool {
+    pub fn effective_enable_slack_tools(&self, defaults: &ScheduleDefaults) -> bool {
         self.enable_slack_tools
             .unwrap_or(defaults.enable_slack_tools)
     }
 
     /// Get the effective enable_subagents, falling back to defaults.
-    pub fn effective_enable_subagents(&self, defaults: &WatchDefaults) -> bool {
+    pub fn effective_enable_subagents(&self, defaults: &ScheduleDefaults) -> bool {
         self.enable_subagents.unwrap_or(defaults.enable_subagents)
     }
 
     /// Get the effective pause_on_approval, falling back to defaults.
-    pub fn effective_pause_on_approval(&self, defaults: &WatchDefaults) -> bool {
+    pub fn effective_pause_on_approval(&self, defaults: &ScheduleDefaults) -> bool {
         self.pause_on_approval.unwrap_or(defaults.pause_on_approval)
     }
 
@@ -388,8 +388,8 @@ pub enum ConfigError {
     MissingRequiredField(String, String),
 }
 
-impl WatchConfig {
-    /// Load configuration from the default path (~/.stakpak/watch.toml).
+impl ScheduleConfig {
+    /// Load configuration from the default path (~/.stakpak/autopilot.toml).
     pub fn load_default() -> Result<Self, ConfigError> {
         let path = expand_tilde(STAKPAK_AUTOPILOT_CONFIG_PATH);
         Self::load(&path)
@@ -398,14 +398,14 @@ impl WatchConfig {
     /// Load configuration from a specific path.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = std::fs::read_to_string(path.as_ref())?;
-        let config: WatchConfig = toml::from_str(&content)?;
+        let config: ScheduleConfig = toml::from_str(&content)?;
         config.validate()?;
         Ok(config)
     }
 
     /// Parse configuration from a string (useful for testing).
     pub fn parse(content: &str) -> Result<Self, ConfigError> {
-        let config: WatchConfig = toml::from_str(content)?;
+        let config: ScheduleConfig = toml::from_str(content)?;
         config.validate()?;
         Ok(config)
     }
@@ -503,8 +503,8 @@ mod tests {
     fn test_parse_valid_config() {
         let config_str = r#"
 [watch]
-db_path = "~/.stakpak/watch/watch.db"
-log_dir = "~/.stakpak/watch/logs"
+db_path = "~/.stakpak/autopilot/autopilot.db"
+log_dir = "~/.stakpak/autopilot/logs"
 
 [defaults]
 profile = "production"
@@ -525,9 +525,9 @@ prompt = "Run health checks"
 board_id = "board_123"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse valid config");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse valid config");
 
-        assert_eq!(config.watch.db_path, "~/.stakpak/watch/watch.db");
+        assert_eq!(config.watch.db_path, "~/.stakpak/autopilot/autopilot.db");
         assert_eq!(config.defaults.profile, "production");
         assert_eq!(config.defaults.timeout, Duration::from_secs(3600));
         assert_eq!(config.defaults.check_timeout, Duration::from_secs(60));
@@ -555,10 +555,10 @@ cron = "0 0 * * *"
 prompt = "Do something"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse minimal config");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse minimal config");
 
         // Check defaults are applied
-        assert_eq!(config.watch.db_path, "~/.stakpak/watch/watch.db");
+        assert_eq!(config.watch.db_path, "~/.stakpak/autopilot/autopilot.db");
         assert_eq!(config.defaults.profile, "default");
         assert_eq!(config.defaults.timeout, Duration::from_secs(30 * 60));
         assert_eq!(config.schedules.len(), 1);
@@ -573,7 +573,7 @@ cron = "invalid cron expression"
 prompt = "This should fail"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -597,7 +597,7 @@ cron = "0 0 * * *"
 prompt = "Second"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -626,7 +626,7 @@ cron = "0 0 * * *"
 prompt = "Test prompt"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse");
         let schedule = &config.schedules[0];
 
         // Verify defaults are used
@@ -668,7 +668,7 @@ prompt = "Test"
                 expr
             );
 
-            let result = WatchConfig::parse(&config_str);
+            let result = ScheduleConfig::parse(&config_str);
             assert!(
                 result.is_ok(),
                 "Should parse valid cron expression: {}",
@@ -692,7 +692,7 @@ timeout = "1h 15m 30s"
 check_timeout = "2m"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse humantime durations");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse humantime durations");
 
         assert_eq!(
             config.defaults.timeout,
@@ -715,7 +715,7 @@ check_timeout = "2m"
 db_path = "/custom/path/watch.db"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse config with no schedules");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse config with no schedules");
         assert!(config.schedules.is_empty());
     }
 
@@ -729,7 +729,7 @@ prompt = "Test"
 check = "/nonexistent/path/to/script.sh"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -748,7 +748,7 @@ cron = "0 * * * *"
 prompt = "Test"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
         // Should fail at TOML parsing level due to missing required field
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
@@ -762,7 +762,7 @@ name = "test"
 prompt = "Test"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
     }
@@ -775,7 +775,7 @@ name = "test"
 cron = "0 * * * *"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
     }
@@ -841,7 +841,7 @@ cron = "0 * * * *"
 prompt = "Test"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse trigger_on values");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse trigger_on values");
         assert_eq!(config.schedules.len(), 4);
 
         assert_eq!(
@@ -874,7 +874,7 @@ prompt = "Test"
 trigger_on = "success"
 "#;
 
-        let config = WatchConfig::parse(config_str).expect("Should parse trigger_on with defaults");
+        let config = ScheduleConfig::parse(config_str).expect("Should parse trigger_on with defaults");
 
         // First schedule should use default (failure)
         assert_eq!(
@@ -899,7 +899,7 @@ prompt = "Test"
 trigger_on = "invalid"
 "#;
 
-        let result = WatchConfig::parse(config_str);
+        let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
     }

@@ -1,4 +1,4 @@
-//! Shared utilities for watch commands.
+//! Shared utilities for autopilot commands.
 
 use std::process::Command;
 

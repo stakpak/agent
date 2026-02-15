@@ -145,6 +145,10 @@ pub enum AutopilotCommands {
         /// Number of lines to show initially
         #[arg(short = 'n', long)]
         lines: Option<u32>,
+
+        /// Filter logs by component
+        #[arg(short = 'c', long, value_parser = ["scheduler", "server", "gateway"])]
+        component: Option<String>,
     },
 
     /// Restart autopilot (reload config)
@@ -347,7 +351,11 @@ impl AutopilotCommands {
             AutopilotCommands::Status { json, recent_runs } => {
                 status_autopilot(&config, OutputMode::from_json_flag(json), recent_runs).await
             }
-            AutopilotCommands::Logs { follow, lines } => logs_autopilot(follow, lines).await,
+            AutopilotCommands::Logs {
+                follow,
+                lines,
+                component,
+            } => logs_autopilot(follow, lines, component).await,
             AutopilotCommands::Restart => restart_autopilot().await,
             AutopilotCommands::Schedule(command) => run_schedule_command(command).await,
             AutopilotCommands::Channel(command) => run_channel_command(command).await,
@@ -641,7 +649,7 @@ struct AutopilotStatusJson {
     service: ServiceStatusJson,
     server: EndpointStatusJson,
     gateway: EndpointStatusJson,
-    watch: WatchStatusJson,
+    scheduler: SchedulerStatusJson,
     schedules: Vec<AutopilotScheduleStatusJson>,
     channels: Vec<AutopilotChannelStatusJson>,
 }
@@ -661,7 +669,7 @@ struct EndpointStatusJson {
 }
 
 #[derive(Debug, Serialize)]
-struct WatchStatusJson {
+struct SchedulerStatusJson {
     expected_enabled: bool,
     config_path: String,
     config_valid: bool,
@@ -671,11 +679,11 @@ struct WatchStatusJson {
     stale_pid: bool,
     db_path: Option<String>,
     error: Option<String>,
-    recent_runs: Vec<WatchRunSummaryJson>,
+    recent_runs: Vec<ScheduleRunSummaryJson>,
 }
 
 #[derive(Debug, Serialize)]
-struct WatchRunSummaryJson {
+struct ScheduleRunSummaryJson {
     id: i64,
     schedule_name: String,
     status: String,
@@ -1041,9 +1049,70 @@ async fn start_foreground_runtime(
     config: &AppConfig,
     options: &StartOptions,
 ) -> Result<(), String> {
+    // --- Per-component file logging ---
+    // Each runtime gets its own log file under ~/.stakpak/autopilot/logs/.
+    // Guards must be held for the lifetime of the runtime to ensure logs are flushed.
+    let log_dir = autopilot_log_dir();
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("Failed to create autopilot log directory: {}", e))?;
+
+    // TODO: add log rotation (daily or size-based) via tracing_appender::rolling::daily()
+    let scheduler_appender = tracing_appender::rolling::never(&log_dir, "scheduler.log");
+    let server_appender = tracing_appender::rolling::never(&log_dir, "server.log");
+    let gateway_appender = tracing_appender::rolling::never(&log_dir, "gateway.log");
+
+    let (scheduler_nb, _scheduler_guard) = tracing_appender::non_blocking(scheduler_appender);
+    let (server_nb, _server_guard) = tracing_appender::non_blocking(server_appender);
+    let (gateway_nb, _gateway_guard) = tracing_appender::non_blocking(gateway_appender);
+
+    {
+        use tracing_subscriber::fmt::writer::MakeWriterExt;
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        // Each component gets its own fmt layer with a target-based filter.
+        let scheduler_layer = tracing_subscriber::fmt::layer()
+            .with_writer(
+                scheduler_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                    meta.target().starts_with("stakpak::commands::watch")
+                }),
+            )
+            .with_target(true)
+            .with_ansi(false);
+
+        let server_layer = tracing_subscriber::fmt::layer()
+            .with_writer(
+                server_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                    meta.target().starts_with("stakpak_server")
+                }),
+            )
+            .with_target(true)
+            .with_ansi(false);
+
+        let gateway_layer = tracing_subscriber::fmt::layer()
+            .with_writer(
+                gateway_nb.with_filter(|meta: &tracing::Metadata<'_>| {
+                    meta.target().starts_with("stakpak_gateway")
+                }),
+            )
+            .with_target(true)
+            .with_ansi(false);
+
+        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,stakpak=info,stakpak_server=info,stakpak_gateway=info".into());
+
+        // Best-effort: if a global subscriber is already set (e.g. --debug), skip.
+        let _ = tracing_subscriber::registry()
+            .with(env_filter)
+            .with(scheduler_layer)
+            .with(server_layer)
+            .with(gateway_layer)
+            .try_init();
+    }
+
     // --- 1. Schedule runtime ---
-    let watch_task = tokio::spawn(async {
-        if let Err(error) = crate::commands::watch::commands::run_watch().await {
+    let schedule_task = tokio::spawn(async {
+        if let Err(error) = crate::commands::watch::commands::run_scheduler().await {
             eprintln!("Schedule runtime exited: {}", error);
         }
     });
@@ -1355,9 +1424,9 @@ async fn start_foreground_runtime(
     }
     let _ = refresh_task.await;
 
-    // Abort the watch task
-    watch_task.abort();
-    let _ = watch_task.await;
+    // Abort the schedule task
+    schedule_task.abort();
+    let _ = schedule_task.await;
 
     println!();
     println!("Shutting down...");
@@ -1470,7 +1539,7 @@ async fn stop_autopilot() -> Result<(), String> {
 
         // Clean up PID file if process is gone
         if !crate::commands::watch::is_process_running(pid) {
-            let config = crate::commands::watch::WatchConfig::load_default().ok();
+            let config = crate::commands::watch::ScheduleConfig::load_default().ok();
             if let Some(config) = config {
                 let pid_file = config
                     .db_path()
@@ -1510,7 +1579,7 @@ async fn restart_autopilot() -> Result<(), String> {
     );
 
     // 2. Validate the watch/scheduler config (cron parsing, check scripts, db/log paths)
-    match crate::commands::watch::WatchConfig::load_default() {
+    match crate::commands::watch::ScheduleConfig::load_default() {
         Ok(config) => {
             println!(
                 "  ✓ Scheduler config valid ({} schedules)",
@@ -1625,13 +1694,13 @@ async fn run_schedule_command(command: AutopilotScheduleCommands) -> Result<(), 
             crate::commands::watch::commands::history::show_run(id).await
         }
         AutopilotScheduleCommands::Clean { older_than_days } => {
-            let config = crate::commands::watch::WatchConfig::load_default()
+            let config = crate::commands::watch::ScheduleConfig::load_default()
                 .map_err(|e| format!("Failed to load watch config: {}", e))?;
             let db_path = config.db_path();
             let db_path_str = db_path
                 .to_str()
                 .ok_or_else(|| "Invalid database path".to_string())?;
-            let db = crate::commands::watch::WatchDb::new(db_path_str)
+            let db = crate::commands::watch::ScheduleDb::new(db_path_str)
                 .await
                 .map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -2015,7 +2084,7 @@ async fn status_autopilot(
         url: gateway_url,
     };
 
-    let watch = collect_watch_status(recent_runs).await;
+    let scheduler = collect_scheduler_status(recent_runs).await;
 
     if output_mode.is_json() {
         print_json(&AutopilotStatusJson {
@@ -2027,7 +2096,7 @@ async fn status_autopilot(
             service,
             server,
             gateway,
-            watch,
+            scheduler,
             schedules,
             channels,
         })?;
@@ -2071,22 +2140,22 @@ async fn status_autopilot(
     let config_exists = AutopilotConfigFile::path().exists();
     if !config_exists {
         println!("  Scheduler       not configured (run: stakpak autopilot init)");
-    } else if watch.config_valid {
-        let sched_state = if watch.running {
-            format!("✓ running (pid {})", watch.pid.unwrap_or_default())
-        } else if watch.stale_pid {
-            format!("⚠ stale (pid {})", watch.pid.unwrap_or_default())
+    } else if scheduler.config_valid {
+        let sched_state = if scheduler.running {
+            format!("✓ running (pid {})", scheduler.pid.unwrap_or_default())
+        } else if scheduler.stale_pid {
+            format!("⚠ stale (pid {})", scheduler.pid.unwrap_or_default())
         } else {
             "stopped".to_string()
         };
         println!(
             "  Scheduler       {} — {} schedules",
-            sched_state, watch.trigger_count
+            sched_state, scheduler.trigger_count
         );
     } else {
         println!(
             "  Scheduler       ✗ config error: {}",
-            watch.error.as_deref().unwrap_or("unknown")
+            scheduler.error.as_deref().unwrap_or("unknown")
         );
     }
 
@@ -2137,10 +2206,10 @@ async fn status_autopilot(
     }
 
     // Recent runs
-    if !watch.recent_runs.is_empty() {
+    if !scheduler.recent_runs.is_empty() {
         println!();
         println!("  Recent runs:");
-        for run in &watch.recent_runs {
+        for run in &scheduler.recent_runs {
             println!(
                 "    #{} {:<16} {:<10} {}",
                 run.id, run.schedule_name, run.status, run.started_at
@@ -2151,60 +2220,84 @@ async fn status_autopilot(
     Ok(())
 }
 
-async fn logs_autopilot(follow: bool, lines: Option<u32>) -> Result<(), String> {
+fn tail_log_files(files: &[PathBuf], follow: bool, lines: Option<u32>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("tail");
+    if follow {
+        cmd.arg("-f");
+    }
+    if let Some(n) = lines {
+        cmd.arg("-n").arg(n.to_string());
+    }
+    for file in files {
+        cmd.arg(file);
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("Failed to read autopilot logs: {}", e))?;
+    if !status.success() {
+        return Err("Failed to read autopilot logs".to_string());
+    }
+    Ok(())
+}
+
+async fn logs_autopilot(
+    follow: bool,
+    lines: Option<u32>,
+    component: Option<String>,
+) -> Result<(), String> {
+    let log_dir = autopilot_log_dir();
+
+    // Resolve which log files to show
+    let log_files: Vec<PathBuf> = if let Some(ref name) = component {
+        let file = log_dir.join(format!("{}.log", name));
+        if !file.exists() {
+            return Err(format!(
+                "Component log file not found: {}\nAutopilot may not have run yet.",
+                file.display()
+            ));
+        }
+        vec![file]
+    } else {
+        // Show all component logs plus legacy stdout/stderr
+        ["scheduler.log", "server.log", "gateway.log", "stdout.log", "stderr.log"]
+            .iter()
+            .map(|f| log_dir.join(f))
+            .filter(|p| p.exists())
+            .collect()
+    };
+
+    if log_files.is_empty() {
+        return Err(format!(
+            "No log files found in {}.\nAutopilot may not have run yet.",
+            log_dir.display()
+        ));
+    }
+
     match detect_platform() {
         Platform::Linux => {
-            let mut cmd = std::process::Command::new("journalctl");
-            cmd.args(["--user", "-u", AUTOPILOT_SYSTEMD_SERVICE]);
-            if follow {
-                cmd.arg("-f");
-            }
-            if let Some(lines) = lines {
-                cmd.arg("-n").arg(lines.to_string());
-            }
+            // If a component filter is set, use tail on the specific file instead of journalctl
+            if component.is_some() {
+                tail_log_files(&log_files, follow, lines)?;
+            } else {
+                let mut cmd = std::process::Command::new("journalctl");
+                cmd.args(["--user", "-u", AUTOPILOT_SYSTEMD_SERVICE]);
+                if follow {
+                    cmd.arg("-f");
+                }
+                if let Some(lines) = lines {
+                    cmd.arg("-n").arg(lines.to_string());
+                }
 
-            let status = cmd
-                .status()
-                .map_err(|e| format!("Failed to run journalctl: {}", e))?;
-            if !status.success() {
-                return Err("Failed to read autopilot logs from journalctl".to_string());
+                let status = cmd
+                    .status()
+                    .map_err(|e| format!("Failed to run journalctl: {}", e))?;
+                if !status.success() {
+                    return Err("Failed to read autopilot logs from journalctl".to_string());
+                }
             }
         }
         Platform::MacOS => {
-            let log_dir = autopilot_log_dir();
-            let stdout_log = log_dir.join("stdout.log");
-            let stderr_log = log_dir.join("stderr.log");
-
-            if follow {
-                let mut cmd = std::process::Command::new("tail");
-                cmd.arg("-f");
-                if let Some(lines) = lines {
-                    cmd.arg("-n").arg(lines.to_string());
-                }
-                cmd.arg(stdout_log);
-                cmd.arg(stderr_log);
-
-                let status = cmd
-                    .status()
-                    .map_err(|e| format!("Failed to tail autopilot logs: {}", e))?;
-                if !status.success() {
-                    return Err("Failed to tail autopilot logs".to_string());
-                }
-            } else {
-                let mut cmd = std::process::Command::new("tail");
-                if let Some(lines) = lines {
-                    cmd.arg("-n").arg(lines.to_string());
-                }
-                cmd.arg(stdout_log);
-                cmd.arg(stderr_log);
-
-                let status = cmd
-                    .status()
-                    .map_err(|e| format!("Failed to read autopilot logs: {}", e))?;
-                if !status.success() {
-                    return Err("Failed to read autopilot logs".to_string());
-                }
-            }
+            tail_log_files(&log_files, follow, lines)?;
         }
         Platform::Windows | Platform::Unknown => {
             return Err(
@@ -2269,21 +2362,21 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         }
     }
 
-    let watch_status = collect_watch_status(None).await;
-    if watch_status.config_valid {
-        if watch_status.trigger_count == 0 {
+    let scheduler_status = collect_scheduler_status(None).await;
+    if scheduler_status.config_valid {
+        if scheduler_status.trigger_count == 0 {
             println!("✓ No schedules configured (edit ~/.stakpak/autopilot.toml to add)");
         } else {
             println!(
                 "✓ Schedule config valid ({} schedules)",
-                watch_status.trigger_count
+                scheduler_status.trigger_count
             );
         }
     } else {
         failures += 1;
         println!(
             "✗ Schedule config invalid: {}",
-            watch_status
+            scheduler_status
                 .error
                 .unwrap_or_else(|| "unknown configuration error".to_string())
         );
@@ -2376,7 +2469,7 @@ fn loopback_base_url_from_bind(bind: &str) -> String {
     }
 }
 
-async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
+async fn collect_scheduler_status(recent_runs: Option<u32>) -> SchedulerStatusJson {
     let config_path = AutopilotConfigFile::path();
 
     let schedule_count = AutopilotConfigFile::load_or_default()
@@ -2385,17 +2478,17 @@ async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
 
     let config_valid = config_path.exists();
 
-    // Watch runtime uses ~/.stakpak/watch/watch.db regardless of config format
+    // Watch runtime uses ~/.stakpak/autopilot/autopilot.db regardless of config format
     let db_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".stakpak/watch/watch.db");
+        .join(".stakpak/autopilot/autopilot.db");
     let db_path_str = db_path.to_string_lossy().to_string();
 
     let db = match db_path.to_str() {
-        Some(path) => match crate::commands::watch::WatchDb::new(path).await {
+        Some(path) => match crate::commands::watch::ScheduleDb::new(path).await {
             Ok(db) => db,
             Err(error) => {
-                return WatchStatusJson {
+                return SchedulerStatusJson {
                     expected_enabled: true,
                     config_path: config_path.display().to_string(),
                     config_valid,
@@ -2410,7 +2503,7 @@ async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
             }
         },
         None => {
-            return WatchStatusJson {
+            return SchedulerStatusJson {
                 expected_enabled: true,
                 config_path: config_path.display().to_string(),
                 config_valid,
@@ -2419,15 +2512,15 @@ async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
                 pid: None,
                 stale_pid: false,
                 db_path: Some(db_path_str),
-                error: Some("Invalid watch database path".to_string()),
+                error: Some("Invalid scheduler database path".to_string()),
                 recent_runs: Vec::new(),
             };
         }
     };
 
-    let watch_state = db.get_watch_state().await.ok().flatten();
+    let scheduler_state = db.get_autopilot_state().await.ok().flatten();
 
-    let (running, stale_pid, pid) = if let Some(state) = watch_state {
+    let (running, stale_pid, pid) = if let Some(state) = scheduler_state {
         let pid = state.pid;
         let running = u32::try_from(pid)
             .ok()
@@ -2450,7 +2543,7 @@ async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
         {
             Ok(runs) => runs
                 .into_iter()
-                .map(|run| WatchRunSummaryJson {
+                .map(|run| ScheduleRunSummaryJson {
                     id: run.id,
                     schedule_name: run.schedule_name,
                     status: run.status.to_string(),
@@ -2465,7 +2558,7 @@ async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
         Vec::new()
     };
 
-    WatchStatusJson {
+    SchedulerStatusJson {
         expected_enabled: true,
         config_path: config_path.display().to_string(),
         config_valid,
@@ -2638,7 +2731,7 @@ fn autopilot_service_installed() -> bool {
 
 /// Check if the autopilot process is currently running via PID file + process check.
 fn is_autopilot_running() -> Option<u32> {
-    let config = crate::commands::watch::WatchConfig::load_default().ok()?;
+    let config = crate::commands::watch::ScheduleConfig::load_default().ok()?;
     let pid_file = config
         .db_path()
         .parent()
@@ -3380,17 +3473,17 @@ enabled = true
                 reachable: false,
                 url: "http://127.0.0.1:4096/v1/gateway/status".to_string(),
             },
-            watch: WatchStatusJson {
+            scheduler: SchedulerStatusJson {
                 expected_enabled: true,
-                config_path: "/tmp/watch.toml".to_string(),
+                config_path: "/tmp/autopilot.toml".to_string(),
                 config_valid: true,
                 trigger_count: 2,
                 running: true,
                 pid: Some(123),
                 stale_pid: false,
-                db_path: Some("/tmp/watch.db".to_string()),
+                db_path: Some("/tmp/autopilot.db".to_string()),
                 error: None,
-                recent_runs: vec![WatchRunSummaryJson {
+                recent_runs: vec![ScheduleRunSummaryJson {
                     id: 1,
                     schedule_name: "example".to_string(),
                     status: "completed".to_string(),
@@ -3426,17 +3519,17 @@ enabled = true
             assert!(value.get("service").is_some());
             assert!(value.get("server").is_some());
             assert!(value.get("gateway").is_some());
-            assert!(value.get("watch").is_some());
+            assert!(value.get("scheduler").is_some());
             assert!(value.get("schedules").is_some());
             assert!(value.get("channels").is_some());
 
-            let watch_runs = value
-                .get("watch")
-                .and_then(|watch| watch.get("recent_runs"))
+            let scheduler_runs = value
+                .get("scheduler")
+                .and_then(|s| s.get("recent_runs"))
                 .and_then(|runs| runs.as_array())
                 .map(|runs| runs.len())
                 .unwrap_or_default();
-            assert_eq!(watch_runs, 1);
+            assert_eq!(scheduler_runs, 1);
         }
     }
 }

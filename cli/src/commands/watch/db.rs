@@ -1,4 +1,4 @@
-//! SQLite database layer for watch state and schedule run history.
+//! SQLite database layer for autopilot state and schedule run history.
 //!
 //! Uses libsql for async SQLite operations.
 
@@ -76,7 +76,7 @@ pub struct ScheduleRun {
 
 /// Watch state record.
 #[derive(Debug, Clone)]
-pub struct WatchState {
+pub struct SchedulerState {
     pub started_at: DateTime<Utc>,
     pub pid: i64,
     pub last_heartbeat: DateTime<Utc>,
@@ -113,11 +113,11 @@ pub enum DbError {
 }
 
 /// Watch database storage.
-pub struct WatchDb {
+pub struct ScheduleDb {
     conn: Mutex<Connection>,
 }
 
-impl WatchDb {
+impl ScheduleDb {
     /// Create a new database instance, initializing schema if needed.
     pub async fn new(db_path: &str) -> Result<Self, DbError> {
         // Ensure parent directory exists
@@ -181,9 +181,9 @@ impl WatchDb {
             .execute("ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT", ())
             .await;
 
-        // Create watch_state table (singleton)
+        // Create autopilot_state table (singleton)
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS watch_state (
+            "CREATE TABLE IF NOT EXISTS autopilot_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 started_at TEXT,
                 pid INTEGER,
@@ -452,7 +452,7 @@ impl WatchDb {
     }
 
     /// Mark all stale "running" runs as failed.
-    /// Runs are considered stale if they've been running and the watch service is no longer active.
+    /// Runs are considered stale if they've been running and the autopilot service is no longer active.
     pub async fn clean_stale_runs(&self) -> Result<u64, DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
@@ -468,13 +468,13 @@ impl WatchDb {
         Ok(result)
     }
 
-    /// Set watch state (upsert).
-    pub async fn set_watch_state(&self, pid: i64) -> Result<(), DbError> {
+    /// Set autopilot state (upsert).
+    pub async fn set_autopilot_state(&self, pid: i64) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "INSERT OR REPLACE INTO watch_state (id, started_at, pid, last_heartbeat) VALUES (1, ?, ?, ?)",
+            "INSERT OR REPLACE INTO autopilot_state (id, started_at, pid, last_heartbeat) VALUES (1, ?, ?, ?)",
             (now.as_str(), pid, now.as_str()),
         )
         .await
@@ -483,13 +483,13 @@ impl WatchDb {
         Ok(())
     }
 
-    /// Update watch heartbeat.
+    /// Update autopilot heartbeat.
     pub async fn update_heartbeat(&self) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "UPDATE watch_state SET last_heartbeat = ? WHERE id = 1",
+            "UPDATE autopilot_state SET last_heartbeat = ? WHERE id = 1",
             [now.as_str()],
         )
         .await
@@ -498,13 +498,13 @@ impl WatchDb {
         Ok(())
     }
 
-    /// Get watch state.
-    pub async fn get_watch_state(&self) -> Result<Option<WatchState>, DbError> {
+    /// Get autopilot state.
+    pub async fn get_autopilot_state(&self) -> Result<Option<SchedulerState>, DbError> {
         let conn = self.conn.lock().await;
 
         let mut rows = conn
             .query(
-                "SELECT started_at, pid, last_heartbeat FROM watch_state WHERE id = 1",
+                "SELECT started_at, pid, last_heartbeat FROM autopilot_state WHERE id = 1",
                 (),
             )
             .await
@@ -515,7 +515,7 @@ impl WatchDb {
             let pid: i64 = row.get(1).map_err(|e| DbError::Query(e.to_string()))?;
             let last_heartbeat: String = row.get(2).map_err(|e| DbError::Query(e.to_string()))?;
 
-            Ok(Some(WatchState {
+            Ok(Some(SchedulerState {
                 started_at: parse_datetime(&started_at)?,
                 pid,
                 last_heartbeat: parse_datetime(&last_heartbeat)?,
@@ -525,11 +525,11 @@ impl WatchDb {
         }
     }
 
-    /// Clear watch state.
-    pub async fn clear_watch_state(&self) -> Result<(), DbError> {
+    /// Clear autopilot state.
+    pub async fn clear_autopilot_state(&self) -> Result<(), DbError> {
         let conn = self.conn.lock().await;
 
-        conn.execute("DELETE FROM watch_state WHERE id = 1", ())
+        conn.execute("DELETE FROM autopilot_state WHERE id = 1", ())
             .await
             .map_err(|e| DbError::Query(e.to_string()))?;
 
@@ -654,10 +654,10 @@ mod tests {
     use super::*;
     use tempfile::{TempDir, tempdir};
 
-    async fn create_test_db() -> (WatchDb, TempDir) {
+    async fn create_test_db() -> (ScheduleDb, TempDir) {
         let dir = tempdir().expect("Failed to create temp dir");
         let db_path = dir.path().join("test.db");
-        let db = WatchDb::new(db_path.to_str().expect("Invalid path"))
+        let db = ScheduleDb::new(db_path.to_str().expect("Invalid path"))
             .await
             .expect("Failed to create test db");
         (db, dir)
@@ -668,7 +668,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let db_path = dir.path().join("test.db");
 
-        let db = WatchDb::new(db_path.to_str().expect("Invalid path"))
+        let db = ScheduleDb::new(db_path.to_str().expect("Invalid path"))
             .await
             .expect("Failed to create db");
 
@@ -677,7 +677,7 @@ mod tests {
 
         let mut rows = conn
             .query(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('trigger_runs', 'watch_state')",
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('trigger_runs', 'autopilot_state')",
                 (),
             )
             .await
@@ -690,7 +690,7 @@ mod tests {
         }
 
         assert!(tables.contains(&"trigger_runs".to_string()));
-        assert!(tables.contains(&"watch_state".to_string()));
+        assert!(tables.contains(&"autopilot_state".to_string()));
     }
 
     #[tokio::test]
@@ -822,18 +822,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_watch_state_lifecycle() {
+    async fn test_autopilot_state_lifecycle() {
         let (db, _dir) = create_test_db().await;
 
         // Initially no state
-        let state = db.get_watch_state().await.expect("Get state failed");
+        let state = db.get_autopilot_state().await.expect("Get state failed");
         assert!(state.is_none());
 
         // Set state
-        db.set_watch_state(12345).await.expect("Set state failed");
+        db.set_autopilot_state(12345).await.expect("Set state failed");
 
         let state = db
-            .get_watch_state()
+            .get_autopilot_state()
             .await
             .expect("Get state failed")
             .expect("State should exist");
@@ -846,16 +846,16 @@ mod tests {
             .expect("Update heartbeat failed");
 
         let state2 = db
-            .get_watch_state()
+            .get_autopilot_state()
             .await
             .expect("Get state failed")
             .expect("State should exist");
         assert!(state2.last_heartbeat >= state.last_heartbeat);
 
         // Clear state
-        db.clear_watch_state().await.expect("Clear state failed");
+        db.clear_autopilot_state().await.expect("Clear state failed");
 
-        let state = db.get_watch_state().await.expect("Get state failed");
+        let state = db.get_autopilot_state().await.expect("Get state failed");
         assert!(state.is_none());
     }
 
