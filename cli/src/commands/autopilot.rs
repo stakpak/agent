@@ -1495,16 +1495,56 @@ async fn stop_autopilot() -> Result<(), String> {
 }
 
 async fn restart_autopilot() -> Result<(), String> {
-    if !autopilot_service_installed() {
+    // 1. Validate the full autopilot config (server, schedules, channels)
+    println!("Validating autopilot configuration...");
+    let autopilot_config = AutopilotConfigFile::load_or_default()?;
+
+    for schedule in &autopilot_config.schedules {
+        validate_schedule(schedule)?;
+    }
+    println!(
+        "  ✓ {} schedule(s), {} channel(s), server listen={}",
+        autopilot_config.schedules.len(),
+        autopilot_config.channels.len(),
+        autopilot_config.server.listen,
+    );
+
+    // 2. Validate the watch/scheduler config (cron parsing, check scripts, db/log paths)
+    match crate::commands::watch::WatchConfig::load_default() {
+        Ok(config) => {
+            println!(
+                "  ✓ Scheduler config valid ({} schedules)",
+                config.schedules.len()
+            );
+        }
+        Err(e) => {
+            return Err(format!(
+                "Scheduler configuration error: {}\nFix {} and try again.",
+                e,
+                AutopilotConfigFile::path().display(),
+            ));
+        }
+    }
+
+    // 3. Restart: service path or foreground PID
+    if autopilot_service_installed() {
+        println!("\nRestarting autopilot service...");
+        stop_autopilot_service()?;
+        // Wait for the old process to fully exit before starting the new one.
+        // launchctl stop is async — the process may still be shutting down.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        start_autopilot_service()?;
+        println!("✓ Autopilot service restarted (scheduler, server, gateway)");
+    } else if let Some(pid) = is_autopilot_running() {
+        println!("\nAutopilot is running in foreground mode (PID {}).", pid);
+        println!("Stop it with Ctrl-C or `stakpak autopilot down`, then start again with `stakpak up`.");
+        println!("Configuration has been validated and will take effect on next start.");
+    } else {
         return Err(
-            "Autopilot service is not installed. Run `stakpak autopilot up` first.".to_string(),
+            "Autopilot is not running. Start it with `stakpak up`.".to_string(),
         );
     }
 
-    stop_autopilot_service()?;
-    start_autopilot_service()?;
-
-    println!("✓ Autopilot service restarted");
     Ok(())
 }
 

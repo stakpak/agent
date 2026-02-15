@@ -4,16 +4,13 @@
 
 pub mod history;
 mod init;
-mod install;
 mod prune;
 mod reload;
 mod resume;
 mod run;
 pub mod schedule;
-mod service;
 mod status;
 mod stop;
-mod uninstall;
 
 use clap::Subcommand;
 
@@ -66,14 +63,6 @@ pub enum WatchCommands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Install watch as a system service (launchd on macOS, systemd on Linux)
-    Install {
-        /// Reinstall even if already installed
-        #[arg(short, long)]
-        force: bool,
-    },
-    /// Uninstall watch system service
-    Uninstall,
     /// Reload watch configuration (restarts the service)
     Reload,
 }

@@ -189,10 +189,6 @@ pub enum Commands {
     Up {
         #[command(flatten)]
         args: StartArgs,
-
-        /// Run in background/service mode (legacy `up` defaults to foreground)
-        #[arg(long, default_value_t = false, conflicts_with = "foreground")]
-        background: bool,
     },
 
     /// Alias for `stakpak autopilot down`
@@ -236,26 +232,6 @@ fn get_config_path_option(config: &AppConfig) -> Option<&Path> {
     } else {
         Some(Path::new(&config.config_path))
     }
-}
-
-fn normalize_up_alias_start_args(
-    mut args: StartArgs,
-    background: bool,
-) -> Result<StartArgs, String> {
-    // Defense-in-depth: clap already enforces this at parse time, but keep this for
-    // programmatic construction paths (tests/internal callers).
-    if background && args.foreground {
-        return Err("Cannot combine --background with --foreground.".to_string());
-    }
-
-    // Backwards-compatibility: historically `stakpak up` was a foreground/blocking command.
-    // Keep that behavior unless --background is requested.
-    // For machine output (--json), prefer background/service mode.
-    if !background && !args.json {
-        args.foreground = true;
-    }
-
-    Ok(args)
 }
 
 impl Commands {
@@ -522,9 +498,7 @@ impl Commands {
             Commands::Onboard { args } => {
                 AutopilotCommands::Init { args }.run(config).await?;
             }
-            Commands::Up { args, background } => {
-                let args = normalize_up_alias_start_args(args, background)?;
-
+            Commands::Up { args } => {
                 AutopilotCommands::Up {
                     args,
                     from_service: false,
@@ -756,8 +730,9 @@ fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path
 mod tests {
     use super::*;
 
-    fn base_start_args() -> StartArgs {
-        StartArgs {
+    #[test]
+    fn up_defaults_to_background_mode() {
+        let args = StartArgs {
             bind: "127.0.0.1:4096".to_string(),
             show_token: false,
             no_auth: false,
@@ -765,50 +740,8 @@ mod tests {
             auto_approve_all: false,
             json: false,
             foreground: false,
-        }
-    }
-
-    #[test]
-    fn normalize_up_alias_defaults_to_foreground_for_legacy_compat() {
-        let args = base_start_args();
-        let normalized = normalize_up_alias_start_args(args, false);
-        assert!(normalized.is_ok());
-
-        if let Ok(normalized) = normalized {
-            assert!(normalized.foreground);
-        }
-    }
-
-    #[test]
-    fn normalize_up_alias_background_keeps_non_foreground() {
-        let args = base_start_args();
-        let normalized = normalize_up_alias_start_args(args, true);
-        assert!(normalized.is_ok());
-
-        if let Ok(normalized) = normalized {
-            assert!(!normalized.foreground);
-        }
-    }
-
-    #[test]
-    fn normalize_up_alias_json_does_not_force_foreground() {
-        let mut args = base_start_args();
-        args.json = true;
-
-        let normalized = normalize_up_alias_start_args(args, false);
-        assert!(normalized.is_ok());
-
-        if let Ok(normalized) = normalized {
-            assert!(!normalized.foreground);
-        }
-    }
-
-    #[test]
-    fn normalize_up_alias_rejects_background_foreground_conflict() {
-        let mut args = base_start_args();
-        args.foreground = true;
-
-        let normalized = normalize_up_alias_start_args(args, true);
-        assert!(normalized.is_err());
+        };
+        // Without --foreground, args.foreground should be false (background/service mode)
+        assert!(!args.foreground);
     }
 }

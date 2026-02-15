@@ -603,9 +603,8 @@ mod tests {
 
         if let Ok(cli) = parsed {
             match cli.command {
-                Some(Commands::Up { args, background }) => {
+                Some(Commands::Up { args }) => {
                     assert!(args.foreground);
-                    assert!(!background);
                 }
                 _ => panic!("Expected up command"),
             }
@@ -613,15 +612,14 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_up_alias_background_flag() {
-        let parsed = Cli::try_parse_from(["stakpak", "up", "--background"]);
+    fn cli_parses_up_defaults_to_background() {
+        let parsed = Cli::try_parse_from(["stakpak", "up"]);
         assert!(parsed.is_ok());
 
         if let Ok(cli) = parsed {
             match cli.command {
-                Some(Commands::Up { args, background }) => {
+                Some(Commands::Up { args }) => {
                     assert!(!args.foreground);
-                    assert!(background);
                 }
                 _ => panic!("Expected up command"),
             }
@@ -644,22 +642,15 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejects_up_background_and_foreground_together() {
-        let parsed = Cli::try_parse_from(["stakpak", "up", "--background", "--foreground"]);
-        assert!(parsed.is_err());
-    }
-
-    #[test]
     fn cli_parses_up_json_and_foreground_flags() {
         let parsed = Cli::try_parse_from(["stakpak", "up", "--json", "--foreground"]);
         assert!(parsed.is_ok());
 
         if let Ok(cli) = parsed {
             match cli.command {
-                Some(Commands::Up { args, background }) => {
+                Some(Commands::Up { args }) => {
                     assert!(args.json);
                     assert!(args.foreground);
-                    assert!(!background);
                 }
                 _ => panic!("Expected up command"),
             }
@@ -705,7 +696,6 @@ mod tests {
                     json: false,
                     foreground: false,
                 },
-                background: false,
             }
             .requires_auth()
         );
