@@ -19,6 +19,8 @@ stakpak-mcp-client = { workspace = true }
 stakpak-mcp-proxy = { workspace = true }
 stakpak-tui = { workspace = true }
 stakpak-shared = { workspace = true }
+stakpak-server = { workspace = true }
+stakpak-gateway = { workspace = true }
 stakai = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -30,6 +32,7 @@ serde_json = { workspace = true }
 serde_yaml = "0.9"
 toml = "0.8.19"
 tokio = { workspace = true }
+axum = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }
 chrono = { workspace = true }
@@ -60,7 +63,7 @@ croner = "3.0"
 humantime-serde = "1.1"
 humantime = "2.1"
 thiserror = "2.0"
-libsql = "0.9.29"
+libsql = { workspace = true }
 tokio-cron-scheduler = "0.15"
 which = "7.0"
 

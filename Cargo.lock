@@ -3066,6 +3066,8 @@ checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -6052,6 +6054,7 @@ version = "0.3.42"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
+ "axum 0.8.7",
  "base64 0.22.1",
  "chrono",
  "clap 4.5.51",
@@ -6082,9 +6085,11 @@ dependencies = [
  "serde_yaml",
  "stakai",
  "stakpak-api",
+ "stakpak-gateway",
  "stakpak-mcp-client",
  "stakpak-mcp-proxy",
  "stakpak-mcp-server",
+ "stakpak-server",
  "stakpak-shared",
  "stakpak-tui",
  "tar",
@@ -6101,6 +6106,21 @@ dependencies = [
  "walkdir",
  "which 7.0.3",
  "zip",
+]
+
+[[package]]
+name = "stakpak-agent-core"
+version = "0.3.42"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "stakai",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -6125,6 +6145,33 @@ dependencies = [
  "tempfile",
  "tokio",
  "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "stakpak-gateway"
+version = "0.3.42"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.7",
+ "bytes",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "libsql",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "stakai",
+ "stakpak-agent-core",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
  "uuid",
 ]
 
@@ -6193,6 +6240,31 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "stakpak-server"
+version = "0.3.42"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.8.7",
+ "chrono",
+ "http-body-util",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "stakai",
+ "stakpak-agent-core",
+ "stakpak-api",
+ "stakpak-mcp-client",
+ "stakpak-shared",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tower 0.5.2",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
@@ -6758,6 +6830,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls 0.23.35",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tungstenite",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6767,6 +6855,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -7021,6 +7110,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http 1.3.1",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "rustls 0.23.35",
+ "rustls-pki-types",
+ "sha1",
+ "thiserror 1.0.69",
+ "utf-8",
+]
+
+[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7135,6 +7244,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
+name = "utf-8"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
+
+[[package]]
 name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7145,6 +7260,30 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fcc29c80c21c31608227e0912b2d7fddba57ad76b606890627ba8ee7964e993"
+dependencies = [
+ "indexmap 2.12.0",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d79d08d92ab8af4c5e8a6da20c47ae3f61a0f1dabc1997cdf2d082b757ca08b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.110",
+ "uuid",
+]
 
 [[package]]
 name = "uuid"
