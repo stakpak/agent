@@ -42,18 +42,37 @@ impl ApprovalAction {
     pub fn new(tool_call: ToolCall) -> Self {
         let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
 
-        // Convert snake_case to Title Case (e.g., "get_pak_content" -> "Get Pak Content")
-        let label = tool_name
-            .split('_')
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                    None => String::new(),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
+        let label = if tool_name == "dynamic_subagent_task" {
+            // Parse description and sandbox flag from arguments for a meaningful label
+            let args =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let desc = args
+                .as_ref()
+                .and_then(|a| a.get("description").and_then(|v| v.as_str()))
+                .unwrap_or("Subagent");
+            let is_sandbox = args
+                .as_ref()
+                .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if is_sandbox {
+                format!("{} [sandboxed]", desc)
+            } else {
+                desc.to_string()
+            }
+        } else {
+            // Convert snake_case to Title Case (e.g., "get_pak_content" -> "Get Pak Content")
+            tool_name
+                .split('_')
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
 
         Self {
             tool_call,
@@ -246,13 +265,46 @@ impl ApprovalBar {
 
     /// Calculate the height needed for rendering
     /// Returns: top border (1) + content lines (with spacing) + empty line (1) + footer (1) + bottom border (1)
-    pub fn calculate_height(&self) -> u16 {
+    pub fn calculate_height(&self, terminal_width: u16) -> u16 {
         if !self.is_visible() {
             return 0;
         }
-        // Base height: top border (1) + button row (1) + empty line (1) + footer (1) + bottom border (1) = 5
-        // Cap at reasonable height
-        5
+
+        // Calculate how many lines the tabs will wrap to
+        let inner_width = terminal_width.saturating_sub(4) as usize; // -2 for borders, -2 for padding
+        let tab_width = inner_width.saturating_sub(2); // margins inside content area
+
+        let mut num_lines = 1usize;
+        let mut current_width = 0usize;
+
+        for action in &self.actions {
+            // Calculate button width: " ✓ Label " with spaces
+            let button_text = format!(" ✓ {} ", action.label);
+            let button_width = button_text.chars().count();
+            let separator_len = if current_width == 0 { 0 } else { 1 }; // " " between buttons
+            let needed_width = button_width + separator_len;
+
+            // Check if we need to wrap to next line
+            if current_width > 0 && current_width + needed_width > tab_width {
+                num_lines += 1;
+                current_width = button_width;
+            } else {
+                current_width += needed_width;
+            }
+        }
+
+        // Height calculation:
+        // - top border: 1
+        // - content lines: num_lines (first line) + (num_lines - 1) spacing lines between rows
+        // - empty line before footer: 1
+        // - footer: 1
+        // - bottom border: 1
+        // Total: 1 + num_lines + (num_lines - 1) + 1 + 1 + 1 = 2 * num_lines + 3
+        let content_height = num_lines + num_lines.saturating_sub(1); // lines + spacing between them
+        let total_height = 1 + content_height + 1 + 1 + 1; // top border + content + empty + footer + bottom
+
+        // Cap at reasonable height (e.g., 15 lines max to avoid taking over the screen)
+        (total_height as u16).min(15)
     }
 
     /// Render the approval bar with wrapping support
@@ -641,5 +693,44 @@ mod tests {
 
         let bar_action = ApprovalAction::new(make_tool_call("create", "{}"));
         assert_eq!(bar_action.label, "Create");
+    }
+
+    #[test]
+    fn test_calculate_height_single_row() {
+        let mut bar = ApprovalBar::new();
+        bar.add_action(make_tool_call("run_command", "{}"));
+        bar.add_action(make_tool_call("create", "{}"));
+
+        // With wide terminal (100 chars), should fit on one row
+        // Height = top border (1) + 1 content line + empty (1) + footer (1) + bottom (1) = 5
+        let height = bar.calculate_height(100);
+        assert_eq!(height, 5);
+    }
+
+    #[test]
+    fn test_calculate_height_multiple_rows() {
+        let mut bar = ApprovalBar::new();
+        // Add many tool calls to force wrapping
+        for i in 0..8 {
+            bar.add_action(make_tool_call(&format!("tool_name_{}", i), "{}"));
+        }
+
+        // With narrow terminal (50 chars), should wrap to multiple rows
+        // Each button is roughly " ✓ Tool Name X " = ~16 chars
+        // 50 - 6 (borders/padding) = 44 usable width
+        // ~2-3 buttons per row, so 8 buttons = 3-4 rows
+        let height = bar.calculate_height(50);
+        assert!(
+            height > 5,
+            "Expected height > 5 for wrapped rows, got {}",
+            height
+        );
+    }
+
+    #[test]
+    fn test_calculate_height_hidden() {
+        let bar = ApprovalBar::new();
+        // Empty/hidden bar should return 0
+        assert_eq!(bar.calculate_height(100), 0);
     }
 }

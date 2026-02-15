@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultStatus,
+    ToolCall, ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
 };
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
@@ -603,6 +603,28 @@ pub fn extract_bash_block_info(
             content_color: Color::LightRed,
             tool_type: "Delete File".to_string(),
         },
+        "dynamic_subagent_task" => {
+            let is_sandbox =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                    .unwrap_or(false);
+            if is_sandbox {
+                BubbleColors {
+                    border_color: Color::Green,
+                    title_color: Color::Green,
+                    content_color: term_color(Color::Gray),
+                    tool_type: "Subagent [sandboxed]".to_string(),
+                }
+            } else {
+                BubbleColors {
+                    border_color: Color::Magenta,
+                    title_color: Color::Magenta,
+                    content_color: term_color(Color::Gray),
+                    tool_type: "Subagent".to_string(),
+                }
+            }
+        }
         _ => BubbleColors {
             border_color: Color::Cyan,
             title_color: term_color(Color::White),
@@ -2393,32 +2415,44 @@ pub fn render_task_wait_block(
             .unwrap_or_else(|| "...".to_string());
 
         // Truncate task_id for display (show first 8 chars)
-        let task_id_display = if task.task_id.len() > 8 {
-            format!("{}…", &task.task_id[..8])
+        let task_id_display = if task.task_id.chars().count() > 8 {
+            let truncated: String = task.task_id.chars().take(8).collect();
+            format!("{}…", truncated)
         } else {
             task.task_id.clone()
         };
 
         // Get description or fall back to truncated task_id
-        let display_name = task
+        let raw_description = task
             .description
             .as_ref()
-            .map(|d| {
-                // Truncate description if too long
-                if d.len() > 30 {
-                    format!("{}…", &d[..30])
-                } else {
-                    d.clone()
-                }
-            })
+            .cloned()
             .unwrap_or_else(|| task_id_display.clone());
 
-        // Build the task line: "│ ● description [duration] status │"
-        let task_content = format!("{} {} [{}]", display_name, task.status, duration_str);
+        // Detect and strip [sandboxed] tag for separate rendering
+        let is_sandboxed = raw_description.contains("[sandboxed]");
+        let clean_description = raw_description
+            .replace(" [sandboxed]", "")
+            .replace("[sandboxed]", "");
+
+        let display_name = if clean_description.chars().count() > 30 {
+            let truncated: String = clean_description.chars().take(30).collect();
+            format!("{}…", truncated)
+        } else {
+            clean_description
+        };
+
+        let sandboxed_tag = if is_sandboxed { " [sandboxed]" } else { "" };
+
+        // Build the task line: "│ ● description [sandboxed] [duration] status │"
+        let task_content = format!(
+            "{}{} {} [{}]",
+            display_name, sandboxed_tag, task.status, duration_str
+        );
         let content_display_width = calculate_display_width(&task_content) + 2; // +2 for icon and space
         let padding_needed = inner_width.saturating_sub(content_display_width);
 
-        let line_spans = vec![
+        let mut line_spans = vec![
             Span::styled("│", Style::default().fg(border_color)),
             Span::from(" "),
             Span::styled(
@@ -2429,6 +2463,14 @@ pub fn render_task_wait_block(
             ),
             Span::from(" "),
             Span::styled(display_name, Style::default().fg(AdaptiveColors::text())),
+        ];
+        if is_sandboxed {
+            line_spans.push(Span::styled(
+                " [sandboxed]",
+                Style::default().fg(Color::Green),
+            ));
+        }
+        line_spans.extend([
             Span::styled(
                 format!(" [{}]", duration_str),
                 Style::default().fg(Color::DarkGray),
@@ -2439,7 +2481,7 @@ pub fn render_task_wait_block(
             ),
             Span::from(" ".repeat(padding_needed)),
             Span::styled(" │", Style::default().fg(border_color)),
-        ];
+        ]);
         formatted_lines.push(Line::from(line_spans));
 
         // If task is paused, show pause info (agent message and pending tool calls)
@@ -2474,18 +2516,23 @@ pub fn render_task_wait_block(
             if let Some(tool_calls) = &pause_info.pending_tool_calls {
                 for tc in tool_calls {
                     // Format: "  → tool_name(args_preview)"
-                    let args_preview = tc
-                        .arguments
-                        .as_ref()
-                        .map(|args| {
-                            let args_str = args.to_string();
-                            if args_str.len() > 40 {
-                                format!("{}…", &args_str[..40])
-                            } else {
-                                args_str
-                            }
-                        })
-                        .unwrap_or_default();
+                    let args_preview = {
+                        let args_str = tc.arguments.to_string();
+                        if args_str == "null" || args_str == "{}" {
+                            String::new()
+                        } else if args_str.len() > 40 {
+                            // Find a valid UTF-8 boundary near 40 chars
+                            let truncate_at = args_str
+                                .char_indices()
+                                .take_while(|(i, _)| *i < 40)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(0);
+                            format!("{}…", &args_str[..truncate_at])
+                        } else {
+                            args_str
+                        }
+                    };
 
                     let tool_display = if args_preview.is_empty() {
                         format!("→ {}", tc.name)
@@ -2689,8 +2736,9 @@ pub fn render_subagent_resume_pending_block<'a>(
                     ]));
 
                     // Show arguments in a readable format
-                    if let Some(args) = &tc.arguments {
-                        let formatted_args = format_tool_arguments_readable(args, inner_width - 6);
+                    if !tc.arguments.is_null() {
+                        let formatted_args =
+                            format_tool_arguments_readable(&tc.arguments, inner_width - 6);
                         for arg_line in formatted_args {
                             let arg_display_width = calculate_display_width(&arg_line);
                             let arg_padding = inner_width.saturating_sub(arg_display_width + 4);
@@ -2863,6 +2911,192 @@ fn format_tool_arguments_readable(args: &serde_json::Value, max_width: usize) ->
     lines
 }
 
+/// Render a preview block showing tool calls being streamed/generated by the LLM.
+/// Compact layout: shows a summary line with total count + total tokens,
+/// plus individual tool rows (capped at MAX_VISIBLE_TOOLS to keep the block short).
+pub fn render_tool_call_stream_block(
+    infos: &[ToolCallStreamInfo],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let border_color = Color::DarkGray;
+    // inner_width = usable content width between the border+padding chars
+    // Each line is: "│ " + content(inner_width) + " │" = inner_width + 4
+    let inner_width = if width > 4 { width - 4 } else { 40 };
+    let horizontal_line = "─".repeat(inner_width + 2);
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    // Title: "Generating N tool calls..."
+    let title = if infos.len() == 1 {
+        " Generating 1 tool call... ".to_string()
+    } else {
+        format!(" Generating {} tool calls... ", infos.len())
+    };
+    let title_display_width = UnicodeWidthStr::width(title.as_str());
+    // Top border: "╭" + title + "─"×remaining + "╮" must equal inner_width + 4
+    let remaining_dashes = (inner_width + 2).saturating_sub(title_display_width);
+    lines.push(Line::from(vec![
+        Span::styled("╭", Style::default().fg(border_color)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{}╮", "─".repeat(remaining_dashes)),
+            Style::default().fg(border_color),
+        ),
+    ]));
+
+    // Each line structure: "│" + fill(fill_width) + " │"
+    // Total = 1 + fill_width + 2 = width, so fill_width = width - 3
+    let fill_width = width.saturating_sub(3);
+
+    // Show individual tool rows, capped to keep the block compact
+    const MAX_VISIBLE_TOOLS: usize = 5;
+    let visible_count = infos.len().min(MAX_VISIBLE_TOOLS);
+
+    for (i, info) in infos.iter().take(visible_count).enumerate() {
+        let number = circled_number(i + 1);
+        let base_name = if info.name.is_empty() {
+            "streaming...".to_string()
+        } else {
+            format_tool_display_name(&info.name)
+        };
+        let tokens = if info.args_tokens > 0 {
+            format_token_count(info.args_tokens)
+        } else {
+            "...".to_string()
+        };
+
+        // Append description if available, truncating to fit
+        let number_width = UnicodeWidthStr::width(number.as_str());
+        let base_name_width = UnicodeWidthStr::width(base_name.as_str());
+        let tokens_width = UnicodeWidthStr::width(tokens.as_str());
+        let fixed_used = 2 + number_width + 1 + base_name_width + tokens_width;
+
+        let name = if let Some(desc) = &info.description {
+            let sep = " - ";
+            let sep_width = sep.len();
+            // Need at least 4 chars for a meaningful truncated description ("X…")
+            let available = fill_width.saturating_sub(fixed_used + sep_width + 1);
+            if available >= 2 {
+                let desc_display: String = desc.chars().take(available).collect();
+                let truncated = if UnicodeWidthStr::width(desc_display.as_str())
+                    < UnicodeWidthStr::width(desc.as_str())
+                {
+                    let trimmed: String = desc.chars().take(available.saturating_sub(1)).collect();
+                    format!("{}…", trimmed)
+                } else {
+                    desc_display
+                };
+                format!("{}{}{}", base_name, sep, truncated)
+            } else {
+                base_name
+            }
+        } else {
+            base_name
+        };
+
+        let name_width = UnicodeWidthStr::width(name.as_str());
+        let used = 2 + number_width + 1 + name_width + tokens_width;
+        let padding = fill_width.saturating_sub(used);
+
+        lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::raw("  "),
+            Span::styled(number, Style::default().fg(AdaptiveColors::orange())),
+            Span::raw(" "),
+            Span::styled(name, Style::default().fg(Color::White)),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(tokens, Style::default().fg(Color::DarkGray)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+    }
+
+    // If there are more tools than we can show, add a summary row
+    if infos.len() > MAX_VISIBLE_TOOLS {
+        let hidden_count = infos.len() - MAX_VISIBLE_TOOLS;
+        let hidden_tokens: usize = infos
+            .iter()
+            .skip(MAX_VISIBLE_TOOLS)
+            .map(|i| i.args_tokens)
+            .sum();
+        let summary = format!(
+            " +{} more{}",
+            hidden_count,
+            if hidden_tokens > 0 {
+                format!(" ({})", format_token_count(hidden_tokens))
+            } else {
+                String::new()
+            }
+        );
+        let summary_width = UnicodeWidthStr::width(summary.as_str());
+        let padding = fill_width.saturating_sub(summary_width);
+
+        lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+    }
+
+    // Total tokens line
+    let total_tokens: usize = infos.iter().map(|i| i.args_tokens).sum();
+    if total_tokens > 0 {
+        let total_text = format!(" total: {}", format_token_count(total_tokens));
+        let total_width = UnicodeWidthStr::width(total_text.as_str());
+        let padding = fill_width.saturating_sub(total_width);
+
+        lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::styled(total_text, Style::default().fg(Color::DarkGray)),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(" │", Style::default().fg(border_color)),
+        ]));
+    }
+
+    // Bottom border
+    lines.push(Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]));
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    lines
+}
+
+fn circled_number(n: usize) -> String {
+    format!("{}", n)
+}
+
+fn format_tool_display_name(name: &str) -> String {
+    let stripped = crate::utils::strip_tool_name(name);
+    stripped
+        .replace('_', " ")
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
+fn format_token_count(tokens: usize) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k tokens", tokens as f64 / 1000.0)
+    } else {
+        format!("{} tokens", tokens)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2932,5 +3166,83 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "");
+    }
+
+    #[test]
+    fn test_tool_call_stream_block_border_alignment() {
+        use stakpak_shared::models::integrations::openai::ToolCallStreamInfo;
+
+        let infos = vec![
+            ToolCallStreamInfo {
+                name: "stakpak__create".to_string(),
+                args_tokens: 3241,
+                description: None,
+            },
+            ToolCallStreamInfo {
+                name: "stakpak__run_command".to_string(),
+                args_tokens: 412,
+                description: None,
+            },
+            ToolCallStreamInfo {
+                name: "".to_string(),
+                args_tokens: 0,
+                description: None,
+            },
+        ];
+
+        let width = 80;
+        let lines = render_tool_call_stream_block(&infos, width);
+
+        // Check that all non-SPACING_MARKER lines have consistent display width
+        for line in &lines {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            if text == "SPACING_MARKER" {
+                continue;
+            }
+            let display_width = UnicodeWidthStr::width(text.as_str());
+            assert_eq!(
+                display_width, width,
+                "Line has wrong width {}: {:?}",
+                display_width, text
+            );
+        }
+    }
+
+    #[test]
+    fn test_tool_call_stream_block_overflow_summary() {
+        use stakpak_shared::models::integrations::openai::ToolCallStreamInfo;
+
+        let infos: Vec<ToolCallStreamInfo> = (0..8)
+            .map(|i| ToolCallStreamInfo {
+                name: format!("stakpak__tool_{}", i),
+                args_tokens: 100 * (i + 1),
+                description: None,
+            })
+            .collect();
+
+        let width = 80;
+        let lines = render_tool_call_stream_block(&infos, width);
+
+        // Should have: SPACING + top border + 5 tool rows + 1 summary + 1 total + bottom border + SPACING = 11
+        let content_lines: Vec<_> = lines
+            .iter()
+            .filter(|l| {
+                let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                text != "SPACING_MARKER"
+            })
+            .collect();
+        // top + 5 visible + 1 "+3 more" + 1 total + bottom = 9
+        assert_eq!(content_lines.len(), 9);
+
+        // Verify all lines have correct width
+        for line in &content_lines {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let display_width = UnicodeWidthStr::width(text.as_str());
+            assert_eq!(
+                display_width, width,
+                "Line has wrong width {}: {:?}",
+                display_width, text
+            );
+        }
     }
 }

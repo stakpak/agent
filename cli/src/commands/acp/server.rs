@@ -2291,7 +2291,7 @@ mod tests {
 
     #[test]
     fn test_session_model_state_creation() {
-        let models = vec![
+        let models = [
             Model::new(
                 "claude-sonnet-4-5",
                 "Claude Sonnet 4.5",
@@ -2328,7 +2328,7 @@ mod tests {
 
     #[test]
     fn test_find_model_by_id() {
-        let models = vec![
+        let models = [
             Model::new(
                 "claude-sonnet-4-5",
                 "Claude Sonnet 4.5",
@@ -2368,7 +2368,7 @@ mod tests {
     #[test]
     fn test_model_selection_with_provider_prefixed_ids() {
         // Models with stakpak provider prefix format
-        let models = vec![
+        let models = [
             Model::new(
                 "anthropic/claude-sonnet-4-5-20250514",
                 "Claude Sonnet 4.5",
@@ -2397,13 +2397,13 @@ mod tests {
 
     #[test]
     fn test_new_session_response_serialization_with_models() {
-        let models = vec![
+        let models = [
             ModelInfo::new("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5")
                 .description("Provider: stakpak".to_string()),
             ModelInfo::new("openai/gpt-4o", "GPT-4o").description("Provider: stakpak".to_string()),
         ];
 
-        let model_state = SessionModelState::new("anthropic/claude-sonnet-4-5", models);
+        let model_state = SessionModelState::new("anthropic/claude-sonnet-4-5", models.to_vec());
 
         let response = acp::NewSessionResponse::new(acp::SessionId::new("test-session-123"))
             .models(model_state);
@@ -2437,7 +2437,7 @@ mod tests {
     #[test]
     fn test_current_model_must_match_available_models() {
         // Simulate the logic from get_session_model_state
-        let available_models = vec![
+        let available_models = [
             Model::new(
                 "anthropic/claude-sonnet-4-5-20250929",
                 "Claude Sonnet 4.5",

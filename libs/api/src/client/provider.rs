@@ -183,8 +183,10 @@ impl AgentProvider for AgentClient {
         session_id: Option<Uuid>,
         metadata: Option<serde_json::Value>,
     ) -> Result<ChatCompletionResponse, String> {
-        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
-        ctx.state.metadata = metadata;
+        let mut ctx = HookContext::new(
+            session_id,
+            AgentState::new(model, messages, tools, metadata),
+        );
 
         // Execute before request hooks
         self.hook_registry
@@ -231,6 +233,9 @@ impl AgentProvider for AgentClient {
                 "checkpoint_id".to_string(),
                 serde_json::Value::String(checkpoint_id.to_string()),
             );
+        }
+        if let Some(state_metadata) = &ctx.state.metadata {
+            meta.insert("state_metadata".to_string(), state_metadata.clone());
         }
 
         Ok(ChatCompletionResponse {
@@ -281,8 +286,10 @@ impl AgentProvider for AgentClient {
         ),
         String,
     > {
-        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
-        ctx.state.metadata = metadata;
+        let mut ctx = HookContext::new(
+            session_id,
+            AgentState::new(model, messages, tools, metadata),
+        );
 
         // Execute before request hooks
         self.hook_registry
@@ -373,6 +380,9 @@ impl AgentProvider for AgentClient {
                                 meta.insert("session_id".to_string(), serde_json::Value::String(session_id.to_string()));
                                 if let Some(checkpoint_id) = ctx.new_checkpoint_id {
                                     meta.insert("checkpoint_id".to_string(), serde_json::Value::String(checkpoint_id.to_string()));
+                                }
+                                if let Some(state_metadata) = &ctx.state.metadata {
+                                    meta.insert("state_metadata".to_string(), state_metadata.clone());
                                 }
                                 yield Ok(ChatCompletionStreamResponse {
                                     id: ctx.request_id.to_string(),
@@ -911,6 +921,7 @@ impl AgentClient {
         let cheap_models: &[(&str, &str)] = &[
             ("stakpak", "claude-haiku-4-5"),
             ("anthropic", "claude-haiku-4-5"),
+            ("amazon-bedrock", "claude-haiku-4-5"),
             ("openai", "gpt-4.1-mini"),
             ("google", "gemini-2.5-flash"),
         ];

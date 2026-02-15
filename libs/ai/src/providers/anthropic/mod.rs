@@ -1,9 +1,9 @@
 //! Anthropic provider module
 
-mod convert;
+pub(crate) mod convert;
 mod provider;
-mod stream;
-mod types;
+pub(crate) mod stream;
+pub(crate) mod types;
 
 pub use provider::AnthropicProvider;
 pub use types::{AnthropicConfig, AnthropicRequest, AnthropicResponse};

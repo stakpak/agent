@@ -1,3 +1,4 @@
+pub mod async_manifest;
 pub mod auth;
 pub mod billing;
 pub mod error;
