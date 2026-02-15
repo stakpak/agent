@@ -7,7 +7,10 @@ use chrono::Utc;
 use clap::{Args, Subcommand, ValueEnum};
 use croner::Cron;
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
+
+use std::sync::Arc;
+
+use stakpak_api::AgentProvider;
 
 use crate::{
     config::AppConfig,
@@ -52,18 +55,6 @@ pub struct SetupArgs {
     #[arg(long, default_value_t = false)]
     pub auto_approve_all: bool,
 
-    /// Disable gateway runtime by default for autopilot starts
-    #[arg(long, default_value_t = false)]
-    pub no_gateway: bool,
-
-    /// Disable watch scheduler by default for autopilot starts
-    #[arg(long, default_value_t = false)]
-    pub no_watch: bool,
-
-    /// Path to gateway config file (saved for autopilot starts)
-    #[arg(long)]
-    pub gateway_config: Option<PathBuf>,
-
     /// Emit machine-readable JSON output
     #[arg(long, default_value_t = false)]
     pub json: bool,
@@ -90,18 +81,6 @@ pub struct StartArgs {
     /// Auto-approve all tools (CI/headless only)
     #[arg(long, default_value_t = false)]
     pub auto_approve_all: bool,
-
-    /// Don't start gateway runtime
-    #[arg(long, default_value_t = false)]
-    pub no_gateway: bool,
-
-    /// Don't start watch scheduler
-    #[arg(long, default_value_t = false)]
-    pub no_watch: bool,
-
-    /// Path to gateway config file
-    #[arg(long)]
-    pub gateway_config: Option<PathBuf>,
 
     /// Emit machine-readable JSON output
     #[arg(long, default_value_t = false)]
@@ -152,9 +131,9 @@ pub enum AutopilotCommands {
         #[arg(long, default_value_t = false)]
         json: bool,
 
-        /// Include recent watch runs (count)
+        /// Include recent schedule runs (count)
         #[arg(long)]
-        watch_runs: Option<u32>,
+        recent_runs: Option<u32>,
     },
 
     /// Stream autopilot logs
@@ -171,11 +150,11 @@ pub enum AutopilotCommands {
     /// Restart autopilot (reload config)
     Restart,
 
-    /// Manage schedule metadata (not yet wired to active watch runtime)
+    /// Manage scheduled tasks
     #[command(subcommand)]
     Schedule(AutopilotScheduleCommands),
 
-    /// Manage channel metadata (not yet wired to active gateway runtime)
+    /// Manage messaging channels (Slack, Telegram, Discord)
     #[command(subcommand)]
     Channel(AutopilotChannelCommands),
 
@@ -188,7 +167,7 @@ pub enum AutopilotScheduleCommands {
     /// List all schedules
     List,
 
-    /// Add a schedule (blocked until watch runtime wiring lands)
+    /// Add a schedule
     Add {
         /// Schedule name
         name: String,
@@ -230,16 +209,16 @@ pub enum AutopilotScheduleCommands {
         enabled: bool,
     },
 
-    /// Remove a schedule (blocked until watch runtime wiring lands)
+    /// Remove a schedule
     Remove { name: String },
 
-    /// Enable a schedule (blocked until watch runtime wiring lands)
+    /// Enable a schedule
     Enable { name: String },
 
-    /// Disable a schedule (blocked until watch runtime wiring lands)
+    /// Disable a schedule
     Disable { name: String },
 
-    /// Show run history for a schedule (blocked until watch runtime wiring lands)
+    /// Show run history for a schedule
     History {
         /// Schedule name
         name: String,
@@ -248,6 +227,29 @@ pub enum AutopilotScheduleCommands {
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=1000))]
         limit: u32,
     },
+
+    /// Manually trigger a schedule now
+    Trigger {
+        /// Schedule name
+        name: String,
+
+        /// Preview what would happen without actually triggering
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Show details of a specific run
+    Show {
+        /// Run ID
+        id: i64,
+    },
+
+    /// Clean up stale runs and optionally prune old history
+    Clean {
+        /// Also prune runs older than this many days
+        #[arg(long)]
+        older_than_days: Option<u32>,
+    },
 }
 
 #[derive(Subcommand, PartialEq, Debug, Clone)]
@@ -255,47 +257,34 @@ pub enum AutopilotChannelCommands {
     /// List all channels
     List,
 
-    /// Add a channel (blocked until gateway runtime wiring lands)
+    /// Add a channel
     Add {
-        /// Channel name
-        name: String,
-
-        /// Channel type
-        #[arg(long = "type")]
+        /// Channel type (slack, telegram, discord)
+        #[arg(value_enum)]
         channel_type: ChannelType,
 
-        /// Auth token
+        /// Bot token (Telegram bot token, Discord bot token)
         #[arg(long)]
         token: Option<String>,
 
-        /// Read token from environment variable
+        /// Slack bot token (xoxb-...)
         #[arg(long)]
-        token_env: Option<String>,
+        bot_token: Option<String>,
 
-        /// Where to send/receive (channel/chat ID/URL)
+        /// Slack app token (xapp-...)
         #[arg(long)]
-        target: String,
-
-        /// Only send alerts, don't accept inbound commands
-        #[arg(long, default_value_t = false)]
-        alerts_only: bool,
-
-        /// Enable immediately
-        #[arg(long, default_value_t = true)]
-        enabled: bool,
+        app_token: Option<String>,
     },
 
-    /// Remove a channel (blocked until gateway runtime wiring lands)
-    Remove { name: String },
+    /// Remove a channel
+    Remove {
+        /// Channel type (slack, telegram, discord)
+        #[arg(value_enum)]
+        channel_type: ChannelType,
+    },
 
-    /// Enable a channel (blocked until gateway runtime wiring lands)
-    Enable { name: String },
-
-    /// Disable a channel (blocked until gateway runtime wiring lands)
-    Disable { name: String },
-
-    /// Validate channel configuration (blocked until gateway runtime wiring lands)
-    Test { name: String },
+    /// Test channel connectivity
+    Test,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
@@ -333,9 +322,6 @@ impl AutopilotCommands {
                         no_auth: args.no_auth,
                         model: args.model,
                         auto_approve_all: args.auto_approve_all,
-                        no_gateway: args.no_gateway,
-                        no_watch: args.no_watch,
-                        gateway_config: args.gateway_config,
                     },
                     OutputMode::from_json_flag(args.json),
                 )
@@ -350,9 +336,6 @@ impl AutopilotCommands {
                         no_auth: args.no_auth,
                         model: args.model,
                         auto_approve_all: args.auto_approve_all,
-                        no_gateway: args.no_gateway,
-                        no_watch: args.no_watch,
-                        gateway_config: args.gateway_config,
                         foreground: args.foreground,
                         from_service,
                     },
@@ -360,9 +343,9 @@ impl AutopilotCommands {
                 )
                 .await
             }
-            AutopilotCommands::Down { args } => stop_autopilot(args.uninstall).await,
-            AutopilotCommands::Status { json, watch_runs } => {
-                status_autopilot(&config, OutputMode::from_json_flag(json), watch_runs).await
+            AutopilotCommands::Down { args: _ } => stop_autopilot().await,
+            AutopilotCommands::Status { json, recent_runs } => {
+                status_autopilot(&config, OutputMode::from_json_flag(json), recent_runs).await
             }
             AutopilotCommands::Logs { follow, lines } => logs_autopilot(follow, lines).await,
             AutopilotCommands::Restart => restart_autopilot().await,
@@ -384,9 +367,6 @@ struct SetupOptions {
     no_auth: bool,
     model: Option<String>,
     auto_approve_all: bool,
-    no_gateway: bool,
-    no_watch: bool,
-    gateway_config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -396,17 +376,12 @@ struct StartOptions {
     no_auth: bool,
     model: Option<String>,
     auto_approve_all: bool,
-    no_gateway: bool,
-    no_watch: bool,
-    gateway_config: Option<PathBuf>,
     foreground: bool,
     from_service: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AutopilotConfigFile {
-    #[serde(flatten)]
-    runtime: AutopilotRuntimeConfig,
     #[serde(default)]
     server: AutopilotServerConfig,
     #[serde(default)]
@@ -419,6 +394,14 @@ struct AutopilotConfigFile {
 struct AutopilotServerConfig {
     #[serde(default = "default_server_listen")]
     listen: String,
+    #[serde(default)]
+    show_token: bool,
+    #[serde(default)]
+    no_auth: bool,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    auto_approve_all: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -461,13 +444,20 @@ impl Default for AutopilotServerConfig {
     fn default() -> Self {
         Self {
             listen: default_server_listen(),
+            show_token: false,
+            no_auth: false,
+            model: None,
+            auto_approve_all: false,
         }
     }
 }
 
 impl AutopilotConfigFile {
     fn path() -> PathBuf {
-        AutopilotRuntimeConfig::path()
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".stakpak")
+            .join("autopilot.toml")
     }
 
     fn load_or_default() -> Result<Self, String> {
@@ -489,46 +479,9 @@ impl AutopilotConfigFile {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read autopilot config {}: {}", path.display(), e))?;
 
-        let value: toml::Value = toml::from_str(&content)
+        let config: Self = toml::from_str(&content)
             .map_err(|e| format!("Failed to parse autopilot config {}: {}", path.display(), e))?;
 
-        let has_runtime_bind_key = value
-            .as_table()
-            .map(|table| table.contains_key("bind"))
-            .unwrap_or(false);
-
-        let mut config = match value.clone().try_into::<Self>() {
-            Ok(config) => config,
-            Err(parse_error) => {
-                if looks_like_legacy_runtime_config(&value) {
-                    let runtime: AutopilotRuntimeConfig =
-                        value.clone().try_into().map_err(|e| {
-                            format!(
-                                "Failed to parse legacy autopilot runtime config {}: {}",
-                                path.display(),
-                                e
-                            )
-                        })?;
-
-                    Self {
-                        runtime,
-                        ..Self::default()
-                    }
-                } else {
-                    return Err(format!(
-                        "Failed to parse autopilot config {}: {}",
-                        path.display(),
-                        parse_error
-                    ));
-                }
-            }
-        };
-
-        if !has_runtime_bind_key && !config.server.listen.trim().is_empty() {
-            config.runtime.bind = config.server.listen.clone();
-        }
-
-        config.sync_runtime_and_server();
         Ok(config)
     }
 
@@ -544,56 +497,22 @@ impl AutopilotConfigFile {
                 .map_err(|e| format!("Failed to create autopilot config dir: {}", e))?;
         }
 
-        let mut normalized = self.clone();
-        normalized.sync_runtime_and_server();
-
-        let content = toml::to_string_pretty(&normalized)
+        let content = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize autopilot config: {}", e))?;
 
         std::fs::write(path, content)
             .map_err(|e| format!("Failed to write autopilot config {}: {}", path.display(), e))
     }
 
-    fn sync_runtime_and_server(&mut self) {
-        self.server.listen = self.runtime.bind.clone();
-    }
-
-    #[cfg(test)]
     fn find_schedule(&self, name: &str) -> Option<&AutopilotScheduleConfig> {
         self.schedules.iter().find(|schedule| schedule.name == name)
     }
 
-    #[cfg(test)]
     fn find_schedule_mut(&mut self, name: &str) -> Option<&mut AutopilotScheduleConfig> {
         self.schedules
             .iter_mut()
             .find(|schedule| schedule.name == name)
     }
-}
-
-fn looks_like_legacy_runtime_config(value: &toml::Value) -> bool {
-    let Some(table) = value.as_table() else {
-        return false;
-    };
-
-    let runtime_keys = [
-        "bind",
-        "show_token",
-        "no_auth",
-        "model",
-        "auto_approve_all",
-        "no_gateway",
-        "no_watch",
-        "gateway_config",
-    ];
-
-    let has_runtime_key = table.keys().any(|key| runtime_keys.contains(&key.as_str()));
-    let has_new_keys = table.contains_key("server")
-        || table.contains_key("schedules")
-        || table.contains_key("channels");
-    let has_only_runtime_keys = table.keys().all(|key| runtime_keys.contains(&key.as_str()));
-
-    has_runtime_key && !has_new_keys && has_only_runtime_keys
 }
 
 impl std::fmt::Display for ScheduleTriggerOn {
@@ -646,125 +565,13 @@ impl OutputMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AutopilotRuntimeConfig {
-    bind: String,
-    show_token: bool,
-    no_auth: bool,
-    model: Option<String>,
-    auto_approve_all: bool,
-    no_gateway: bool,
-    no_watch: bool,
-    gateway_config: Option<PathBuf>,
-}
-
-impl Default for AutopilotRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            bind: "127.0.0.1:4096".to_string(),
-            show_token: false,
-            no_auth: false,
-            model: None,
-            auto_approve_all: false,
-            no_gateway: false,
-            no_watch: false,
-            gateway_config: None,
-        }
-    }
-}
-
-impl AutopilotRuntimeConfig {
-    fn path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".stakpak")
-            .join("autopilot.toml")
-    }
-
-    fn load_or_default() -> Result<Self, String> {
-        Ok(AutopilotConfigFile::load_or_default()?.runtime)
-    }
-
-    async fn load_or_default_async() -> Result<Self, String> {
-        tokio::task::spawn_blocking(Self::load_or_default)
-            .await
-            .map_err(|e| format!("Failed to join runtime config load task: {}", e))?
-    }
-
-    fn save(&self) -> Result<PathBuf, String> {
-        let mut config_file = AutopilotConfigFile::load_or_default()?;
-        config_file.runtime = self.clone();
-        config_file.save()
-    }
-
-    async fn save_async(&self) -> Result<PathBuf, String> {
-        let runtime = self.clone();
-        tokio::task::spawn_blocking(move || runtime.save())
-            .await
-            .map_err(|e| format!("Failed to join runtime config save task: {}", e))?
-    }
-
-    fn from_setup_options(options: &SetupOptions) -> Self {
-        Self {
-            bind: options
-                .bind
-                .clone()
-                .unwrap_or_else(|| "127.0.0.1:4096".to_string()),
-            show_token: options.show_token,
-            no_auth: options.no_auth,
-            model: options.model.clone(),
-            auto_approve_all: options.auto_approve_all,
-            no_gateway: options.no_gateway,
-            no_watch: options.no_watch,
-            gateway_config: options.gateway_config.clone(),
-        }
-    }
-
-    fn from_start_options(options: &StartOptions) -> Self {
-        Self {
-            bind: options.bind.clone(),
-            show_token: options.show_token,
-            no_auth: options.no_auth,
-            model: options.model.clone(),
-            auto_approve_all: options.auto_approve_all,
-            no_gateway: options.no_gateway,
-            no_watch: options.no_watch,
-            gateway_config: options.gateway_config.clone(),
-        }
-    }
-
-    #[cfg(test)]
-    fn load_from_path(path: &Path) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read autopilot config {}: {}", path.display(), e))?;
-
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse autopilot config {}: {}", path.display(), e))
-    }
-
-    #[cfg(test)]
-    fn save_to_path(&self, path: &Path) -> Result<(), String> {
-        let mut config_file = if path.exists() {
-            AutopilotConfigFile::load_from_path(path).unwrap_or_default()
-        } else {
-            AutopilotConfigFile::default()
-        };
-
-        config_file.runtime = self.clone();
-        config_file.save_to_path(path)
-    }
-}
-
 impl StartOptions {
-    fn with_runtime_config(mut self, runtime: &AutopilotRuntimeConfig) -> Self {
-        self.bind = runtime.bind.clone();
-        self.show_token = runtime.show_token;
-        self.no_auth = runtime.no_auth;
-        self.model = runtime.model.clone();
-        self.auto_approve_all = runtime.auto_approve_all;
-        self.no_gateway = runtime.no_gateway;
-        self.no_watch = runtime.no_watch;
-        self.gateway_config = runtime.gateway_config.clone();
+    fn with_server_config(mut self, server: &AutopilotServerConfig) -> Self {
+        self.bind = server.listen.clone();
+        self.show_token = server.show_token;
+        self.no_auth = server.no_auth;
+        self.model = server.model.clone();
+        self.auto_approve_all = server.auto_approve_all;
         self
     }
 
@@ -774,9 +581,31 @@ impl StartOptions {
             || self.no_auth
             || self.model.is_some()
             || self.auto_approve_all
-            || self.no_gateway
-            || self.no_watch
-            || self.gateway_config.is_some()
+    }
+}
+
+impl AutopilotServerConfig {
+    fn from_setup_options(options: &SetupOptions) -> Self {
+        Self {
+            listen: options
+                .bind
+                .clone()
+                .unwrap_or_else(|| "127.0.0.1:4096".to_string()),
+            show_token: options.show_token,
+            no_auth: options.no_auth,
+            model: options.model.clone(),
+            auto_approve_all: options.auto_approve_all,
+        }
+    }
+
+    fn from_start_options(options: &StartOptions) -> Self {
+        Self {
+            listen: options.bind.clone(),
+            show_token: options.show_token,
+            no_auth: options.no_auth,
+            model: options.model.clone(),
+            auto_approve_all: options.auto_approve_all,
+        }
     }
 }
 
@@ -786,10 +615,10 @@ struct StartJsonResult {
     ok: bool,
     started_via: &'static str,
     profile: String,
-    runtime_config_path: String,
-    runtime_config_updated: bool,
+    config_path: String,
+    config_updated: bool,
     service_installed_now: bool,
-    effective: AutopilotRuntimeConfig,
+    server: AutopilotServerConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -797,11 +626,9 @@ struct SetupJsonResult {
     command: &'static str,
     ok: bool,
     profile: String,
-    runtime_config_path: String,
-    runtime: AutopilotRuntimeConfig,
+    config_path: String,
+    server: AutopilotServerConfig,
     service_installed: bool,
-    gateway_config_path: String,
-    watch_config_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -809,14 +636,12 @@ struct AutopilotStatusJson {
     command: &'static str,
     ok: bool,
     profile: String,
-    runtime: AutopilotRuntimeConfig,
-    runtime_config_path: String,
+    config_path: String,
+    server_config: AutopilotServerConfig,
     service: ServiceStatusJson,
     server: EndpointStatusJson,
     gateway: EndpointStatusJson,
     watch: WatchStatusJson,
-    schedule_runtime_wired: bool,
-    channel_runtime_wired: bool,
     schedules: Vec<AutopilotScheduleStatusJson>,
     channels: Vec<AutopilotChannelStatusJson>,
 }
@@ -852,7 +677,7 @@ struct WatchStatusJson {
 #[derive(Debug, Serialize)]
 struct WatchRunSummaryJson {
     id: i64,
-    trigger_name: String,
+    schedule_name: String,
     status: String,
     started_at: String,
     finished_at: Option<String>,
@@ -910,25 +735,23 @@ async fn setup_autopilot(
         }
     }
 
-    if !options.no_gateway {
-        ensure_gateway_setup(config, options.force, options.non_interactive, output_mode).await?;
-    } else if !output_mode.is_json() {
-        println!("✓ Skipping gateway setup (--no-gateway)");
-    }
+    ensure_autopilot_config(options.force, options.non_interactive, output_mode).await?;
 
-    if !options.no_watch {
-        ensure_watch_setup(options.force, output_mode).await?;
-    } else if !output_mode.is_json() {
-        println!("✓ Skipping watch setup (--no-watch)");
-    }
-
-    let runtime_config = AutopilotRuntimeConfig::from_setup_options(&options);
-    let runtime_config_path = runtime_config.save_async().await?;
+    // Save server config from CLI options into the config file
+    let mut config_file = AutopilotConfigFile::load_or_default()?;
+    config_file.server = AutopilotServerConfig::from_setup_options(&options);
+    let config_path = config_file.save()?;
 
     if !options.skip_service_install {
-        install_autopilot_service(config)?;
-        if !output_mode.is_json() {
-            println!("✓ Autopilot service installed");
+        if autopilot_service_installed() {
+            if !output_mode.is_json() {
+                println!("✓ Autopilot service already installed");
+            }
+        } else {
+            install_autopilot_service(config)?;
+            if !output_mode.is_json() {
+                println!("✓ Autopilot service installed");
+            }
         }
     } else if !output_mode.is_json() {
         println!("✓ Skipped service installation (--skip-service-install)");
@@ -940,20 +763,13 @@ async fn setup_autopilot(
                 command: "autopilot.init",
                 ok: true,
                 profile: config.profile_name.clone(),
-                runtime_config_path: runtime_config_path.display().to_string(),
-                runtime: runtime_config.clone(),
+                config_path: config_path.display().to_string(),
+                server: config_file.server.clone(),
                 service_installed: !options.skip_service_install,
-                gateway_config_path: stakpak_gateway::config::default_gateway_config_path()
-                    .display()
-                    .to_string(),
-                watch_config_path: default_watch_config_path().display().to_string(),
             })?;
         }
     } else {
-        println!(
-            "✓ Autopilot runtime defaults saved: {}",
-            runtime_config_path.display()
-        );
+        println!("✓ Autopilot config saved: {}", config_path.display());
         println!();
         if options.yes {
             println!("Setup complete. Starting autopilot...");
@@ -962,6 +778,9 @@ async fn setup_autopilot(
             println!("  stakpak up         # alias for 'stakpak autopilot up'");
             println!("  stakpak down       # alias for 'stakpak autopilot down'");
             println!("  stakpak autopilot status");
+            println!();
+            println!("Add channels:  stakpak autopilot channel add");
+            println!("Add schedules: edit ~/.stakpak/autopilot.toml");
         }
     }
 
@@ -974,9 +793,6 @@ async fn setup_autopilot(
                 no_auth: false,
                 model: None,
                 auto_approve_all: false,
-                no_gateway: false,
-                no_watch: false,
-                gateway_config: None,
                 foreground: false,
                 from_service: false,
             },
@@ -988,47 +804,55 @@ async fn setup_autopilot(
     Ok(())
 }
 
-async fn ensure_gateway_setup(
-    config: &AppConfig,
+/// Ensure autopilot.toml exists with schedules and (optionally) channels.
+///
+/// - If config already exists and !force, validate and return.
+/// - Non-interactive: write default template, pick up channel tokens from env vars.
+/// - Interactive: write default template, ask user if they want to add a channel.
+async fn ensure_autopilot_config(
     force: bool,
     non_interactive: bool,
     output_mode: OutputMode,
 ) -> Result<(), String> {
-    let gateway_path = stakpak_gateway::config::default_gateway_config_path();
+    let config_path = AutopilotConfigFile::path();
 
-    if gateway_path.exists() && !force {
-        let loaded = stakpak_gateway::GatewayConfig::load(
-            Some(gateway_path.as_path()),
-            &stakpak_gateway::GatewayCliFlags::default(),
-        )
-        .map_err(|e| format!("Failed to validate gateway config: {e}"))?;
-
+    if config_path.exists() && !force {
+        let config = AutopilotConfigFile::load_or_default()?;
         if !output_mode.is_json() {
             println!(
-                "✓ Gateway config ready: {} (channels: {})",
-                gateway_path.display(),
-                loaded.enabled_channels().join(", ")
+                "✓ Autopilot config ready: {} ({} schedules)",
+                config_path.display(),
+                config.schedules.len()
             );
         }
         return Ok(());
     }
 
+    // Write default schedule template
+    write_default_autopilot_config(&config_path, force).await?;
+
+    if !output_mode.is_json() {
+        println!("✓ Autopilot config created: {}", config_path.display());
+    }
+
+    // Pick up channel tokens from environment
     let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN").ok();
     let discord_token = std::env::var("DISCORD_BOT_TOKEN").ok();
     let slack_bot_token = std::env::var("SLACK_BOT_TOKEN").ok();
     let slack_app_token = std::env::var("SLACK_APP_TOKEN").ok();
 
-    if non_interactive {
-        if telegram_token.is_none()
-            && discord_token.is_none()
-            && (slack_bot_token.is_none() || slack_app_token.is_none())
-        {
-            return Err(
-                "No gateway channels configured. For --non-interactive setup, set TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, or both SLACK_BOT_TOKEN + SLACK_APP_TOKEN.".to_string(),
-            );
-        }
+    let has_env_channels = telegram_token.is_some()
+        || discord_token.is_some()
+        || (slack_bot_token.is_some() && slack_app_token.is_some());
 
-        let mut gateway_config = stakpak_gateway::GatewayConfig::default();
+    if has_env_channels {
+        // Auto-configure channels from env vars
+        let mut gateway_config = stakpak_gateway::GatewayConfig::load(
+            config_path.as_path(),
+            &stakpak_gateway::GatewayCliFlags::default(),
+        )
+        .unwrap_or_default();
+
         if let Some(token) = telegram_token {
             gateway_config.channels.telegram = Some(stakpak_gateway::config::TelegramConfig {
                 token,
@@ -1049,52 +873,26 @@ async fn ensure_gateway_setup(
         }
 
         gateway_config
-            .save(Some(gateway_path.as_path()))
-            .map_err(|e| format!("Failed to save gateway config: {e}"))?;
-    } else {
-        crate::commands::gateway::GatewayCommands::Init {
-            telegram_token,
-            discord_token,
-            slack_bot_token,
-            slack_app_token,
-            force: true,
-        }
-        .run(config.clone())
-        .await
-        .map_err(|e| format!("Failed to setup gateway: {e}"))?;
-    }
+            .save(config_path.as_path())
+            .map_err(|e| format!("Failed to save channel config: {e}"))?;
 
-    if !output_mode.is_json() {
-        println!("✓ Gateway setup complete: {}", gateway_path.display());
-    }
-    Ok(())
-}
-
-async fn ensure_watch_setup(force: bool, output_mode: OutputMode) -> Result<(), String> {
-    let watch_path = default_watch_config_path();
-
-    if watch_path.exists() && !force {
-        let config = crate::commands::watch::WatchConfig::load_default()
-            .map_err(|e| format!("Failed to validate watch config: {e}"))?;
         if !output_mode.is_json() {
+            let channels = gateway_config.enabled_channels();
             println!(
-                "✓ Watch config ready: {} ({} triggers)",
-                watch_path.display(),
-                config.triggers.len()
+                "✓ Channels configured from environment: {}",
+                channels.join(", ")
             );
         }
-        return Ok(());
+    } else if !non_interactive {
+        // Interactive: offer to add a channel
+        if !output_mode.is_json() {
+            println!();
+            println!("Channels let autopilot talk to you on Slack, Telegram, or Discord.");
+            println!("You can add them now or later with: stakpak autopilot channel add");
+            println!();
+        }
     }
 
-    if output_mode.is_json() {
-        write_default_watch_config(&watch_path, force).await?;
-    } else {
-        crate::commands::watch::commands::init_config(force).await?;
-    }
-
-    if !output_mode.is_json() {
-        println!("✓ Watch setup complete: {}", watch_path.display());
-    }
     Ok(())
 }
 
@@ -1114,32 +912,68 @@ async fn start_autopilot(
     options: StartOptions,
     output_mode: OutputMode,
 ) -> Result<(), String> {
-    let runtime_config_path = AutopilotRuntimeConfig::path();
-    let saved_runtime_config = AutopilotRuntimeConfig::load_or_default_async().await?;
+    // Auto-init: if no autopilot config exists, create default config
+    let autopilot_config_path = AutopilotConfigFile::path();
+    if !autopilot_config_path.exists() {
+        if !output_mode.is_json() {
+            println!("No autopilot config found. Creating default...");
+        }
+        write_default_autopilot_config(&autopilot_config_path, false)
+            .await
+            .map_err(|e| format!("Failed to create autopilot config: {e}"))?;
+        if !output_mode.is_json() {
+            println!("✓ Created {}", autopilot_config_path.display());
+            println!("  Edit schedules: ~/.stakpak/autopilot.toml");
+            println!("  Add channels:   stakpak autopilot channel add");
+            println!();
+        }
+    }
+    let config_path = AutopilotConfigFile::path();
+    let saved_config = AutopilotConfigFile::load_or_default()?;
 
     let has_runtime_overrides = options.has_runtime_overrides();
-    let effective_runtime_config = if has_runtime_overrides {
-        let runtime_config = AutopilotRuntimeConfig::from_start_options(&options);
-        runtime_config.save_async().await?;
+    let effective_server = if has_runtime_overrides {
+        let server_config = AutopilotServerConfig::from_start_options(&options);
+        let mut config_file = saved_config.clone();
+        config_file.server = server_config.clone();
+        config_file.save()?;
         if !output_mode.is_json() {
-            println!(
-                "✓ Saved runtime overrides to {}",
-                runtime_config_path.display()
-            );
+            println!("✓ Saved server overrides to {}", config_path.display());
         }
-        runtime_config
+        server_config
     } else {
-        saved_runtime_config
+        saved_config.server.clone()
     };
 
-    let effective_options = options
-        .clone()
-        .with_runtime_config(&effective_runtime_config);
+    let effective_options = options.clone().with_server_config(&effective_server);
 
     validate_start_output_mode(output_mode, &effective_options)?;
 
     if effective_options.foreground || effective_options.from_service {
         return start_foreground_runtime(config, &effective_options).await;
+    }
+
+    // Idempotency: if autopilot is already running, skip start
+    if let Some(pid) = is_autopilot_running() {
+        if output_mode.is_json() {
+            print_json(&StartJsonResult {
+                command: "autopilot.up",
+                ok: true,
+                started_via: "already_running",
+                profile: config.profile_name.clone(),
+                config_path: config_path.display().to_string(),
+                config_updated: has_runtime_overrides,
+                service_installed_now: false,
+                server: effective_server.clone(),
+            })?;
+        } else {
+            println!("Autopilot is already running (PID {}).", pid);
+            println!();
+            println!("  Status      stakpak autopilot status");
+            println!("  Restart     stakpak autopilot restart");
+            println!("  Stop        stakpak autopilot down");
+        }
+        return Ok(());
     }
 
     let mut service_installed_now = false;
@@ -1159,14 +993,45 @@ async fn start_autopilot(
             ok: true,
             started_via: "service",
             profile: config.profile_name.clone(),
-            runtime_config_path: runtime_config_path.display().to_string(),
-            runtime_config_updated: has_runtime_overrides,
+            config_path: config_path.display().to_string(),
+            config_updated: has_runtime_overrides,
             service_installed_now,
-            effective: effective_runtime_config,
+            server: effective_server.clone(),
         })?;
     } else {
-        println!("✓ Autopilot service started");
-        println!("Run 'stakpak autopilot status' to inspect health.");
+        // Clean post-start status summary
+        let schedule_count = saved_config.schedules.len();
+        let channel_list = stakpak_gateway::GatewayConfig::load(
+            config_path.as_path(),
+            &stakpak_gateway::GatewayCliFlags::default(),
+        )
+        .map(|c| c.enabled_channels().join(", "))
+        .unwrap_or_default();
+
+        println!();
+        println!("  Autopilot is running.");
+        println!();
+        println!("  Server      http://{}", effective_server.listen);
+        println!(
+            "  Schedules   {}",
+            if schedule_count > 0 {
+                format!("{} active", schedule_count)
+            } else {
+                "none (edit ~/.stakpak/autopilot.toml)".to_string()
+            }
+        );
+        println!(
+            "  Channels    {}",
+            if channel_list.is_empty() {
+                "none (stakpak autopilot channel add)".to_string()
+            } else {
+                channel_list
+            }
+        );
+        println!();
+        println!("  View logs   stakpak autopilot logs");
+        println!("  Status      stakpak autopilot status");
+        println!("  Stop        stakpak down");
     }
 
     Ok(())
@@ -1176,117 +1041,454 @@ async fn start_foreground_runtime(
     config: &AppConfig,
     options: &StartOptions,
 ) -> Result<(), String> {
-    let watch_task = if options.no_watch {
-        None
+    // --- 1. Schedule runtime ---
+    let watch_task = tokio::spawn(async {
+        if let Err(error) = crate::commands::watch::commands::run_watch().await {
+            eprintln!("Schedule runtime exited: {}", error);
+        }
+    });
+
+    // --- 2. Server runtime ---
+    let bind = options.bind.clone();
+    let (auth_config, generated_auth_token) = if options.no_auth {
+        (stakpak_server::AuthConfig::disabled(), None)
     } else {
-        Some(tokio::spawn(async {
-            if let Err(error) = crate::commands::watch::commands::run_watch().await {
-                eprintln!("Watch runtime exited: {}", error);
-            }
-        }))
+        let token = stakpak_shared::utils::generate_password(64, true);
+        (
+            stakpak_server::AuthConfig::token(token.clone()),
+            Some(token),
+        )
     };
 
-    let current_exe = std::env::current_exe()
-        .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+    let listener = tokio::net::TcpListener::bind(&bind)
+        .await
+        .map_err(|e| format!("Failed to bind {}: {}", bind, e))?;
 
-    let mut serve_cmd = Command::new(current_exe);
-    if config.profile_name != "default" {
-        serve_cmd.arg("--profile").arg(&config.profile_name);
-    }
-    if !config.config_path.is_empty() {
-        serve_cmd.arg("--config").arg(&config.config_path);
+    let listener_addr = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to inspect listener address: {}", e))?;
+
+    let runtime_client = crate::commands::build_agent_client(config).await?;
+    let storage = runtime_client.session_storage().clone();
+
+    let events = Arc::new(stakpak_server::EventLog::new(4096));
+    let idempotency = Arc::new(stakpak_server::IdempotencyStore::new(
+        std::time::Duration::from_secs(24 * 60 * 60),
+    ));
+    let inference = Arc::new(
+        stakai::Inference::builder()
+            .with_registry(runtime_client.stakai().registry().clone())
+            .build()
+            .map_err(|e| format!("Failed to initialize inference runtime: {}", e))?,
+    );
+
+    let mut models = runtime_client.list_models().await;
+    let requested_model = options.model.clone().or(config.model.clone());
+    let auto_approve_tools = config.auto_approve.clone();
+    let allowed_tools = config.allowed_tools.clone();
+
+    let requested_model_from_catalog = requested_model.as_deref().and_then(|name| {
+        if let Some((provider, id)) = name.split_once('/') {
+            return models
+                .iter()
+                .find(|model| model.provider == provider && model.id == id)
+                .cloned();
+        }
+        models.iter().find(|model| model.id == name).cloned()
+    });
+
+    let requested_custom_model = requested_model.as_deref().and_then(|name| {
+        name.split_once('/')
+            .map(|(provider, id)| stakai::Model::custom(id, provider))
+    });
+
+    let default_model = requested_model_from_catalog
+        .clone()
+        .or(requested_custom_model)
+        .or_else(|| models.first().cloned())
+        .or_else(|| Some(stakai::Model::custom("gpt-4o-mini", "openai")));
+
+    if let Some(requested) = requested_model.as_deref()
+        && requested_model_from_catalog.is_none()
+    {
+        if requested.contains('/') {
+            eprintln!(
+                "⚠ Requested model '{}' is not in the catalog; using it as a custom model id.",
+                requested
+            );
+        } else if let Some(resolved) = default_model.as_ref() {
+            eprintln!(
+                "⚠ Requested model '{}' not found in catalog; using fallback '{}/{}'.",
+                requested, resolved.provider, resolved.id
+            );
+        }
     }
 
-    serve_cmd.arg("serve");
-    serve_cmd.arg("--bind").arg(&options.bind);
+    if models.is_empty()
+        && let Some(default_model) = default_model.clone()
+    {
+        models.push(default_model);
+    }
 
-    if options.show_token {
-        serve_cmd.arg("--show-token");
-    }
-    if options.no_auth {
-        serve_cmd.arg("--no-auth");
-    }
+    let tool_approval_policy = if options.auto_approve_all {
+        stakpak_server::ToolApprovalPolicy::All
+    } else {
+        let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
+        if let Some(ref auto_approve_tools) = auto_approve_tools {
+            policy.with_overrides(
+                auto_approve_tools
+                    .iter()
+                    .cloned()
+                    .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
+            )
+        } else {
+            policy
+        }
+    };
+
+    let mcp_init_config = crate::commands::agent::run::mcp_init::McpInitConfig {
+        redact_secrets: true,
+        privacy_mode: false,
+        enabled_tools: stakpak_mcp_server::EnabledToolsConfig { slack: false },
+        enable_mtls: true,
+        enable_subagents: true,
+        allowed_tools,
+    };
+
+    let mcp_init_result = crate::commands::agent::run::mcp_init::initialize_mcp_server_and_tools(
+        config,
+        mcp_init_config,
+        None,
+    )
+    .await
+    .map_err(|e| format!("Failed to initialize MCP stack: {}", e))?;
+
+    let mcp_tools = mcp_init_result
+        .mcp_tools
+        .iter()
+        .map(|tool| stakai::Tool {
+            tool_type: "function".to_string(),
+            function: stakai::ToolFunction {
+                name: tool.name.as_ref().to_string(),
+                description: tool
+                    .description
+                    .as_ref()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                parameters: serde_json::Value::Object((*tool.input_schema).clone()),
+            },
+            provider_options: None,
+        })
+        .collect();
+
+    let app_state = stakpak_server::AppState::new(
+        storage,
+        events,
+        idempotency,
+        inference,
+        models,
+        default_model,
+        tool_approval_policy,
+    )
+    .with_mcp(
+        mcp_init_result.client,
+        mcp_tools,
+        Some(mcp_init_result.server_shutdown_tx),
+        Some(mcp_init_result.proxy_shutdown_tx),
+    );
+
+    // --- 3. Gateway runtime ---
+    let config_path = AutopilotConfigFile::path();
+    let loopback_url = loopback_server_url(listener_addr);
+    let loopback_token = if options.no_auth {
+        String::new()
+    } else {
+        generated_auth_token.clone().unwrap_or_default()
+    };
+
+    let gateway_cli = stakpak_gateway::GatewayCliFlags {
+        url: Some(loopback_url),
+        token: Some(loopback_token),
+        ..Default::default()
+    };
+
+    let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(config_path.as_path(), &gateway_cli)
+        .unwrap_or_default();
+
     if options.auto_approve_all {
-        serve_cmd.arg("--auto-approve-all");
-    }
-    if !options.no_gateway {
-        serve_cmd.arg("--gateway");
-    }
-    if let Some(model) = options.model.as_ref() {
-        serve_cmd.arg("--model").arg(model);
-    }
-    if let Some(path) = options.gateway_config.as_ref() {
-        serve_cmd.arg("--gateway-config").arg(path);
+        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::AllowAll;
+        gateway_cfg.gateway.approval_allowlist.clear();
+    } else if let Some(auto_approve_tools) = auto_approve_tools.as_ref() {
+        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::Allowlist;
+        gateway_cfg.gateway.approval_allowlist =
+            expand_gateway_approval_allowlist(auto_approve_tools);
     }
 
-    serve_cmd.kill_on_drop(true);
+    let gateway_runtime = if gateway_cfg.has_channels() {
+        match stakpak_gateway::Gateway::new(gateway_cfg).await {
+            Ok(gw) => Some(Arc::new(gw)),
+            Err(e) => {
+                eprintln!(
+                    "⚠ Failed to initialize gateway: {}. Continuing without channels.",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
 
-    let mut child = serve_cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start serve runtime: {}", e))?;
+    // --- Build HTTP app ---
+    let refresh_state = app_state.clone();
+    let (refresh_shutdown_tx, mut refresh_shutdown_rx) = tokio::sync::watch::channel(false);
+    let refresh_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                    if let Err(error) = refresh_state.refresh_mcp_tools().await {
+                        eprintln!("[mcp-refresh] {}", error);
+                    }
+                }
+                changed = refresh_shutdown_rx.changed() => {
+                    if changed.is_err() || *refresh_shutdown_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 
+    let shutdown_state = app_state.clone();
+    let shutdown_refresh_tx = refresh_shutdown_tx.clone();
+
+    let base_app = stakpak_server::router(app_state, auth_config);
+    let app = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
+        let gateway_routes = gateway_runtime.api_router();
+        base_app.nest_service("/v1/gateway", gateway_routes.into_service())
+    } else {
+        base_app
+    };
+
+    let gateway_cancel = tokio_util::sync::CancellationToken::new();
+    let gateway_task = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
+        let gateway_runtime = gateway_runtime.clone();
+        let cancel = gateway_cancel.clone();
+        Some(tokio::spawn(
+            async move { gateway_runtime.run(cancel).await },
+        ))
+    } else {
+        None
+    };
+    let gateway_cancel_for_shutdown = gateway_cancel.clone();
+
+    // --- Print status ---
     println!("Autopilot running in foreground. Press Ctrl+C to stop.");
-
-    tokio::select! {
-        status = child.wait() => {
-            if let Some(task) = watch_task {
-                task.abort();
-                let _ = task.await;
-            }
-
-            let status = status.map_err(|e| format!("Failed while waiting for serve runtime: {}", e))?;
-            if !status.success() {
-                return Err(format!(
-                    "Serve runtime exited with status {}",
-                    status
-                        .code()
-                        .map(|code| code.to_string())
-                        .unwrap_or_else(|| "signal".to_string())
-                ));
-            }
+    println!();
+    println!("  Server      http://{}", bind);
+    if let Some(ref token) = generated_auth_token {
+        if options.show_token {
+            println!("  Auth token  Bearer {}", token);
+        } else {
+            println!("  Auth        enabled");
         }
-        _ = wait_for_shutdown_signal() => {
-            if let Some(pid) = child.id() {
-                #[cfg(unix)]
-                {
-                    let _ = std::process::Command::new("kill")
-                        .arg("-TERM")
-                        .arg(pid.to_string())
-                        .status();
-                }
-                #[cfg(windows)]
-                {
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/PID", &pid.to_string()])
-                        .status();
-                }
-            }
+    } else if options.no_auth {
+        println!("  Auth        disabled");
+    }
+    if gateway_runtime.is_some() {
+        println!("  Gateway     enabled");
+    } else {
+        println!("  Gateway     no channels configured");
+    }
 
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
-            let _ = child.start_kill();
+    // --- Shutdown handler ---
+    let shutdown = async move {
+        wait_for_shutdown_signal().await;
 
-            if let Some(task) = watch_task {
-                task.abort();
-                let _ = task.await;
+        gateway_cancel_for_shutdown.cancel();
+
+        for (session_id, run_id) in shutdown_state.run_manager.running_runs().await {
+            let _ = shutdown_state
+                .run_manager
+                .cancel_run(session_id, run_id)
+                .await;
+        }
+
+        let drain_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if shutdown_state.run_manager.running_runs().await.is_empty()
+                || tokio::time::Instant::now() >= drain_deadline
+            {
+                break;
             }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let _ = shutdown_refresh_tx.send(true);
+
+        if let Some(tx) = shutdown_state.mcp_server_shutdown_tx.as_ref() {
+            let _ = tx.send(());
+        }
+        if let Some(tx) = shutdown_state.mcp_proxy_shutdown_tx.as_ref() {
+            let _ = tx.send(());
+        }
+    };
+
+    // --- Run server ---
+    let serve_result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await;
+
+    // --- Cleanup ---
+    gateway_cancel.cancel();
+    if let Some(task) = gateway_task {
+        match task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => eprintln!("Gateway runtime error: {}", e),
+            Err(e) => eprintln!("Gateway runtime task failed: {}", e),
         }
     }
+
+    let _ = refresh_shutdown_tx.send(true);
+    if !refresh_task.is_finished() {
+        refresh_task.abort();
+    }
+    let _ = refresh_task.await;
+
+    // Abort the watch task
+    watch_task.abort();
+    let _ = watch_task.await;
+
+    println!();
+    println!("Shutting down...");
+
+    serve_result.map_err(|e| format!("Server error: {}", e))?;
 
     Ok(())
 }
 
-async fn stop_autopilot(uninstall: bool) -> Result<(), String> {
-    if autopilot_service_installed() {
-        stop_autopilot_service()?;
-        println!("✓ Autopilot service stopped");
-
-        if uninstall {
-            uninstall_autopilot_service()?;
-            println!("✓ Autopilot service uninstalled");
-        }
+fn loopback_server_url(listener_addr: std::net::SocketAddr) -> String {
+    let port = listener_addr.port();
+    if listener_addr.ip().is_ipv6() {
+        format!("http://[::1]:{port}")
     } else {
-        println!("Autopilot service is not installed.");
-        println!("If running foreground mode, stop it with Ctrl+C.");
+        format!("http://127.0.0.1:{port}")
+    }
+}
+
+fn expand_gateway_approval_allowlist(tools: &[String]) -> Vec<String> {
+    let mut normalized = std::collections::BTreeSet::new();
+    for tool in tools {
+        let trimmed = tool.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        normalized.insert(trimmed.to_string());
+        if !trimmed.starts_with("stakpak__") {
+            normalized.insert(format!("stakpak__{trimmed}"));
+        }
+    }
+    normalized.into_iter().collect()
+}
+
+async fn stop_autopilot() -> Result<(), String> {
+    let mut stopped = false;
+
+    // Stop and uninstall the system service
+    if autopilot_service_installed() {
+        // Ignore errors from stop — service might not be running
+        let _ = stop_autopilot_service();
+        uninstall_autopilot_service()?;
+        stopped = true;
+        println!("✓ Autopilot service stopped and uninstalled");
+    }
+
+    // Also kill any foreground process via PID file
+    if let Some(pid) = is_autopilot_running() {
+        #[cfg(unix)]
+        {
+            // Send SIGTERM to the entire process group to kill child processes too
+            // Try negative PID first (process group), fall back to single PID
+            let pgid_result = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(format!("-{}", pid))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+
+            // If process group kill failed (e.g., not a group leader), kill the process directly
+            if pgid_result.is_err() || !pgid_result.unwrap_or_default().success() {
+                let _ = std::process::Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+        }
+        #[cfg(windows)]
+        {
+            // /T flag kills the process tree (parent + children)
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T"])
+                .status();
+        }
+
+        // Wait briefly for process to exit
+        for _ in 0..10 {
+            if !crate::commands::watch::is_process_running(pid) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        // If still running after SIGTERM, force kill
+        if crate::commands::watch::is_process_running(pid) {
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(format!("-{}", pid))
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                let _ = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(pid.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .status();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
+        // Clean up PID file if process is gone
+        if !crate::commands::watch::is_process_running(pid) {
+            let config = crate::commands::watch::WatchConfig::load_default().ok();
+            if let Some(config) = config {
+                let pid_file = config
+                    .db_path()
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("watch.pid");
+                let _ = std::fs::remove_file(&pid_file);
+            }
+        }
+
+        if !stopped {
+            println!("✓ Autopilot process stopped (PID {})", pid);
+        }
+        stopped = true;
+    }
+
+    if !stopped {
+        println!("Autopilot is not running.");
     }
 
     Ok(())
@@ -1306,26 +1508,264 @@ async fn restart_autopilot() -> Result<(), String> {
     Ok(())
 }
 
-const SCHEDULE_RUNTIME_NOT_WIRED_MESSAGE: &str = "Autopilot schedule metadata is not wired into active watch runtime yet. Use `stakpak watch` commands (e.g. `stakpak watch init`, `stakpak watch get triggers`, `stakpak watch get runs`) for active scheduling.";
-const CHANNEL_RUNTIME_NOT_WIRED_MESSAGE: &str = "Autopilot channel metadata is not wired into active gateway runtime yet. Use `stakpak gateway init` and `stakpak gateway channels ...` for active channel routing/testing.";
-
 async fn run_schedule_command(command: AutopilotScheduleCommands) -> Result<(), String> {
     match command {
-        AutopilotScheduleCommands::List => {
-            println!("⚠ {}", SCHEDULE_RUNTIME_NOT_WIRED_MESSAGE);
-            list_schedules().await
+        AutopilotScheduleCommands::List => list_schedules().await,
+        AutopilotScheduleCommands::Add {
+            name,
+            cron,
+            prompt,
+            check,
+            trigger_on,
+            workdir,
+            max_steps,
+            channel,
+            pause_on_approval,
+            enabled,
+        } => {
+            let mut config = AutopilotConfigFile::load_or_default_async().await?;
+            let schedule = AutopilotScheduleConfig {
+                name: name.clone(),
+                cron,
+                prompt,
+                check,
+                trigger_on,
+                workdir,
+                max_steps,
+                channel,
+                pause_on_approval,
+                enabled,
+            };
+            add_schedule_in_config(&mut config, schedule)?;
+            config.save()?;
+            println!("✓ Schedule '{}' added", name);
+            Ok(())
         }
-        _ => Err(SCHEDULE_RUNTIME_NOT_WIRED_MESSAGE.to_string()),
+        AutopilotScheduleCommands::Remove { name } => {
+            let mut config = AutopilotConfigFile::load_or_default_async().await?;
+            remove_schedule_in_config(&mut config, &name)?;
+            config.save()?;
+            println!("✓ Schedule '{}' removed", name);
+            Ok(())
+        }
+        AutopilotScheduleCommands::Enable { name } => {
+            let mut config = AutopilotConfigFile::load_or_default_async().await?;
+            set_schedule_enabled_in_config(&mut config, &name, true)?;
+            config.save()?;
+            println!("✓ Schedule '{}' enabled", name);
+            Ok(())
+        }
+        AutopilotScheduleCommands::Disable { name } => {
+            let mut config = AutopilotConfigFile::load_or_default_async().await?;
+            set_schedule_enabled_in_config(&mut config, &name, false)?;
+            config.save()?;
+            println!("✓ Schedule '{}' disabled", name);
+            Ok(())
+        }
+        AutopilotScheduleCommands::Trigger { name, dry_run } => {
+            // Validate the schedule exists in config
+            let config = AutopilotConfigFile::load_or_default_async().await?;
+            if config.find_schedule(&name).is_none() {
+                return Err(format!("Schedule '{}' not found", name));
+            }
+            // Delegate to the watch module's fire_schedule
+            match crate::commands::watch::commands::schedule::fire_schedule(&name, dry_run).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.contains("not found") || e.contains("not running") => Err(format!(
+                    "Cannot trigger '{}': autopilot is not running. Start it with: stakpak up",
+                    name
+                )),
+                Err(e) => Err(e),
+            }
+        }
+        AutopilotScheduleCommands::History { name, limit } => {
+            crate::commands::watch::commands::history::show_history(Some(&name), Some(limit)).await
+        }
+        AutopilotScheduleCommands::Show { id } => {
+            crate::commands::watch::commands::history::show_run(id).await
+        }
+        AutopilotScheduleCommands::Clean { older_than_days } => {
+            let config = crate::commands::watch::WatchConfig::load_default()
+                .map_err(|e| format!("Failed to load watch config: {}", e))?;
+            let db_path = config.db_path();
+            let db_path_str = db_path
+                .to_str()
+                .ok_or_else(|| "Invalid database path".to_string())?;
+            let db = crate::commands::watch::WatchDb::new(db_path_str)
+                .await
+                .map_err(|e| format!("Failed to open database: {}", e))?;
+
+            // Clean stale running runs
+            let cleaned = db
+                .clean_stale_runs()
+                .await
+                .map_err(|e| format!("Failed to clean stale runs: {}", e))?;
+            if cleaned > 0 {
+                println!(
+                    "✓ Marked {} stale run{} as failed",
+                    cleaned,
+                    if cleaned == 1 { "" } else { "s" }
+                );
+            } else {
+                println!("No stale runs found");
+            }
+
+            // Optionally prune old history
+            if let Some(days) = older_than_days {
+                let pruned = db
+                    .prune_runs(days)
+                    .await
+                    .map_err(|e| format!("Failed to prune runs: {}", e))?;
+                if pruned > 0 {
+                    println!(
+                        "✓ Pruned {} run{} older than {} day{}",
+                        pruned,
+                        if pruned == 1 { "" } else { "s" },
+                        days,
+                        if days == 1 { "" } else { "s" }
+                    );
+                } else {
+                    println!("No runs older than {} days to prune", days);
+                }
+            }
+
+            Ok(())
+        }
     }
 }
 
 async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), String> {
+    let config_path = AutopilotConfigFile::path();
     match command {
         AutopilotChannelCommands::List => {
-            println!("⚠ {}", CHANNEL_RUNTIME_NOT_WIRED_MESSAGE);
-            list_channels().await
+            let config = stakpak_gateway::GatewayConfig::load(
+                config_path.as_path(),
+                &stakpak_gateway::GatewayCliFlags::default(),
+            )
+            .unwrap_or_default();
+
+            let channels = config.enabled_channels();
+            if channels.is_empty() {
+                println!("No channels configured.");
+                println!(
+                    "  Add one: stakpak autopilot channel add slack --bot-token X --app-token Y"
+                );
+                return Ok(());
+            }
+
+            println!("{:<15} STATUS", "CHANNEL");
+            if config.channels.telegram.is_some() {
+                println!("{:<15} configured", "telegram");
+            }
+            if config.channels.discord.is_some() {
+                println!("{:<15} configured", "discord");
+            }
+            if config.channels.slack.is_some() {
+                println!("{:<15} configured", "slack");
+            }
+            Ok(())
         }
-        _ => Err(CHANNEL_RUNTIME_NOT_WIRED_MESSAGE.to_string()),
+        AutopilotChannelCommands::Add {
+            channel_type,
+            token,
+            bot_token,
+            app_token,
+        } => {
+            let mut config = stakpak_gateway::GatewayConfig::load(
+                config_path.as_path(),
+                &stakpak_gateway::GatewayCliFlags::default(),
+            )
+            .unwrap_or_default();
+
+            match channel_type {
+                ChannelType::Telegram => {
+                    let tok = token
+                        .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok())
+                        .ok_or("Telegram token required. Use --token or set TELEGRAM_BOT_TOKEN")?;
+                    config.channels.telegram = Some(stakpak_gateway::config::TelegramConfig {
+                        token: tok,
+                        require_mention: false,
+                    });
+                }
+                ChannelType::Discord => {
+                    let tok = token
+                        .or_else(|| std::env::var("DISCORD_BOT_TOKEN").ok())
+                        .ok_or("Discord token required. Use --token or set DISCORD_BOT_TOKEN")?;
+                    config.channels.discord = Some(stakpak_gateway::config::DiscordConfig {
+                        token: tok,
+                        guilds: Vec::new(),
+                    });
+                }
+                ChannelType::Slack => {
+                    let bot = bot_token
+                        .or_else(|| std::env::var("SLACK_BOT_TOKEN").ok())
+                        .ok_or(
+                            "Slack bot token required. Use --bot-token or set SLACK_BOT_TOKEN",
+                        )?;
+                    let app = app_token
+                        .or_else(|| std::env::var("SLACK_APP_TOKEN").ok())
+                        .ok_or(
+                            "Slack app token required. Use --app-token or set SLACK_APP_TOKEN",
+                        )?;
+                    config.channels.slack = Some(stakpak_gateway::config::SlackConfig {
+                        bot_token: bot,
+                        app_token: app,
+                    });
+                }
+                _ => return Err(format!("{:?} is not supported yet", channel_type)),
+            }
+
+            config
+                .save(config_path.as_path())
+                .map_err(|e| format!("Failed to save config: {e}"))?;
+            println!("✓ Channel {:?} added", channel_type);
+            Ok(())
+        }
+        AutopilotChannelCommands::Remove { channel_type } => {
+            let mut config = stakpak_gateway::GatewayConfig::load(
+                config_path.as_path(),
+                &stakpak_gateway::GatewayCliFlags::default(),
+            )
+            .map_err(|e| format!("Failed to load config: {e}"))?;
+
+            match channel_type {
+                ChannelType::Telegram => config.channels.telegram = None,
+                ChannelType::Discord => config.channels.discord = None,
+                ChannelType::Slack => config.channels.slack = None,
+                _ => return Err(format!("{:?} is not supported yet", channel_type)),
+            }
+
+            config
+                .save(config_path.as_path())
+                .map_err(|e| format!("Failed to save config: {e}"))?;
+            println!("✓ Channel {:?} removed", channel_type);
+            Ok(())
+        }
+        AutopilotChannelCommands::Test => {
+            let config = stakpak_gateway::GatewayConfig::load(
+                config_path.as_path(),
+                &stakpak_gateway::GatewayCliFlags::default(),
+            )
+            .map_err(|e| format!("Failed to load config: {e}"))?;
+
+            let channels = stakpak_gateway::build_channels(&config)
+                .map_err(|e| format!("Failed to build channels: {e}"))?;
+
+            if channels.is_empty() {
+                return Err("No channels configured. Add one first: stakpak autopilot channel add slack --bot-token X --app-token Y".to_string());
+            }
+
+            for channel in channels.values() {
+                match channel.test().await {
+                    Ok(result) => println!(
+                        "  ✓ {}: {} ({})",
+                        result.channel, result.identity, result.details
+                    ),
+                    Err(error) => println!("  ✗ {}: {}", channel.display_name(), error),
+                }
+            }
+            Ok(())
+        }
     }
 }
 
@@ -1360,7 +1800,6 @@ async fn list_schedules() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
 fn validate_schedule(schedule: &AutopilotScheduleConfig) -> Result<(), String> {
     if schedule.name.trim().is_empty() {
         return Err("Schedule name cannot be empty".to_string());
@@ -1376,7 +1815,6 @@ fn validate_schedule(schedule: &AutopilotScheduleConfig) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
 fn add_schedule_in_config(
     config: &mut AutopilotConfigFile,
     schedule: AutopilotScheduleConfig,
@@ -1391,7 +1829,6 @@ fn add_schedule_in_config(
     Ok(())
 }
 
-#[cfg(test)]
 fn remove_schedule_in_config(config: &mut AutopilotConfigFile, name: &str) -> Result<(), String> {
     let initial_len = config.schedules.len();
     config.schedules.retain(|schedule| schedule.name != name);
@@ -1403,7 +1840,6 @@ fn remove_schedule_in_config(config: &mut AutopilotConfigFile, name: &str) -> Re
     Ok(())
 }
 
-#[cfg(test)]
 fn set_schedule_enabled_in_config(
     config: &mut AutopilotConfigFile,
     name: &str,
@@ -1414,34 +1850,6 @@ fn set_schedule_enabled_in_config(
         .ok_or_else(|| format!("Schedule '{}' not found", name))?;
 
     schedule.enabled = enabled;
-    Ok(())
-}
-
-async fn list_channels() -> Result<(), String> {
-    let config = AutopilotConfigFile::load_or_default_async().await?;
-    if config.channels.is_empty() {
-        println!("No channels configured.");
-        return Ok(());
-    }
-
-    println!(
-        "{:<20} {:<12} {:<24} {:<10}",
-        "NAME", "TYPE", "TARGET", "STATUS"
-    );
-    for (name, channel) in config.channels {
-        println!(
-            "{:<20} {:<12} {:<24} {:<10}",
-            truncate_text(&name, 20),
-            channel.channel_type,
-            truncate_text(&channel.target, 24),
-            if channel.enabled {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        );
-    }
-
     Ok(())
 }
 
@@ -1525,12 +1933,12 @@ fn set_channel_enabled_in_config(
 async fn status_autopilot(
     config: &AppConfig,
     output_mode: OutputMode,
-    watch_runs: Option<u32>,
+    recent_runs: Option<u32>,
 ) -> Result<(), String> {
     let autopilot_config = AutopilotConfigFile::load_or_default_async().await?;
-    let runtime = autopilot_config.runtime.clone();
-    let runtime_config_path = AutopilotRuntimeConfig::path();
-    let base_url = loopback_base_url_from_bind(&runtime.bind);
+    let server_config = autopilot_config.server.clone();
+    let config_path = AutopilotConfigFile::path();
+    let base_url = loopback_base_url_from_bind(&server_config.listen);
     let probe_client = build_probe_http_client();
 
     let schedules = build_schedule_statuses(&autopilot_config.schedules);
@@ -1562,41 +1970,24 @@ async fn status_autopilot(
         false
     };
     let gateway = EndpointStatusJson {
-        expected_enabled: !runtime.no_gateway,
+        expected_enabled: true,
         reachable: gateway_reachable,
         url: gateway_url,
     };
 
-    let watch = if runtime.no_watch {
-        WatchStatusJson {
-            expected_enabled: false,
-            config_path: default_watch_config_path().display().to_string(),
-            config_valid: true,
-            trigger_count: 0,
-            running: false,
-            pid: None,
-            stale_pid: false,
-            db_path: None,
-            error: None,
-            recent_runs: Vec::new(),
-        }
-    } else {
-        collect_watch_status(watch_runs).await
-    };
+    let watch = collect_watch_status(recent_runs).await;
 
     if output_mode.is_json() {
         print_json(&AutopilotStatusJson {
             command: "autopilot.status",
             ok: true,
             profile: config.profile_name.clone(),
-            runtime,
-            runtime_config_path: runtime_config_path.display().to_string(),
+            config_path: config_path.display().to_string(),
+            server_config: server_config.clone(),
             service,
             server,
             gateway,
             watch,
-            schedule_runtime_wired: false,
-            channel_runtime_wired: false,
             schedules,
             channels,
         })?;
@@ -1604,52 +1995,72 @@ async fn status_autopilot(
     }
 
     println!("Autopilot status");
-    println!("Profile: {}", config.profile_name);
-    println!("Runtime config: {}", runtime_config_path.display());
+    println!();
+    println!("  Profile         {}", config.profile_name);
+    println!("  Config          {}", config_path.display());
     println!(
-        "Service: {} ({})",
+        "  Service         {}",
         if service.installed {
             if service.active {
                 "active"
             } else {
-                "installed but inactive"
+                "installed (inactive)"
             }
         } else {
             "not installed"
-        },
-        service.path
+        }
     );
     println!(
-        "Server: {} ({})",
+        "  Server          {}",
         if server.reachable {
-            "reachable"
+            format!("✓ reachable ({})", server.url)
         } else {
-            "unreachable"
-        },
-        server.url
+            format!("✗ unreachable ({})", server.url)
+        }
     );
     println!(
-        "Gateway: {} ({})",
+        "  Channels        {}",
         if gateway.reachable {
-            "reachable"
-        } else if !gateway.expected_enabled {
-            "disabled by runtime config"
+            format!("✓ reachable ({})", gateway.url)
         } else {
-            "unreachable"
-        },
-        gateway.url
+            format!("✗ unreachable ({})", gateway.url)
+        }
     );
 
+    // Scheduler status
+    let config_exists = AutopilotConfigFile::path().exists();
+    if !config_exists {
+        println!("  Scheduler       not configured (run: stakpak autopilot init)");
+    } else if watch.config_valid {
+        let sched_state = if watch.running {
+            format!("✓ running (pid {})", watch.pid.unwrap_or_default())
+        } else if watch.stale_pid {
+            format!("⚠ stale (pid {})", watch.pid.unwrap_or_default())
+        } else {
+            "stopped".to_string()
+        };
+        println!(
+            "  Scheduler       {} — {} schedules",
+            sched_state, watch.trigger_count
+        );
+    } else {
+        println!(
+            "  Scheduler       ✗ config error: {}",
+            watch.error.as_deref().unwrap_or("unknown")
+        );
+    }
+
+    // Schedules table
     if !schedules.is_empty() {
         println!();
-        println!("Schedules (metadata only; not wired to watch runtime):");
+        println!("  Schedules:");
         println!(
-            "  {:<20} {:<16} {:<10} {:<20}",
+            "    {:<20} {:<16} {:<10} {:<20}",
             "NAME", "CRON", "STATUS", "NEXT RUN"
         );
         for schedule in &schedules {
             println!(
-                "  {:<20} {:<16} {:<10} {:<20}",
+                "    {:<20} {:<16} {:<10} {:<20}",
                 truncate_text(&schedule.name, 20),
                 truncate_text(&schedule.cron, 16),
                 if schedule.enabled {
@@ -1662,16 +2073,17 @@ async fn status_autopilot(
         }
     }
 
+    // Channels table
     if !channels.is_empty() {
         println!();
-        println!("Channels (metadata only; not wired to gateway runtime):");
+        println!("  Channels:");
         println!(
-            "  {:<20} {:<10} {:<24} {:<10}",
+            "    {:<20} {:<10} {:<24} {:<10}",
             "NAME", "TYPE", "TARGET", "STATUS"
         );
         for channel in &channels {
             println!(
-                "  {:<20} {:<10} {:<24} {:<10}",
+                "    {:<20} {:<10} {:<24} {:<10}",
                 truncate_text(&channel.name, 20),
                 truncate_text(&channel.channel_type, 10),
                 truncate_text(&channel.target, 24),
@@ -1684,37 +2096,16 @@ async fn status_autopilot(
         }
     }
 
-    println!();
-    if !watch.expected_enabled {
-        println!("Watch: disabled by runtime config");
-    } else if watch.config_valid {
-        let watch_state = if watch.running {
-            format!("running (pid {})", watch.pid.unwrap_or_default())
-        } else if watch.stale_pid {
-            format!("stale pid {}", watch.pid.unwrap_or_default())
-        } else {
-            "not running".to_string()
-        };
-
-        println!("Watch: {}", watch_state);
-        println!("Watch config: {}", watch.config_path);
-        println!("Watch triggers: {}", watch.trigger_count);
-        if !watch.recent_runs.is_empty() {
-            println!();
-            println!("Recent watch runs:");
-            for run in &watch.recent_runs {
-                println!(
-                    "  #{} {:<16} {:<10} {}",
-                    run.id, run.trigger_name, run.status, run.started_at
-                );
-            }
+    // Recent runs
+    if !watch.recent_runs.is_empty() {
+        println!();
+        println!("  Recent runs:");
+        for run in &watch.recent_runs {
+            println!(
+                "    #{} {:<16} {:<10} {}",
+                run.id, run.schedule_name, run.status, run.started_at
+            );
         }
-    } else if let Some(error) = watch.error {
-        println!("Watch: config invalid ({})", error);
-        println!("Watch config: {}", watch.config_path);
-    } else {
-        println!("Watch: config invalid");
-        println!("Watch config: {}", watch.config_path);
     }
 
     Ok(())
@@ -1800,69 +2191,62 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         println!("✗ No credentials configured");
     }
 
-    let runtime = match AutopilotRuntimeConfig::load_or_default_async().await {
-        Ok(runtime) => {
-            println!(
-                "✓ Autopilot runtime config loaded ({}, gateway={}, watch={})",
-                runtime.bind,
-                if runtime.no_gateway {
-                    "disabled"
-                } else {
-                    "enabled"
-                },
-                if runtime.no_watch {
-                    "disabled"
-                } else {
-                    "enabled"
-                }
-            );
-            runtime
+    let autopilot_config = match AutopilotConfigFile::load_or_default() {
+        Ok(cfg) => {
+            println!("✓ Autopilot config loaded (listen={})", cfg.server.listen);
+            cfg
         }
         Err(e) => {
             failures += 1;
-            println!("✗ Autopilot runtime config invalid: {}", e);
-            AutopilotRuntimeConfig::default()
+            println!("✗ Autopilot config invalid: {}", e);
+            AutopilotConfigFile::default()
         }
     };
+    let _ = &autopilot_config; // used below for schedule count
 
-    if runtime.no_gateway {
-        println!("✓ Gateway runtime disabled by autopilot config");
-    } else {
-        let gateway_path = stakpak_gateway::config::default_gateway_config_path();
-        match stakpak_gateway::GatewayConfig::load(
-            Some(gateway_path.as_path()),
-            &stakpak_gateway::GatewayCliFlags::default(),
-        ) {
-            Ok(cfg) => println!(
-                "✓ Gateway config valid ({}, channels: {})",
-                gateway_path.display(),
-                cfg.enabled_channels().join(", ")
-            ),
-            Err(e) => {
+    let gateway_path = AutopilotConfigFile::path();
+    match stakpak_gateway::GatewayConfig::load(
+        gateway_path.as_path(),
+        &stakpak_gateway::GatewayCliFlags::default(),
+    ) {
+        Ok(cfg) => {
+            let channels = cfg.enabled_channels();
+            if channels.is_empty() {
+                println!("✓ No channels configured (add with: stakpak autopilot channel add)");
+            } else {
+                println!("✓ Channel config valid (channels: {})", channels.join(", "));
+            }
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            // "at least one channel" is not a real error for autopilot — channels are optional
+            if err_str.contains("at least one channel") {
+                println!("✓ No channels configured (add with: stakpak autopilot channel add)");
+            } else {
                 failures += 1;
-                println!("✗ Gateway config invalid: {}", e);
+                println!("✗ Channel config invalid: {}", e);
             }
         }
     }
 
-    if runtime.no_watch {
-        println!("✓ Watch runtime disabled by autopilot config");
-    } else {
-        let watch_status = collect_watch_status(None).await;
-        if watch_status.config_valid {
+    let watch_status = collect_watch_status(None).await;
+    if watch_status.config_valid {
+        if watch_status.trigger_count == 0 {
+            println!("✓ No schedules configured (edit ~/.stakpak/autopilot.toml to add)");
+        } else {
             println!(
-                "✓ Watch config valid ({} triggers)",
+                "✓ Schedule config valid ({} schedules)",
                 watch_status.trigger_count
             );
-        } else {
-            failures += 1;
-            println!(
-                "✗ Watch config invalid: {}",
-                watch_status
-                    .error
-                    .unwrap_or_else(|| "unknown watch configuration error".to_string())
-            );
         }
+    } else {
+        failures += 1;
+        println!(
+            "✗ Schedule config invalid: {}",
+            watch_status
+                .error
+                .unwrap_or_else(|| "unknown configuration error".to_string())
+        );
     }
 
     if autopilot_service_installed() {
@@ -1872,7 +2256,7 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         println!("✗ Autopilot service not installed");
     }
 
-    let base_url = loopback_base_url_from_bind(&runtime.bind);
+    let base_url = loopback_base_url_from_bind(&autopilot_config.server.listen);
     let server_health_url = format!("{}/v1/health", base_url);
     let probe_client = build_probe_http_client();
     let server_reachable = if let Some(client) = probe_client.as_ref() {
@@ -1902,28 +2286,27 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
     Ok(())
 }
 
-fn default_watch_config_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".stakpak")
-        .join("watch.toml")
-}
-
-async fn write_default_watch_config(path: &Path, force: bool) -> Result<(), String> {
+async fn write_default_autopilot_config(path: &Path, force: bool) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| format!("Failed to create watch config directory: {}", e))?;
+            .map_err(|e| format!("Failed to create autopilot config directory: {}", e))?;
     }
 
     if force || !path.exists() {
-        tokio::fs::write(path, DEFAULT_WATCH_CONFIG_TEMPLATE)
-            .await
-            .map_err(|e| format!("Failed to write watch config template: {}", e))?;
-    }
+        let default_config = AutopilotConfigFile::default();
+        let content = toml::to_string_pretty(&default_config)
+            .map_err(|e| format!("Failed to serialize default autopilot config: {}", e))?;
 
-    crate::commands::watch::WatchConfig::load_default()
-        .map_err(|e| format!("Failed to validate watch config: {}", e))?;
+        let header = "# Stakpak Autopilot Configuration\n\
+                      # Add schedules:  stakpak autopilot schedule add <name> --cron '...' --prompt '...'\n\
+                      # Add channels:   stakpak autopilot channel add slack --bot-token X --app-token Y\n\
+                      # Start:          stakpak up\n\n";
+
+        tokio::fs::write(path, format!("{}{}", header, content))
+            .await
+            .map_err(|e| format!("Failed to write autopilot config: {}", e))?;
+    }
 
     Ok(())
 }
@@ -1953,28 +2336,19 @@ fn loopback_base_url_from_bind(bind: &str) -> String {
     }
 }
 
-async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
-    let config_path = default_watch_config_path();
+async fn collect_watch_status(recent_runs: Option<u32>) -> WatchStatusJson {
+    let config_path = AutopilotConfigFile::path();
 
-    let config = match crate::commands::watch::WatchConfig::load_default() {
-        Ok(config) => config,
-        Err(error) => {
-            return WatchStatusJson {
-                expected_enabled: true,
-                config_path: config_path.display().to_string(),
-                config_valid: false,
-                trigger_count: 0,
-                running: false,
-                pid: None,
-                stale_pid: false,
-                db_path: None,
-                error: Some(error.to_string()),
-                recent_runs: Vec::new(),
-            };
-        }
-    };
+    let schedule_count = AutopilotConfigFile::load_or_default()
+        .map(|c| c.schedules.len())
+        .unwrap_or(0);
 
-    let db_path = config.db_path();
+    let config_valid = config_path.exists();
+
+    // Watch runtime uses ~/.stakpak/watch/watch.db regardless of config format
+    let db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".stakpak/watch/watch.db");
     let db_path_str = db_path.to_string_lossy().to_string();
 
     let db = match db_path.to_str() {
@@ -1984,8 +2358,8 @@ async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
                 return WatchStatusJson {
                     expected_enabled: true,
                     config_path: config_path.display().to_string(),
-                    config_valid: true,
-                    trigger_count: config.triggers.len(),
+                    config_valid,
+                    trigger_count: schedule_count,
                     running: false,
                     pid: None,
                     stale_pid: false,
@@ -1999,8 +2373,8 @@ async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
             return WatchStatusJson {
                 expected_enabled: true,
                 config_path: config_path.display().to_string(),
-                config_valid: true,
-                trigger_count: config.triggers.len(),
+                config_valid,
+                trigger_count: schedule_count,
                 running: false,
                 pid: None,
                 stale_pid: false,
@@ -2024,10 +2398,10 @@ async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
         (false, false, None)
     };
 
-    let recent_runs = if let Some(limit) = watch_runs.filter(|limit| *limit > 0) {
+    let recent_runs = if let Some(limit) = recent_runs.filter(|limit| *limit > 0) {
         match db
             .list_runs(&crate::commands::watch::ListRunsFilter {
-                trigger_name: None,
+                schedule_name: None,
                 status: None,
                 limit: Some(limit),
                 offset: None,
@@ -2038,7 +2412,7 @@ async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
                 .into_iter()
                 .map(|run| WatchRunSummaryJson {
                     id: run.id,
-                    trigger_name: run.trigger_name,
+                    schedule_name: run.schedule_name,
                     status: run.status.to_string(),
                     started_at: run.started_at.to_rfc3339(),
                     finished_at: run.finished_at.map(|value| value.to_rfc3339()),
@@ -2054,8 +2428,8 @@ async fn collect_watch_status(watch_runs: Option<u32>) -> WatchStatusJson {
     WatchStatusJson {
         expected_enabled: true,
         config_path: config_path.display().to_string(),
-        config_valid: true,
-        trigger_count: config.triggers.len(),
+        config_valid,
+        trigger_count: schedule_count,
         running,
         pid,
         stale_pid,
@@ -2222,6 +2596,25 @@ fn autopilot_service_installed() -> bool {
     !path.as_os_str().is_empty() && path.exists()
 }
 
+/// Check if the autopilot process is currently running via PID file + process check.
+fn is_autopilot_running() -> Option<u32> {
+    let config = crate::commands::watch::WatchConfig::load_default().ok()?;
+    let pid_file = config
+        .db_path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("watch.pid");
+    let pid_str = std::fs::read_to_string(&pid_file).ok()?;
+    let pid: u32 = pid_str.trim().parse().ok()?;
+    if crate::commands::watch::is_process_running(pid) {
+        Some(pid)
+    } else {
+        // Stale PID file — clean it up
+        let _ = std::fs::remove_file(&pid_file);
+        None
+    }
+}
+
 fn install_autopilot_service(config: &AppConfig) -> Result<(), String> {
     match detect_platform() {
         Platform::Linux => install_systemd_service(config),
@@ -2354,7 +2747,7 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
     }
     exec_parts.extend([
         "autopilot".to_string(),
-        "start".to_string(),
+        "up".to_string(),
         "--foreground".to_string(),
         "--from-service".to_string(),
     ]);
@@ -2442,7 +2835,7 @@ fn install_launchd_service(config: &AppConfig) -> Result<(), String> {
     }
     args.extend([
         "<string>autopilot</string>".to_string(),
-        "<string>start</string>".to_string(),
+        "<string>up</string>".to_string(),
         "<string>--foreground</string>".to_string(),
         "<string>--from-service</string>".to_string(),
     ]);
@@ -2558,22 +2951,6 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-const DEFAULT_WATCH_CONFIG_TEMPLATE: &str = r#"# Stakpak Watch Configuration
-
-[defaults]
-profile = "default"
-timeout = "30m"
-check_timeout = "30s"
-
-[[triggers]]
-name = "example-health-report"
-schedule = "0 9 * * *"
-prompt = """
-Generate a concise health report for this environment.
-Focus on read-only checks and summarize findings.
-"""
-"#;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2593,38 +2970,31 @@ mod tests {
     }
 
     #[test]
-    fn runtime_config_roundtrip_save_load() {
-        let path = temp_file_path("autopilot-runtime");
+    fn config_roundtrip_save_load() {
+        let path = temp_file_path("autopilot-config");
 
-        let config = AutopilotRuntimeConfig {
-            bind: "0.0.0.0:4111".to_string(),
-            show_token: true,
-            no_auth: true,
-            model: Some("anthropic/claude-sonnet-4-5".to_string()),
-            auto_approve_all: true,
-            no_gateway: false,
-            no_watch: true,
-            gateway_config: Some(PathBuf::from("/tmp/gateway.toml")),
-        };
+        let mut config = AutopilotConfigFile::default();
+        config.server.listen = "0.0.0.0:4111".to_string();
+        config.server.show_token = true;
+        config.server.no_auth = true;
+        config.server.model = Some("anthropic/claude-sonnet-4-5".to_string());
+        config.server.auto_approve_all = true;
 
         let save_result = config.save_to_path(&path);
         assert!(save_result.is_ok());
 
-        let loaded = AutopilotRuntimeConfig::load_from_path(&path);
+        let loaded = AutopilotConfigFile::load_from_path(&path);
         assert!(loaded.is_ok());
 
         if let Ok(loaded) = loaded {
-            assert_eq!(loaded.bind, "0.0.0.0:4111");
-            assert!(loaded.show_token);
-            assert!(loaded.no_auth);
-            assert_eq!(loaded.model.as_deref(), Some("anthropic/claude-sonnet-4-5"));
-            assert!(loaded.auto_approve_all);
-            assert!(!loaded.no_gateway);
-            assert!(loaded.no_watch);
+            assert_eq!(loaded.server.listen, "0.0.0.0:4111");
+            assert!(loaded.server.show_token);
+            assert!(loaded.server.no_auth);
             assert_eq!(
-                loaded.gateway_config.as_deref(),
-                Some(Path::new("/tmp/gateway.toml"))
+                loaded.server.model.as_deref(),
+                Some("anthropic/claude-sonnet-4-5")
             );
+            assert!(loaded.server.auto_approve_all);
         }
 
         let _ = std::fs::remove_file(path);
@@ -2647,9 +3017,6 @@ mod tests {
             no_auth: false,
             model: None,
             auto_approve_all: false,
-            no_gateway: false,
-            no_watch: false,
-            gateway_config: None,
             foreground: true,
             from_service: false,
         };
@@ -2866,8 +3233,6 @@ mod tests {
 bind = "127.0.0.1:4096"
 show_token = false
 no_auth = false
-no_gateway = false
-no_watch = false
 
 [channels.slack]
 type = "not-a-channel"
@@ -2884,7 +3249,7 @@ enabled = true
     }
 
     #[test]
-    fn runtime_save_preserves_schedules_and_channels() {
+    fn server_config_save_preserves_schedules_and_channels() {
         let path = temp_file_path("autopilot-preserve");
 
         let mut config = AutopilotConfigFile::default();
@@ -2896,28 +3261,31 @@ enabled = true
         let save_initial = config.save_to_path(&path);
         assert!(save_initial.is_ok());
 
-        let mut runtime = AutopilotRuntimeConfig::load_from_path(&path)
-            .unwrap_or_else(|_| AutopilotRuntimeConfig::default());
-        runtime.no_watch = true;
-        let save_runtime = runtime.save_to_path(&path);
-        assert!(save_runtime.is_ok());
+        let mut loaded = AutopilotConfigFile::load_from_path(&path).unwrap_or_default();
+        loaded.server.auto_approve_all = true;
+        let save_updated = loaded.save_to_path(&path);
+        assert!(save_updated.is_ok());
 
-        let loaded = AutopilotConfigFile::load_from_path(&path);
-        assert!(loaded.is_ok());
+        let reloaded = AutopilotConfigFile::load_from_path(&path);
+        assert!(reloaded.is_ok());
 
-        if let Ok(loaded) = loaded {
-            assert_eq!(loaded.schedules.len(), 1);
-            assert!(loaded.find_schedule("health-check").is_some());
-            assert!(loaded.channels.contains_key("slack"));
-            assert!(loaded.runtime.no_watch);
+        if let Ok(reloaded) = reloaded {
+            assert_eq!(reloaded.schedules.len(), 1);
+            assert!(reloaded.find_schedule("health-check").is_some());
+            assert!(reloaded.channels.contains_key("slack"));
+            assert!(reloaded.server.auto_approve_all);
         }
 
         let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]
-    async fn schedule_mutations_are_blocked_until_runtime_wiring() {
-        let result = run_schedule_command(AutopilotScheduleCommands::Add {
+    async fn schedule_add_writes_to_config() {
+        // Schedule add now works — it writes to the config file.
+        // We can't easily test it here without a temp config path,
+        // so just verify the helper functions work correctly.
+        let mut config = AutopilotConfigFile::default();
+        let schedule = AutopilotScheduleConfig {
             name: "demo".to_string(),
             cron: "*/5 * * * *".to_string(),
             prompt: "hello".to_string(),
@@ -2928,32 +3296,25 @@ enabled = true
             channel: None,
             pause_on_approval: false,
             enabled: true,
-        })
-        .await;
-
-        assert_eq!(
-            result.err().as_deref(),
-            Some(SCHEDULE_RUNTIME_NOT_WIRED_MESSAGE)
-        );
+        };
+        let result = add_schedule_in_config(&mut config, schedule);
+        assert!(result.is_ok());
+        assert!(config.find_schedule("demo").is_some());
     }
 
     #[tokio::test]
-    async fn channel_mutations_are_blocked_until_runtime_wiring() {
+    async fn channel_add_requires_token() {
+        // Channel add without token should fail with a helpful message
         let result = run_channel_command(AutopilotChannelCommands::Add {
-            name: "slack".to_string(),
-            channel_type: ChannelType::Slack,
-            token: Some("token".to_string()),
-            token_env: None,
-            target: "#infra".to_string(),
-            alerts_only: false,
-            enabled: true,
+            channel_type: ChannelType::Telegram,
+            token: None,
+            bot_token: None,
+            app_token: None,
         })
         .await;
 
-        assert_eq!(
-            result.err().as_deref(),
-            Some(CHANNEL_RUNTIME_NOT_WIRED_MESSAGE)
-        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Telegram token required"));
     }
 
     #[test]
@@ -2962,8 +3323,8 @@ enabled = true
             command: "autopilot.status",
             ok: true,
             profile: "default".to_string(),
-            runtime: AutopilotRuntimeConfig::default(),
-            runtime_config_path: "/tmp/autopilot.toml".to_string(),
+            config_path: "/tmp/autopilot.toml".to_string(),
+            server_config: AutopilotServerConfig::default(),
             service: ServiceStatusJson {
                 installed: true,
                 active: true,
@@ -2991,15 +3352,13 @@ enabled = true
                 error: None,
                 recent_runs: vec![WatchRunSummaryJson {
                     id: 1,
-                    trigger_name: "example".to_string(),
+                    schedule_name: "example".to_string(),
                     status: "completed".to_string(),
                     started_at: "2026-01-01T00:00:00Z".to_string(),
                     finished_at: Some("2026-01-01T00:00:10Z".to_string()),
                     error_message: None,
                 }],
             },
-            schedule_runtime_wired: false,
-            channel_runtime_wired: false,
             schedules: vec![AutopilotScheduleStatusJson {
                 name: "health-check".to_string(),
                 cron: "*/5 * * * *".to_string(),
@@ -3023,21 +3382,11 @@ enabled = true
                 value.get("command").and_then(|v| v.as_str()),
                 Some("autopilot.status")
             );
-            assert!(value.get("runtime").is_some());
+            assert!(value.get("server_config").is_some());
             assert!(value.get("service").is_some());
             assert!(value.get("server").is_some());
             assert!(value.get("gateway").is_some());
             assert!(value.get("watch").is_some());
-            assert_eq!(
-                value
-                    .get("schedule_runtime_wired")
-                    .and_then(|v| v.as_bool()),
-                Some(false)
-            );
-            assert_eq!(
-                value.get("channel_runtime_wired").and_then(|v| v.as_bool()),
-                Some(false)
-            );
             assert!(value.get("schedules").is_some());
             assert!(value.get("channels").is_some());
 

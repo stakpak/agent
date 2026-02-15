@@ -6,7 +6,7 @@ use super::service::{Platform, get_service_config_path, is_service_installed, un
 pub async fn uninstall_watch() -> Result<(), String> {
     let platform = Platform::detect();
 
-    println!("Uninstalling stakpak watch service...");
+    println!("Uninstalling stakpak autopilot service...");
     println!("Platform: {}", platform.name());
     println!();
 

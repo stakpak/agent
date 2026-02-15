@@ -1,12 +1,12 @@
-//! Watch install command - install as a system service.
+//! Autopilot install command - install as a system service.
 
 use super::service::{Platform, get_service_config_path, install_service, is_service_installed};
 
-/// Install the watch service as a system service.
+/// Install the autopilot service as a system service.
 pub async fn install_watch(force: bool) -> Result<(), String> {
     let platform = Platform::detect();
 
-    println!("Installing stakpak watch as a system service...");
+    println!("Installing stakpak autopilot as a system service...");
     println!("Platform: {}", platform.name());
     println!();
 
@@ -21,7 +21,7 @@ pub async fn install_watch(force: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    // Check for watch config
+    // Check for autopilot config
     let config_path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".stakpak")
@@ -29,23 +29,23 @@ pub async fn install_watch(force: bool) -> Result<(), String> {
 
     if !config_path.exists() {
         println!(
-            "\x1b[33m⚠\x1b[0m  No watch configuration found at: {}",
+            "\x1b[33m⚠\x1b[0m  No autopilot configuration found at: {}",
             config_path.display()
         );
         println!();
         println!("Create a configuration first with:");
-        println!("  stakpak watch init");
+        println!("  stakpak autopilot init");
         println!();
         println!("Then run this command again.");
-        return Err("Watch configuration not found".to_string());
+        return Err("Autopilot configuration not found".to_string());
     }
 
     // Validate the config can be loaded
     match crate::commands::watch::WatchConfig::load_default() {
         Ok(config) => {
             println!(
-                "✓ Configuration validated ({} triggers)",
-                config.triggers.len()
+                "✓ Configuration validated ({} schedules)",
+                config.schedules.len()
             );
         }
         Err(e) => {

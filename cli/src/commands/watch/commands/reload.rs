@@ -1,19 +1,19 @@
-//! Watch reload command - reload the installed watch configuration.
+//! Autopilot reload command - reload the installed autopilot configuration.
 
 use super::service::{Platform, is_service_installed, reload_service};
 
-/// Reload the watch configuration.
+/// Reload the autopilot configuration.
 pub async fn reload_watch() -> Result<(), String> {
     let platform = Platform::detect();
 
     if !is_service_installed() {
         return Err(
-            "Watch service is not installed. Install it first with 'stakpak watch install'."
+            "Autopilot service is not installed. Install it first with 'stakpak autopilot up'."
                 .to_string(),
         );
     }
 
-    println!("Reloading stakpak watch configuration...");
+    println!("Reloading stakpak autopilot configuration...");
     println!("Platform: {}", platform.name());
     println!();
 
@@ -26,8 +26,8 @@ pub async fn reload_watch() -> Result<(), String> {
     match crate::commands::watch::WatchConfig::load_default() {
         Ok(config) => {
             println!(
-                "✓ Configuration validated ({} triggers)",
-                config.triggers.len()
+                "✓ Configuration validated ({} schedules)",
+                config.schedules.len()
             );
         }
         Err(e) => {
@@ -45,7 +45,7 @@ pub async fn reload_watch() -> Result<(), String> {
     let result = reload_service().await?;
 
     println!();
-    println!("\x1b[32m✓ Watch reloaded successfully!\x1b[0m");
+    println!("\x1b[32m✓ Autopilot reloaded successfully!\x1b[0m");
     println!();
     println!("{}", result.message);
 

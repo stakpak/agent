@@ -582,13 +582,7 @@ mod tests {
 
     #[test]
     fn cli_parses_onboard_alias_flags() {
-        let parsed = Cli::try_parse_from([
-            "stakpak",
-            "onboard",
-            "--non-interactive",
-            "--json",
-            "--no-gateway",
-        ]);
+        let parsed = Cli::try_parse_from(["stakpak", "onboard", "--non-interactive", "--json"]);
         assert!(parsed.is_ok());
 
         if let Ok(cli) = parsed {
@@ -596,7 +590,6 @@ mod tests {
                 Some(Commands::Onboard { args }) => {
                     assert!(args.non_interactive);
                     assert!(args.json);
-                    assert!(args.no_gateway);
                 }
                 _ => panic!("Expected onboard command"),
             }
@@ -678,7 +671,7 @@ mod tests {
         assert!(
             !Commands::Autopilot(commands::AutopilotCommands::Status {
                 json: false,
-                watch_runs: None,
+                recent_runs: None,
             })
             .requires_auth()
         );
@@ -695,9 +688,6 @@ mod tests {
                     no_auth: false,
                     model: None,
                     auto_approve_all: false,
-                    no_gateway: true,
-                    no_watch: true,
-                    gateway_config: None,
                     json: true,
                 }
             }
@@ -712,9 +702,6 @@ mod tests {
                     no_auth: false,
                     model: None,
                     auto_approve_all: false,
-                    no_gateway: false,
-                    no_watch: false,
-                    gateway_config: None,
                     json: false,
                     foreground: false,
                 },

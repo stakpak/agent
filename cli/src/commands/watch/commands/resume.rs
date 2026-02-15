@@ -27,7 +27,7 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to get run: {}", e))?;
 
-    println!("Run #{}: {} ({})", run.id, run.trigger_name, run.status);
+    println!("Run #{}: {} ({})", run.id, run.schedule_name, run.status);
 
     // Check if run has a checkpoint to resume from
     let checkpoint_id = run.agent_last_checkpoint_id.as_ref().ok_or_else(|| {
@@ -43,11 +43,14 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    // Find the trigger config to get profile
-    let trigger = config.triggers.iter().find(|t| t.name == run.trigger_name);
+    // Find the schedule config to get profile
+    let schedule = config
+        .schedules
+        .iter()
+        .find(|s| s.name == run.schedule_name);
 
-    let profile = trigger
-        .and_then(|t| t.profile.as_ref())
+    let profile = schedule
+        .and_then(|s| s.profile.as_ref())
         .unwrap_or(&config.defaults.profile);
 
     println!("\nLaunching TUI with checkpoint from run #{}...", run.id);

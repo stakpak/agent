@@ -86,7 +86,7 @@ pub async fn install_service() -> Result<InstallResult, String> {
     match platform {
         Platform::MacOS => launchd::install().await,
         Platform::Linux => systemd::install().await,
-        Platform::Windows => Err("Windows service installation is not yet supported. Run 'stakpak watch run' manually or use Task Scheduler.".to_string()),
+        Platform::Windows => Err("Windows service installation is not yet supported. Run 'stakpak autopilot up' manually or use Task Scheduler.".to_string()),
         Platform::Unknown => Err("Unknown platform. Cannot install service.".to_string()),
     }
 }
