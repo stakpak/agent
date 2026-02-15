@@ -393,8 +393,8 @@ Multi-step tasks, complex implementations, cross-session work. Skip for simple Q
 2. Present plan and verify with user
 3. Create board with cards to track execution - don't just leave it as markdown
 
-# Stakpak Watch: `stakpak watch`
-Run yourself autonomously on a schedule with optional trigger scripts. Config: `~/.stakpak/watch.toml`
+# Stakpak Autopilot: `stakpak autopilot`
+Self-driving infrastructure. Runs 24/7 on your machines — monitoring, investigating, fixing, and talking to you on Slack when it needs you. Config: `~/.stakpak/autopilot.toml`
 
 ## Installing stakpak cli on remote servers
 ```bash
@@ -410,38 +410,77 @@ stakpak auth login --provider anthropic --api-key <anthropic_api_key>
 ```
 
 ## Commands
+
+### Core Lifecycle
 ```bash
-stakpak watch init              # Create sample config
-stakpak watch run               # Start watch service (foreground)
-stakpak watch install           # Install as system service (launchd/systemd)
-stakpak watch reload            # Reload config after modifying triggers
-stakpak watch get triggers      # List configured triggers
-stakpak watch get runs          # View run history
-stakpak watch fire <name>       # Manually fire a trigger
+stakpak up --non-interactive        # Start autopilot + install as system service (alias: stakpak autopilot up)
+stakpak down                        # Stop autopilot + remove system service (alias: stakpak autopilot down)
+stakpak autopilot status            # Show health, uptime, schedules, channels, recent activity
+stakpak autopilot logs              # Stream autopilot logs (-f to follow, -c to filter by component)
+stakpak autopilot restart           # Restart autopilot (reload config)
+stakpak autopilot doctor            # Run preflight checks for autopilot setup/runtime
 ```
 
-**IMPORTANT:** Always use `stakpak watch install` to set up the system service. Do NOT manually create systemd unit files or launchd plist files.
+### Schedule Management
+```bash
+stakpak autopilot schedule list                     # List all schedules
+stakpak autopilot schedule add <name> --cron '...' --prompt '...'  # Add a schedule
+stakpak autopilot schedule remove <name>            # Remove a schedule
+stakpak autopilot schedule enable <name>            # Enable a schedule
+stakpak autopilot schedule disable <name>           # Disable a schedule
+stakpak autopilot schedule trigger <name>           # Manually trigger a schedule (--dry-run to preview)
+stakpak autopilot schedule history <name>           # Show run history (--limit <N>)
+stakpak autopilot schedule show <run_id>            # Show details of a specific run
+stakpak autopilot schedule clean                    # Clean up stale runs (--older-than-days <N>)
+```
 
-## Trigger Configuration
-Edit `~/.stakpak/watch.toml`:
+`schedule add` options: `--cron` (required), `--prompt` (required), `--check <PATH>`, `--trigger-on <success|failure|any>` (default: failure), `--workdir <DIR>`, `--max-steps <N>` (default: 50), `--channel <NAME>`, `--pause-on-approval`
+
+### Channel Management
+```bash
+stakpak autopilot channel list                      # List all channels
+stakpak autopilot channel add <type> [--token|--bot-token|--app-token]  # Add a channel
+stakpak autopilot channel remove <type>             # Remove a channel
+stakpak autopilot channel test                      # Test channel connectivity
+```
+
+**IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
+
+## Schedule Configuration
+Edit `~/.stakpak/autopilot.toml`:
 ```toml
-[[triggers]]
+[[schedules]]
 name = "daily-backup-check"      # Required: unique identifier
-schedule = "0 6 * * *"           # Required: cron expression (minute hour day month weekday)
+cron = "0 6 * * *"               # Required: cron expression (minute hour day month weekday)
 prompt = """                     # Required: prompt sent to agent
 Check backup status for all databases.
 Verify last backup < 24h old.
 """
 # Optional fields:
-profile = "prod"                 # Profile from ~/.stakpak/config.toml (default: "default")
-timeout = "1h"                   # Agent execution timeout (default: 30m)
 check = "~/.stakpak/checks/weekday.sh"  # Gate script that determines if agent should run
-check_timeout = "1m"             # Check script timeout (default: 30s)
-check_trigger_on = "success"     # "success" (exit 0), "failure" (exit 1+), or "any"
-board_id = "board_abc123"        # Task board for tracking
-enable_slack_tools = true        # Enable Slack MCP tools (default: false)
-                                 # No token needed - uses backend integration from https://stakpak.dev/stakpak/settings/integrations
-enable_subagents = true          # Enable subagents (default: false)
+trigger_on = "success"           # "success" (exit 0), "failure" (exit 1+), or "any"
+workdir = "/path/to/project"     # Working directory for this schedule
+max_steps = 50                   # Max agent steps (default: 50)
+channel = "slack"                # Report results to this channel
+pause_on_approval = false        # Require approval before acting
+enabled = true                   # Enable immediately
+```
+
+## Channel Configuration
+```toml
+[channels.slack]
+type = "slack"
+token_env = "SLACK_BOT_TOKEN"    # No token needed if using backend integration from https://stakpak.dev/stakpak/settings/integrations
+target = "#infra"
+enabled = true
+```
+
+## Non-Interactive Setup (CI/scripts)
+```bash
+stakpak auth login --api-key $KEY
+stakpak autopilot schedule add health --cron '0 */6 * * *' --prompt 'Check health'
+stakpak autopilot channel add slack --bot-token $SLACK_BOT --app-token $SLACK_APP
+stakpak up --non-interactive
 ```
 
 # Task Success Criteria

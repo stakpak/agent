@@ -1,18 +1,20 @@
-//! Watch status command - shows watch status and trigger information.
+//! Autopilot status command - shows autopilot status and schedule information.
 
-use crate::commands::watch::{ListRunsFilter, RunStatus, WatchConfig, WatchDb, is_process_running};
+use crate::commands::watch::{
+    ListRunsFilter, RunStatus, ScheduleConfig, ScheduleDb, is_process_running,
+};
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use std::str::FromStr;
 
-/// Show watch status and upcoming trigger runs.
+/// Show autopilot status and upcoming schedule runs.
 pub async fn show_status() -> Result<(), String> {
     // Load configuration
-    let config = match WatchConfig::load_default() {
+    let config = match ScheduleConfig::load_default() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to load watch config: {}", e);
-            eprintln!("Run 'stakpak watch init' to create a configuration file.");
+            eprintln!("Failed to load autopilot config: {}", e);
+            eprintln!("Run 'stakpak autopilot init' to create a configuration file.");
             return Ok(());
         }
     };
@@ -23,21 +25,21 @@ pub async fn show_status() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = (WatchDb::new(db_path_str).await).ok();
+    let db = (ScheduleDb::new(db_path_str).await).ok();
 
-    // Check watch state
-    let watch_state = if let Some(ref db) = db {
-        db.get_watch_state().await.ok().flatten()
+    // Check autopilot state
+    let autopilot_state = if let Some(ref db) = db {
+        db.get_autopilot_state().await.ok().flatten()
     } else {
         None
     };
 
-    // Print watch status
-    if let Some(state) = watch_state {
+    // Print autopilot status
+    if let Some(state) = autopilot_state {
         // Check if process is actually running
         if is_process_running(state.pid as u32) {
             println!(
-                "Watch: \x1b[32mrunning\x1b[0m (PID {}, started {})",
+                "Autopilot: \x1b[32mrunning\x1b[0m (PID {}, started {})",
                 state.pid,
                 format_datetime(&state.started_at)
             );
@@ -47,36 +49,36 @@ pub async fn show_status() -> Result<(), String> {
             );
         } else {
             println!(
-                "Watch: \x1b[33mstale\x1b[0m (PID {} not running, last seen {})",
+                "Autopilot: \x1b[33mstale\x1b[0m (PID {} not running, last seen {})",
                 state.pid,
                 format_datetime(&state.started_at)
             );
         }
     } else {
-        println!("Watch: \x1b[31mnot running\x1b[0m");
+        println!("Autopilot: \x1b[31mnot running\x1b[0m");
     }
 
     println!();
 
-    // Print triggers
-    if config.triggers.is_empty() {
-        println!("No triggers configured.");
+    // Print schedules
+    if config.schedules.is_empty() {
+        println!("No schedules configured.");
         return Ok(());
     }
 
-    println!("Triggers ({}):", config.triggers.len());
+    println!("Schedules ({}):", config.schedules.len());
     println!(
         "  {:<24} {:<16} {:<14} {:<22} LAST RUN",
-        "NAME", "SCHEDULE", "PROFILE", "NEXT RUN"
+        "NAME", "CRON", "PROFILE", "NEXT RUN"
     );
 
-    for trigger in &config.triggers {
+    for schedule in &config.schedules {
         // Calculate next run time
-        let next_run = calculate_next_run(&trigger.schedule);
+        let next_run = calculate_next_run(&schedule.cron);
 
         // Get last run from database
         let last_run_info = if let Some(ref db) = db {
-            get_last_run_info(db, &trigger.name).await
+            get_last_run_info(db, &schedule.name).await
         } else {
             None
         };
@@ -89,12 +91,12 @@ pub async fn show_status() -> Result<(), String> {
             .map(|(dt, status)| format!("{} ({})", format_datetime(&dt), status))
             .unwrap_or_else(|| "-".to_string());
 
-        let profile = trigger.effective_profile(&config.defaults);
+        let profile = schedule.effective_profile(&config.defaults);
 
         println!(
             "  {:<24} {:<16} {:<14} {:<22} {}",
-            truncate(&trigger.name, 24),
-            truncate(&trigger.schedule, 16),
+            truncate(&schedule.name, 24),
+            truncate(&schedule.cron, 16),
             truncate(profile, 14),
             next_run_str,
             last_run_str
@@ -105,15 +107,18 @@ pub async fn show_status() -> Result<(), String> {
 }
 
 /// Calculate the next run time for a cron expression.
-fn calculate_next_run(schedule: &str) -> Option<DateTime<Utc>> {
-    let cron = Cron::from_str(schedule).ok()?;
+fn calculate_next_run(cron_expr: &str) -> Option<DateTime<Utc>> {
+    let cron = Cron::from_str(cron_expr).ok()?;
     cron.find_next_occurrence(&Utc::now(), false).ok()
 }
 
-/// Get the last run info for a trigger.
-async fn get_last_run_info(db: &WatchDb, trigger_name: &str) -> Option<(DateTime<Utc>, String)> {
+/// Get the last run info for a schedule.
+async fn get_last_run_info(
+    db: &ScheduleDb,
+    schedule_name: &str,
+) -> Option<(DateTime<Utc>, String)> {
     let filter = ListRunsFilter {
-        trigger_name: Some(trigger_name.to_string()),
+        schedule_name: Some(schedule_name.to_string()),
         status: None,
         limit: Some(1),
         offset: None,

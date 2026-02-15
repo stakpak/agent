@@ -103,22 +103,13 @@ Auth middleware is applied only to the protected router.
 
 ---
 
-## Running `stakpak serve` (operator quickstart)
+## Running the server (operator quickstart)
 
-Use these commands from the repo root (or installed CLI):
+The server runs as part of the autopilot runtime:
 
 ```bash
-# Local dev, no auth
-stakpak serve --no-auth
-
-# Local dev with gateway enabled
-stakpak serve --gateway --no-auth
-
-# Use a non-default profile (root option must come before subcommand)
-stakpak --profile local serve --gateway --no-auth
-
-# Force auto-approve all tools (CI/headless)
-stakpak serve --auto-approve-all --no-auth
+# Start full autopilot (server + gateway + scheduler)
+stakpak up
 ```
 
 Default bind is `127.0.0.1:4096`.
@@ -142,26 +133,22 @@ When gateway is enabled, these are also mounted:
 - `GET /v1/gateway/sessions`
 - `POST /v1/gateway/send`
 
-## Gateway-related CLI commands
+## Channel-related CLI commands
+
+Channels are managed through the autopilot system:
 
 ```bash
-# Initialize gateway config (~/.stakpak/gateway.toml)
-stakpak gateway init --force
-
-# Non-interactive init
-stakpak gateway init \
-  --telegram-token "$TELEGRAM_BOT_TOKEN" \
-  --discord-token "$DISCORD_BOT_TOKEN" \
-  --slack-bot-token "$SLACK_BOT_TOKEN" \
-  --slack-app-token "$SLACK_APP_TOKEN" \
-  --force
+# Add channels
+stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"
+stakpak autopilot channel add telegram --token "$TELEGRAM_BOT_TOKEN"
+stakpak autopilot channel add discord --token "$DISCORD_BOT_TOKEN"
 
 # Validate configured channels
-stakpak gateway channels list
-stakpak gateway channels test
+stakpak autopilot channel list
+stakpak autopilot channel test
 
-# Run gateway standalone (if serve is already running)
-stakpak gateway run
+# Start everything (server + gateway + scheduler)
+stakpak up
 ```
 
 ## Relationship to core

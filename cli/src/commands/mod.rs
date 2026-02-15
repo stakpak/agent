@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -13,16 +11,17 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod autopilot;
 pub mod board;
-pub mod gateway;
 pub mod mcp;
 pub mod warden;
 pub mod watch;
 
+use autopilot::{StartArgs, StopArgs};
+
 pub use auth::AuthCommands;
-pub use gateway::GatewayCommands;
+pub use autopilot::AutopilotCommands;
 pub use mcp::McpCommands;
-pub use watch::WatchCommands;
 
 /// Frontmatter structure for rulebook metadata
 #[derive(Deserialize, Serialize)]
@@ -154,10 +153,6 @@ pub enum Commands {
     #[command(subcommand)]
     Auth(AuthCommands),
 
-    /// Messaging gateway commands
-    #[command(subcommand)]
-    Gateway(GatewayCommands),
-
     /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
     Warden {
         /// Environment variables to pass to container
@@ -179,79 +174,21 @@ pub enum Commands {
     /// Update Stakpak Agent to the latest version
     Update,
 
-    /// Start the HTTP/SSE server runtime
-    Serve {
-        /// Bind address, e.g. 127.0.0.1:4096
-        #[arg(long, default_value = "127.0.0.1:4096")]
-        bind: String,
-
-        /// Bearer token required for protected routes. If omitted, a secure token is generated.
-        #[arg(long)]
-        auth_token: Option<String>,
-
-        /// Show generated auth token in stdout (local dev only)
-        #[arg(long, default_value_t = false)]
-        show_token: bool,
-
-        /// Disable auth checks for protected routes (local dev only)
-        #[arg(long, default_value_t = false)]
-        no_auth: bool,
-
-        /// Override default model for server runs (provider/model or model id)
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Auto-approve all tools (CI/headless only)
-        #[arg(long, default_value_t = false)]
-        auto_approve_all: bool,
-
-        /// Also start the messaging gateway
-        #[arg(long, default_value_t = false)]
-        gateway: bool,
-
-        /// Path to gateway config file (requires --gateway)
-        #[arg(long)]
-        gateway_config: Option<std::path::PathBuf>,
-    },
-
-    /// Start everything: serve + gateway + watch
-    Up {
-        /// Bind address, e.g. 127.0.0.1:4096
-        #[arg(long, default_value = "127.0.0.1:4096")]
-        bind: String,
-
-        /// Show generated auth token in stdout (local dev only)
-        #[arg(long, default_value_t = false)]
-        show_token: bool,
-
-        /// Disable auth checks for protected routes (local dev only)
-        #[arg(long, default_value_t = false)]
-        no_auth: bool,
-
-        /// Override default model for server runs (provider/model or model id)
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Auto-approve all tools (CI/headless only)
-        #[arg(long, default_value_t = false)]
-        auto_approve_all: bool,
-
-        /// Don't start gateway runtime
-        #[arg(long, default_value_t = false)]
-        no_gateway: bool,
-
-        /// Don't start watch scheduler
-        #[arg(long, default_value_t = false)]
-        no_watch: bool,
-
-        /// Path to gateway config file
-        #[arg(long)]
-        gateway_config: Option<std::path::PathBuf>,
-    },
-
-    /// Run the autonomous watch agent with scheduled triggers
+    /// Autonomous 24/7 lifecycle commands
     #[command(subcommand)]
-    Watch(WatchCommands),
+    Autopilot(AutopilotCommands),
+
+    /// Start autopilot — auto-configures on first run (alias: stakpak autopilot up)
+    Up {
+        #[command(flatten)]
+        args: StartArgs,
+    },
+
+    /// Alias for `stakpak autopilot down`
+    Down {
+        #[command(flatten)]
+        args: StopArgs,
+    },
 }
 
 async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
@@ -290,33 +227,6 @@ fn get_config_path_option(config: &AppConfig) -> Option<&Path> {
     }
 }
 
-fn expand_gateway_approval_allowlist(tools: &[String]) -> Vec<String> {
-    let mut normalized = BTreeSet::new();
-
-    for tool in tools {
-        let trimmed = tool.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        normalized.insert(trimmed.to_string());
-        if !trimmed.starts_with("stakpak__") {
-            normalized.insert(format!("stakpak__{trimmed}"));
-        }
-    }
-
-    normalized.into_iter().collect()
-}
-
-fn loopback_server_url(listener_addr: SocketAddr) -> String {
-    let port = listener_addr.port();
-    if listener_addr.ip().is_ipv6() {
-        format!("http://[::1]:{port}")
-    } else {
-        format!("http://127.0.0.1:{port}")
-    }
-}
-
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -329,10 +239,9 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
-                | Commands::Gateway(_)
-                | Commands::Serve { .. }
+                | Commands::Autopilot(_)
                 | Commands::Up { .. }
-                | Commands::Watch(_)
+                | Commands::Down { .. }
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -575,471 +484,19 @@ impl Commands {
             Commands::Update => {
                 auto_update::run_auto_update(false).await?;
             }
-            Commands::Gateway(gateway_command) => {
-                gateway_command.run(config).await?;
+            Commands::Autopilot(autopilot_command) => {
+                autopilot_command.run(config).await?;
             }
-            Commands::Up {
-                bind,
-                show_token,
-                no_auth,
-                model,
-                auto_approve_all,
-                no_gateway,
-                no_watch,
-                gateway_config,
-            } => {
-                let watch_task = if no_watch {
-                    None
-                } else {
-                    Some(tokio::spawn(async {
-                        if let Err(error) = crate::commands::watch::commands::run_watch().await {
-                            eprintln!("Watch runtime exited: {}", error);
-                        }
-                    }))
-                };
-
-                let current_exe = std::env::current_exe()
-                    .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
-
-                let mut serve_cmd = tokio::process::Command::new(current_exe);
-                if config.profile_name != "default" {
-                    serve_cmd.arg("--profile").arg(&config.profile_name);
+            Commands::Up { args } => {
+                AutopilotCommands::Up {
+                    args,
+                    from_service: false,
                 }
-                serve_cmd.arg("serve");
-                serve_cmd.arg("--bind").arg(bind);
-
-                if show_token {
-                    serve_cmd.arg("--show-token");
-                }
-                if no_auth {
-                    serve_cmd.arg("--no-auth");
-                }
-                if auto_approve_all {
-                    serve_cmd.arg("--auto-approve-all");
-                }
-                if !no_gateway {
-                    serve_cmd.arg("--gateway");
-                }
-                if let Some(model) = model {
-                    serve_cmd.arg("--model").arg(model);
-                }
-                if let Some(path) = gateway_config {
-                    serve_cmd.arg("--gateway-config").arg(path);
-                }
-
-                let status = serve_cmd
-                    .status()
-                    .await
-                    .map_err(|e| format!("Failed to start serve runtime: {}", e))?;
-
-                if let Some(task) = watch_task {
-                    task.abort();
-                    let _ = task.await;
-                }
-
-                if !status.success() {
-                    return Err(format!(
-                        "Serve runtime exited with status {}",
-                        status
-                            .code()
-                            .map(|code| code.to_string())
-                            .unwrap_or_else(|| "signal".to_string())
-                    ));
-                }
+                .run(config)
+                .await?;
             }
-            Commands::Serve {
-                bind,
-                auth_token,
-                show_token,
-                no_auth,
-                model,
-                auto_approve_all,
-                gateway,
-                gateway_config,
-            } => {
-                if no_auth && auth_token.is_some() {
-                    return Err(
-                        "Cannot combine --no-auth with --auth-token. Remove one of them."
-                            .to_string(),
-                    );
-                }
-
-                let (auth_config, generated_auth_token) = if no_auth {
-                    (stakpak_server::AuthConfig::disabled(), None)
-                } else {
-                    let token = auth_token
-                        .unwrap_or_else(|| stakpak_shared::utils::generate_password(64, true));
-                    (
-                        stakpak_server::AuthConfig::token(token.clone()),
-                        Some(token),
-                    )
-                };
-
-                let listener = tokio::net::TcpListener::bind(&bind)
-                    .await
-                    .map_err(|e| format!("Failed to bind {}: {}", bind, e))?;
-
-                let runtime_client = build_agent_client(&config).await?;
-                let storage = runtime_client.session_storage().clone();
-
-                let events = Arc::new(stakpak_server::EventLog::new(4096));
-                let idempotency = Arc::new(stakpak_server::IdempotencyStore::new(
-                    std::time::Duration::from_secs(24 * 60 * 60),
-                ));
-                let inference = Arc::new(
-                    stakai::Inference::builder()
-                        .with_registry(runtime_client.stakai().registry().clone())
-                        .build()
-                        .map_err(|e| format!("Failed to initialize inference runtime: {}", e))?,
-                );
-
-                let mut models = runtime_client.list_models().await;
-                let requested_model = model.or(config.model.clone());
-                let auto_approve_tools = config.auto_approve.clone();
-                let allowed_tools = config.allowed_tools.clone();
-
-                let requested_model_from_catalog = requested_model.as_deref().and_then(|name| {
-                    if let Some((provider, id)) = name.split_once('/') {
-                        return models
-                            .iter()
-                            .find(|model| model.provider == provider && model.id == id)
-                            .cloned();
-                    }
-
-                    models.iter().find(|model| model.id == name).cloned()
-                });
-
-                let requested_custom_model = requested_model.as_deref().and_then(|name| {
-                    name.split_once('/')
-                        .map(|(provider, id)| stakai::Model::custom(id, provider))
-                });
-
-                let default_model = requested_model_from_catalog
-                    .clone()
-                    .or(requested_custom_model)
-                    .or_else(|| models.first().cloned())
-                    .or_else(|| Some(stakai::Model::custom("gpt-4o-mini", "openai")));
-
-                if let Some(requested) = requested_model.as_deref()
-                    && requested_model_from_catalog.is_none()
-                {
-                    if requested.contains('/') {
-                        eprintln!(
-                            "⚠ Requested model '{}' is not in the catalog; using it as a custom model id.",
-                            requested
-                        );
-                    } else if let Some(resolved) = default_model.as_ref() {
-                        eprintln!(
-                            "⚠ Requested model '{}' not found in catalog; using fallback '{}/{}'.",
-                            requested, resolved.provider, resolved.id
-                        );
-                    }
-                }
-
-                if models.is_empty()
-                    && let Some(default_model) = default_model.clone()
-                {
-                    models.push(default_model);
-                }
-
-                let tool_approval_policy = if auto_approve_all {
-                    stakpak_server::ToolApprovalPolicy::All
-                } else {
-                    let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
-                    if let Some(ref auto_approve_tools) = auto_approve_tools {
-                        policy.with_overrides(
-                            auto_approve_tools
-                                .iter()
-                                .cloned()
-                                .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
-                        )
-                    } else {
-                        policy
-                    }
-                };
-
-                let mcp_init_config = crate::commands::agent::run::mcp_init::McpInitConfig {
-                    redact_secrets: true,
-                    privacy_mode: false,
-                    enabled_tools: stakpak_mcp_server::EnabledToolsConfig { slack: false },
-                    enable_mtls: true,
-                    enable_subagents: true,
-                    allowed_tools,
-                };
-
-                let mcp_init_result =
-                    crate::commands::agent::run::mcp_init::initialize_mcp_server_and_tools(
-                        &config,
-                        mcp_init_config,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to initialize MCP stack: {}", e))?;
-
-                let mcp_tools = mcp_init_result
-                    .mcp_tools
-                    .iter()
-                    .map(|tool| stakai::Tool {
-                        tool_type: "function".to_string(),
-                        function: stakai::ToolFunction {
-                            name: tool.name.as_ref().to_string(),
-                            description: tool
-                                .description
-                                .as_ref()
-                                .map(|value| value.to_string())
-                                .unwrap_or_default(),
-                            parameters: serde_json::Value::Object((*tool.input_schema).clone()),
-                        },
-                        provider_options: None,
-                    })
-                    .collect();
-
-                let app_state = stakpak_server::AppState::new(
-                    storage,
-                    events,
-                    idempotency,
-                    inference,
-                    models,
-                    default_model,
-                    tool_approval_policy,
-                )
-                .with_mcp(
-                    mcp_init_result.client,
-                    mcp_tools,
-                    Some(mcp_init_result.server_shutdown_tx),
-                    Some(mcp_init_result.proxy_shutdown_tx),
-                );
-
-                let gateway_runtime = if gateway {
-                    let listener_addr = listener
-                        .local_addr()
-                        .map_err(|e| format!("Failed to inspect listener address: {}", e))?;
-                    let loopback_url = loopback_server_url(listener_addr);
-                    let loopback_token = if no_auth {
-                        String::new()
-                    } else {
-                        generated_auth_token.clone().unwrap_or_default()
-                    };
-
-                    let gateway_cli = stakpak_gateway::GatewayCliFlags {
-                        url: Some(loopback_url),
-                        token: Some(loopback_token),
-                        ..Default::default()
-                    };
-
-                    let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(
-                        gateway_config.as_deref(),
-                        &gateway_cli,
-                    )
-                    .map_err(|e| format!("Failed to load gateway config: {}", e))?;
-
-                    if auto_approve_all {
-                        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::AllowAll;
-                        gateway_cfg.gateway.approval_allowlist.clear();
-                    } else if let Some(auto_approve_tools) = auto_approve_tools.as_ref() {
-                        gateway_cfg.gateway.approval_mode =
-                            stakpak_gateway::ApprovalMode::Allowlist;
-                        gateway_cfg.gateway.approval_allowlist =
-                            expand_gateway_approval_allowlist(auto_approve_tools);
-                    }
-
-                    if !gateway_cfg.has_channels() {
-                        println!(
-                            "Gateway enabled but no channels configured. Skipping gateway runtime."
-                        );
-                        None
-                    } else {
-                        Some(Arc::new(
-                            stakpak_gateway::Gateway::new(gateway_cfg)
-                                .await
-                                .map_err(|e| {
-                                    format!("Failed to initialize gateway runtime: {}", e)
-                                })?,
-                        ))
-                    }
-                } else {
-                    None
-                };
-
-                let refresh_state = app_state.clone();
-                let (refresh_shutdown_tx, mut refresh_shutdown_rx) =
-                    tokio::sync::watch::channel(false);
-                let refresh_task = tokio::spawn(async move {
-                    loop {
-                        tokio::select! {
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
-                                if let Err(error) = refresh_state.refresh_mcp_tools().await {
-                                    eprintln!("[mcp-refresh] {}", error);
-                                }
-                            }
-                            changed = refresh_shutdown_rx.changed() => {
-                                if changed.is_err() || *refresh_shutdown_rx.borrow() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                });
-
-                let shutdown_state = app_state.clone();
-                let shutdown_refresh_tx = refresh_shutdown_tx.clone();
-
-                let base_app = stakpak_server::router(app_state, auth_config);
-                let app = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
-                    let gateway_routes = gateway_runtime.api_router();
-                    base_app.nest_service("/v1/gateway", gateway_routes.into_service())
-                } else {
-                    base_app
-                };
-
-                println!("Stakpak server listening on http://{}", bind);
-                println!("Profile: {}", config.profile_name);
-                println!(
-                    "Session backend: {}",
-                    if runtime_client.has_stakpak() {
-                        "stakpak remote"
-                    } else {
-                        "local sqlite"
-                    }
-                );
-
-                if no_auth {
-                    println!("Auth: disabled (--no-auth)");
-                } else if let Some(token) = generated_auth_token {
-                    println!("Auth: enabled (Bearer token required)");
-                    if show_token {
-                        println!("Authorization: Bearer {}", token);
-                    } else {
-                        println!(
-                            "Use --show-token to print the generated token in local development."
-                        );
-                    }
-                }
-
-                if gateway_runtime.is_some() {
-                    println!("Gateway: enabled");
-                }
-
-                let gateway_cancel = tokio_util::sync::CancellationToken::new();
-                let gateway_task = if let Some(gateway_runtime) = gateway_runtime.as_ref() {
-                    let gateway_runtime = gateway_runtime.clone();
-                    let cancel = gateway_cancel.clone();
-                    Some(tokio::spawn(
-                        async move { gateway_runtime.run(cancel).await },
-                    ))
-                } else {
-                    None
-                };
-                let gateway_cancel_for_shutdown = gateway_cancel.clone();
-
-                let shutdown = async move {
-                    let _ = tokio::signal::ctrl_c().await;
-
-                    gateway_cancel_for_shutdown.cancel();
-
-                    for (session_id, run_id) in shutdown_state.run_manager.running_runs().await {
-                        let _ = shutdown_state
-                            .run_manager
-                            .cancel_run(session_id, run_id)
-                            .await;
-                    }
-
-                    let drain_deadline =
-                        tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-                    loop {
-                        if shutdown_state.run_manager.running_runs().await.is_empty()
-                            || tokio::time::Instant::now() >= drain_deadline
-                        {
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    }
-
-                    let _ = shutdown_refresh_tx.send(true);
-
-                    if let Some(tx) = shutdown_state.mcp_server_shutdown_tx.as_ref() {
-                        let _ = tx.send(());
-                    }
-                    if let Some(tx) = shutdown_state.mcp_proxy_shutdown_tx.as_ref() {
-                        let _ = tx.send(());
-                    }
-                };
-
-                let serve_result = axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown)
-                    .await;
-
-                gateway_cancel.cancel();
-                if let Some(task) = gateway_task {
-                    match task.await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => eprintln!("Gateway runtime error: {}", e),
-                        Err(e) => eprintln!("Gateway runtime task failed: {}", e),
-                    }
-                }
-
-                let _ = refresh_shutdown_tx.send(true);
-                if !refresh_task.is_finished() {
-                    refresh_task.abort();
-                }
-                let _ = refresh_task.await;
-
-                serve_result.map_err(|e| format!("Server error: {}", e))?;
-            }
-            Commands::Watch(watch_command) => {
-                use crate::commands::watch::commands::{
-                    DescribeResource, GetResource, WatchCommands, fire_trigger, init_config,
-                    install_watch, prune_history, reload_watch, resume_run, run_watch,
-                    show_history, show_run, show_status, show_trigger, stop_watch, uninstall_watch,
-                };
-                match watch_command {
-                    WatchCommands::Run => {
-                        run_watch().await?;
-                    }
-                    WatchCommands::Stop => {
-                        stop_watch().await?;
-                    }
-                    WatchCommands::Status => {
-                        show_status().await?;
-                    }
-                    WatchCommands::Get { resource } => match resource {
-                        GetResource::Triggers => {
-                            show_status().await?; // Status already shows triggers
-                        }
-                        GetResource::Runs { trigger, limit } => {
-                            show_history(trigger.as_deref(), Some(limit)).await?;
-                        }
-                    },
-                    WatchCommands::Describe { resource } => match resource {
-                        DescribeResource::Trigger { name } => {
-                            show_trigger(&name).await?;
-                        }
-                        DescribeResource::Run { id } => {
-                            show_run(id).await?;
-                        }
-                    },
-                    WatchCommands::Fire { trigger, dry_run } => {
-                        fire_trigger(&trigger, dry_run).await?;
-                    }
-                    WatchCommands::Resume { run_id, force } => {
-                        resume_run(run_id, force).await?;
-                    }
-                    WatchCommands::Prune { days } => {
-                        prune_history(days).await?;
-                    }
-                    WatchCommands::Init { force } => {
-                        init_config(force).await?;
-                    }
-                    WatchCommands::Install { force } => {
-                        install_watch(force).await?;
-                    }
-                    WatchCommands::Uninstall => {
-                        uninstall_watch().await?;
-                    }
-                    WatchCommands::Reload => {
-                        reload_watch().await?;
-                    }
-                }
+            Commands::Down { args } => {
+                AutopilotCommands::Down { args }.run(config).await?;
             }
             Commands::Auth(auth_command) => {
                 auth_command.run(config).await?;
@@ -1255,5 +712,26 @@ fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path
         Err(_) => {
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn up_defaults_to_background_mode() {
+        let args = StartArgs {
+            bind: "127.0.0.1:4096".to_string(),
+            show_token: false,
+            no_auth: false,
+            model: None,
+            auto_approve_all: false,
+            foreground: false,
+            non_interactive: false,
+            force: false,
+        };
+        // Without --foreground, args.foreground should be false (background/service mode)
+        assert!(!args.foreground);
     }
 }

@@ -1,15 +1,15 @@
-//! Watch run command - runs the watch service in foreground mode.
+//! Autopilot run command - runs the autopilot service in foreground mode.
 //!
-//! This is the main entry point for the watch service, which:
+//! This is the main entry point for the autopilot service, which:
 //! 1. Loads and validates configuration
 //! 2. Initializes the SQLite database
-//! 3. Sets watch state (PID, start time)
-//! 4. Registers all triggers with the scheduler
+//! 3. Sets autopilot state (PID, start time)
+//! 4. Registers all schedules with the scheduler
 //! 5. Runs the scheduler loop
 //! 6. Handles graceful shutdown on SIGTERM/SIGINT
 
 use crate::commands::watch::{
-    RunStatus, SpawnConfig, WatchConfig, WatchDb, WatchScheduler, assemble_prompt,
+    RunStatus, ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig, assemble_prompt,
     is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};
@@ -21,18 +21,18 @@ use std::time::Duration;
 use tokio::signal;
 use tracing::{error, info, warn};
 
-/// Run the watch service in foreground mode.
+/// Run the autopilot service in foreground mode.
 ///
-/// This function blocks until the watch service receives a shutdown signal (SIGTERM/SIGINT).
-pub async fn run_watch() -> Result<(), String> {
+/// This function blocks until the autopilot service receives a shutdown signal (SIGTERM/SIGINT).
+pub async fn run_scheduler() -> Result<(), String> {
     print_banner();
 
     // Load and validate configuration
     let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
+        ScheduleConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
 
     info!(
-        triggers = config.triggers.len(),
+        schedules = config.schedules.len(),
         "Configuration loaded successfully"
     );
 
@@ -43,14 +43,14 @@ pub async fn run_watch() -> Result<(), String> {
             .map_err(|e| format!("Failed to create database directory: {}", e))?;
     }
 
-    // Check for existing watch service via PID file
+    // Check for existing autopilot service via PID file
     let pid_file = db_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join("watch.pid");
-    if let Some(existing_pid) = check_existing_watch(&pid_file) {
+        .join("autopilot.pid");
+    if let Some(existing_pid) = check_existing_autopilot(&pid_file) {
         return Err(format!(
-            "Another watch instance is already running (PID {}). \
+            "Another autopilot instance is already running (PID {}). \
              Stop it first with 'kill {}' or remove the stale PID file at {}",
             existing_pid,
             existing_pid,
@@ -70,37 +70,37 @@ pub async fn run_watch() -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
-    // Set watch state
-    db.set_watch_state(pid as i64)
+    // Set autopilot state
+    db.set_autopilot_state(pid as i64)
         .await
-        .map_err(|e| format!("Failed to set watch state: {}", e))?;
+        .map_err(|e| format!("Failed to set autopilot state: {}", e))?;
 
-    info!(pid = pid, db_path = %db_path.display(), "Watch state initialized");
+    info!(pid = pid, db_path = %db_path.display(), "Autopilot state initialized");
 
     // Print config summary
     print_config_summary(&config, pid as i64);
 
     // Create scheduler (returns scheduler and event receiver)
-    let (mut scheduler, mut event_rx) = WatchScheduler::new()
+    let (mut scheduler, mut event_rx) = Scheduler::new()
         .await
         .map_err(|e| format!("Failed to create scheduler: {}", e))?;
 
-    // Register triggers and collect info for display
-    let mut registered_triggers = Vec::new();
-    for trigger in &config.triggers {
-        if let Err(e) = scheduler.register_trigger(trigger.clone()).await {
-            error!(trigger = %trigger.name, error = %e, "Failed to register trigger, skipping");
+    // Register schedules and collect info for display
+    let mut registered_schedules = Vec::new();
+    for schedule in &config.schedules {
+        if let Err(e) = scheduler.register_schedule(schedule.clone()).await {
+            error!(schedule = %schedule.name, error = %e, "Failed to register schedule, skipping");
             eprintln!(
                 "  \x1b[31m✗\x1b[0m {} - failed to register: {}",
-                trigger.name, e
+                schedule.name, e
             );
         } else {
-            info!(trigger = %trigger.name, schedule = %trigger.schedule, "Registered trigger");
-            registered_triggers.push(trigger.clone());
+            info!(schedule = %schedule.name, cron = %schedule.cron, "Registered schedule");
+            registered_schedules.push(schedule.clone());
         }
     }
 
@@ -109,16 +109,16 @@ pub async fn run_watch() -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to start scheduler: {}", e))?;
 
-    info!("Scheduler started, waiting for triggers...");
+    info!("Scheduler started, waiting for schedules...");
 
-    // Print registered triggers table
-    print_triggers_table(&registered_triggers);
+    // Print registered schedules table
+    print_schedules_table(&registered_schedules);
 
     // Wrap shared state in Arc for the event loop
     let db = Arc::new(db);
     let config = Arc::new(config);
 
-    // Spawn event handler task for scheduled triggers
+    // Spawn event handler task for scheduled schedules
     let db_clone = Arc::clone(&db);
     let config_clone = Arc::clone(&config);
     let event_handler = tokio::spawn(async move {
@@ -126,20 +126,20 @@ pub async fn run_watch() -> Result<(), String> {
             let db = Arc::clone(&db_clone);
             let config = Arc::clone(&config_clone);
 
-            // Handle each trigger event in a separate task
+            // Handle each schedule event in a separate task
             tokio::spawn(async move {
-                if let Err(e) = handle_trigger_event(&db, &config, &event.trigger).await {
+                if let Err(e) = handle_schedule_event(&db, &config, &event.schedule).await {
                     error!(
-                        trigger = %event.trigger.name,
+                        schedule = %event.schedule.name,
                         error = %e,
-                        "Failed to handle trigger event"
+                        "Failed to handle schedule event"
                     );
                 }
             });
         }
     });
 
-    // Spawn pending trigger poller for manual trigger fires
+    // Spawn pending schedule poller for manual schedule fires
     let db_clone2 = Arc::clone(&db);
     let config_clone2 = Arc::clone(&config);
     let pending_poller = tokio::spawn(async move {
@@ -147,54 +147,55 @@ pub async fn run_watch() -> Result<(), String> {
         loop {
             interval.tick().await;
 
-            // Pop all pending triggers
-            match db_clone2.pop_pending_triggers().await {
+            // Pop all pending schedules
+            match db_clone2.pop_pending_schedules().await {
                 Ok(pending) => {
-                    for pending_trigger in pending {
-                        // Find the trigger config by name
-                        if let Some(trigger) = config_clone2
-                            .triggers
+                    for pending_schedule in pending {
+                        // Find the schedule config by name
+                        if let Some(schedule) = config_clone2
+                            .schedules
                             .iter()
-                            .find(|t| t.name == pending_trigger.trigger_name)
+                            .find(|s| s.name == pending_schedule.schedule_name)
                         {
                             let db = Arc::clone(&db_clone2);
-                            let trigger = trigger.clone();
+                            let schedule = schedule.clone();
                             let config = Arc::clone(&config_clone2);
 
                             // Handle in a separate task
                             tokio::spawn(async move {
-                                info!(trigger = %trigger.name, "Manual trigger fired");
-                                print_event("fire", &trigger.name, "Manual trigger fired");
-                                if let Err(e) = handle_trigger_event(&db, &config, &trigger).await {
+                                info!(schedule = %schedule.name, "Manual schedule fired");
+                                print_event("fire", &schedule.name, "Manual schedule fired");
+                                if let Err(e) = handle_schedule_event(&db, &config, &schedule).await
+                                {
                                     error!(
-                                        trigger = %trigger.name,
+                                        schedule = %schedule.name,
                                         error = %e,
-                                        "Failed to handle manual trigger event"
+                                        "Failed to handle manual schedule event"
                                     );
                                 }
                             });
                         } else {
                             warn!(
-                                trigger = %pending_trigger.trigger_name,
-                                "Pending trigger not found in config, skipping"
+                                schedule = %pending_schedule.schedule_name,
+                                "Pending schedule not found in config, skipping"
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to poll pending triggers");
+                    warn!(error = %e, "Failed to poll pending schedules");
                 }
             }
         }
     });
 
     // Wait for shutdown signal
-    info!("Watch service running. Press Ctrl+C to stop.");
+    info!("Autopilot running. Press Ctrl+C to stop.");
     wait_for_shutdown_signal().await;
 
     println!();
-    println!("\x1b[33mShutdown signal received, stopping watch service...\x1b[0m");
-    info!("Shutdown signal received, stopping watch service...");
+    println!("\x1b[33mShutdown signal received, stopping autopilot service...\x1b[0m");
+    info!("Shutdown signal received, stopping autopilot service...");
 
     // Stop scheduler
     if let Err(e) = scheduler.shutdown().await {
@@ -205,9 +206,9 @@ pub async fn run_watch() -> Result<(), String> {
     event_handler.abort();
     pending_poller.abort();
 
-    // Clear watch state
-    if let Err(e) = db.clear_watch_state().await {
-        warn!(error = %e, "Failed to clear watch state");
+    // Clear autopilot state
+    if let Err(e) = db.clear_autopilot_state().await {
+        warn!(error = %e, "Failed to clear autopilot state");
     }
 
     // Remove PID file
@@ -215,39 +216,63 @@ pub async fn run_watch() -> Result<(), String> {
         warn!(error = %e, "Failed to remove PID file");
     }
 
-    println!("\x1b[32mWatch service stopped.\x1b[0m");
-    info!("Watch service stopped");
+    println!("\x1b[32mAutopilot stopped.\x1b[0m");
+    info!("Autopilot stopped");
     Ok(())
 }
 
-/// Handle a trigger event by running the check script and spawning the agent if needed.
-async fn handle_trigger_event(
-    db: &WatchDb,
-    config: &WatchConfig,
-    trigger: &crate::commands::watch::Trigger,
+/// Handle a schedule event by running the check script and spawning the agent if needed.
+async fn handle_schedule_event(
+    db: &ScheduleDb,
+    config: &ScheduleConfig,
+    schedule: &crate::commands::watch::Schedule,
 ) -> Result<(), String> {
-    info!(trigger = %trigger.name, "Trigger fired");
-    print_event("fire", &trigger.name, "Trigger fired");
+    // Singleton guard: skip if this schedule already has a running run
+    match db.has_running_run(&schedule.name).await {
+        Ok(true) => {
+            info!(
+                schedule = %schedule.name,
+                "Skipping: previous run still in progress"
+            );
+            print_event(
+                "skip",
+                &schedule.name,
+                "Skipped (previous run still in progress)",
+            );
+            return Ok(());
+        }
+        Ok(false) => {} // No running run, proceed
+        Err(e) => {
+            warn!(
+                schedule = %schedule.name,
+                error = %e,
+                "Failed to check for running runs, proceeding anyway"
+            );
+        }
+    }
+
+    info!(schedule = %schedule.name, "Schedule fired");
+    print_event("fire", &schedule.name, "Schedule fired");
 
     // Insert a new run record
     let run_id = db
-        .insert_run(&trigger.name)
+        .insert_run(&schedule.name)
         .await
         .map_err(|e| format!("Failed to insert run: {}", e))?;
 
     // Run check script if defined
-    let check_result = if let Some(check_path) = &trigger.check {
+    let check_result = if let Some(check_path) = &schedule.check {
         let expanded_path = crate::commands::watch::config::expand_tilde(check_path);
-        let timeout = trigger.effective_check_timeout(&config.defaults);
+        let timeout = schedule.effective_check_timeout(&config.defaults);
 
         info!(
-            trigger = %trigger.name,
+            schedule = %schedule.name,
             check_script = %expanded_path.display(),
             "Running check script"
         );
         print_event(
             "check",
-            &trigger.name,
+            &schedule.name,
             &format!("Running check: {}", expanded_path.display()),
         );
 
@@ -266,8 +291,8 @@ async fn handle_trigger_event(
                 .map_err(|e| format!("Failed to update check result: {}", e))?;
 
                 if result.timed_out {
-                    warn!(trigger = %trigger.name, "Check script timed out");
-                    print_event("timeout", &trigger.name, "Check script timed out");
+                    warn!(schedule = %schedule.name, "Check script timed out");
+                    print_event("timeout", &schedule.name, "Check script timed out");
                     db.update_run_finished(
                         run_id,
                         RunStatus::Failed,
@@ -280,24 +305,24 @@ async fn handle_trigger_event(
                     return Ok(());
                 }
 
-                // Determine if we should trigger based on check_trigger_on setting
+                // Determine if we should trigger based on trigger_on setting
                 let exit_code = result.exit_code.unwrap_or(-1);
-                let check_trigger_on = trigger.effective_check_trigger_on(&config.defaults);
-                let should_trigger = check_trigger_on.should_trigger(exit_code);
+                let trigger_on = schedule.effective_trigger_on(&config.defaults);
+                let should_trigger = trigger_on.should_trigger(exit_code);
 
                 if !should_trigger {
                     info!(
-                        trigger = %trigger.name,
+                        schedule = %schedule.name,
                         exit_code = exit_code,
-                        check_trigger_on = %check_trigger_on,
+                        trigger_on = %trigger_on,
                         "Check script did not meet trigger condition"
                     );
                     print_event(
                         "skip",
-                        &trigger.name,
+                        &schedule.name,
                         &format!(
                             "Skipped (exit {} does not match trigger_on={})",
-                            exit_code, check_trigger_on
+                            exit_code, trigger_on
                         ),
                     );
                     db.update_run_finished(run_id, RunStatus::Skipped, None, None, None)
@@ -307,17 +332,17 @@ async fn handle_trigger_event(
                 }
 
                 info!(
-                    trigger = %trigger.name,
+                    schedule = %schedule.name,
                     exit_code = exit_code,
-                    check_trigger_on = %check_trigger_on,
+                    trigger_on = %trigger_on,
                     "Check script met trigger condition"
                 );
 
                 Some(result)
             }
             Err(e) => {
-                error!(trigger = %trigger.name, error = %e, "Failed to run check script");
-                print_event("fail", &trigger.name, &format!("Check error: {}", e));
+                error!(schedule = %schedule.name, error = %e, "Failed to run check script");
+                print_event("fail", &schedule.name, &format!("Check error: {}", e));
                 db.update_run_finished(
                     run_id,
                     RunStatus::Failed,
@@ -335,20 +360,20 @@ async fn handle_trigger_event(
     };
 
     // Assemble prompt
-    let prompt = assemble_prompt(trigger, check_result.as_ref());
+    let prompt = assemble_prompt(schedule, check_result.as_ref());
 
-    info!(trigger = %trigger.name, "Waking agent");
-    print_event("agent", &trigger.name, "Spawning agent...");
+    info!(schedule = %schedule.name, "Waking agent");
+    print_event("agent", &schedule.name, "Spawning agent...");
 
     // Spawn agent
     let spawn_config = SpawnConfig {
         prompt,
-        profile: trigger.effective_profile(&config.defaults).to_string(),
-        timeout: trigger.effective_timeout(&config.defaults),
+        profile: schedule.effective_profile(&config.defaults).to_string(),
+        timeout: schedule.effective_timeout(&config.defaults),
         workdir: None,
-        enable_slack_tools: trigger.effective_enable_slack_tools(&config.defaults),
-        enable_subagents: trigger.effective_enable_subagents(&config.defaults),
-        pause_on_approval: trigger.effective_pause_on_approval(&config.defaults),
+        enable_slack_tools: schedule.effective_enable_slack_tools(&config.defaults),
+        enable_subagents: schedule.effective_enable_subagents(&config.defaults),
+        pause_on_approval: schedule.effective_pause_on_approval(&config.defaults),
     };
 
     match spawn_agent(spawn_config).await {
@@ -368,26 +393,26 @@ async fn handle_trigger_event(
 
             // Determine final status and print event
             let (status, error_msg) = if result.timed_out {
-                print_event("timeout", &trigger.name, "Agent timed out");
+                print_event("timeout", &schedule.name, "Agent timed out");
                 (RunStatus::TimedOut, Some("Agent timed out".to_string()))
             } else if result.is_paused() {
                 let resume_hint = result
                     .resume_hint
                     .as_deref()
-                    .unwrap_or("stakpak watch resume <run_id>");
+                    .unwrap_or("stakpak autopilot schedule inspect <run_id>");
                 print_event(
                     "pause",
-                    &trigger.name,
+                    &schedule.name,
                     &format!("Agent paused - resume with: {}", resume_hint),
                 );
                 (RunStatus::Paused, None)
             } else if result.success() {
-                print_event("done", &trigger.name, "Agent completed successfully");
+                print_event("done", &schedule.name, "Agent completed successfully");
                 (RunStatus::Completed, None)
             } else {
                 print_event(
                     "fail",
-                    &trigger.name,
+                    &schedule.name,
                     &format!("Agent failed (exit {:?})", result.exit_code),
                 );
                 (
@@ -418,10 +443,10 @@ async fn handle_trigger_event(
             .await
             .map_err(|e| format!("Failed to update run status: {}", e))?;
 
-            maybe_send_notification(config, trigger, &result, check_result.as_ref(), None).await;
+            maybe_send_notification(config, schedule, &result, check_result.as_ref(), None).await;
 
             info!(
-                trigger = %trigger.name,
+                schedule = %schedule.name,
                 status = ?status,
                 session_id = ?result.session_id,
                 paused = result.is_paused(),
@@ -429,10 +454,10 @@ async fn handle_trigger_event(
             );
         }
         Err(e) => {
-            error!(trigger = %trigger.name, error = %e, "Failed to spawn agent");
+            error!(schedule = %schedule.name, error = %e, "Failed to spawn agent");
             print_event(
                 "fail",
-                &trigger.name,
+                &schedule.name,
                 &format!("Failed to spawn agent: {}", e),
             );
             db.update_run_finished(
@@ -447,7 +472,7 @@ async fn handle_trigger_event(
 
             maybe_send_notification(
                 config,
-                trigger,
+                schedule,
                 &crate::commands::watch::agent::AgentResult {
                     exit_code: Some(1),
                     session_id: None,
@@ -470,8 +495,8 @@ async fn handle_trigger_event(
 }
 
 async fn maybe_send_notification(
-    config: &WatchConfig,
-    trigger: &crate::commands::watch::Trigger,
+    config: &ScheduleConfig,
+    schedule: &crate::commands::watch::Schedule,
     result: &crate::commands::watch::agent::AgentResult,
     check_result: Option<&crate::commands::watch::CheckResult>,
     error_override: Option<&str>,
@@ -481,18 +506,18 @@ async fn maybe_send_notification(
     };
 
     let success = result.success();
-    if !notifications.should_notify(trigger, success) {
+    if !notifications.should_notify(schedule, success) {
         return;
     }
 
-    let Some(delivery) = trigger.effective_delivery(notifications) else {
-        warn!(trigger = %trigger.name, "Notification enabled but delivery target is missing");
+    let Some(delivery) = schedule.effective_delivery(notifications) else {
+        warn!(schedule = %schedule.name, "Notification enabled but delivery target is missing");
         return;
     };
 
-    let text = format_notification(trigger, result, check_result, error_override);
+    let text = format_notification(schedule, result, check_result, error_override);
     let context = serde_json::json!({
-        "trigger": trigger.name,
+        "schedule": schedule.name,
         "summary": extract_summary(result, error_override),
         "check_output": check_result
             .map(|value| sanitize_text_output(value.stdout.trim()))
@@ -515,7 +540,7 @@ async fn maybe_send_notification(
         Ok(client) => client,
         Err(error) => {
             warn!(
-                trigger = %trigger.name,
+                schedule = %schedule.name,
                 error = %error,
                 "Failed to create notification HTTP client"
             );
@@ -536,7 +561,7 @@ async fn maybe_send_notification(
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
                 warn!(
-                    trigger = %trigger.name,
+                    schedule = %schedule.name,
                     status = %status,
                     body = %body,
                     "Gateway notification request failed"
@@ -545,7 +570,7 @@ async fn maybe_send_notification(
         }
         Err(error) => {
             warn!(
-                trigger = %trigger.name,
+                schedule = %schedule.name,
                 error = %error,
                 "Failed to send watch notification"
             );
@@ -563,7 +588,7 @@ fn build_gateway_target(delivery: &crate::commands::watch::DeliveryConfig) -> se
 }
 
 fn format_notification(
-    trigger: &crate::commands::watch::Trigger,
+    schedule: &crate::commands::watch::Schedule,
     result: &crate::commands::watch::agent::AgentResult,
     check_result: Option<&crate::commands::watch::CheckResult>,
     error_override: Option<&str>,
@@ -575,7 +600,7 @@ fn format_notification(
         "failed"
     };
 
-    let mut text = format!("{} {} {}\n", emoji, trigger.name, status);
+    let mut text = format!("{} {} {}\n", emoji, schedule.name, status);
 
     if let Some(check) = check_result
         && let Some(exit) = check.exit_code
@@ -616,7 +641,7 @@ fn sanitize_and_truncate(text: &str, max_bytes: usize) -> String {
     truncate_string(&sanitized, max_bytes)
 }
 
-/// Truncate a string to a maximum byte length, respecting unicode character boundaries.
+/// Truncate a string to a maximum length, respecting char boundaries.
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         return s.to_string();
@@ -671,9 +696,9 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-/// Check if an existing watch service is running by reading the PID file.
-/// Returns Some(pid) if a watch service is running, None otherwise.
-fn check_existing_watch(pid_file: &std::path::Path) -> Option<u32> {
+/// Check if an existing autopilot service is running by reading the PID file.
+/// Returns Some(pid) if an autopilot service is running, None otherwise.
+fn check_existing_autopilot(pid_file: &std::path::Path) -> Option<u32> {
     let pid_str = std::fs::read_to_string(pid_file).ok()?;
     let pid: u32 = pid_str.trim().parse().ok()?;
 
@@ -696,7 +721,7 @@ fn print_banner() {
     println!();
     println!("\x1b[1;36m+-------------------------------------+\x1b[0m");
     println!(
-        "\x1b[1;36m|\x1b[0m   \x1b[1mStakpak Watch\x1b[0m                      \x1b[1;36m|\x1b[0m"
+        "\x1b[1;36m|\x1b[0m   \x1b[1mStakpak Autopilot\x1b[0m                      \x1b[1;36m|\x1b[0m"
     );
     println!("\x1b[1;36m|\x1b[0m   Autonomous Agent Scheduler        \x1b[1;36m|\x1b[0m");
     println!("\x1b[1;36m+-------------------------------------+\x1b[0m");
@@ -704,7 +729,7 @@ fn print_banner() {
 }
 
 /// Print configuration summary.
-fn print_config_summary(config: &WatchConfig, pid: i64) {
+fn print_config_summary(config: &ScheduleConfig, pid: i64) {
     println!("\x1b[1mConfiguration:\x1b[0m");
     println!("  PID:        {}", pid);
     println!("  Database:   {}", config.db_path().display());
@@ -717,33 +742,33 @@ fn print_config_summary(config: &WatchConfig, pid: i64) {
     println!();
 }
 
-/// Print registered triggers table with next run times.
-fn print_triggers_table(triggers: &[crate::commands::watch::Trigger]) {
-    if triggers.is_empty() {
-        println!("\x1b[33mNo triggers registered.\x1b[0m");
+/// Print registered schedules table with next run times.
+fn print_schedules_table(schedules: &[crate::commands::watch::Schedule]) {
+    if schedules.is_empty() {
+        println!("\x1b[33mNo schedules registered.\x1b[0m");
         println!();
         return;
     }
 
-    println!("\x1b[1mRegistered Triggers ({}):\x1b[0m", triggers.len());
-    println!("  {:<24} {:<18} {:<24}", "NAME", "SCHEDULE", "NEXT RUN");
+    println!("\x1b[1mRegistered Schedules ({}):\x1b[0m", schedules.len());
+    println!("  {:<24} {:<18} {:<24}", "NAME", "CRON", "NEXT RUN");
     println!("  {}", "-".repeat(66));
 
-    for trigger in triggers {
-        let next_run = calculate_next_run(&trigger.schedule)
+    for trigger in schedules {
+        let next_run = calculate_next_run(&trigger.cron)
             .map(|dt| format_relative_time(&dt))
             .unwrap_or_else(|| "invalid".to_string());
 
         println!(
             "  {:<24} {:<18} {}",
             truncate(&trigger.name, 24),
-            truncate(&trigger.schedule, 18),
+            truncate(&trigger.cron, 18),
             next_run
         );
     }
 
     println!();
-    println!("\x1b[32mWatch service running.\x1b[0m Press \x1b[1mCtrl+C\x1b[0m to stop.");
+    println!("\x1b[32mAutopilot running.\x1b[0m Press \x1b[1mCtrl+C\x1b[0m to stop.");
     println!();
     println!("\x1b[2m--- Event Log ---\x1b[0m");
     println!();

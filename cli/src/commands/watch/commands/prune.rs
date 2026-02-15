@@ -1,12 +1,12 @@
-//! Watch prune command - clean up old run history.
+//! Autopilot prune command - clean up old run history.
 
-use crate::commands::watch::{WatchConfig, WatchDb};
+use crate::commands::watch::{ScheduleConfig, ScheduleDb};
 
 /// Prune old run history.
 pub async fn prune_history(days: u32) -> Result<(), String> {
     // Load configuration
-    let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -14,7 +14,7 @@ pub async fn prune_history(days: u32) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 

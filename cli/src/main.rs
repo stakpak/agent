@@ -579,4 +579,106 @@ mod tests {
         ]);
         assert!(parsed.is_err());
     }
+
+    #[test]
+    fn cli_parses_up_alias_foreground_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "up", "--foreground"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_up_defaults_to_background() {
+        let parsed = Cli::try_parse_from(["stakpak", "up"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(!args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_down_alias_uninstall_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "down", "--uninstall"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Down { args }) => {
+                    assert!(args.uninstall);
+                }
+                _ => panic!("Expected down command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_up_non_interactive_and_force_flags() {
+        let parsed = Cli::try_parse_from([
+            "stakpak",
+            "up",
+            "--non-interactive",
+            "--force",
+            "--foreground",
+        ]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(args.non_interactive);
+                    assert!(args.force);
+                    assert!(args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn autopilot_related_commands_do_not_require_auth() {
+        assert!(
+            !Commands::Autopilot(commands::AutopilotCommands::Status {
+                json: false,
+                recent_runs: None,
+            })
+            .requires_auth()
+        );
+
+        assert!(
+            !Commands::Up {
+                args: commands::autopilot::StartArgs {
+                    bind: "127.0.0.1:4096".to_string(),
+                    show_token: false,
+                    no_auth: false,
+                    model: None,
+                    auto_approve_all: false,
+                    foreground: false,
+                    non_interactive: false,
+                    force: false,
+                },
+            }
+            .requires_auth()
+        );
+
+        assert!(
+            !Commands::Down {
+                args: commands::autopilot::StopArgs { uninstall: false },
+            }
+            .requires_auth()
+        );
+    }
 }

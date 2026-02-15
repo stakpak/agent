@@ -23,6 +23,7 @@ stakpak-server = { workspace = true }
 stakpak-gateway = { workspace = true }
 stakai = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 clap = { version = "4.5.23", features = ["derive", "env"] }

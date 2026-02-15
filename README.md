@@ -52,6 +52,27 @@ curl -sSL https://stakpak.dev/install.sh | sh
 ```
 [For more installation options...](https://github.com/stakpak/agent#installation)
 
+### 🤖 Autopilot (24/7 Autonomous Runtime)
+
+Use the new lifecycle aliases for one-command setup/start/stop:
+
+```bash
+stakpak onboard   # alias for: stakpak autopilot init
+stakpak up        # alias for: stakpak autopilot up
+stakpak down      # alias for: stakpak autopilot down
+```
+
+You can also use the canonical subcommands:
+
+```bash
+stakpak autopilot init
+stakpak autopilot up
+stakpak autopilot status
+stakpak autopilot logs
+stakpak autopilot down
+stakpak autopilot doctor
+```
+
 ## 🔒 Security Hardened
 
 - **Mutual TLS (mTLS)** - End-to-end encrypted MCP

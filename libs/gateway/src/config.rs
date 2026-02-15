@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::router::{Binding, BindingMatch, DmScope, PeerMatch, PeerMatchKind, RouterConfig};
 
-pub const DEFAULT_GATEWAY_CONFIG_PATH: &str = "~/.stakpak/gateway.toml";
-
 #[derive(Debug, Clone, Default)]
 pub struct GatewayCliFlags {
     pub url: Option<String>,
@@ -152,17 +150,19 @@ impl Default for GatewayConfig {
 }
 
 impl GatewayConfig {
-    pub fn load(config_path: Option<&Path>, cli: &GatewayCliFlags) -> Result<Self> {
-        let path = config_path
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_gateway_config_path);
-
-        let mut config = if path.exists() {
-            let text = std::fs::read_to_string(&path).map_err(|error| {
-                anyhow!("failed to read gateway config {}: {error}", path.display())
+    pub fn load(config_path: &Path, cli: &GatewayCliFlags) -> Result<Self> {
+        let mut config = if config_path.exists() {
+            let text = std::fs::read_to_string(config_path).map_err(|error| {
+                anyhow!(
+                    "failed to read gateway config {}: {error}",
+                    config_path.display()
+                )
             })?;
             let persisted: PersistedGatewayConfig = toml::from_str(&text).map_err(|error| {
-                anyhow!("failed to parse gateway config {}: {error}", path.display())
+                anyhow!(
+                    "failed to parse gateway config {}: {error}",
+                    config_path.display()
+                )
             })?;
             persisted.into_runtime()
         } else {
@@ -177,16 +177,8 @@ impl GatewayConfig {
         Ok(config)
     }
 
-    pub fn load_default(cli: &GatewayCliFlags) -> Result<Self> {
-        Self::load(None, cli)
-    }
-
-    pub fn save(&self, config_path: Option<&Path>) -> Result<()> {
-        let path = config_path
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_gateway_config_path);
-
-        if let Some(parent) = path.parent() {
+    pub fn save(&self, config_path: &Path) -> Result<()> {
+        if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
                 anyhow!("failed to create config dir {}: {error}", parent.display())
             })?;
@@ -196,8 +188,11 @@ impl GatewayConfig {
         let text = toml::to_string_pretty(&persisted)
             .map_err(|error| anyhow!("failed to serialize gateway config: {error}"))?;
 
-        std::fs::write(&path, text).map_err(|error| {
-            anyhow!("failed to write gateway config {}: {error}", path.display())
+        std::fs::write(config_path, text).map_err(|error| {
+            anyhow!(
+                "failed to write gateway config {}: {error}",
+                config_path.display()
+            )
         })?;
 
         Ok(())
@@ -535,13 +530,9 @@ fn binding_to_runtime(binding: &BindingConfig) -> Binding {
 
 fn default_store_path() -> PathBuf {
     if let Some(home) = dirs::home_dir() {
-        return home.join(".stakpak").join("gateway").join("gateway.db");
+        return home.join(".stakpak").join("autopilot").join("gateway.db");
     }
-    PathBuf::from(".stakpak/gateway/gateway.db")
-}
-
-pub fn default_gateway_config_path() -> PathBuf {
-    expand_tilde_path(&PathBuf::from(DEFAULT_GATEWAY_CONFIG_PATH))
+    PathBuf::from(".stakpak/autopilot/gateway.db")
 }
 
 fn expand_tilde_path(path: &Path) -> PathBuf {
@@ -565,7 +556,7 @@ fn expand_tilde_path(path: &Path) -> PathBuf {
 mod tests {
     use super::{
         ApprovalMode, ChannelConfigs, GatewayCliFlags, GatewayConfig, GatewaySettings,
-        TelegramConfig, default_gateway_config_path,
+        TelegramConfig,
     };
 
     #[test]
@@ -637,11 +628,5 @@ mod tests {
 
         let title = config.render_title_template("telegram", "42", "group", "-100");
         assert_eq!(title, "telegram:group:42");
-    }
-
-    #[test]
-    fn default_config_path_expands() {
-        let path = default_gateway_config_path();
-        assert!(!path.to_string_lossy().contains('~'));
     }
 }

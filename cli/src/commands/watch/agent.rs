@@ -1,6 +1,6 @@
-//! Agent spawner for watch triggers.
+//! Agent spawner for autopilot schedules.
 //!
-//! Spawns the stakpak agent as a child process when a trigger fires,
+//! Spawns the stakpak agent as a child process when a schedule fires,
 //! capturing session and checkpoint information from JSON output.
 
 use crate::commands::agent::run::pause::EXIT_CODE_PAUSED;

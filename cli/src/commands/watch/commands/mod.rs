@@ -1,45 +1,31 @@
-//! Watch CLI commands.
+//! Autopilot CLI commands.
 //!
-//! This module contains all the CLI subcommands for the watch feature.
+//! This module contains all the CLI subcommands for the autopilot feature.
 
-mod history;
+pub mod history;
 mod init;
-mod install;
 mod prune;
 mod reload;
 mod resume;
 mod run;
-mod service;
+pub mod schedule;
 mod status;
 mod stop;
-mod trigger;
-mod uninstall;
 
 use clap::Subcommand;
 
-// Re-export command functions
-pub use history::{show_history, show_run};
-pub use init::init_config;
-pub use install::install_watch;
-pub use prune::prune_history;
-pub use reload::reload_watch;
-pub use resume::resume_run;
-pub use run::run_watch;
-pub use status::show_status;
-pub use stop::stop_watch;
-pub use trigger::{fire_trigger, show_trigger};
-pub use uninstall::uninstall_watch;
+pub use run::run_scheduler;
 
-/// Watch subcommands for managing the autonomous agent scheduler.
+/// Autopilot subcommands for managing the autonomous agent scheduler.
 #[derive(Subcommand, PartialEq, Debug)]
-pub enum WatchCommands {
-    /// Start the watch service in foreground mode
+pub enum ScheduleCommands {
+    /// Start the autopilot service in foreground mode
     Run,
-    /// Stop a running watch service
+    /// Stop a running autopilot service
     Stop,
-    /// Show watch status overview
+    /// Show autopilot status overview
     Status,
-    /// List resources (triggers, runs)
+    /// List resources (schedules, runs)
     Get {
         #[command(subcommand)]
         resource: GetResource,
@@ -49,10 +35,10 @@ pub enum WatchCommands {
         #[command(subcommand)]
         resource: DescribeResource,
     },
-    /// Manually fire a trigger
+    /// Manually fire a schedule
     Fire {
-        /// Name of the trigger to fire
-        trigger: String,
+        /// Name of the schedule to fire
+        schedule: String,
         /// Show what would happen without actually running
         #[arg(long)]
         dry_run: bool,
@@ -77,28 +63,20 @@ pub enum WatchCommands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Install watch as a system service (launchd on macOS, systemd on Linux)
-    Install {
-        /// Reinstall even if already installed
-        #[arg(short, long)]
-        force: bool,
-    },
-    /// Uninstall watch system service
-    Uninstall,
-    /// Reload watch configuration (restarts the service)
+    /// Reload autopilot configuration (restarts the service)
     Reload,
 }
 
 /// Resources for the 'get' command.
 #[derive(Subcommand, PartialEq, Debug, Clone)]
 pub enum GetResource {
-    /// List configured triggers
-    Triggers,
+    /// List configured schedules
+    Schedules,
     /// List run history
     Runs {
-        /// Filter by trigger name
+        /// Filter by schedule name
         #[arg(short, long)]
-        trigger: Option<String>,
+        schedule: Option<String>,
         /// Maximum number of runs to show
         #[arg(short = 'n', long, default_value = "20")]
         limit: u32,
@@ -108,9 +86,9 @@ pub enum GetResource {
 /// Resources for the 'describe' command.
 #[derive(Subcommand, PartialEq, Debug, Clone)]
 pub enum DescribeResource {
-    /// Show detailed information about a trigger
-    Trigger {
-        /// Name of the trigger
+    /// Show detailed information about a schedule
+    Schedule {
+        /// Name of the schedule
         name: String,
     },
     /// Show detailed information about a run
