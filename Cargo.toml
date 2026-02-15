@@ -1,20 +1,23 @@
 [workspace]
 resolver = "2"
 members = [
-    "cli",
-    "tui",
-    "libs/shared",
-    "libs/api",
-    "libs/ai",
-    "libs/mcp/client",
-    "libs/mcp/server",
-    "libs/mcp/proxy",
+  "cli",
+  "tui",
+  "libs/shared",
+  "libs/api",
+  "libs/ai",
+  "libs/agent-core",
+  "libs/server",
+  "libs/gateway",
+  "libs/mcp/client",
+  "libs/mcp/server",
+  "libs/mcp/proxy",
 ]
 default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.35"
+version = "0.3.42"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -23,13 +26,16 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.35" }
-stakpak-api = { path = "libs/api", version = "0.3.35" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.35" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.35" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.35" }
-stakpak-tui = { path = "tui", version = "0.3.35" }
-stakpak-shared = { path = "libs/shared", version = "0.3.35" }
+stakai = { path = "libs/ai", version = "0.3.42" }
+stakpak-api = { path = "libs/api", version = "0.3.42" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.42" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.42" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.42" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.42" }
+stakpak-gateway = { path = "libs/gateway", version = "0.3.42" }
+stakpak-server = { path = "libs/server", version = "0.3.42" }
+stakpak-tui = { path = "tui", version = "0.3.42" }
+stakpak-shared = { path = "libs/shared", version = "0.3.42" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
@@ -38,32 +44,32 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
 rmcp = { version = "0.11.0", features = [
-    "base64",
-    "macros",
-    "client",
-    "server",
-    "reqwest",
-    "transport-io",
-    "transport-child-process",
-    "transport-streamable-http-client",
-    "transport-streamable-http-client-reqwest",
-    "transport-streamable-http-server",
-    "transport-streamable-http-server-session",
-    "transport-worker",
+  "base64",
+  "macros",
+  "client",
+  "server",
+  "reqwest",
+  "transport-io",
+  "transport-child-process",
+  "transport-streamable-http-client",
+  "transport-streamable-http-client-reqwest",
+  "transport-streamable-http-server",
+  "transport-streamable-http-server-session",
+  "transport-worker",
 ], default-features = false }
 futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
 reqwest = { version = "=0.12.15", features = [
-    "json",
-    "stream",
-    "rustls-tls",
+  "json",
+  "stream",
+  "rustls-tls",
 ], default-features = false }
 ratatui = { version = "0.29.0", features = [
-    "scrolling-regions",
-    "unstable-rendered-line-info",
-    "unstable-widget-ref",
+  "scrolling-regions",
+  "unstable-rendered-line-info",
+  "unstable-widget-ref",
 ] }
 toml = "0.8.0"
 rand = "0.9.1"
@@ -91,6 +97,7 @@ globset = "0.4"
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
+libsql = "0.9.29"
 
 # Required nightly
 [workspace.lints.clippy]

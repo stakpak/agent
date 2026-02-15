@@ -32,7 +32,7 @@ use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v1.md");
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v2.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -391,8 +391,9 @@ pub async fn run_interactive(
                     current_session_id = Some(checkpoint.session_id);
                 }
 
-                let (checkpoint_messages, _checkpoint_metadata) =
+                let (checkpoint_messages, checkpoint_metadata) =
                     get_checkpoint_messages(client.as_ref(), &checkpoint_id_str).await?;
+                current_metadata = checkpoint_metadata;
 
                 let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
                     &checkpoint_id_str,
@@ -1158,6 +1159,16 @@ pub async fn run_interactive(
                             .and_then(|value| Uuid::parse_str(value).ok())
                         {
                             current_session_id = Some(session_id);
+                        }
+
+                        // Update metadata from checkpoint state so the next
+                        // turn sees the latest trimming state.
+                        if let Some(state_metadata) = response
+                            .metadata
+                            .as_ref()
+                            .and_then(|meta| meta.get("state_metadata"))
+                        {
+                            current_metadata = Some(state_metadata.clone());
                         }
 
                         // Accumulate usage from response

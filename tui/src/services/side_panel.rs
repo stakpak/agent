@@ -221,15 +221,8 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
     lines.push(make_row("Model", truncated_model, Color::Cyan));
 
-    // Provider - from active model (capitalized)
-    let provider = {
-        let p = &active_model.provider;
-        let mut chars = p.chars();
-        match chars.next() {
-            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-            None => String::new(),
-        }
-    };
+    // Provider - from active model (display name)
+    let provider = format_provider_display_name(&active_model.provider);
     lines.push(make_row("Provider", provider, Color::DarkGray));
 
     // Profile
@@ -692,6 +685,28 @@ fn section_header_style(focused: bool) -> Style {
     }
 }
 
+/// Format a provider ID into a human-readable display name.
+///
+/// Maps known provider IDs to their proper display names.
+/// Unknown providers get simple capitalization of the first letter.
+fn format_provider_display_name(provider_id: &str) -> String {
+    match provider_id {
+        "amazon-bedrock" => "Amazon Bedrock".to_string(),
+        "openai" => "OpenAI".to_string(),
+        "anthropic" => "Anthropic".to_string(),
+        "gemini" | "google" => "Google Gemini".to_string(),
+        "stakpak" => "Stakpak".to_string(),
+        other => {
+            // Fallback: capitalize first letter
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
 /// Format token count with separators
 fn format_tokens(tokens: u32) -> String {
     if tokens >= 1000 {
@@ -701,14 +716,15 @@ fn format_tokens(tokens: u32) -> String {
     }
 }
 
-/// Truncate a string to fit within a given width
+/// Truncate a string to fit within a given width, respecting char boundaries.
 fn truncate_string(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
+    if s.chars().count() <= max_width {
         s.to_string()
     } else if max_width > 3 {
-        format!("{}...", &s[..max_width - 3])
+        let truncated: String = s.chars().take(max_width - 3).collect();
+        format!("{}...", truncated)
     } else {
-        s[..max_width].to_string()
+        s.chars().take(max_width).collect()
     }
 }
 

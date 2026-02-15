@@ -7,6 +7,10 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 
+[features]
+default = []
+bedrock = ["stakai/bedrock"]
+
 [dependencies]
 tracing = { workspace = true }
 serde = { workspace = true }

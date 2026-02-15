@@ -23,6 +23,10 @@ pub struct WatchConfig {
     #[serde(default)]
     pub defaults: WatchDefaults,
 
+    /// Optional outbound notifications routed through gateway API.
+    #[serde(default)]
+    pub notifications: Option<NotificationConfig>,
+
     /// List of scheduled triggers.
     #[serde(default)]
     pub triggers: Vec<Trigger>,
@@ -157,6 +161,58 @@ fn default_pause_on_approval() -> bool {
     false // Default to auto-approve, matching async mode default
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationConfig {
+    pub gateway_url: String,
+    #[serde(default)]
+    pub gateway_token: Option<String>,
+    #[serde(default)]
+    pub notify_on: Option<NotifyOn>,
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub chat_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryConfig {
+    pub channel: String,
+    pub chat_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyOn {
+    All,
+    Completions,
+    Failures,
+    None,
+}
+
+impl NotificationConfig {
+    pub fn should_notify(&self, trigger: &Trigger, success: bool) -> bool {
+        let mode = trigger
+            .notify_on
+            .or(self.notify_on)
+            .unwrap_or(NotifyOn::All);
+        match mode {
+            NotifyOn::All => true,
+            NotifyOn::Completions => success,
+            NotifyOn::Failures => !success,
+            NotifyOn::None => false,
+        }
+    }
+
+    pub fn default_delivery(&self) -> Option<DeliveryConfig> {
+        let channel = self.channel.as_ref()?;
+        let chat_id = self.chat_id.as_ref()?;
+        Some(DeliveryConfig {
+            channel: channel.clone(),
+            chat_id: chat_id.clone(),
+        })
+    }
+}
+
 /// A scheduled trigger that can wake the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
@@ -208,6 +264,15 @@ pub struct Trigger {
     /// Pause when tools require approval instead of auto-approving.
     /// Falls back to defaults.pause_on_approval if not specified.
     pub pause_on_approval: Option<bool>,
+
+    /// Notification mode override for this trigger.
+    pub notify_on: Option<NotifyOn>,
+
+    /// Notification delivery channel override.
+    pub notify_channel: Option<String>,
+
+    /// Notification chat target override.
+    pub notify_chat_id: Option<String>,
 }
 
 impl Trigger {
@@ -245,6 +310,23 @@ impl Trigger {
     /// Get the effective pause_on_approval, falling back to defaults.
     pub fn effective_pause_on_approval(&self, defaults: &WatchDefaults) -> bool {
         self.pause_on_approval.unwrap_or(defaults.pause_on_approval)
+    }
+
+    /// Resolve notification delivery target using trigger overrides and global defaults.
+    pub fn effective_delivery(&self, notifications: &NotificationConfig) -> Option<DeliveryConfig> {
+        let channel = self
+            .notify_channel
+            .as_ref()
+            .cloned()
+            .or_else(|| notifications.channel.clone())?;
+
+        let chat_id = self
+            .notify_chat_id
+            .as_ref()
+            .cloned()
+            .or_else(|| notifications.chat_id.clone())?;
+
+        Some(DeliveryConfig { channel, chat_id })
     }
 }
 
@@ -385,6 +467,16 @@ impl WatchConfig {
     /// Get the expanded log directory path.
     pub fn log_dir(&self) -> PathBuf {
         expand_tilde(&self.watch.log_dir)
+    }
+
+    /// True when notifications are configured to local loopback gateway URL.
+    pub fn notifications_points_to_local_loopback(&self) -> bool {
+        let Some(notifications) = &self.notifications else {
+            return false;
+        };
+
+        let url = notifications.gateway_url.to_ascii_lowercase();
+        url.contains("127.0.0.1") || url.contains("localhost")
     }
 }
 

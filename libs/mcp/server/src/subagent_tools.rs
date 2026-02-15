@@ -208,9 +208,14 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         };
 
         // Start the subagent as a background task
+        let task_description = if enable_sandbox {
+            format!("{} [sandboxed]", description)
+        } else {
+            description.clone()
+        };
         let task_info = match self
             .get_task_manager()
-            .start_task(subagent_command, Some(description.clone()), None, None)
+            .start_task(subagent_command, Some(task_description), None, None)
             .await
         {
             Ok(task_info) => task_info,

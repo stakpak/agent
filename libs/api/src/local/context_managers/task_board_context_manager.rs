@@ -27,6 +27,8 @@ impl super::ContextManager for TaskBoardContextManager {
     }
 }
 
+const TRIMMED_CONTENT_PLACEHOLDER: &str = "[trimmed]";
+
 impl TaskBoardContextManager {
     /// Remove `<checkpoint_id>...</checkpoint_id>` XML tags from message content.
     fn clean_checkpoint_tags(message: &mut ChatMessage) {
@@ -129,19 +131,18 @@ impl TaskBoardContextManager {
     /// Trim a single message's content, replacing it with a placeholder.
     /// Preserves message structure (role, tool_call_ids) for API validity.
     fn trim_message(msg: &mut LLMMessage) {
-        let placeholder = "[trimmed]";
         match &mut msg.content {
             LLMMessageContent::String(s) => {
-                *s = placeholder.to_string();
+                *s = TRIMMED_CONTENT_PLACEHOLDER.to_string();
             }
             LLMMessageContent::List(parts) => {
                 for part in parts.iter_mut() {
                     match part {
                         LLMMessageTypedContent::Text { text } => {
-                            *text = placeholder.to_string();
+                            *text = TRIMMED_CONTENT_PLACEHOLDER.to_string();
                         }
                         LLMMessageTypedContent::ToolResult { content, .. } => {
-                            *content = placeholder.to_string();
+                            *content = TRIMMED_CONTENT_PLACEHOLDER.to_string();
                         }
                         // Preserve ToolCall structure - needed for API to match tool_use/tool_result
                         LLMMessageTypedContent::ToolCall { .. } => {}
@@ -217,7 +218,7 @@ impl TaskBoardContextManager {
         let tool_overhead = Self::estimate_tool_overhead(tools);
         let threshold = (context_window as f32 * self.context_budget_threshold) as u64;
 
-        // Read previous trimming state
+        // Read previous trimming state from metadata
         let prev_trimmed_up_to = metadata
             .as_ref()
             .and_then(|m| m.get("trimmed_up_to_message_index"))
@@ -855,7 +856,7 @@ mod tests {
             match &msg.content {
                 LLMMessageContent::String(s) => {
                     assert_ne!(
-                        s, "[trimmed]",
+                        s, TRIMMED_CONTENT_PLACEHOLDER,
                         "Messages after trim boundary should not be trimmed"
                     );
                 }
@@ -867,7 +868,10 @@ mod tests {
         let first_assistant = &result[1]; // index 1 is assistant
         match &first_assistant.content {
             LLMMessageContent::String(s) => {
-                assert_eq!(s, "[trimmed]", "Early assistant messages should be trimmed");
+                assert_eq!(
+                    s, TRIMMED_CONTENT_PLACEHOLDER,
+                    "Early assistant messages should be trimmed"
+                );
             }
             _ => {}
         }
@@ -876,7 +880,10 @@ mod tests {
         let first_user = &result[0]; // index 0 is user
         match &first_user.content {
             LLMMessageContent::String(s) => {
-                assert_ne!(s, "[trimmed]", "User messages should never be trimmed");
+                assert_ne!(
+                    s, TRIMMED_CONTENT_PLACEHOLDER,
+                    "User messages should never be trimmed"
+                );
             }
             _ => {}
         }
@@ -985,10 +992,12 @@ mod tests {
     /// Helper: check if a message has been trimmed
     fn is_trimmed(msg: &LLMMessage) -> bool {
         match &msg.content {
-            LLMMessageContent::String(s) => s == "[trimmed]",
+            LLMMessageContent::String(s) => s == TRIMMED_CONTENT_PLACEHOLDER,
             LLMMessageContent::List(parts) => parts.iter().all(|p| match p {
-                LLMMessageTypedContent::Text { text } => text == "[trimmed]",
-                LLMMessageTypedContent::ToolResult { content, .. } => content == "[trimmed]",
+                LLMMessageTypedContent::Text { text } => text == TRIMMED_CONTENT_PLACEHOLDER,
+                LLMMessageTypedContent::ToolResult { content, .. } => {
+                    content == TRIMMED_CONTENT_PLACEHOLDER
+                }
                 LLMMessageTypedContent::ToolCall { .. } => true, // tool calls are never trimmed
                 LLMMessageTypedContent::Image { .. } => true,
             }),

@@ -248,21 +248,17 @@ async fn main() {
 
             // Run interactive/async agent when no subcommand or Init; otherwise run the subcommand
             if matches!(cli.command, None | Some(Commands::Init)) {
-                // Run onboarding when no API key (Init and default both run the agent)
-                if config.get_stakpak_api_key().is_none() && Commands::Init.requires_auth() {
+                // Run onboarding if no credentials are configured at all
+                // Check both Stakpak API key AND local provider keys
+                let has_stakpak_key = config.get_stakpak_api_key().is_some();
+                let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
+                if !has_stakpak_key && !has_provider_keys {
                     run_onboarding(&mut config, OnboardingMode::Default).await;
                 }
 
                 let _ = gitignore::ensure_stakpak_in_gitignore(&config);
 
                 let send_init_prompt_on_start = cli.command == Some(Commands::Init);
-
-                // Run onboarding if no credentials are configured at all
-                let has_stakpak_key = config.get_stakpak_api_key().is_some();
-                let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
-                if !has_stakpak_key && !has_provider_keys {
-                    run_onboarding(&mut config, OnboardingMode::Default).await;
-                }
 
                 // Initialize models cache in background (fetch if missing/stale)
                 let cache_task = tokio::spawn(async {

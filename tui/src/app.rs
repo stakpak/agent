@@ -119,6 +119,8 @@ pub struct AppState {
     pub completed_tool_calls: std::collections::HashSet<Uuid>,
     pub is_streaming: bool,
     pub latest_tool_call: Option<ToolCall>,
+    /// Stable message ID for the tool call streaming preview block
+    pub tool_call_stream_preview_id: Option<Uuid>,
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
@@ -201,7 +203,7 @@ pub struct AppState {
     pub model: Model,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
-    /// Content of init prompt ( init.v1.md) for /init
+    /// Content of init prompt (init.v2.md) for /init
     pub init_prompt_content: Option<String>,
 
     // ========== Misc State ==========
@@ -267,7 +269,7 @@ pub struct AppStateOptions<'a> {
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
     /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID env var)
     pub board_agent_id: Option<String>,
-    /// Content of init prompt ( init.v1.md, passed from CLI)
+    /// Content of init prompt (init.v2.md, embedded from CLI)
     pub init_prompt_content: Option<String>,
 }
 
@@ -390,6 +392,7 @@ impl AppState {
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
+            tool_call_stream_preview_id: None,
             retry_attempts: 0,
             max_retry_attempts: 3,
             last_user_message_for_retry: None,
