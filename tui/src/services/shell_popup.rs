@@ -108,8 +108,9 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
         .shell_pending_command_value
         .as_ref()
         .map(|c| {
-            if c.len() > 50 {
-                format!("{}...", &c[..47])
+            if c.chars().count() > 50 {
+                let truncated: String = c.chars().take(47).collect();
+                format!("{}...", truncated)
             } else {
                 c.clone()
             }

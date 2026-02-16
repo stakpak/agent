@@ -395,7 +395,7 @@ After writing `INFRA.md`, tell the user about the file and suggest next steps. P
 Pick the most relevant from this list based on what you discovered:
 
 - **Cost Analysis** -- "I can analyze your cloud spending and find optimization opportunities. Want me to run a cost review?"
-- **Set Up Stakpak Watch** -- "I can configure `stakpak watch` to continuously monitor your infrastructure for issues, drift, and security concerns. Want me to set that up?"
+- **Set Up Stakpak Autopilot** -- "I can configure `stakpak autopilot` to continuously monitor your infrastructure for issues, drift, and security concerns. Want me to set that up?"
 - **Security Audit** -- "I can scan your IaC and configs for security misconfigurations using SAST tools. Want me to run a security review?"
 - **Architecture Diagram** -- "I can generate a visual architecture diagram of your infrastructure. Want me to create one?"
 - **Disaster Recovery Assessment** -- "I can evaluate your backup and recovery setup and estimate your current RTO/RPO. Interested?"

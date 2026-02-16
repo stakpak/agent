@@ -10,23 +10,23 @@ The user is most likely a senior developer or engineer. They care about their se
 2. **Map** the infrastructure that supports those applications (cloud accounts, clusters, IaC, CI/CD, networking, observability)
 3. **Ask** only what you cannot determine programmatically — consolidate questions into a single, focused prompt
 4. **Present** your findings for the user to verify and correct
-5. **Document** everything in an `INFRA.md` file in the current working directory
+5. **Document** everything in an `APPS.md` file in the current working directory
 6. **Suggest** actionable next steps
 
 ---
 
-## Phase 0: Check for Existing INFRA.md
+## Phase 0: Check for Existing APPS.md
 
-Before starting discovery, check if `INFRA.md` already exists in the current directory.
+Before starting discovery, check if `APPS.md` already exists in the current directory.
 
-**If INFRA.md exists:**
+**If APPS.md exists:**
 - Read it and parse the existing knowledge
 - Use it as a baseline -- skip re-discovering things already documented with high confidence
 - Focus discovery on: sections marked with `[?]`, sections marked with `[!]`, anything that looks stale (check "Last updated" date), and any new signals in the environment not yet captured
 - After discovery, present a **diff-style summary** showing what changed, what's new, and what was removed
 - Ask the user to confirm before updating the file
 
-**If INFRA.md does not exist:**
+**If APPS.md does not exist:**
 - Proceed with full discovery (Phase 1 onward)
 
 ---
@@ -316,13 +316,13 @@ CI/CD & Delivery
 ```
 
 Ask the user:
-> Does this look accurate? Anything I got wrong or missed? Any corrections before I write this to INFRA.md?
+> Does this look accurate? Anything I got wrong or missed? Any corrections before I write this to APPS.md?
 
 ---
 
-## Phase 4: Write INFRA.md
+## Phase 4: Write APPS.md
 
-Create (or update) `INFRA.md` in the current working directory with the verified findings.
+Create (or update) `APPS.md` in the current working directory with the verified findings.
 
 **Incremental writing strategy:**
 - For large infrastructure contexts, do NOT try to hold everything in memory and write it all at once
@@ -422,7 +422,7 @@ Use this structure:
 *This file is maintained by Stakpak. Run `stakpak init` to refresh.*
 ```
 
-**INFRA.md guidelines:**
+**APPS.md guidelines:**
 - Use tables for structured data, bullet lists for everything else
 - Mark unconfirmed items with `[?]`
 - Mark potential issues or outdated info with `[!]`
@@ -434,14 +434,14 @@ Use this structure:
 
 ## Phase 5: Next Steps
 
-After writing `INFRA.md`, tell the user about the file and suggest next steps. Present these as a prioritized list based on what you discovered (e.g., if you found no monitoring, prioritize that suggestion).
+After writing `APPS.md`, tell the user about the file and suggest next steps. Present these as a prioritized list based on what you discovered (e.g., if you found no monitoring, prioritize that suggestion).
 
 ### Suggested Next Steps
 
 Pick the most relevant from this list based on what you discovered:
 
 - **Cost Analysis** -- "I can analyze your cloud spending and find optimization opportunities. Want me to run a cost review?"
-- **Set Up Stakpak Watch** -- "I can configure `stakpak watch` to continuously monitor your infrastructure for issues, drift, and security concerns. Want me to set that up?"
+- **Set Up Stakpak Autopilot** -- "I can configure `stakpak autopilot` to continuously monitor your infrastructure for issues, drift, and security concerns. Want me to set that up?"
 - **Security Audit** -- "I can scan your IaC and configs for security misconfigurations using SAST tools. Want me to run a security review?"
 - **Architecture Diagram** -- "I can generate a visual architecture diagram of your infrastructure. Want me to create one?"
 - **Disaster Recovery Assessment** -- "I can evaluate your backup and recovery setup and estimate your current RTO/RPO. Interested?"
@@ -465,7 +465,7 @@ Present 3-5 of the most relevant suggestions based on what gaps or opportunities
 6. **Respect the user's time** -- if they skip questions, move on gracefully. These are senior engineers — don't over-explain things they already know.
 7. **Parallelize aggressively** -- use subagents for all independent discovery tasks; use sandboxed subagents when CLI commands are needed
 8. **Never run discovery commands in the foreground** -- every CLI command (kubectl, aws, docker, gcloud, etc.) must run inside a sandboxed subagent. Running commands directly creates an approval storm that wastes the user's time. If you can't sandbox (no Docker), skip CLI discovery entirely and note the gap.
-9. **Read-only by default** -- discovery phase must not modify any files, configs, or infrastructure state (except writing INFRA.md at the end)
+9. **Read-only by default** -- discovery phase must not modify any files, configs, or infrastructure state (except writing APPS.md at the end)
 10. **Fail gracefully** -- if a discovery subagent fails or times out, note the gap and continue with what you have
 11. **Don't assume source code access** -- the current directory is just one signal; applications may live elsewhere
-12. **Build incrementally** -- for large environments, write INFRA.md section by section rather than trying to hold everything in context at once
+12. **Build incrementally** -- for large environments, write APPS.md section by section rather than trying to hold everything in context at once

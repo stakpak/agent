@@ -136,6 +136,7 @@ impl OAuthFlow {
 /// Parse the authorization code from Anthropic's callback format
 ///
 /// Anthropic returns codes in the format: "authorization_code#state"
+#[allow(clippy::string_slice)] // pos from find('#') on same string, '#' is ASCII
 fn parse_auth_code(code: &str) -> OAuthResult<(String, String)> {
     // Handle both "#" and "%23" (URL-encoded #)
     let code = code.replace("%23", "#");

@@ -91,6 +91,8 @@ impl AsyncManifest {
             && let Some(end) = trimmed.rfind('}')
             && end > start
         {
+            // find/rfind of ASCII '{' '}' on same string — always valid char boundaries
+            #[allow(clippy::string_slice)]
             let json_str = &trimmed[start..=end];
             if let Ok(manifest) = serde_json::from_str::<AsyncManifest>(json_str) {
                 return Some(manifest);
@@ -151,7 +153,10 @@ impl std::fmt::Display for AsyncManifest {
                                             .last()
                                             .map(|(i, c)| i + c.len_utf8())
                                             .unwrap_or(0);
-                                        format!("\"{}...\"", &s[..truncate_at])
+                                        // truncate_at from char_indices() — always a valid boundary
+                                        #[allow(clippy::string_slice)]
+                                        let truncated = &s[..truncate_at];
+                                        format!("\"{}...\"", truncated)
                                     }
                                     serde_json::Value::String(s) => format!("\"{}\"", s),
                                     _ => value.to_string(),

@@ -40,9 +40,8 @@ vt100 = "0.15.2"
 dirs = "5.0"
 glob = { workspace = true }
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
+[lints]
+workspace = true
 
 
 [target.'cfg(any(unix, windows))'.dependencies]

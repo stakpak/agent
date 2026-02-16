@@ -2733,8 +2733,9 @@ SAFETY NOTES:
                 None
             } else {
                 lines.iter().rev().find(|l| !l.is_empty()).map(|l| {
-                    if l.len() > 50 {
-                        format!("{}...", &l[..50])
+                    if l.chars().count() > 50 {
+                        let truncated: String = l.chars().take(50).collect();
+                        format!("{}...", truncated)
                     } else {
                         l.to_string()
                     }
@@ -3093,6 +3094,7 @@ impl NormalizedWithMapping {
 ///
 /// Uses Rust's built-in [`str::find`] (Two-Way algorithm) for O(n + m)
 /// substring search instead of a naive O(n × m) character-by-character scan.
+#[allow(clippy::string_slice)] // all indices from find() on normalized text + orig_byte_at() which maps to char_indices() boundaries
 fn unicode_normalized_replace(
     content: &str,
     old_str: &str,

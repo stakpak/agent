@@ -12,6 +12,7 @@ use crate::types::{
 };
 use futures::stream::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
+use std::error::Error as StdError;
 
 /// Track state for each content block during streaming
 #[derive(Debug, Clone)]
@@ -69,6 +70,35 @@ pub async fn create_stream(mut event_source: EventSource) -> Result<GenerateStre
                     yield Err(Error::provider_error(format!(
                         "Anthropic API error {}: {}",
                         status, error_body
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Transport(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "Transport error: {} | source: {:?}",
+                        e,
+                        e.source()
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Utf8(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "UTF-8 decode error in stream: {}",
+                        e
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::Parser(e)) => {
+                    yield Err(Error::stream_error(format!(
+                        "SSE parser error: {}",
+                        e
+                    )));
+                    break;
+                }
+                Err(reqwest_eventsource::Error::InvalidContentType(content_type, _)) => {
+                    yield Err(Error::stream_error(format!(
+                        "Invalid content type from server: {:?} (expected text/event-stream)",
+                        content_type
                     )));
                     break;
                 }

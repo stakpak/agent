@@ -71,6 +71,7 @@ pub fn find_model(model_str: &str, use_stakpak: bool) -> Option<Model> {
 }
 
 /// Parse "provider/model_id" or plain "model_id"
+#[allow(clippy::string_slice)] // idx from find('/') on same string, '/' is ASCII
 fn parse_model_string(s: &str) -> (Option<&str>, &str) {
     match s.find('/') {
         Some(idx) => {

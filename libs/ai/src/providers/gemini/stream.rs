@@ -8,6 +8,7 @@ use crate::types::{
 };
 use futures::stream::StreamExt;
 use reqwest::Response;
+use std::error::Error as StdError;
 
 /// Create a stream from Gemini response
 /// Gemini uses SSE framing (`data: {json}` events).
@@ -29,8 +30,13 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
 
                     // Yield complete lines as they arrive
                     while let Some(pos) = line_buffer.find('\n') {
+                        // pos is from find('\n') on the same string, so it's always a valid char boundary
+                        #[allow(clippy::string_slice)]
                         let line = line_buffer[..pos].trim_end_matches('\r').to_string();
-                        line_buffer = line_buffer[pos + 1..].to_string();
+                        #[allow(clippy::string_slice)]
+                        {
+                            line_buffer = line_buffer[pos + 1..].to_string();
+                        }
 
                         if let Some(event_data) =
                             process_sse_line(&line, &mut current_event_data)
@@ -57,7 +63,11 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
                     }
                 }
                 Err(e) => {
-                    yield Err(Error::stream_error(format!("Stream error: {}", e)));
+                    yield Err(Error::stream_error(format!(
+                        "Stream error: {} | source: {:?}",
+                        e,
+                        e.source()
+                    )));
                     break;
                 }
             }

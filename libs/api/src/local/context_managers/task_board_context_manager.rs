@@ -2216,8 +2216,9 @@ mod tests {
         for (i, msg) in result.iter().enumerate() {
             let content_preview = match &msg.content {
                 LLMMessageContent::String(s) => {
-                    if s.len() > 80 {
-                        format!("{}...", &s[..80])
+                    if s.chars().count() > 80 {
+                        let truncated: String = s.chars().take(80).collect();
+                        format!("{}...", truncated)
                     } else {
                         s.clone()
                     }
@@ -2227,8 +2228,9 @@ mod tests {
                     for p in parts {
                         match p {
                             LLMMessageTypedContent::Text { text } => {
-                                let t = if text.len() > 60 {
-                                    format!("{}...", &text[..60])
+                                let t = if text.chars().count() > 60 {
+                                    let truncated: String = text.chars().take(60).collect();
+                                    format!("{}...", truncated)
                                 } else {
                                     text.clone()
                                 };
@@ -2242,8 +2244,9 @@ mod tests {
                                 content,
                                 ..
                             } => {
-                                let c = if content.len() > 40 {
-                                    format!("{}...", &content[..40])
+                                let c = if content.chars().count() > 40 {
+                                    let truncated: String = content.chars().take(40).collect();
+                                    format!("{}...", truncated)
                                 } else {
                                     content.clone()
                                 };
@@ -2311,8 +2314,9 @@ mod tests {
         for (i, msg) in result2[start..].iter().enumerate() {
             let content_preview = match &msg.content {
                 LLMMessageContent::String(s) => {
-                    if s.len() > 100 {
-                        format!("{}...", &s[..100])
+                    if s.chars().count() > 100 {
+                        let truncated: String = s.chars().take(100).collect();
+                        format!("{}...", truncated)
                     } else {
                         s.clone()
                     }

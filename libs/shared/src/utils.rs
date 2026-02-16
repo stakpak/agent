@@ -53,6 +53,7 @@ pub fn should_include_entry(entry: &DirEntry, base_dir: &str, ignore_patterns: &
 }
 
 /// Check if a path matches a gitignore pattern
+#[allow(clippy::string_slice)] // pattern[1..len-1] guarded by starts_with('*')/ends_with('*'), '*' is ASCII
 pub fn matches_gitignore_pattern(pattern: &str, path: &str) -> bool {
     // Basic gitignore pattern matching
     let pattern = pattern.trim_end_matches('/'); // Remove trailing slash
@@ -78,6 +79,7 @@ pub fn matches_gitignore_pattern(pattern: &str, path: &str) -> bool {
 }
 
 /// Simple glob pattern matching for basic cases
+#[allow(clippy::string_slice)] // text_pos accumulated from starts_with/find on same string, always valid boundaries
 pub fn pattern_matches_glob(pattern: &str, text: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {

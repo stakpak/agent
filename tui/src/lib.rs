@@ -1,3 +1,8 @@
+// TUI crate performs heavy string slicing for text rendering, markdown parsing,
+// cursor positioning, and layout. All indices come from find()/rfind()/char_indices()
+// on the same strings. Allowing at crate level to avoid 120+ individual annotations.
+#![allow(clippy::string_slice)]
+
 mod app;
 mod constants;
 mod event;

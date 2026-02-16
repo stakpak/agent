@@ -1,30 +1,30 @@
-//! Watch trigger command - inspect or manually fire a trigger.
+//! Autopilot schedule command - inspect or manually fire a schedule.
 
 use crate::commands::watch::{
-    RunStatus, WatchConfig, WatchDb, assemble_prompt, is_process_running, run_check_script,
+    RunStatus, ScheduleConfig, ScheduleDb, assemble_prompt, is_process_running, run_check_script,
 };
 
-/// Show detailed information about a trigger.
-pub async fn show_trigger(name: &str) -> Result<(), String> {
+/// Show detailed information about a schedule.
+pub async fn show_schedule(name: &str) -> Result<(), String> {
     // Load configuration
-    let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
-    // Find the trigger
-    let trigger = config
-        .triggers
+    // Find the schedule
+    let schedule = config
+        .schedules
         .iter()
-        .find(|t| t.name == name)
-        .ok_or_else(|| format!("Trigger '{}' not found", name))?;
+        .find(|s| s.name == name)
+        .ok_or_else(|| format!("Schedule '{}' not found", name))?;
 
-    // Print trigger details
-    println!("\x1b[1m{}\x1b[0m", trigger.name);
+    // Print schedule details
+    println!("\x1b[1m{}\x1b[0m", schedule.name);
     println!();
-    println!("Schedule:      {}", trigger.schedule);
+    println!("Cron:          {}", schedule.cron);
     println!(
         "Profile:       {} {}",
-        trigger.effective_profile(&config.defaults),
-        if trigger.profile.is_some() {
+        schedule.effective_profile(&config.defaults),
+        if schedule.profile.is_some() {
             ""
         } else {
             "(default)"
@@ -32,20 +32,20 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
     );
     println!(
         "Timeout:       {:?} {}",
-        trigger.effective_timeout(&config.defaults),
-        if trigger.timeout.is_some() {
+        schedule.effective_timeout(&config.defaults),
+        if schedule.timeout.is_some() {
             ""
         } else {
             "(default)"
         }
     );
 
-    if let Some(check) = &trigger.check {
+    if let Some(check) = &schedule.check {
         println!("Check script:  {}", check);
         println!(
             "Check timeout: {:?} {}",
-            trigger.effective_check_timeout(&config.defaults),
-            if trigger.check_timeout.is_some() {
+            schedule.effective_check_timeout(&config.defaults),
+            if schedule.check_timeout.is_some() {
                 ""
             } else {
                 "(default)"
@@ -55,23 +55,23 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
         println!("Check script:  none");
     }
 
-    if let Some(board_id) = &trigger.board_id {
+    if let Some(board_id) = &schedule.board_id {
         println!("Board ID:      {}", board_id);
     }
 
     println!();
     println!("Prompt:");
     println!("---");
-    println!("{}", trigger.prompt.trim());
+    println!("{}", schedule.prompt.trim());
     println!("---");
 
     // Show recent runs
     let db_path = config.db_path();
     if let Ok(db_path_str) = db_path.to_str().ok_or("Invalid path")
-        && let Ok(db) = WatchDb::new(db_path_str).await
+        && let Ok(db) = ScheduleDb::new(db_path_str).await
     {
         let filter = crate::commands::watch::ListRunsFilter {
-            trigger_name: Some(name.to_string()),
+            schedule_name: Some(name.to_string()),
             status: None,
             limit: Some(5),
             offset: None,
@@ -95,34 +95,37 @@ pub async fn show_trigger(name: &str) -> Result<(), String> {
                 println!("  #{:<4} {} {}", run.id, time_str, status_str);
             }
             println!();
-            println!("Use 'stakpak watch describe run <id>' to inspect a run.");
+            println!(
+                "Use 'stakpak autopilot schedule history {}' to inspect a run.",
+                schedule.name
+            );
         }
     }
 
     Ok(())
 }
 
-/// Manually fire a trigger or perform a dry run.
-pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
+/// Manually fire a schedule or perform a dry run.
+pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
     // Load configuration
-    let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
-    // Find the trigger
-    let trigger = config
-        .triggers
+    // Find the schedule
+    let schedule = config
+        .schedules
         .iter()
-        .find(|t| t.name == name)
-        .ok_or_else(|| format!("Trigger '{}' not found", name))?;
+        .find(|s| s.name == name)
+        .ok_or_else(|| format!("Schedule '{}' not found", name))?;
 
     // For dry run, show what would happen without queuing
     if dry_run {
-        println!("Trigger: {}", trigger.name);
+        println!("Schedule: {}", schedule.name);
 
         // Run check script if defined (for dry run preview)
-        let check_result = if let Some(check_path) = &trigger.check {
+        let check_result = if let Some(check_path) = &schedule.check {
             let expanded_path = crate::commands::watch::config::expand_tilde(check_path);
-            let timeout = trigger.effective_check_timeout(&config.defaults);
+            let timeout = schedule.effective_check_timeout(&config.defaults);
 
             println!("Check script: {}", expanded_path.display());
 
@@ -148,18 +151,18 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
                     if result.timed_out {
                         println!("\n\x1b[31mCheck script timed out\x1b[0m");
                     } else {
-                        let check_trigger_on = trigger.effective_check_trigger_on(&config.defaults);
-                        let should_trigger = check_trigger_on.should_trigger(exit_code);
-                        println!("Check trigger_on: {}", check_trigger_on);
+                        let trigger_on = schedule.effective_trigger_on(&config.defaults);
+                        let should_trigger = trigger_on.should_trigger(exit_code);
+                        println!("Check trigger_on: {}", trigger_on);
                         if should_trigger {
                             println!(
                                 "\n\x1b[32mCheck passed (exit {} matches trigger_on={}) - agent would be woken\x1b[0m",
-                                exit_code, check_trigger_on
+                                exit_code, trigger_on
                             );
                         } else {
                             println!(
                                 "\n\x1b[33mCheck skipped (exit {} does not match trigger_on={}) - agent would not be woken\x1b[0m",
-                                exit_code, check_trigger_on
+                                exit_code, trigger_on
                             );
                         }
                     }
@@ -177,14 +180,14 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
         };
 
         // Assemble prompt
-        let prompt = assemble_prompt(trigger, check_result.as_ref());
+        let prompt = assemble_prompt(schedule, check_result.as_ref());
 
         println!("\nAssembled prompt:");
         println!("---");
         println!("{}", prompt);
         println!("---");
 
-        println!("\n\x1b[33m[Dry run - trigger not queued, nothing recorded]\x1b[0m");
+        println!("\n\x1b[33m[Dry run - schedule not queued, nothing recorded]\x1b[0m");
         return Ok(());
     }
 
@@ -194,20 +197,20 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
-    // Check if watch service is running
-    let watch_state = db
-        .get_watch_state()
+    // Check if autopilot service is running
+    let autopilot_state = db
+        .get_autopilot_state()
         .await
-        .map_err(|e| format!("Failed to check watch state: {}", e))?;
+        .map_err(|e| format!("Failed to check autopilot state: {}", e))?;
 
-    match watch_state {
+    match autopilot_state {
         None => {
             return Err(
-                "Watch service is not running. Start it with 'stakpak watch run' first, or use --dry-run to preview."
+                "Autopilot is not running. Start it with 'stakpak autopilot up' first, or use --dry-run to preview."
                     .to_string(),
             );
         }
@@ -215,23 +218,26 @@ pub async fn fire_trigger(name: &str, dry_run: bool) -> Result<(), String> {
             // Verify the process is actually running
             if !is_process_running(state.pid as u32) {
                 return Err(
-                    "Watch process is not running (stale state). Start it with 'stakpak watch run' first, or use --dry-run to preview."
+                    "Autopilot is not running (stale state). Start it with 'stakpak autopilot up' first, or use --dry-run to preview."
                         .to_string(),
                 );
             }
         }
     }
 
-    // Queue the trigger for the watch service to pick up
-    db.insert_pending_trigger(name)
+    // Queue the schedule for the autopilot service to pick up
+    db.insert_pending_schedule(name)
         .await
-        .map_err(|e| format!("Failed to queue trigger: {}", e))?;
+        .map_err(|e| format!("Failed to queue schedule: {}", e))?;
 
     println!(
-        "\x1b[32m✓\x1b[0m Trigger '{}' queued for execution by watch service",
+        "\x1b[32m✓\x1b[0m Schedule '{}' queued for execution by autopilot service",
         name
     );
-    println!("  Use 'stakpak watch get runs' to monitor progress.");
+    println!(
+        "  Use 'stakpak autopilot schedule history {}' to monitor progress.",
+        name
+    );
 
     Ok(())
 }

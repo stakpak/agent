@@ -17,7 +17,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.42"
+version = "0.3.44"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -26,21 +26,22 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.42" }
-stakpak-api = { path = "libs/api", version = "0.3.42" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.42" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.42" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.42" }
-stakpak-agent-core = { path = "libs/agent-core", version = "0.3.42" }
-stakpak-gateway = { path = "libs/gateway", version = "0.3.42" }
-stakpak-server = { path = "libs/server", version = "0.3.42" }
-stakpak-tui = { path = "tui", version = "0.3.42" }
-stakpak-shared = { path = "libs/shared", version = "0.3.42" }
+stakai = { path = "libs/ai", version = "0.3.44" }
+stakpak-api = { path = "libs/api", version = "0.3.44" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.44" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.44" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.44" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.44" }
+stakpak-gateway = { path = "libs/gateway", version = "0.3.44" }
+stakpak-server = { path = "libs/server", version = "0.3.44" }
+stakpak-tui = { path = "tui", version = "0.3.44" }
+stakpak-shared = { path = "libs/shared", version = "0.3.44" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
+tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
 rmcp = { version = "0.11.0", features = [
@@ -104,3 +105,4 @@ libsql = "0.9.29"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+string_slice = "deny"

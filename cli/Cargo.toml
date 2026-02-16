@@ -23,6 +23,7 @@ stakpak-server = { workspace = true }
 stakpak-gateway = { workspace = true }
 stakai = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 clap = { version = "4.5.23", features = ["derive", "env"] }
@@ -71,6 +72,5 @@ which = "7.0"
 tempfile = "3"
 test-case = "3"
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
+[lints]
+workspace = true

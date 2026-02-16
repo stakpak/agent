@@ -1,15 +1,15 @@
-//! Watch resume command - resume an interrupted agent run in TUI mode.
+//! Autopilot resume command - resume an interrupted agent run in TUI mode.
 
-use crate::commands::watch::{RunStatus, WatchConfig, WatchDb};
+use crate::commands::watch::{RunStatus, ScheduleConfig, ScheduleDb};
 
 /// Resume an interrupted agent run in TUI mode.
 ///
 /// This launches the TUI with the checkpoint flag, allowing the user to
-/// take over the session interactively where the watch service left off.
+/// take over the session interactively where the autopilot service left off.
 pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
     // Load configuration
-    let config =
-        WatchConfig::load_default().map_err(|e| format!("Failed to load watch config: {}", e))?;
+    let config = ScheduleConfig::load_default()
+        .map_err(|e| format!("Failed to load watch config: {}", e))?;
 
     // Connect to database
     let db_path = config.db_path();
@@ -17,7 +17,7 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         .to_str()
         .ok_or_else(|| "Invalid database path".to_string())?;
 
-    let db = WatchDb::new(db_path_str)
+    let db = ScheduleDb::new(db_path_str)
         .await
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
@@ -27,7 +27,7 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to get run: {}", e))?;
 
-    println!("Run #{}: {} ({})", run.id, run.trigger_name, run.status);
+    println!("Run #{}: {} ({})", run.id, run.schedule_name, run.status);
 
     // Check if run has a checkpoint to resume from
     let checkpoint_id = run.agent_last_checkpoint_id.as_ref().ok_or_else(|| {
@@ -43,11 +43,14 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    // Find the trigger config to get profile
-    let trigger = config.triggers.iter().find(|t| t.name == run.trigger_name);
+    // Find the schedule config to get profile
+    let schedule = config
+        .schedules
+        .iter()
+        .find(|s| s.name == run.schedule_name);
 
-    let profile = trigger
-        .and_then(|t| t.profile.as_ref())
+    let profile = schedule
+        .and_then(|s| s.profile.as_ref())
         .unwrap_or(&config.defaults.profile);
 
     println!("\nLaunching TUI with checkpoint from run #{}...", run.id);

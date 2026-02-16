@@ -207,6 +207,9 @@ jobs:
           publish_package stakpak-mcp-client
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy
+          publish_package stakpak-agent-core
+          publish_package stakpak-gateway
+          publish_package stakpak-server
           publish_package stakpak-tui
           # Finally publish the main CLI crate
           publish_package stakpak

@@ -1476,6 +1476,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6040,7 +6049,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stakai"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6069,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
@@ -6120,6 +6129,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.23",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "uuid",
  "walkdir",
@@ -6129,7 +6139,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-agent-core"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6144,7 +6154,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-api"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6171,7 +6181,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-gateway"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6198,7 +6208,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "futures",
@@ -6215,7 +6225,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-proxy"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6234,7 +6244,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6265,7 +6275,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-server"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6290,7 +6300,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6335,7 +6345,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.3.42"
+version = "0.3.44"
 dependencies = [
  "ansi-to-tui",
  "arboard",
@@ -7058,6 +7068,18 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-appender"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
+dependencies = [
+ "crossbeam-channel",
+ "thiserror 2.0.17",
+ "time",
+ "tracing-subscriber",
 ]
 
 [[package]]

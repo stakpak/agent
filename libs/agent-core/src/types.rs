@@ -150,6 +150,7 @@ impl ToolApprovalPolicy {
 }
 
 /// Strip MCP server prefix from tool name (e.g. "stakpak__run_command" -> "run_command").
+#[allow(clippy::string_slice)] // pos from find("__") on same string, "__" is ASCII
 fn strip_tool_prefix(name: &str) -> &str {
     if let Some(pos) = name.find("__")
         && pos + 2 < name.len()

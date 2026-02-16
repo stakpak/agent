@@ -344,6 +344,8 @@ impl MessageContent {
         }
     }
 
+    /// All indices from rfind()/find() of ASCII XML tags on same string
+    #[allow(clippy::string_slice)]
     pub fn extract_checkpoint_id(&self) -> Option<Uuid> {
         match self {
             MessageContent::String(s) => s

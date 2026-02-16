@@ -27,7 +27,8 @@ cli/                          # Main binary crate (`stakpak`)
 │   │   ├── acp/              # Agent Client Protocol (Zed integration)
 │   │   ├── mcp/              # MCP server/proxy commands
 │   │   ├── auth/             # Login/account commands (interactive + non-interactive setup)
-│   │   └── watch/            # Scheduled trigger system
+│   │   ├── autopilot/        # Autopilot: init, up/down, status, schedule, channel
+│   │   └── watch/            # Scheduled task runtime (internal, driven by autopilot)
 │   ├── config/               # Configuration management
 │   │   ├── file.rs           # ConfigFile with profiles + ensure_readonly()
 │   │   ├── profile.rs        # ProfileConfig + readonly_profile()
@@ -61,6 +62,66 @@ libs/
     ├── client/
     ├── server/
     └── proxy/
+```
+
+## Autopilot Architecture
+
+The autopilot system (`stakpak autopilot` / `stakpak up`) is the self-driving infrastructure mode. It runs as a system service (launchd on macOS, systemd on Linux) and manages two runtimes:
+
+### Config: `~/.stakpak/autopilot.toml`
+
+Single config file for everything — schedules, channels, and runtime settings:
+
+```toml
+[runtime]
+bind = "127.0.0.1:4096"
+
+[[schedules]]
+name = "health-check"
+cron = "*/5 * * * *"
+prompt = "Check system health"
+
+[channels.slack]
+bot_token = "xoxb-..."
+app_token = "xapp-..."
+```
+
+### CLI Commands
+
+```
+stakpak up                              # Start autopilot (auto-inits if needed)
+stakpak down                            # Stop autopilot
+stakpak autopilot init                  # Explicit setup wizard
+stakpak autopilot status                # Health, uptime, schedules, channels
+stakpak autopilot logs                  # Stream logs
+stakpak autopilot schedule list         # List schedules
+stakpak autopilot schedule add <name> --cron '...' --prompt '...'
+stakpak autopilot schedule remove <name>
+stakpak autopilot schedule enable|disable <name>
+stakpak autopilot schedule trigger <name>   # Manual fire
+stakpak autopilot schedule history <name>
+stakpak autopilot channel list          # List channels
+stakpak autopilot channel add <type> --token|--bot-token|--app-token
+stakpak autopilot channel remove <type>
+stakpak autopilot channel test          # Test connectivity
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `cli/src/commands/autopilot.rs` | All autopilot commands, config types, schedule/channel CRUD |
+| `cli/src/commands/watch/` | Schedule runtime (cron engine, trigger execution, history) |
+| `libs/gateway/` | Channel runtime (Slack/Telegram/Discord message handling) |
+| `libs/gateway/src/config.rs` | `GatewayConfig` — channel config load/save |
+
+### Non-Interactive Setup (CI/scripts)
+
+```bash
+stakpak auth login --api-key $KEY
+stakpak autopilot schedule add health --cron '0 */6 * * *' --prompt 'Check health'
+stakpak autopilot channel add slack --bot-token $SLACK_BOT --app-token $SLACK_APP
+stakpak up
 ```
 
 ## Architecture & Data Flow
@@ -255,7 +316,18 @@ This creates:
 - `~/.stakpak/config.toml` with `default` + `readonly` profiles
 - `~/.stakpak/auth.toml` for local provider credentials
 
+Full non-interactive autopilot setup:
+
+```bash
+stakpak auth login --api-key $STAKPAK_API_KEY
+stakpak autopilot init --non-interactive --yes
+stakpak autopilot schedule add daily-check --cron '0 9 * * *' --prompt 'Run health checks'
+stakpak autopilot channel add slack --bot-token $SLACK_BOT --app-token $SLACK_APP
+stakpak up
+```
+
 Key files:
 - `cli/src/commands/auth/login.rs` — `handle_non_interactive_setup()`
+- `cli/src/commands/autopilot.rs` — `setup_autopilot()`, `start_autopilot()`, schedule/channel CRUD
 - `cli/src/onboarding/save_config.rs` — `save_to_profile()` + `update_readonly()`
 - `cli/src/config/profile.rs` — `readonly_profile()` creates sandbox replica of default

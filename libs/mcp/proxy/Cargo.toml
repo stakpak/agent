@@ -21,3 +21,6 @@ rustls = { workspace = true }
 rustls-platform-verifier = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }
+
+[lints.clippy]
+string_slice = "deny"

@@ -2,7 +2,7 @@
 
 Messaging gateway runtime for `stakpak`.
 
-It bridges chat platforms (Telegram / Slack / Discord) to the Stakpak server API (`/v1/sessions/...`), manages routing/session mapping, and exposes a small Gateway API for outbound messages and watch notifications.
+It bridges chat platforms (Telegram / Slack / Discord) to the Stakpak server API (`/v1/sessions/...`), manages routing/session mapping, and exposes a small Gateway API for outbound messages and autopilot notifications.
 
 ---
 
@@ -10,11 +10,11 @@ It bridges chat platforms (Telegram / Slack / Discord) to the Stakpak server API
 
 - Receives inbound messages from channels
 - Routes each conversation to a stable Stakpak session
-- Sends user messages to `stakpak serve`
+- Sends user messages to the autopilot server runtime
 - Streams run events and returns assistant replies back to channel
 - Handles tool decisions using configured approval policy
 - Stores routing/session mappings in SQLite
-- Supports watch notifications via `POST /v1/gateway/send`
+- Supports autopilot notifications via `POST /v1/gateway/send`
 
 ---
 
@@ -28,7 +28,7 @@ Channel adapter (telegram/slack/discord)
 Dispatcher
   ├─ resolve routing key (dm/group/thread)
   ├─ load/create session mapping (GatewayStore)
-  ├─ send user message to stakpak server
+  ├─ send user message to autopilot server
   ├─ subscribe to SSE events for the run
   ├─ auto-resolve tool approvals (gateway policy)
   └─ deliver assistant reply back to channel
@@ -51,9 +51,9 @@ Channel adapter send(...)
   - supports bindings + DM scope behavior
 - **`store.rs`**
   - SQLite persistence for routing key → session mapping
-  - stores one-shot `delivery_context` for watch notification replies
+  - stores one-shot `delivery_context` for autopilot notification replies
 - **`client.rs`**
-  - HTTP + SSE client to `stakpak serve`
+  - HTTP + SSE client to autopilot server
   - sends messages, receives run events, resolves tool decisions
 - **`api.rs`**
   - gateway HTTP surface:
@@ -73,83 +73,50 @@ Channel adapter send(...)
 
 - Gateway receives `tool_calls_proposed` from SSE.
 - It builds decisions using configured policy (`allow_all`, `deny_all`, `allowlist`).
-- In integrated mode (`stakpak serve --gateway`), approval policy is derived from serve/profile auto-approve settings.
-
-### Embedded vs standalone mode
-
-- **Embedded (recommended):** `stakpak serve --gateway`
-  - server + gateway share one process
-  - gateway routes are exposed under server: `/v1/gateway/*`
-- **Standalone:** `stakpak gateway run`
-  - gateway runs separately and connects to an existing `stakpak serve`
-  - standalone API binds separately (default `127.0.0.1:4097`)
+- In autopilot mode, approval policy is derived from the profile's auto-approve settings.
 
 ---
 
-## Recommended way to run
+## How to run
 
-### 1) Create gateway config
+The gateway is managed through the autopilot system. There are no standalone `stakpak gateway` commands.
 
-```bash
-stakpak gateway init --force
-```
-
-Or non-interactive:
+### Setup channels
 
 ```bash
-stakpak gateway init \
-  --telegram-token "$TELEGRAM_BOT_TOKEN" \
-  --discord-token "$DISCORD_BOT_TOKEN" \
-  --slack-bot-token "$SLACK_BOT_TOKEN" \
-  --slack-app-token "$SLACK_APP_TOKEN" \
-  --force
+# Add channels via autopilot CLI
+stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"
+stakpak autopilot channel add telegram --token "$TELEGRAM_BOT_TOKEN"
+stakpak autopilot channel add discord --token "$DISCORD_BOT_TOKEN"
+
+# Verify channels
+stakpak autopilot channel list
+stakpak autopilot channel test
 ```
 
-Config is saved at:
-
-`~/.stakpak/gateway.toml`
-
----
-
-### 2) Validate configured channels
+### Start autopilot (includes gateway)
 
 ```bash
-stakpak gateway channels list
-stakpak gateway channels test
+stakpak up
 ```
 
----
+This starts the full autopilot runtime which includes:
+- **Scheduler** — cron-based schedule execution
+- **Server** — HTTP API on `127.0.0.1:4096`
+- **Gateway** — channel adapters + routing
 
-### 3) Start with server integration (recommended)
+Gateway routes are available at `http://127.0.0.1:4096/v1/gateway/*`.
+
+### Channel management
 
 ```bash
-stakpak serve --gateway --no-auth
+stakpak autopilot channel list
+stakpak autopilot channel test
+stakpak autopilot channel add <type> --token ...
+stakpak autopilot channel remove <type>
 ```
 
-This runs:
-- server on `127.0.0.1:4096`
-- gateway runtime inside serve
-- gateway routes at `http://127.0.0.1:4096/v1/gateway/*`
-
----
-
-## Alternative: run gateway standalone
-
-Terminal 1:
-
-```bash
-stakpak serve --no-auth
-```
-
-Terminal 2:
-
-```bash
-stakpak gateway run
-```
-
-Standalone gateway API defaults to:
-
-`http://127.0.0.1:4097/v1/gateway/*`
+Configuration is stored in `~/.stakpak/autopilot.toml`.
 
 ---
 
@@ -177,45 +144,6 @@ Channel target formats:
 - Telegram: `{ "chat_id": "...", "thread_id": "..." }`
 - Discord: `{ "channel_id": "...", "thread_id": "...", "message_id": "..." }`
 - Slack: `{ "channel": "...", "thread_ts": "..." }`
-
----
-
-## Useful CLI commands
-
-```bash
-# Create/update config
-stakpak gateway init --force
-
-# Channel management
-stakpak gateway channels list
-stakpak gateway channels test
-stakpak gateway channels add --channel slack
-stakpak gateway channels remove --channel discord
-
-# Run gateway alone
-stakpak gateway run
-stakpak gateway run --url http://127.0.0.1:4096 --bind 127.0.0.1:4097
-
-# Run everything
-stakpak up
-```
-
----
-
-## Approval behavior (important)
-
-When running through:
-
-```bash
-stakpak serve --gateway ...
-```
-
-gateway tool decisions follow serve/profile auto-approve settings.
-
-- `--auto-approve-all` => gateway allow all
-- profile `auto_approve` allowlist => gateway allowlist
-
-When running standalone (`stakpak gateway run`), approvals are taken from `gateway.toml`.
 
 ---
 

@@ -1,4 +1,5 @@
 use crate::utils::agents_md::{AgentsMdInfo, format_agents_md_for_context};
+use crate::utils::apps_md::{AppsMdInfo, format_apps_md_for_context};
 use crate::utils::local_context::LocalContext;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
@@ -190,6 +191,12 @@ pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, Str
     let agents_text = format_agents_md_for_context(agents_md);
     let formatted_input = format!("{}\n<agents_md>\n{}\n</agents_md>", user_input, agents_text);
     (formatted_input, agents_text)
+}
+
+pub fn add_apps_md(user_input: &str, apps_md: &AppsMdInfo) -> (String, String) {
+    let apps_text = format_apps_md_for_context(apps_md);
+    let formatted_input = format!("{}\n<apps_md>\n{}\n</apps_md>", user_input, apps_text);
+    (formatted_input, apps_text)
 }
 
 /// Refresh billing info and send it to the TUI.

@@ -423,7 +423,22 @@ impl StakpakApiClient {
     /// Handle response and parse JSON
     async fn handle_response<T: DeserializeOwned>(&self, response: Response) -> Result<T, String> {
         let response = self.handle_response_error(response).await?;
-        response.json().await.map_err(|e| e.to_string())
+        let url = response.url().to_string();
+        let status = response.status();
+        let body = response.text().await.map_err(|e| {
+            format!(
+                "Failed to read response body from {} (status {}): {}",
+                url, status, e
+            )
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            // Truncate body to avoid flooding the error message
+            let truncated_body: String = body.chars().take(500).collect();
+            format!(
+                "Failed to decode response from {} (status {}): {} | body: {}",
+                url, status, e, truncated_body
+            )
+        })
     }
 
     /// Handle response without body

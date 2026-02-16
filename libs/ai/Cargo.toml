@@ -67,3 +67,6 @@ aws-smithy-types = { version = "1.2", optional = true }
 tokio-test = "0.4"
 mockito = "1"
 anyhow = { workspace = true }
+
+[lints.clippy]
+string_slice = "deny"

@@ -37,6 +37,5 @@ globset = { workspace = true }
 [dev-dependencies]
 tempfile = "3.8"
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
+[lints]
+workspace = true

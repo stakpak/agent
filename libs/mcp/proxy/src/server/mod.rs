@@ -53,6 +53,8 @@ fn service_error_to_error_data(e: ServiceError, context: &str) -> ErrorData {
 /// the *replacement text* without re-scanning it, a secret whose value happens
 /// to contain another `[REDACTED_SECRET:...]` token will **not** trigger a
 /// chain replacement.
+/// All indices from find() of ASCII tokens (PREFIX, ']') on same string
+#[allow(clippy::string_slice)]
 fn restore_secrets_single_pass(s: &str, redaction_map: &HashMap<String, String>) -> String {
     const PREFIX: &str = "[REDACTED_SECRET:";
 

@@ -791,6 +791,25 @@ fn update_pending_tool_display(state: &mut AppState) {
         state.messages.retain(|m| m.id != pending_id);
     }
 
+    // Create a new pending block for the currently selected tool
+    create_pending_block_for_selected_tool(state);
+
+    // Force-invalidate cache — bypass the streaming guard in invalidate_message_lines_cache
+    // because the user is actively cycling through tool call tabs and needs to see the
+    // updated preview immediately, even if is_streaming is still true from the LLM stream.
+    state.assembled_lines_cache = None;
+    state.visible_lines_cache = None;
+    state.message_lines_cache = None;
+    state.collapsed_message_lines_cache = None;
+
+    // Don't auto-scroll - let user control scroll position
+    state.stay_at_bottom = false;
+}
+
+/// Create a pending block in messages for the currently selected tool in the approval bar.
+/// Sets `pending_bash_message_id` and `dialog_command` to match the selected tool.
+/// Does NOT remove any existing pending block — caller is responsible for cleanup.
+pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
     // Get the currently selected tool call
     if let Some(action) = state.approval_bar.selected_action() {
         let tool_call = &action.tool_call;
@@ -846,10 +865,4 @@ fn update_pending_tool_display(state: &mut AppState) {
         // Update dialog_command to the selected tool
         state.dialog_command = Some(tool_call.clone());
     }
-
-    // Invalidate cache so the new pending message is rendered
-    invalidate_message_lines_cache(state);
-
-    // Don't auto-scroll - let user control scroll position
-    state.stay_at_bottom = false;
 }

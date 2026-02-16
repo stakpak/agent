@@ -1,3 +1,8 @@
+// CLI crate uses string slicing for parsing model strings, frontmatter, tool names,
+// error messages, and rendering. All indices come from find()/rfind() of ASCII
+// delimiters on the same strings.
+#![allow(clippy::string_slice)]
+
 use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
@@ -29,6 +34,7 @@ use commands::{
 use config::{AppConfig, ModelsCache};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agents_md::discover_agents_md;
+use utils::apps_md::discover_apps_md;
 use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
@@ -127,6 +133,10 @@ struct Cli {
     /// Ignore AGENTS.md files (skip discovery and injection)
     #[arg(long = "ignore-agents-md", default_value_t = false)]
     ignore_agents_md: bool,
+
+    /// Ignore APPS.md files (skip discovery and injection)
+    #[arg(long = "ignore-apps-md", default_value_t = false)]
+    ignore_apps_md: bool,
 
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
@@ -273,6 +283,14 @@ async fn main() {
                     std::env::current_dir()
                         .ok()
                         .and_then(|cwd| discover_agents_md(&cwd))
+                };
+
+                let apps_md = if cli.ignore_apps_md {
+                    None
+                } else {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| discover_apps_md(&cwd))
                 };
 
                 // Use credential resolution with auth.toml fallback chain
@@ -451,6 +469,7 @@ async fn main() {
                                 },
                                 model: default_model.clone(),
                                 agents_md: agents_md.clone(),
+                                apps_md: apps_md.clone(),
                                 pause_on_approval: cli.pause_on_approval,
                                 resume_input: if cli.approve.is_some()
                                     || cli.reject.is_some()
@@ -516,6 +535,7 @@ async fn main() {
                                 },
                                 model: default_model,
                                 agents_md,
+                                apps_md,
                                 send_init_prompt_on_start,
                                 commands_config,
                             },
@@ -577,5 +597,107 @@ mod tests {
             "hello",
         ]);
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn cli_parses_up_alias_foreground_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "up", "--foreground"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_up_defaults_to_background() {
+        let parsed = Cli::try_parse_from(["stakpak", "up"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(!args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_down_alias_uninstall_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "down", "--uninstall"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Down { args }) => {
+                    assert!(args.uninstall);
+                }
+                _ => panic!("Expected down command"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_parses_up_non_interactive_and_force_flags() {
+        let parsed = Cli::try_parse_from([
+            "stakpak",
+            "up",
+            "--non-interactive",
+            "--force",
+            "--foreground",
+        ]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Up { args }) => {
+                    assert!(args.non_interactive);
+                    assert!(args.force);
+                    assert!(args.foreground);
+                }
+                _ => panic!("Expected up command"),
+            }
+        }
+    }
+
+    #[test]
+    fn autopilot_related_commands_do_not_require_auth() {
+        assert!(
+            !Commands::Autopilot(commands::AutopilotCommands::Status {
+                json: false,
+                recent_runs: None,
+            })
+            .requires_auth()
+        );
+
+        assert!(
+            !Commands::Up {
+                args: commands::autopilot::StartArgs {
+                    bind: "127.0.0.1:4096".to_string(),
+                    show_token: false,
+                    no_auth: false,
+                    model: None,
+                    auto_approve_all: false,
+                    foreground: false,
+                    non_interactive: false,
+                    force: false,
+                },
+            }
+            .requires_auth()
+        );
+
+        assert!(
+            !Commands::Down {
+                args: commands::autopilot::StopArgs { uninstall: false },
+            }
+            .requires_auth()
+        );
     }
 }

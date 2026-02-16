@@ -31,3 +31,6 @@ include_dir = "0.7"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints.clippy]
+string_slice = "deny"

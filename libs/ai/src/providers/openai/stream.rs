@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::StreamExt;
 use reqwest_eventsource::{self, Event, EventSource};
+use std::error::Error as StdError;
 
 /// Track state for each tool call during streaming
 #[derive(Debug, Clone)]
@@ -61,6 +62,35 @@ pub async fn create_completions_stream(event_source: EventSource) -> Result<Gene
                             let body = response.text().await.unwrap_or_default();
                             yield Err(Error::provider_error(format!(
                                 "OpenAI API error {}: {}", status, body
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Transport(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "Transport error: {} | source: {:?}",
+                                e,
+                                e.source()
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Utf8(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "UTF-8 decode error in stream: {}",
+                                e
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Parser(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "SSE parser error: {}",
+                                e
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::InvalidContentType(content_type, _) => {
+                            yield Err(Error::stream_error(format!(
+                                "Invalid content type from server: {:?} (expected text/event-stream)",
+                                content_type
                             )));
                             break;
                         }
@@ -270,6 +300,35 @@ pub async fn create_responses_stream(event_source: EventSource) -> Result<Genera
                             let body = response.text().await.unwrap_or_default();
                             yield Err(Error::provider_error(format!(
                                 "OpenAI Responses API error {}: {}", status, body
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Transport(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "Transport error: {} | source: {:?}",
+                                e,
+                                e.source()
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Utf8(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "UTF-8 decode error in stream: {}",
+                                e
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::Parser(e) => {
+                            yield Err(Error::stream_error(format!(
+                                "SSE parser error: {}",
+                                e
+                            )));
+                            break;
+                        }
+                        reqwest_eventsource::Error::InvalidContentType(content_type, _) => {
+                            yield Err(Error::stream_error(format!(
+                                "Invalid content type from server: {:?} (expected text/event-stream)",
+                                content_type
                             )));
                             break;
                         }

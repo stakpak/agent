@@ -508,6 +508,8 @@ fn extract_variant_payload<'a>(event: &'a Option<Value>, variant: &str) -> Optio
     map.get(variant)
 }
 
+/// index from find() of ASCII separators ("\n\n", "\r\n\r\n") on same string
+#[allow(clippy::string_slice)]
 fn try_take_event(buffer: &mut String) -> Result<Option<SseEvent>, ClientError> {
     let separator = if let Some(index) = buffer.find("\n\n") {
         Some((index, 2_usize))

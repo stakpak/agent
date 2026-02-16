@@ -90,6 +90,8 @@ fn split_by_fenced_code(text: &str) -> Vec<Segment> {
     segments
 }
 
+/// All split indices from char_indices()/rfind() — always valid char boundaries
+#[allow(clippy::string_slice)]
 fn split_plain_segment(text: &str, limit: usize) -> Vec<String> {
     if text.is_empty() {
         return Vec::new();
@@ -133,6 +135,8 @@ fn find_preferred_split(text: &str, limit_chars: usize) -> Option<usize> {
         .filter(|idx| *idx > 0)
 }
 
+/// idx from char_indices().nth() — always a valid char boundary
+#[allow(clippy::string_slice)]
 fn prefix_by_chars(text: &str, max_chars: usize) -> &str {
     if text.chars().count() <= max_chars {
         return text;
