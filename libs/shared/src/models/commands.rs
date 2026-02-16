@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
+        
 /// A loaded command ready for execution.
 ///
 /// Commands are loaded from various sources and normalized into this struct

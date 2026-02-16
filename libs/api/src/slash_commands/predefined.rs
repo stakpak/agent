@@ -1,14 +1,19 @@
 //! Predefined slash commands embedded in the binary.
 //!
-//! These commands are available immediately without any configuration.
-//! They use the `/slash:` prefix to distinguish from user-created `/cmd:` commands.
+//! This module includes auto-generated code from build.rs that scans
+//! `src/slash_commands/*.md` files (excluding `cmd_*.md` user templates).
+//!
+//! ## Adding New Commands
+//!
+//! Simply create a new `.md` file in `src/slash_commands/`:
+//! - `my-command.md` → becomes `/my-command` in the TUI
+//!
+//! No need to edit this file or `mod.rs` - the build script handles it automatically.
+//!
+//! ## File Naming Convention
+//!
+//! - `foo-bar.md` → `/foo-bar` (predefined command, embedded in binary)
+//! - `cmd_*.md` → excluded (user command templates for runtime scanning)
 
-/// Predefined slash commands: (name, content)
-/// Available as `/slash:{name}` in the TUI.
-pub const PREDEFINED_COMMANDS: &[(&str, &str)] = &[
-    ("security-review", include_str!("security-review.md")),
-    ("code-review", include_str!("code-review.md")),
-    ("explain", include_str!("explain.md")),
-    ("quick-fix", include_str!("quick-fix.md")),
-    ("write-tests", include_str!("write-tests.md")),
-];
+// Include the auto-generated PREDEFINED_COMMANDS constant
+include!(concat!(env!("OUT_DIR"), "/predefined_generated.rs"));

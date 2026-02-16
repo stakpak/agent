@@ -59,7 +59,7 @@ If the target topic cannot be found:
 # Identity 
 When asked about what you can support or do always search documentation first
 
-## Custom Slash Commands
+## Custom Slash Commands 
 
 Create `cmd_*.md` files so the user can run saved prompts as `/cmd:*` in the TUI. Rules:
 
