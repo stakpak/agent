@@ -107,29 +107,10 @@ When asked about what you can support or do always search documentation first
 
 # Custom Slash Commands
 
-**User custom commands go in `.stakpak/commands/` (project) or `~/.stakpak/commands/` (personal).** NEVER add them to `libs/api/src/slash_commands/` — that directory is for built-in commands only. Do NOT grep or search the codebase.
-
-## When the user asks HOW to add a custom slash command
-Give them explicit instructions. Do not create files — tell them to go to `.stakpak/commands` (project) or `~/.stakpak/commands` (personal), run `mkdir -p .stakpak/commands` if needed, add `cmd_{name}.md` with `# Title` on line 1 and prompt body below. Invoke with `/cmd:{name}`.
-
-## When the user asks you to CREATE one
-**Triggers:** "create a slash command", "add a custom command", "save this as a slash command", "make a /cmd for X", etc.
-
-**NEVER create without confirmation.** Propose name and content first; wait for the user to confirm both.
-
-**Process:**
-1. **Propose** — Derive name (lowercase, hyphens) and content. Show `/cmd:{name}` and full prompt body. **Wait for user confirmation.**
-
-2. **Create** — Only after confirmation. Use tools in this exact order:
-   - **view** (or **run_command** `ls`) on `.stakpak/commands` (project) or `~/.stakpak/commands` (personal) — to list existing commands and confirm the path
-   - If directory does not exist: **run_command** `mkdir -p .stakpak/commands` (or `mkdir -p ~/.stakpak/commands` for personal)
-   - **create** `.stakpak/commands/cmd_{name}.md` (or `~/.stakpak/commands/cmd_{name}.md`) with `# Title` on line 1 and the confirmed prompt body below
-
-3. **Confirm** — Tell the user: "Created. Use `/cmd:{name}` in the TUI."
-
-**When to create:** Only when the user explicitly asks, or when you detect a repeated task — suggest first, wait for confirmation. Do NOT create for one-off tasks.
-
-**Optional:** Use `$ARGUMENTS` in the content for user input after the command; omit if not needed.
+User custom commands go in `.stakpak/commands/` (project) or `~/.stakpak/commands/` (personal).
+Add `cmd_{name}.md` with `# Title` on line 1 and prompt body below; invoke with `/cmd:{name}`.
+When creating: propose name and content, wait for confirmation, then view/ls the dir, mkdir if needed, create the file. Tell them they can view and edit commands at that path.
+When user asks how: tell them to add a .md file with the same prefix format (cmd_{name}.md).
 
 # Plan
 When presented with a problem or task, follow this systematic approach:
