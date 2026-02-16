@@ -1,16 +1,11 @@
 # Write RFC
 
-Write an RFC for a new feature or architectural change.
+Write an RFC (Request for Comments) for a new feature or architectural change.
 
 ## Before Writing
 
-1. **Study existing RFCs** for structure and style:
-   - `docs/rfcs/rfc_stakpak_init.md` — implementation RFC with diagrams
-   - `docs/rfcs/rfc_extend_commands.md` — feature RFC with user flows
-
-2. **Review architecture context**:
-   - `docs/architecture-enhancements/` — existing proposals
-   - `AGENTS.md` — codebase structure and patterns
+1. **Study existing RFCs** in the repo for structure and style (e.g. `docs/rfcs/`, `RFC*.md`)
+2. **Review architecture docs** — design docs, ADRs, or similar in the codebase
 
 ## RFC Structure
 
@@ -30,25 +25,24 @@ Write an RFC for a new feature or architectural change.
 **Non-goals**: [What this explicitly won't do]
 
 ## User Experience
-**CLI**: [Commands/flags]
-**TUI**: [UI changes]
+[Commands, APIs, UI changes — adapt to the project]
 **Example**: [Concrete usage example]
 
 ## Design
 
 ### Architecture
-[ASCII diagram of component flow]
+[Diagram of component flow — ASCII or Mermaid]
 
 ### Key Components
-| Component | File | Purpose |
-|-----------|------|---------|
-| [Name] | `path/file.rs` | [What it does] |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| [Name] | `path/to/file` | [What it does] |
 
 ### Data Flow
 [How data moves through the system]
 
 ## Implementation
-[Key code patterns, snippets for complex parts]
+[Key patterns, code snippets for complex parts]
 
 ## Design Decisions
 | Decision | Choice | Rationale | Alternatives |
@@ -63,10 +57,11 @@ Write an RFC for a new feature or architectural change.
 ```
 
 ## Tips
-- ASCII diagrams for flows (see existing RFCs)
-- Reference specific files in codebase
-- Consider both CLI and TUI entry points
+
+- Use diagrams for flows
+- Reference specific files in the codebase
 - Document the "why" behind decisions
+- Adapt sections to the project (CLI, API, UI, etc.)
 
 ---
 

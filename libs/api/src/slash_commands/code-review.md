@@ -13,34 +13,33 @@ git log origin/main..HEAD --oneline
 
 ## Review Focus
 
-**Rust-Specific**
-- No `unwrap()`/`expect()` outside tests — use `?`, `ok()`, `unwrap_or`
-- No unnecessary `.clone()` — prefer references
-- No locks held across `.await` points
-- Iterators over manual loops
-
 **Correctness**
-- Edge cases: empty inputs, None, errors
+- Edge cases: empty inputs, null/none, errors
 - No off-by-one in slicing/indexing
-- Proper resource cleanup (RAII)
-- Concurrency safety
+- Proper resource cleanup
+- Concurrency and threading safety
 
 **Security**
-- No secrets in code/logs
+- No secrets in code or logs
 - Input validation present
-- No path traversal or command injection
+- No path traversal or injection risks
 
 **Quality**
-- Functions < 50 lines, single responsibility
+- Functions reasonably sized, single responsibility
 - No duplication (DRY)
 - Actionable error messages with context
+
+**Language-specific** (adapt to the project)
+- Idiomatic patterns for the language
+- Avoid unsafe shortcuts (e.g. unwrap/expect in Rust, bare except in Python)
+- Prefer standard library and common patterns
 
 ## Report Format
 
 For each issue:
 
 ```
-### [SEVERITY] `path/file.rs` (line X-Y)
+### [SEVERITY] `path/file` (line X-Y)
 **Issue**: [description]
 **Code**: [problematic snippet]
 **Fix**: [suggested code]

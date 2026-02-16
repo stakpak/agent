@@ -163,7 +163,7 @@ docs/architecture-enhancements/
 ├── 02-event-bus-system.md      # Pub/sub event bus
 ├── 03-http-server-api.md       # REST API with Axum
 ├── 04-oauth-provider-auth.md   # OAuth for Claude Max/Pro
-├── 05-slash-commands.md        # /command system
+├── 05-slash-commands.md        # Custom slash commands
 ├── 06-project-instance-context.md  # State management
 └── 07-modular-tool-system.md   # Tool registry pattern
 ```

@@ -12,9 +12,9 @@ git diff origin/main...HEAD
 ```
 
 Also check:
-- `docs/rfcs/` — related RFCs being implemented
-- `docs/architecture-enhancements/` — related proposals
-- `CONTRIBUTING.md` — commit message format
+- RFCs or design docs being implemented
+- `CONTRIBUTING.md` or similar for conventions
+- Issue tracker for related tickets
 
 ## Output Format
 
@@ -23,12 +23,12 @@ Also check:
 [1-2 sentences: what this PR does and why]
 
 ## Related
-- RFC: `docs/rfcs/rfc_xxx.md` (if applicable)
+- RFC: [link if applicable]
 - Issue: #123 (if applicable)
 
 ## Changes
 
-### [Category: e.g., Core, TUI, Docs]
+### [Category: e.g., Core, API, Docs]
 - Change with brief explanation
 - Another change
 
@@ -36,15 +36,15 @@ Also check:
 - [ ] Bug fix | [ ] Feature | [ ] Breaking change | [ ] Refactor | [ ] Docs
 
 ## Testing
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --all-targets` passes
+- [ ] Tests pass
+- [ ] Linter passes
 - [ ] Manual: [what was tested]
 
 ## Notes
 [Design decisions, trade-offs, future work — if relevant]
 ```
 
-**Commit format**: `<type>: <subject>` where type is `feat|fix|docs|refactor|perf|test|chore`
+**Commit format** (Conventional Commits): `<type>: <subject>` — e.g. `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`
 
 ---
 

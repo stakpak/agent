@@ -19,7 +19,6 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
     let input = state.input().trim();
     let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
     if state.show_helper_dropdown && show {
-        // Get the commands to show
         let commands_to_show = if state.input() == "/" {
             &state.helpers
         } else {
@@ -61,7 +60,6 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             state.helper_scroll
         };
 
-        // Find the longest command display name to calculate padding
         let max_command_length = commands_to_show
             .iter()
             .map(|h| h.display().len())

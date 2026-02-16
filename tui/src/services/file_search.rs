@@ -432,8 +432,6 @@ pub async fn file_search_worker(
             file_search.scan_directory(&current_dir);
         }
 
-        // Filter helpers - only when input starts with '/' and is not empty.
-        // Re-scan custom commands each time for dynamic reload (no restart needed).
         let (filtered_helpers, custom_commands): (Vec<HelperEntry>, Option<Vec<CustomCommand>>) =
             if input.starts_with('/') && !input.is_empty() {
                 let custom =
@@ -443,7 +441,6 @@ pub async fn file_search_worker(
                 let filtered: Vec<HelperEntry> = fresh_helpers
                     .iter()
                     .filter(|h| {
-                        // Match against both command ID and display string
                         h.command().to_lowercase().contains(&search_term)
                             || h.display().to_lowercase().contains(&search_term)
                     })

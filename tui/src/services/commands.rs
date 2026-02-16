@@ -1,14 +1,4 @@
-//! Unified Command System
-//!
-//! This module provides a single source of truth for all commands in the TUI.
-//! Commands can be executed from:
-//! - Direct slash command input (e.g., typing "/help")
-//! - Helper dropdown selection
-//! - Command palette
-//!
-//! All commands are defined here and executed through a unified executor.
-//!
-//! Command scanning logic has been moved to `stakpak_api::commands::scan_commands`.
+//! Unified command system: slash commands, helper dropdown, command palette.
 
 use ratatui::{
     Frame,
@@ -32,10 +22,8 @@ use crate::services::helper_block::{
 use crate::services::message::{Message, MessageContent};
 use crate::{InputEvent, OutputEvent};
 
-/// Command identifier - the slash command string (e.g., "/help", "/clear")
 pub type CommandId<'a> = &'a str;
 
-/// Command metadata for display (used by command palette)
 #[derive(Debug, Clone)]
 pub struct Command {
     pub name: String,
@@ -44,7 +32,6 @@ pub struct Command {
     pub action: CommandAction,
 }
 
-/// Command action enum for command palette
 #[derive(Debug, Clone)]
 pub enum CommandAction {
     OpenProfileSwitcher,
@@ -63,7 +50,6 @@ pub enum CommandAction {
 }
 
 impl CommandAction {
-    /// Convert CommandAction to command ID for unified execution
     pub fn to_command_id(&self) -> Option<&'static str> {
         match self {
             CommandAction::OpenSessions => Some("/sessions"),
@@ -75,7 +61,6 @@ impl CommandAction {
             CommandAction::NewSession => Some("/new"),
             CommandAction::ShowUsage => Some("/usage"),
             CommandAction::SwitchModel => Some("/model"),
-            // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
             | CommandAction::OpenShortcuts
@@ -102,9 +87,6 @@ pub struct CommandContext<'a> {
     pub output_tx: &'a Sender<OutputEvent>,
 }
 
-// ========== Command Registry ==========
-
-/// Get all commands for command palette
 pub fn get_all_commands() -> Vec<Command> {
     vec![
         Command::new(
@@ -123,7 +105,7 @@ pub fn get_all_commands() -> Vec<Command> {
             "Context",
             "Show context utilization popup",
             "Ctrl+G",
-            CommandAction::ShowUsage, // reuse for now; actual action handled upstream
+            CommandAction::ShowUsage,
         ),
         Command::new(
             "Shortcuts",
@@ -194,18 +176,10 @@ pub fn get_all_commands() -> Vec<Command> {
     ]
 }
 
-/// Scan for custom commands from four sources (in order of precedence):
-/// 1. Predefined commands: Embedded in binary as /* (e.g., /security-review) - lowest precedence
-/// 2. Personal files: ~/.stakpak/commands/cmd_*.md as /cmd:*
-/// 3. Project files: ./.stakpak/commands/cmd_*.md as /cmd:* (overrides personal)
-/// 4. Config definitions: config.definitions file references as /cmd:* (highest precedence)
-///
-/// This function delegates to `stakpak_api::commands::scan_commands`.
 pub fn scan_custom_commands(commands_config: Option<&CommandsConfig>) -> Vec<CustomCommand> {
     stakpak_api::commands::scan_commands(commands_config)
 }
 
-/// Built-in commands only
 fn builtin_helper_commands() -> Vec<HelperCommand> {
     vec![
         HelperCommand {
@@ -291,14 +265,12 @@ fn builtin_helper_commands() -> Vec<HelperCommand> {
     ]
 }
 
-/// Merge built-in and custom commands. Built-in first, then custom (no override).
 pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
     let builtin = builtin_helper_commands();
     let builtin_ids: std::collections::HashSet<_> = builtin.iter().map(|h| h.command).collect();
     let mut out: Vec<HelperEntry> = builtin.into_iter().map(HelperEntry::Builtin).collect();
     for c in custom {
         if !builtin_ids.contains(c.id.as_str()) {
-            // User commands use /cmd:name for both id and display
             out.push(HelperEntry::Custom {
                 command: c.id.clone(),
                 display: c.id.clone(),
@@ -309,7 +281,6 @@ pub fn get_helper_commands(custom: &[CustomCommand]) -> Vec<HelperEntry> {
     out
 }
 
-/// Filter commands based on search query
 pub fn filter_commands(query: &str) -> Vec<Command> {
     if query.is_empty() {
         return get_all_commands();
@@ -325,11 +296,7 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
         .collect()
 }
 
-// ========== Command Execution ==========
-
-/// Execute a command by its ID
 pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Result<(), String> {
-    // User custom commands (id = /cmd:name)
     if let Some(cmd) = ctx
         .state
         .custom_commands
@@ -359,12 +326,10 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             Ok(())
         }
         "/model" => {
-            // Show model switcher popup
             ctx.state.show_model_switcher = true;
             ctx.state.model_switcher_selected = 0;
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
-            // Request available models from the output handler
             let _ = ctx.output_tx.try_send(OutputEvent::RequestAvailableModels);
             Ok(())
         }
@@ -411,7 +376,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
                 ctx.state.shell_tool_calls.clone(),
-                Vec::new(), // No image parts for command
+                Vec::new(),
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -444,7 +409,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             Ok(())
         }
         "/toggle_auto_approve" => {
-            // Special case: keep input for user to specify tool name
             let input = "/toggle_auto_approve ".to_string();
             ctx.state.text_area.set_text(&input);
             ctx.state.text_area.set_cursor(input.len());
@@ -471,7 +435,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             Ok(())
         }
         "/editor" => {
-            // Parse path argument if provided: /editor <path>
             let input = ctx.state.input().trim().to_string();
             let path_arg = if let Some(stripped) = input.strip_prefix("/editor ") {
                 let path = stripped.trim();
@@ -485,12 +448,10 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             };
 
             if let Some(path_str) = path_arg {
-                // Resolve the path - handle both absolute and relative paths
                 let path = std::path::Path::new(&path_str);
                 let resolved_path = if path.is_absolute() {
                     path.to_path_buf()
                 } else {
-                    // Resolve relative path against current working directory
                     std::env::current_dir().unwrap_or_default().join(path)
                 };
 
@@ -509,8 +470,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
                     ctx.state.show_helper_dropdown = false;
                 }
             } else {
-                // No path provided - keep /editor with space so user can type path
-                // This makes /editor a standalone feature, not tied to changeset
                 let new_text = "/editor ";
                 ctx.state.text_area.set_text(new_text);
                 ctx.state.text_area.set_cursor(new_text.len());
@@ -526,7 +485,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
         }
 
         "/init" => {
-            //  init prompt is always available (embedded at compile time)
             let prompt = match ctx.state.init_prompt_content.as_deref() {
                 Some(p) if !p.trim().is_empty() => p.to_string(),
                 _ => {
@@ -545,7 +503,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
                 ctx.state.shell_tool_calls.clone(),
-                Vec::new(), // No image parts for command
+                Vec::new(),
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -558,21 +516,15 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext<'_>) -> Re
     }
 }
 
-// ========== Helper Functions ==========
-
-/// Terminate any active shell command before switching sessions
 fn terminate_active_shell(state: &mut AppState) {
     if let Some(cmd) = &state.active_shell_command {
-        // Kill the running command
         let _ = cmd.kill();
     }
 
-    // Remove the shell message box if it exists
     if let Some(shell_msg_id) = state.interactive_shell_message_id {
         state.messages.retain(|m| m.id != shell_msg_id);
     }
 
-    // Reset all shell-related state
     state.active_shell_command = None;
     state.active_shell_command_output = None;
     state.interactive_shell_message_id = None;
@@ -589,7 +541,6 @@ fn terminate_active_shell(state: &mut AppState) {
 }
 
 pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    // Terminate any active shell before switching sessions
     terminate_active_shell(state);
 
     state.message_tool_calls = None;
@@ -606,15 +557,12 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "Resuming last session.");
 
-    // Reset scroll state to show bottom when messages are loaded
     state.scroll = 0;
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
 
-    // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
-    // Reset usage for the resumed session
     state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -635,7 +583,6 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    // Terminate any active shell before starting new session
     terminate_active_shell(state);
 
     let _ = output_tx.try_send(OutputEvent::NewSession);
@@ -646,15 +593,12 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "New session started.");
 
-    // Reset scroll state
     state.scroll = 0;
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
 
-    // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
-    // Reset usage for the new session
     state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -677,7 +621,6 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
 
-    // Use current_model if set (from streaming), otherwise use default model
     let active_model = state.current_model.as_ref().unwrap_or(&state.model);
     let max_tokens = active_model.limit.context as u32;
 
@@ -755,7 +698,6 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
         .collect();
 
-    // Filter by allowed_tools if configured
     if let Some(allowed_tools) = &state.allowed_tools
         && !allowed_tools.is_empty()
     {
@@ -779,7 +721,6 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
             .map(|(name, _)| name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        // add a spacing marker
         state.messages.push(Message::plain_text(""));
         push_styled_message(
             state,
@@ -790,10 +731,6 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         );
     }
 }
-
-// ========== Command Palette Rendering ==========
-// NOTE: render_command_palette is preserved for reference but no longer used.
-// The unified popup in shortcuts_popup.rs now handles command palette rendering.
 
 #[allow(dead_code)]
 pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
@@ -874,7 +811,6 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let search_paragraph = Paragraph::new(search_text);
     f.render_widget(search_paragraph, chunks[1]);
 
-    // Get filtered commands
     let filtered_commands = filter_commands(&state.command_palette_search);
     let total_commands = filtered_commands.len();
     let height = chunks[2].height as usize;
@@ -951,7 +887,6 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
 
     f.render_widget(content_paragraph, chunks[2]);
 
-    // Calculate cumulative commands count
     let mut cumulative_commands_count = 0;
     for line_index in 0..=(scroll + height).min(total_commands.saturating_sub(1)) {
         if line_index < total_commands {
@@ -965,7 +900,6 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     if has_content_above || has_content_below {
         let mut indicator_spans = vec![];
 
-        // Show cumulative commands counter and down arrow on the left
         indicator_spans.push(Span::styled(
             format!(" ({}/{})", cumulative_commands_count, total_commands),
             Style::default().fg(Color::Reset),
