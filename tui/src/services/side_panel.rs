@@ -41,7 +41,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Calculate section heights
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
+    let footer_height = 7; // Separator, session ID line, empty, version, empty, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
@@ -627,26 +627,61 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer section with version and shortcuts
-fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
+/// Render the footer section with session ID, version, and shortcuts
+fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     let mut lines = Vec::new();
 
-    let version = env!("CARGO_PKG_VERSION");
+    // Separator line
+    let separator_width = area.width.saturating_sub(4) as usize;
+    lines.push(Line::from(vec![Span::styled(
+        format!("{}{}", LEFT_PADDING, "─".repeat(separator_width)),
+        Style::default().fg(Color::DarkGray),
+    )]));
 
-    // Line 1: Version (left)
+    // Session ID line with copy shortcut
+    let session_display = if state.session_id.is_empty() {
+        "N/A".to_string()
+    } else {
+        truncate_session_id(&state.session_id)
+    };
+
+    // Check if we recently copied (within 2 seconds)
+    let recently_copied = state
+        .session_id_copied_at
+        .map(|t| t.elapsed().as_secs() < 2)
+        .unwrap_or(false);
+
+    let session_line = if recently_copied {
+        Line::from(vec![
+            Span::styled(LEFT_PADDING, Style::default()),
+            Span::styled("Session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_display, Style::default().fg(Color::Green)),
+            Span::styled("  ✓", Style::default().fg(Color::Green)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(LEFT_PADDING, Style::default()),
+            Span::styled("Session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_display, Style::default().fg(Color::White)),
+            Span::styled("  ctrl+x", Style::default().fg(Color::DarkGray)),
+        ])
+    };
+    lines.push(session_line);
+
+    // Empty line
+    lines.push(Line::from(""));
+
+    // Version
+    let version = env!("CARGO_PKG_VERSION");
     lines.push(Line::from(vec![Span::styled(
         format!("{}v{}", LEFT_PADDING, version),
         Style::default().fg(Color::DarkGray),
     )]));
 
-    // Empty line between version/profile and shortcuts
+    // Empty line
     lines.push(Line::from(""));
 
-    // Shortcuts split into lines with colors:
-    // Tab: Select (Cyan)
-    // Enter: toggle (LightMagenta)
-    // Ctrl+b: Hide (Yellow)
-
+    // Shortcuts
     let left_padding_span = Span::styled(
         LEFT_PADDING.to_string(),
         Style::default().fg(Color::DarkGray),
@@ -672,6 +707,23 @@ fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+}
+
+/// Truncate a session ID to show first 6 and last 4 characters with ellipsis
+fn truncate_session_id(id: &str) -> String {
+    if id.len() <= 12 {
+        return id.to_string();
+    }
+    let start: String = id.chars().take(6).collect();
+    let end: String = id
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{}...{}", start, end)
 }
 
 /// Get the style for a section header - magenta when focused for better visibility

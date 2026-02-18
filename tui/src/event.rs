@@ -80,6 +80,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ToggleSidePanel)
                 }
+
                 KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::AutoApproveCurrentTool)
                 }

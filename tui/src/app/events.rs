@@ -172,6 +172,12 @@ pub enum InputEvent {
     AskUserCustomInputDelete,
     AskUserSubmit,
     AskUserCancel,
+
+    // Clipboard events
+    CopySessionId,
+
+    // Session events
+    SetSessionId(String),
 }
 
 #[derive(Debug)]
