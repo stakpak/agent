@@ -370,6 +370,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 prompt.clone(),
                 ctx.state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
+                None,       // No revert index
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -545,6 +546,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 prompt,
                 ctx.state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
+                None,       // No revert index
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -610,6 +612,10 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
 
+    // Clear changeset and todos from previous session
+    state.changeset = crate::services::changeset::Changeset::default();
+    state.todos.clear();
+
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
@@ -665,6 +671,10 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.scroll = 0;
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
+
+    // Clear changeset and todos from previous session
+    state.changeset = crate::services::changeset::Changeset::default();
+    state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);

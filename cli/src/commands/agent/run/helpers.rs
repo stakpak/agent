@@ -1,7 +1,7 @@
 use crate::utils::agents_md::{AgentsMdInfo, format_agents_md_for_context};
 use crate::utils::apps_md::{AppsMdInfo, format_apps_md_for_context};
 use crate::utils::local_context::LocalContext;
-use stakpak_api::models::ListRuleBook;
+use stakpak_api::models::Skill;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
@@ -125,36 +125,25 @@ pub async fn add_local_context<'a>(
     }
 }
 
-pub fn add_rulebooks(user_input: &str, rulebooks: &[ListRuleBook]) -> (String, Option<String>) {
-    let rulebooks_text = if !rulebooks.is_empty() {
+pub fn add_skills(user_input: &str, skills: &[Skill]) -> (String, Option<String>) {
+    let skills_text = if !skills.is_empty() {
         format!(
-            "\n\n# My Rule Books:\n\n{}",
-            rulebooks
+            "\n\n# Available Skills:\n\n{}",
+            skills
                 .iter()
-                .map(|rulebook| {
-                    let text = rulebook.to_text();
-                    let mut lines = text.lines();
-                    let mut result = String::new();
-                    if let Some(first) = lines.next() {
-                        result.push_str(&format!("  - {}", first));
-                        for line in lines {
-                            result.push_str(&format!("\n    {}", line));
-                        }
-                    }
-                    result
-                })
+                .map(|skill| format!("  - {}", skill.to_metadata_text()))
                 .collect::<Vec<String>>()
                 .join("\n")
         )
     } else {
-        "# No Rule Books Available".to_string()
+        "# No Skills Available".to_string()
     };
 
     let formatted_input = format!(
-        "{}\n<rulebooks>\n{}\n</rulebooks>",
-        user_input, rulebooks_text
+        "{}\n<available_skills>\n{}\n</available_skills>",
+        user_input, skills_text
     );
-    (formatted_input, Some(rulebooks_text))
+    (formatted_input, Some(skills_text))
 }
 
 pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String> {

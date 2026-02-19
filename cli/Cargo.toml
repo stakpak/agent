@@ -69,6 +69,9 @@ thiserror = "2.0"
 libsql = { workspace = true }
 tokio-cron-scheduler = "0.15"
 which = "7.0"
+ignore = { workspace = true }
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
 
 # jemalloc replaces musl's default allocator which aggressively munmap's pages,
 # causing use-after-free SIGSEGV in libsql's sqlite3Close() on Linux musl targets.

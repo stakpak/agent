@@ -11,6 +11,7 @@ mod misc;
 mod navigation;
 mod popup;
 pub mod shell;
+mod text_selection;
 pub mod tool;
 
 // Re-export find_image_file_by_name for use in clipboard_paste
@@ -54,10 +55,14 @@ fn flush_pending_user_messages_if_idle(
         user_message_text,
     } = pending_message;
 
+    // Take pending revert index if set (will be None on normal messages)
+    let revert_index = state.pending_revert_index.take();
+
     match output_tx.try_send(OutputEvent::UserMessage(
         final_input,
         shell_tool_calls,
         image_parts,
+        revert_index,
     )) {
         Ok(()) => {
             if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text.clone()))
@@ -71,11 +76,13 @@ fn flush_pending_user_messages_if_idle(
                 final_input,
                 shell_tool_calls,
                 image_parts,
+                _revert_index,
             ))
             | tokio::sync::mpsc::error::TrySendError::Closed(OutputEvent::UserMessage(
                 final_input,
                 shell_tool_calls,
                 image_parts,
+                _revert_index,
             )),
         ) => {
             log::warn!("Failed to flush buffered UserMessage event: output channel unavailable");
@@ -132,6 +139,40 @@ pub fn update(
     state.scroll = state.scroll.max(0);
 
     state.scroll = state.scroll.max(0);
+
+    // Intercept keys for Message Action Popup
+    if state.show_message_action_popup {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_message_action_popup_navigate(state, -1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_message_action_popup_navigate(state, 1);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_message_action_popup_execute(state);
+                return;
+            }
+            InputEvent::MouseClick(_, _)
+            | InputEvent::MouseDragStart(_, _)
+            | InputEvent::MouseDrag(_, _)
+            | InputEvent::MouseDragEnd(_, _) => {
+                // Close popup on any mouse click/interaction
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
 
     // Intercept keys for "existing plan found" modal
     if state.existing_plan_prompt.is_some() {
@@ -230,11 +271,11 @@ pub fn update(
                     crate::services::plan_review::close_plan_review(state);
                     return;
                 }
-                InputEvent::Up | InputEvent::PlanReviewCursorUp => {
+                InputEvent::Up | InputEvent::ScrollUp | InputEvent::PlanReviewCursorUp => {
                     crate::services::plan_review::cursor_up(state);
                     return;
                 }
-                InputEvent::Down | InputEvent::PlanReviewCursorDown => {
+                InputEvent::Down | InputEvent::ScrollDown | InputEvent::PlanReviewCursorDown => {
                     crate::services::plan_review::cursor_down(state);
                     return;
                 }
@@ -347,8 +388,12 @@ pub fn update(
                 popup::handle_file_changes_popup_backspace(state);
                 return;
             }
-            InputEvent::MouseClick(col, row) => {
+            InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
+                return;
+            }
+            InputEvent::MouseDrag(_, _) | InputEvent::MouseDragEnd(_, _) => {
+                // Ignore drag events when file changes popup is open
                 return;
             }
             _ => {
@@ -359,27 +404,14 @@ pub fn update(
     }
 
     // Intercept keys for Ask User inline block
-    // Tab toggles focus: focused = navigate inside block, unfocused = scroll freely
+    // Always active while visible — no focus mode.
+    // ↑/↓ navigate options; at boundary they fall through to scroll.
+    // ←/→ switch question tabs (except in custom input).
+    // Enter selects/toggles. Esc cancels.
     if state.show_ask_user_popup {
         match event {
             InputEvent::HandleEsc | InputEvent::AskUserCancel => {
-                if state.ask_user_focused {
-                    // First Esc unfocuses, second Esc cancels
-                    state.ask_user_focused = false;
-                    ask_user::refresh_ask_user_block_pub(state);
-                } else {
-                    ask_user::handle_ask_user_cancel(state, output_tx);
-                }
-                return;
-            }
-            InputEvent::Tab => {
-                // Toggle focus on the ask_user block
-                state.ask_user_focused = !state.ask_user_focused;
-                if state.ask_user_focused {
-                    // Scroll to bottom to show the block
-                    state.stay_at_bottom = true;
-                }
-                ask_user::refresh_ask_user_block_pub(state);
+                ask_user::handle_ask_user_cancel(state, output_tx);
                 return;
             }
             InputEvent::ShowAskUserPopup(tool_call, questions) => {
@@ -389,70 +421,107 @@ pub fn update(
             _ => {}
         }
 
-        // When focused, intercept navigation keys for block interaction
-        if state.ask_user_focused {
-            match event {
-                InputEvent::AskUserNextTab | InputEvent::CursorRight => {
-                    ask_user::handle_ask_user_next_tab(state);
-                    return;
+        let is_custom = ask_user::is_custom_input_selected(state);
+
+        match event {
+            // --- Option navigation: ↑/↓ with scroll-on-boundary ---
+            // Only navigate options when at the bottom of chat (block is in view).
+            // If the user has scrolled up, arrows always scroll.
+            InputEvent::Up | InputEvent::AskUserPrevOption => {
+                if state.stay_at_bottom && ask_user::handle_ask_user_prev_option(state) {
+                    return; // Moved — consume the event
                 }
-                InputEvent::AskUserPrevTab | InputEvent::CursorLeft => {
-                    ask_user::handle_ask_user_prev_tab(state);
-                    return;
+                // At top boundary or scrolled up — fall through to scroll
+            }
+            InputEvent::Down | InputEvent::AskUserNextOption => {
+                if state.stay_at_bottom && ask_user::handle_ask_user_next_option(state) {
+                    return; // Moved — consume the event
                 }
-                InputEvent::AskUserNextOption | InputEvent::Down | InputEvent::ScrollDown => {
-                    ask_user::handle_ask_user_next_option(state);
-                    return;
-                }
-                InputEvent::AskUserPrevOption | InputEvent::Up | InputEvent::ScrollUp => {
-                    ask_user::handle_ask_user_prev_option(state);
-                    return;
-                }
-                InputEvent::AskUserSelectOption | InputEvent::InputSubmitted => {
+                // At bottom boundary or scrolled up — fall through to scroll
+            }
+
+            // --- Question tab navigation: ←/→ (always work, no scroll conflict) ---
+            InputEvent::AskUserNextTab | InputEvent::CursorRight => {
+                ask_user::handle_ask_user_next_tab(state);
+                return;
+            }
+            InputEvent::AskUserPrevTab | InputEvent::CursorLeft => {
+                ask_user::handle_ask_user_prev_tab(state);
+                return;
+            }
+
+            // --- Toggle / Select: Space (select option without advancing) ---
+            // In multi-select: toggles the checkbox
+            // In single-select: selects the option (without advancing)
+            InputEvent::AskUserSelectOption => {
+                ask_user::handle_ask_user_select_option(state, output_tx);
+                return;
+            }
+
+            // --- Confirm / Advance: Enter ---
+            // In single-select: selects current option (if none selected) and advances to next question
+            // In multi-select: confirms current selections and advances to next question
+            // On submit tab: submits all answers
+            // On custom input: confirms custom text and advances
+            InputEvent::AskUserConfirmQuestion | InputEvent::InputSubmitted => {
+                ask_user::handle_ask_user_confirm_question(state, output_tx);
+                return;
+            }
+            InputEvent::AskUserSubmit => {
+                ask_user::handle_ask_user_submit(state, output_tx);
+                return;
+            }
+
+            // --- Custom input: character keys when on custom slot ---
+            InputEvent::InputChanged(c) => {
+                if c == ' ' && !is_custom {
+                    // Space toggles/selects the current option (same as AskUserSelectOption)
                     ask_user::handle_ask_user_select_option(state, output_tx);
-                    return;
-                }
-                InputEvent::AskUserSubmit => {
-                    ask_user::handle_ask_user_submit(state, output_tx);
-                    return;
-                }
-                InputEvent::AskUserCustomInputChanged(c) => {
+                } else if is_custom {
                     ask_user::handle_ask_user_custom_input_changed(state, c);
-                    return;
                 }
-                InputEvent::AskUserCustomInputBackspace => {
+                // When not on custom slot, consume all character keys (don't type into chat)
+                return;
+            }
+            InputEvent::InputBackspace => {
+                if is_custom {
                     ask_user::handle_ask_user_custom_input_backspace(state);
-                    return;
                 }
-                InputEvent::AskUserCustomInputDelete => {
+                return;
+            }
+            InputEvent::InputDelete => {
+                if is_custom {
                     ask_user::handle_ask_user_custom_input_delete(state);
-                    return;
                 }
-                InputEvent::InputChanged(c) => {
-                    if ask_user::is_custom_input_selected(state) {
-                        ask_user::handle_ask_user_custom_input_changed(state, c);
-                    }
-                    return;
-                }
-                InputEvent::InputBackspace => {
-                    if ask_user::is_custom_input_selected(state) {
-                        ask_user::handle_ask_user_custom_input_backspace(state);
-                    }
-                    return;
-                }
-                InputEvent::InputDelete => {
-                    if ask_user::is_custom_input_selected(state) {
-                        ask_user::handle_ask_user_custom_input_delete(state);
-                    }
-                    return;
-                }
-                _ => {
-                    // Consume other events while focused
-                    return;
-                }
+                return;
+            }
+            InputEvent::AskUserCustomInputChanged(c) => {
+                ask_user::handle_ask_user_custom_input_changed(state, c);
+                return;
+            }
+            InputEvent::AskUserCustomInputBackspace => {
+                ask_user::handle_ask_user_custom_input_backspace(state);
+                return;
+            }
+            InputEvent::AskUserCustomInputDelete => {
+                ask_user::handle_ask_user_custom_input_delete(state);
+                return;
+            }
+
+            // --- Scroll events always pass through ---
+            InputEvent::ScrollUp
+            | InputEvent::ScrollDown
+            | InputEvent::PageUp
+            | InputEvent::PageDown
+            | InputEvent::Tab => {
+                // Fall through to normal scroll handlers
+            }
+
+            _ => {
+                // Consume other events
+                return;
             }
         }
-        // When unfocused, all events pass through to normal handlers (scrolling works)
     }
 
     // Handle ShowAskUserPopup event even when popup is not visible
@@ -868,9 +937,17 @@ pub fn update(
         }
         InputEvent::ScrollUp => {
             navigation::handle_up_navigation(state);
+            // Extend selection when scrolling during active selection
+            if state.selection.active {
+                text_selection::handle_scroll_during_selection(state, -1, message_area_height);
+            }
         }
         InputEvent::ScrollDown => {
             navigation::handle_down_navigation(state, message_area_height, message_area_width);
+            // Extend selection when scrolling during active selection
+            if state.selection.active {
+                text_selection::handle_scroll_during_selection(state, 1, message_area_height);
+            }
         }
         InputEvent::PageUp => {
             navigation::handle_page_up(state, message_area_height, message_area_width);
@@ -1214,15 +1291,26 @@ pub fn update(
             // so we don't need to call it again to avoid double-counting file changes.
         }
         InputEvent::ApprovalPopupSubmit => {}
-        InputEvent::MouseClick(col, row) => {
+        InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
             // Check if click is on file changes popup first
             if state.show_file_changes_popup {
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
             } else {
+                // Try side panel click first, then start text selection if in message area
                 popup::handle_side_panel_mouse_click(state, col, row);
+                text_selection::handle_drag_start(state, col, row);
             }
         }
-
+        InputEvent::MouseDrag(col, row) => {
+            text_selection::handle_drag(state, col, row);
+        }
+        InputEvent::MouseDragEnd(col, row) => {
+            text_selection::handle_drag_end(state, col, row);
+        }
+        InputEvent::MouseMove(_col, row) => {
+            // Track hover row for visual debugging
+            state.hover_row = Some(row);
+        }
         // Board tasks events
         InputEvent::RefreshBoardTasks => {
             misc::handle_refresh_board_tasks(state, input_tx);
@@ -1310,6 +1398,7 @@ pub fn update(
         | InputEvent::AskUserNextOption
         | InputEvent::AskUserPrevOption
         | InputEvent::AskUserSelectOption
+        | InputEvent::AskUserConfirmQuestion
         | InputEvent::AskUserCustomInputChanged(_)
         | InputEvent::AskUserCustomInputBackspace
         | InputEvent::AskUserCustomInputDelete
@@ -1404,7 +1493,7 @@ mod tests {
         flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
 
         match output_rx.recv().await {
-            Some(OutputEvent::UserMessage(text, Some(tool_calls), image_parts)) => {
+            Some(OutputEvent::UserMessage(text, Some(tool_calls), image_parts, _revert_index)) => {
                 assert_eq!(text, "first\n\nsecond");
                 assert_eq!(tool_calls.len(), 2);
                 assert_eq!(image_parts.len(), 2);
@@ -1506,7 +1595,7 @@ mod tests {
         flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
 
         match output_rx.recv().await {
-            Some(OutputEvent::UserMessage(text, _, _)) => {
+            Some(OutputEvent::UserMessage(text, _, _, _)) => {
                 assert_eq!(text, "queued");
             }
             other => panic!("unexpected output event: {:?}", other),
@@ -1555,7 +1644,7 @@ mod tests {
         );
 
         match output_rx.recv().await {
-            Some(OutputEvent::UserMessage(text, _, _)) => assert_eq!(text, "from-update"),
+            Some(OutputEvent::UserMessage(text, _, _, _)) => assert_eq!(text, "from-update"),
             other => panic!("unexpected output event: {:?}", other),
         }
 
@@ -1564,5 +1653,330 @@ mod tests {
             other => panic!("unexpected input event: {:?}", other),
         }
         assert!(state.pending_user_messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ask_user_arrows_navigate_options_via_update() {
+        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+
+        let mut state = build_state();
+        let (input_tx, _input_rx) = mpsc::channel(8);
+        let (output_tx, _output_rx) = mpsc::channel(8);
+        let (shell_tx, _shell_rx) = mpsc::channel(8);
+
+        // Set up ask_user popup with 3 options
+        let questions = vec![AskUserQuestion {
+            label: "Pick".to_string(),
+            question: "Pick one".to_string(),
+            options: vec![
+                AskUserOption {
+                    value: "a".to_string(),
+                    label: "A".to_string(),
+                    description: None,
+                    selected: false,
+                },
+                AskUserOption {
+                    value: "b".to_string(),
+                    label: "B".to_string(),
+                    description: None,
+                    selected: false,
+                },
+                AskUserOption {
+                    value: "c".to_string(),
+                    label: "C".to_string(),
+                    description: None,
+                    selected: false,
+                },
+            ],
+            allow_custom: false,
+            required: true,
+            multi_select: false,
+        }];
+        let tool_call = ToolCall {
+            id: "tc_1".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "ask_user".to_string(),
+                arguments: "{}".to_string(),
+            },
+            metadata: None,
+        };
+        ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
+        assert!(state.show_ask_user_popup);
+        assert_eq!(state.ask_user_selected_option, 0);
+
+        // Down arrow — should move to next option
+        update(
+            &mut state,
+            InputEvent::Down,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 1,
+            "Down should move to next option"
+        );
+
+        // Down arrow again
+        update(
+            &mut state,
+            InputEvent::Down,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 2,
+            "Down should move to next option again"
+        );
+
+        // Up arrow — should move back
+        update(
+            &mut state,
+            InputEvent::Up,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 1,
+            "Up should move to prev option"
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_user_left_right_navigate_tabs_via_update() {
+        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+
+        let mut state = build_state();
+        let (input_tx, _input_rx) = mpsc::channel(8);
+        let (output_tx, _output_rx) = mpsc::channel(8);
+        let (shell_tx, _shell_rx) = mpsc::channel(8);
+
+        // Set up ask_user popup with 2 questions
+        let questions = vec![
+            AskUserQuestion {
+                label: "Q1".to_string(),
+                question: "First?".to_string(),
+                options: vec![AskUserOption {
+                    value: "a".to_string(),
+                    label: "A".to_string(),
+                    description: None,
+                    selected: false,
+                }],
+                allow_custom: false,
+                required: true,
+                multi_select: false,
+            },
+            AskUserQuestion {
+                label: "Q2".to_string(),
+                question: "Second?".to_string(),
+                options: vec![AskUserOption {
+                    value: "b".to_string(),
+                    label: "B".to_string(),
+                    description: None,
+                    selected: false,
+                }],
+                allow_custom: false,
+                required: true,
+                multi_select: false,
+            },
+        ];
+        let tool_call = ToolCall {
+            id: "tc_2".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "ask_user".to_string(),
+                arguments: "{}".to_string(),
+            },
+            metadata: None,
+        };
+        ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
+        assert_eq!(state.ask_user_current_tab, 0);
+
+        // Right arrow — should move to next tab
+        update(
+            &mut state,
+            InputEvent::CursorRight,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_current_tab, 1,
+            "Right should move to next tab"
+        );
+
+        // Left arrow — should move back
+        update(
+            &mut state,
+            InputEvent::CursorLeft,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_current_tab, 0,
+            "Left should move to prev tab"
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_user_boundary_scroll_passthrough() {
+        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+
+        let mut state = build_state();
+        let (input_tx, _input_rx) = mpsc::channel(8);
+        let (output_tx, _output_rx) = mpsc::channel(8);
+        let (shell_tx, _shell_rx) = mpsc::channel(8);
+
+        let questions = vec![AskUserQuestion {
+            label: "Pick".to_string(),
+            question: "Pick one".to_string(),
+            options: vec![
+                AskUserOption {
+                    value: "a".to_string(),
+                    label: "A".to_string(),
+                    description: None,
+                    selected: false,
+                },
+                AskUserOption {
+                    value: "b".to_string(),
+                    label: "B".to_string(),
+                    description: None,
+                    selected: false,
+                },
+            ],
+            allow_custom: false,
+            required: true,
+            multi_select: false,
+        }];
+        let tool_call = ToolCall {
+            id: "tc_3".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "ask_user".to_string(),
+                arguments: "{}".to_string(),
+            },
+            metadata: None,
+        };
+        ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // stay_at_bottom defaults to true — arrows navigate options
+        assert!(state.stay_at_bottom);
+
+        // Down navigates from option 0 → 1
+        update(
+            &mut state,
+            InputEvent::Down,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 1,
+            "Down should navigate to option 1"
+        );
+
+        // Down at bottom boundary — falls through to scroll, may unset stay_at_bottom
+        update(
+            &mut state,
+            InputEvent::Down,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 1,
+            "Down at bottom should not change option"
+        );
+
+        // After boundary scroll, stay_at_bottom may be false.
+        // Scroll back to bottom so arrows navigate again.
+        state.stay_at_bottom = true;
+
+        // Up navigates from option 1 → 0
+        update(
+            &mut state,
+            InputEvent::Up,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 0,
+            "Up should navigate to option 0"
+        );
+
+        // Up at top boundary — falls through to scroll (sets stay_at_bottom = false)
+        update(
+            &mut state,
+            InputEvent::Up,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 0,
+            "Up at top should not change option"
+        );
+        assert!(
+            !state.stay_at_bottom,
+            "Scrolling up should unset stay_at_bottom"
+        );
+
+        // Now arrows pass through to scroll (don't navigate options)
+        update(
+            &mut state,
+            InputEvent::Down,
+            10,
+            80,
+            &input_tx,
+            &output_tx,
+            None,
+            &shell_tx,
+            Size::new(80, 24),
+        );
+        assert_eq!(
+            state.ask_user_selected_option, 0,
+            "Down while scrolled up should scroll, not navigate"
+        );
     }
 }

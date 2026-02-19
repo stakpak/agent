@@ -8,7 +8,6 @@ mod constants;
 mod event;
 mod event_loop;
 mod terminal;
-pub mod utils;
 mod view;
 pub use app::{
     AppState, ExistingPlanPrompt, InputEvent, LoadingOperation, OutputEvent, SessionInfo,

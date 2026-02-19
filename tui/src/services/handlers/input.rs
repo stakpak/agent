@@ -104,6 +104,11 @@ pub fn handle_input_submitted_event(
                     state.scroll = 0;
                     state.scroll_to_bottom = true;
                     state.stay_at_bottom = true;
+
+                    // Clear changeset and todos from previous session
+                    state.changeset = crate::services::changeset::Changeset::default();
+                    state.todos.clear();
+
                     crate::services::message::invalidate_message_lines_cache(state);
 
                     // Reset usage
@@ -713,10 +718,14 @@ fn handle_input_submitted(
                         user_message_text,
                     ));
             } else {
+                // Take pending revert index if set (will be None on normal messages)
+                let revert_index = state.pending_revert_index.take();
+
                 if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
                     final_input.clone(),
                     state.shell_tool_calls.clone(),
                     image_parts,
+                    revert_index,
                 )) {
                     log::warn!("Failed to send UserMessage event: {}", e);
                 }

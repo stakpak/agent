@@ -37,6 +37,12 @@ pub struct AskUserQuestion {
     #[serde(default = "default_true")]
     #[schemars(description = "Whether this question must be answered (default: true)")]
     pub required: bool,
+    /// When true, user can select multiple options (checkbox list). Default: false (single-select).
+    #[serde(default)]
+    #[schemars(
+        description = "When true, user can select/deselect multiple options (checkbox list). Default: false (single-select radio behavior)."
+    )]
+    pub multi_select: bool,
 }
 
 /// A predefined answer option for a question.
@@ -50,6 +56,12 @@ pub struct AskUserOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Optional description shown below the label")]
     pub description: Option<String>,
+    /// Default selection state for multi_select questions. Ignored for single-select.
+    #[serde(default)]
+    #[schemars(
+        description = "Default selection state when multi_select is true. Pre-marks this option as selected. Ignored for single-select questions."
+    )]
+    pub selected: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,10 +73,14 @@ pub struct AskUserOption {
 pub struct AskUserAnswer {
     /// Question label this answers.
     pub question_label: String,
-    /// Selected option value OR custom text.
+    /// Selected option value OR custom text (for single-select questions).
+    /// For multi-select questions this is a JSON array string of selected values.
     pub answer: String,
     /// Whether this was a custom answer (typed by user).
     pub is_custom: bool,
+    /// Selected values for multi-select questions. Empty/absent for single-select.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_values: Vec<String>,
 }
 
 /// Aggregated result of the `ask_user` tool.
@@ -105,15 +121,18 @@ mod tests {
                     value: "dev".to_string(),
                     label: "Development".to_string(),
                     description: Some("For testing changes".to_string()),
+                    selected: false,
                 },
                 AskUserOption {
                     value: "prod".to_string(),
                     label: "Production".to_string(),
                     description: None,
+                    selected: false,
                 },
             ],
             allow_custom: true,
             required: true,
+            multi_select: false,
         };
 
         let json = serde_json::to_string(&question).unwrap();
@@ -159,6 +178,7 @@ mod tests {
             question_label: "Environment".to_string(),
             answer: "production".to_string(),
             is_custom: false,
+            selected_values: vec![],
         };
 
         let json = serde_json::to_string(&answer).unwrap();
@@ -173,6 +193,7 @@ mod tests {
             question_label: "Feedback".to_string(),
             answer: "User typed this custom response".to_string(),
             is_custom: true,
+            selected_values: vec![],
         };
 
         let json = serde_json::to_string(&answer).unwrap();
@@ -188,11 +209,13 @@ mod tests {
                     question_label: "q1".to_string(),
                     answer: "a1".to_string(),
                     is_custom: false,
+                    selected_values: vec![],
                 },
                 AskUserAnswer {
                     question_label: "q2".to_string(),
                     answer: "custom answer".to_string(),
                     is_custom: true,
+                    selected_values: vec![],
                 },
             ],
             completed: true,
@@ -245,6 +268,7 @@ mod tests {
             value: "yes".to_string(),
             label: "Yes".to_string(),
             description: None,
+            selected: false,
         };
 
         let json = serde_json::to_string(&option).unwrap();
@@ -264,15 +288,18 @@ mod tests {
                     value: "ja".to_string(),
                     label: "日本語".to_string(),
                     description: Some("Japanese language".to_string()),
+                    selected: false,
                 },
                 AskUserOption {
                     value: "emoji".to_string(),
                     label: "🚀 Rocket".to_string(),
                     description: Some("With emoji 🎉".to_string()),
+                    selected: false,
                 },
             ],
             allow_custom: true,
             required: true,
+            multi_select: false,
         };
 
         let json = serde_json::to_string(&question).unwrap();
@@ -292,6 +319,7 @@ mod tests {
             options: vec![],
             allow_custom: true,
             required: true,
+            multi_select: false,
         };
 
         let q2 = q1.clone();
@@ -301,6 +329,7 @@ mod tests {
             question_label: "Test".to_string(),
             answer: "answer".to_string(),
             is_custom: false,
+            selected_values: vec![],
         };
 
         let a2 = a1.clone();
@@ -326,14 +355,116 @@ mod tests {
                     value: "dev".to_string(),
                     label: "Dev".to_string(),
                     description: None,
+                    selected: false,
                 }],
                 allow_custom: false,
                 required: true,
+                multi_select: false,
             }],
         };
 
         let json = serde_json::to_string(&request).unwrap();
         let parsed: AskUserRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(request, parsed);
+    }
+
+    #[test]
+    fn test_multi_select_defaults() {
+        let json = r#"{
+            "label": "Scope",
+            "question": "Which repos?",
+            "options": [
+                {"value": "a", "label": "Repo A"},
+                {"value": "b", "label": "Repo B", "selected": true}
+            ]
+        }"#;
+
+        let question: AskUserQuestion = serde_json::from_str(json).unwrap();
+        assert!(
+            !question.multi_select,
+            "multi_select should default to false"
+        );
+        assert!(
+            !question.options[0].selected,
+            "selected should default to false"
+        );
+        assert!(
+            question.options[1].selected,
+            "selected should be true when set"
+        );
+    }
+
+    #[test]
+    fn test_multi_select_question_round_trip() {
+        let question = AskUserQuestion {
+            label: "Scope".to_string(),
+            question: "Which repos should I include?".to_string(),
+            options: vec![
+                AskUserOption {
+                    value: "repo:api".to_string(),
+                    label: "~/projects/api".to_string(),
+                    description: None,
+                    selected: true,
+                },
+                AskUserOption {
+                    value: "repo:web".to_string(),
+                    label: "~/projects/web".to_string(),
+                    description: None,
+                    selected: false,
+                },
+            ],
+            allow_custom: false,
+            required: true,
+            multi_select: true,
+        };
+
+        let json = serde_json::to_string(&question).unwrap();
+        assert!(json.contains("\"multi_select\":true"));
+        assert!(json.contains("\"selected\":true"));
+
+        let parsed: AskUserQuestion = serde_json::from_str(&json).unwrap();
+        assert_eq!(question, parsed);
+    }
+
+    #[test]
+    fn test_multi_select_answer_with_selected_values() {
+        let answer = AskUserAnswer {
+            question_label: "Scope".to_string(),
+            answer: "[\"repo:api\",\"repo:web\"]".to_string(),
+            is_custom: false,
+            selected_values: vec!["repo:api".to_string(), "repo:web".to_string()],
+        };
+
+        let json = serde_json::to_string(&answer).unwrap();
+        assert!(json.contains("\"selected_values\""));
+        assert!(json.contains("repo:api"));
+        assert!(json.contains("repo:web"));
+
+        let parsed: AskUserAnswer = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.selected_values.len(), 2);
+    }
+
+    #[test]
+    fn test_selected_values_omitted_when_empty() {
+        let answer = AskUserAnswer {
+            question_label: "Env".to_string(),
+            answer: "dev".to_string(),
+            is_custom: false,
+            selected_values: vec![],
+        };
+
+        let json = serde_json::to_string(&answer).unwrap();
+        assert!(
+            !json.contains("selected_values"),
+            "selected_values should be omitted when empty"
+        );
+    }
+
+    #[test]
+    fn test_answer_deserialization_without_selected_values() {
+        // Backward compatibility: old answers without selected_values should still parse
+        let json = r#"{"question_label": "env", "answer": "dev", "is_custom": false}"#;
+        let answer: AskUserAnswer = serde_json::from_str(json).unwrap();
+        assert!(answer.selected_values.is_empty());
     }
 }

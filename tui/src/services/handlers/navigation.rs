@@ -397,17 +397,70 @@ pub fn handle_page_down(
 
 /// Adjust scroll position based on state
 pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    // Use cached line count instead of recalculating every adjustment
-    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
-        cached_lines.len()
-    } else {
-        // Fallback: calculate once and cache
-        let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
-        all_lines.len()
-    };
+    // Always use get_wrapped_message_lines_cached for consistent total_lines calculation
+    // This ensures we use the same cache as the per_message_cache used for last_message_lines
+    let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
+    let total_lines = all_lines.len();
 
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.stay_at_bottom {
+
+    // Decrement block counter if active
+    if state.block_stay_at_bottom_frames > 0 {
+        state.block_stay_at_bottom_frames -= 1;
+        // Clear the lines_from_end when block expires
+        if state.block_stay_at_bottom_frames == 0 {
+            state.scroll_lines_from_end = None;
+        }
+    }
+
+    // scroll_to_last_message_start takes priority - user explicitly navigating tool calls
+    if state.scroll_to_last_message_start {
+        // Get the last message's rendered line count from cache
+        let last_message_lines = state
+            .messages
+            .last()
+            .and_then(|msg| state.per_message_cache.get(&msg.id))
+            .map(|cache| cache.rendered_lines.len())
+            .unwrap_or(0);
+
+        // If last message isn't cached yet, wait for next frame
+        if last_message_lines == 0 {
+            // Keep the flag, don't change scroll
+        } else {
+            // Calculate where the last message starts
+            let last_msg_start_line = total_lines.saturating_sub(last_message_lines);
+
+            // We want to show the START of the tool call block, with some context above if possible
+            // If the tool call is taller than viewport, show its start
+            // If it fits, show it with ~2 lines of context above
+            let context_lines = 2;
+            let scroll_target = last_msg_start_line.saturating_sub(context_lines);
+
+            // Store the target line (from start of content, not from end)
+            // We'll use lines_from_end to maintain position as content changes
+            let lines_from_end = total_lines.saturating_sub(scroll_target);
+            state.scroll_lines_from_end = Some(lines_from_end);
+
+            state.scroll = scroll_target.min(max_scroll);
+            state.scroll_to_last_message_start = false;
+            // Block stay_at_bottom for a few frames to prevent override
+            state.block_stay_at_bottom_frames = 10;
+        }
+        // Disable stay_at_bottom so it doesn't override on next frame
+        state.stay_at_bottom = false;
+    } else if state.block_stay_at_bottom_frames > 0 {
+        // Recalculate scroll based on lines_from_end to maintain relative position
+        // even as total_lines changes
+        if let Some(lines_from_end) = state.scroll_lines_from_end {
+            let scroll_target = total_lines.saturating_sub(lines_from_end);
+            state.scroll = scroll_target.min(max_scroll);
+        } else {
+            // Fallback: just cap to max_scroll
+            if state.scroll > max_scroll {
+                state.scroll = max_scroll;
+            }
+        }
+    } else if state.stay_at_bottom {
         state.scroll = max_scroll;
     } else if state.scroll_to_bottom {
         state.scroll = max_scroll;

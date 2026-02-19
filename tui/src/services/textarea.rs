@@ -19,6 +19,9 @@ struct TextElement {
     range: Range<usize>,
 }
 
+// Re-export WidgetSelection as TextAreaSelection for backwards compatibility
+pub use crate::services::widget_selection::WidgetSelection as TextAreaSelection;
+
 #[derive(Debug)]
 pub struct TextArea {
     text: String,
@@ -28,6 +31,8 @@ pub struct TextArea {
     elements: Vec<TextElement>,
     shell_mode: bool,
     session_empty: bool,
+    /// Text selection state
+    pub selection: TextAreaSelection,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +63,7 @@ impl TextArea {
             elements: Vec::new(),
             shell_mode: false,
             session_empty: true,
+            selection: TextAreaSelection::default(),
         }
     }
 
@@ -149,8 +155,11 @@ impl TextArea {
     }
 
     /// Compute the on-screen cursor position taking scrolling into account.
+    /// Returns absolute terminal coordinates (x, y) matching the rendered cursor.
     pub fn cursor_pos_with_state(&self, area: Rect, state: &TextAreaState) -> Option<(u16, u16)> {
-        let lines = self.wrapped_lines(area.width);
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         let effective_scroll = self.effective_scroll(area.height, &lines, state.scroll);
         let i = Self::wrapped_line_index_by_start(&lines, self.cursor_pos)?;
         let ls = &lines[i];
@@ -159,7 +168,189 @@ impl TextArea {
             .saturating_sub(effective_scroll as usize)
             .try_into()
             .unwrap_or(0);
-        Some((area.x + col, area.y + screen_row))
+        Some((area.x + prefix_width + col, area.y + screen_row))
+    }
+
+    /// Convert screen coordinates to text position.
+    /// Returns the text position (byte offset) for the given screen coordinates.
+    /// The coordinates are relative to the terminal, not the text area.
+    pub fn screen_pos_to_text_pos(
+        &self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> Option<usize> {
+        // Check if the click is within the text area
+        if screen_x < area.x || screen_x >= area.x + area.width {
+            return None;
+        }
+        if screen_y < area.y || screen_y >= area.y + area.height {
+            return None;
+        }
+
+        // Handle empty text case
+        if self.text.is_empty() {
+            return Some(0);
+        }
+
+        // Use content width (area width minus prefix) - must match rendering
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
+        if lines.is_empty() {
+            return Some(0);
+        }
+
+        let effective_scroll = self.effective_scroll(area.height, &lines, state.scroll);
+
+        // Calculate which wrapped line was clicked
+        let relative_y = screen_y.saturating_sub(area.y);
+        let line_idx = (effective_scroll as usize) + (relative_y as usize);
+
+        if line_idx >= lines.len() {
+            // Clicked below all lines - position at end
+            return Some(self.text.len());
+        }
+
+        let line_range = &lines[line_idx];
+
+        // Validate line_range is within text bounds
+        if line_range.start > self.text.len() || line_range.end > self.text.len() + 1 {
+            return Some(self.text.len());
+        }
+
+        // Calculate column within the line, accounting for prefix
+        let relative_x = screen_x.saturating_sub(area.x);
+
+        // If clicking in prefix area, position at start of line
+        if relative_x < prefix_width {
+            return Some(line_range.start.min(self.text.len()));
+        }
+
+        let click_col = (relative_x - prefix_width) as usize;
+
+        // Safe end for slicing (exclusive end, but clamped to text length)
+        let safe_end = line_range.end.saturating_sub(1).min(self.text.len());
+        let safe_start = line_range.start.min(self.text.len());
+
+        if safe_start >= safe_end {
+            return Some(safe_start);
+        }
+
+        // Find the character position within the line based on display width
+        let line_text = &self.text[safe_start..safe_end];
+        let mut current_width = 0usize;
+        let mut byte_pos = safe_start;
+
+        for (idx, grapheme) in line_text.grapheme_indices(true) {
+            let grapheme_width = grapheme.width();
+
+            if current_width + grapheme_width > click_col {
+                // Click is on this character - position cursor before it.
+                // Only snap to after the character if the click is past the midpoint.
+                // Use div_ceil for correct rounding with width-1 chars
+                // (avoids integer division making midpoint=0 for single-width chars).
+                let midpoint = current_width + grapheme_width.div_ceil(2);
+                if click_col >= midpoint {
+                    byte_pos = safe_start + idx + grapheme.len();
+                } else {
+                    byte_pos = safe_start + idx;
+                }
+                break;
+            }
+            current_width += grapheme_width;
+            byte_pos = safe_start + idx + grapheme.len();
+        }
+
+        Some(byte_pos.min(self.text.len()))
+    }
+
+    /// Set cursor position from screen coordinates
+    pub fn set_cursor_from_screen_pos(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> bool {
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.set_cursor(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Start a text selection at the given screen position
+    pub fn start_selection(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> bool {
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.selection.start(pos);
+            self.set_cursor(pos);
+            true
+        } else {
+            self.selection.clear();
+            false
+        }
+    }
+
+    /// Update the selection end position during drag
+    pub fn update_selection(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) {
+        if !self.selection.is_active() {
+            return;
+        }
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.selection.update(pos);
+            self.set_cursor(pos);
+        }
+    }
+
+    /// End the selection and return the selected text, clearing the selection
+    pub fn end_selection(&mut self) -> Option<String> {
+        if !self.selection.is_active() {
+            return None;
+        }
+
+        // Use the new API that clears after getting text
+        self.selection
+            .end_and_get_text(&self.text)
+            .map(|s| s.to_string())
+    }
+
+    /// Clear the selection
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+    }
+
+    /// Check if there's an active selection
+    pub fn has_selection(&self) -> bool {
+        self.selection.has_selection()
+    }
+
+    /// Get the selected text (without clearing)
+    pub fn get_selected_text(&self) -> Option<&str> {
+        self.selection.get_text(&self.text)
+    }
+
+    /// Delete the selected text and return it
+    pub fn delete_selection(&mut self) -> Option<String> {
+        let (start, end) = self.selection.normalized()?;
+        let deleted = self.text[start..end].to_string();
+        self.replace_range(start..end, "");
+        self.selection.clear();
+        Some(deleted)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -204,7 +395,10 @@ impl TextArea {
         state: &mut TextAreaState,
         waiting_for_shell_input: bool,
     ) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         let scroll = self.effective_scroll(area.height, &lines, state.scroll);
         state.scroll = scroll;
 
@@ -951,7 +1145,10 @@ impl TextArea {
 
 impl WidgetRef for &TextArea {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         self.render_lines(area, buf, &lines, 0..lines.len(), false);
     }
 }
@@ -960,7 +1157,10 @@ impl StatefulWidgetRef for &TextArea {
     type State = TextAreaState;
 
     fn render_ref(&self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         let scroll = self.effective_scroll(area.height, &lines, state.scroll);
         state.scroll = scroll;
 
@@ -1061,6 +1261,24 @@ impl TextArea {
                     let x_off = self.text[line_range.start..overlap_start].width() as u16;
                     let style = Style::default().fg(Color::Cyan);
                     buf.set_string(content_x + x_off, y, styled, style);
+                }
+            }
+
+            // Overlay selection highlighting
+            if let Some((sel_start, sel_end)) = self.selection.normalized() {
+                // Check if selection intersects this line
+                let overlap_start = sel_start.max(line_range.start);
+                let overlap_end = sel_end.min(line_range.end);
+                if overlap_start < overlap_end {
+                    let selected_text = if waiting_for_shell_input && self.shell_mode {
+                        "*".repeat(overlap_end - overlap_start)
+                    } else {
+                        self.text[overlap_start..overlap_end].to_string()
+                    };
+                    let x_off = self.text[line_range.start..overlap_start].width() as u16;
+                    // Selection style: inverted colors (white text on blue background)
+                    let selection_style = Style::default().fg(Color::White).bg(Color::Blue);
+                    buf.set_string(content_x + x_off, y, &selected_text, selection_style);
                 }
             }
         }
@@ -1462,9 +1680,12 @@ mod tests {
     #[test]
     fn wrapping_and_cursor_positions() {
         let mut t = ta_with("hello world here");
-        let area = Rect::new(0, 0, 6, 10); // width 6 -> wraps words
-        // desired height counts wrapped lines
-        assert!(t.desired_height(area.width) >= 3);
+        // prefix_width is 2 ("→ "), so area.width = 2 + content_width.
+        // Content wraps at 6 -> area.width = 8.
+        let content_wrap_width = 6;
+        let prefix_width = t.get_prefix_width() as u16;
+        let area = Rect::new(0, 0, prefix_width + content_wrap_width, 10);
+        assert!(t.desired_height(content_wrap_width) >= 3);
 
         // Place cursor in "world"
         let world_start = t.text().find("world").unwrap();
@@ -1474,7 +1695,7 @@ mod tests {
 
         // With state and small height, cursor is mapped onto visible row
         let mut state = TextAreaState::default();
-        let small_area = Rect::new(0, 0, 6, 1);
+        let small_area = Rect::new(0, 0, prefix_width + content_wrap_width, 1);
         // First call: cursor not visible -> effective scroll ensures it is
         let (_x, y) = t.cursor_pos_with_state(small_area, &state).unwrap();
         assert_eq!(y, 0);
@@ -1483,12 +1704,14 @@ mod tests {
         let mut buf = Buffer::empty(small_area);
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), small_area, &mut buf, &mut state);
         // After render, state.scroll should be adjusted so cursor row fits
-        let effective_lines = t.desired_height(small_area.width);
+        let effective_lines = t.desired_height(content_wrap_width);
         assert!(state.scroll < effective_lines);
     }
 
     #[test]
     fn cursor_pos_with_state_basic_and_scroll_behaviors() {
+        let prefix_width: u16 = 2; // "→ "
+
         // Case 1: No wrapping needed, height fits — scroll ignored, y maps directly.
         let mut t = ta_with("hello world");
         t.set_cursor(3);
@@ -1504,11 +1727,11 @@ mod tests {
         // bottom row (area.height - 1) after adjusting effective scroll.
         let mut t = ta_with("one two three four five six");
         // Force wrapping to many visual lines.
-        let wrap_width = 4;
-        let _ = t.desired_height(wrap_width);
+        let content_wrap = 4u16;
+        let _ = t.desired_height(content_wrap);
         // Put cursor somewhere near the end so it's definitely below the first window.
         t.set_cursor(t.text().len().saturating_sub(2));
-        let small_area = Rect::new(0, 0, wrap_width, 2);
+        let small_area = Rect::new(0, 0, prefix_width + content_wrap, 2);
         let state = TextAreaState { scroll: 0 };
         let (_x, y) = t.cursor_pos_with_state(small_area, &state).unwrap();
         assert_eq!(y, small_area.y + small_area.height - 1);
@@ -1516,11 +1739,11 @@ mod tests {
         // Case 3: Cursor above the current window — y should be top row (0)
         // when the provided scroll is too large.
         let mut t = ta_with("alpha beta gamma delta epsilon zeta");
-        let wrap_width = 5;
-        let lines = t.desired_height(wrap_width);
+        let content_wrap = 5u16;
+        let lines = t.desired_height(content_wrap);
         // Place cursor near start so an excessive scroll moves it to top row.
         t.set_cursor(1);
-        let area = Rect::new(0, 0, wrap_width, 3);
+        let area = Rect::new(0, 0, prefix_width + content_wrap, 3);
         let state = TextAreaState {
             scroll: lines.saturating_mul(2),
         };
@@ -1531,8 +1754,10 @@ mod tests {
     #[test]
     fn wrapped_navigation_across_visual_lines() {
         let mut t = ta_with("abcdefghij");
-        // Force wrapping at width 4: lines -> ["abcd", "efgh", "ij"]
-        let _ = t.desired_height(4);
+        let prefix_width = t.get_prefix_width() as u16; // 2
+        // Force wrapping at content width 4: lines -> ["abcd", "efgh", "ij"]
+        let content_wrap = 4u16;
+        let _ = t.desired_height(content_wrap);
 
         // From the very start, moving down should go to the start of the next wrapped line (index 4)
         t.set_cursor(0);
@@ -1540,16 +1765,17 @@ mod tests {
         assert_eq!(t.cursor(), 4);
 
         // Cursor at boundary index 4 should be displayed at start of second wrapped line
+        // x = area.x + prefix_width + 0 (column 0 of line)
         t.set_cursor(4);
-        let area = Rect::new(0, 0, 4, 10);
+        let area = Rect::new(0, 0, prefix_width + content_wrap, 10);
         let (x, y) = t.cursor_pos(area).unwrap();
-        assert_eq!((x, y), (0, 1));
+        assert_eq!((x, y), (prefix_width, 1));
 
-        // With state and small height, cursor should be visible at row 0, col 0
-        let small_area = Rect::new(0, 0, 4, 1);
+        // With state and small height, cursor should be visible at row 0, col = prefix_width
+        let small_area = Rect::new(0, 0, prefix_width + content_wrap, 1);
         let state = TextAreaState::default();
         let (x, y) = t.cursor_pos_with_state(small_area, &state).unwrap();
-        assert_eq!((x, y), (0, 0));
+        assert_eq!((x, y), (prefix_width, 0));
 
         // Place cursor in the middle of the second wrapped line ("efgh"), at 'g'
         t.set_cursor(6);
@@ -1569,45 +1795,48 @@ mod tests {
     #[test]
     fn cursor_pos_with_state_after_movements() {
         let mut t = ta_with("abcdefghij");
-        // Wrap width 4 -> visual lines: abcd | efgh | ij
-        let _ = t.desired_height(4);
-        let area = Rect::new(0, 0, 4, 2);
+        let prefix_width = t.get_prefix_width() as u16; // 2
+        // Content wraps at 4 -> visual lines: abcd | efgh | ij
+        let content_wrap = 4u16;
+        let _ = t.desired_height(content_wrap);
+        let area = Rect::new(0, 0, prefix_width + content_wrap, 2);
         let mut state = TextAreaState::default();
         let mut buf = Buffer::empty(area);
 
-        // Start at beginning
+        // Start at beginning: x = prefix_width (col 0 after prefix)
         t.set_cursor(0);
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x, y), (0, 0));
+        assert_eq!((x, y), (prefix_width, 0));
 
         // Move down to second visual line; should be at bottom row (row 1) within 2-line viewport
         t.move_cursor_down();
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x, y), (0, 1));
+        assert_eq!((x, y), (prefix_width, 1));
 
         // Move down to third visual line; viewport scrolls and keeps cursor on bottom row
         t.move_cursor_down();
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x, y), (0, 1));
+        assert_eq!((x, y), (prefix_width, 1));
 
         // Move up to second visual line; with current scroll, it appears on top row
         t.move_cursor_up();
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x, y), (0, 0));
+        assert_eq!((x, y), (prefix_width, 0));
 
         // Column preservation across moves: set to col 2 on first line, move down
+        // x = prefix_width + 2 (column 2 within content)
         t.set_cursor(2);
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x0, y0) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x0, y0), (2, 0));
+        assert_eq!((x0, y0), (prefix_width + 2, 0));
         t.move_cursor_down();
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x1, y1) = t.cursor_pos_with_state(area, &state).unwrap();
-        assert_eq!((x1, y1), (2, 1));
+        assert_eq!((x1, y1), (prefix_width + 2, 1));
     }
 
     #[test]
@@ -1690,13 +1919,15 @@ mod tests {
             let init = boundaries[rng.random_range(0..boundaries.len())];
             ta.set_cursor(init);
 
-            let mut width: u16 = rng.random_range(1..=12);
+            // Minimum width must accommodate prefix ("→ " = 2 chars) + at least 1 char of content
+            let prefix_w = ta.get_prefix_width() as u16;
+            let mut width: u16 = rng.random_range((prefix_w + 1)..=(prefix_w + 10));
             let mut height: u16 = rng.random_range(1..=4);
 
             for _step in 0..60 {
                 // Mostly stable width/height, occasionally change
                 if rng.random_bool(0.1) {
-                    width = rng.random_range(1..=12);
+                    width = rng.random_range((prefix_w + 1)..=(prefix_w + 10));
                 }
                 if rng.random_bool(0.1) {
                     height = rng.random_range(1..=4);
@@ -1854,7 +2085,9 @@ mod tests {
                 // Render and compute cursor positions; ensure they are in-bounds and do not panic
                 let area = Rect::new(0, 0, width, height);
                 // Stateless render into an area tall enough for all wrapped lines
-                let total_lines = ta.desired_height(width);
+                // Use content width (area.width - prefix) to match how rendering wraps
+                let content_w = width.saturating_sub(prefix_w);
+                let total_lines = ta.desired_height(content_w);
                 let full_area = Rect::new(0, 0, width, total_lines.max(1));
                 let mut buf = Buffer::empty(full_area);
                 ratatui::widgets::WidgetRef::render_ref(&(&ta), full_area, &mut buf);

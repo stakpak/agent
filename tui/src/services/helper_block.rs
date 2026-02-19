@@ -448,6 +448,7 @@ pub fn version_message(latest_version: Option<String>) -> Message {
     }
 }
 
+#[allow(unused_variables)]
 pub fn welcome_messages(
     latest_version: Option<String>,
     state: &crate::app::AppState,

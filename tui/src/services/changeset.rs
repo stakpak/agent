@@ -50,6 +50,8 @@ pub struct FileEdit {
     pub diff_preview: Option<String>,
     /// Original tool call for reverse replay during revert
     pub tool_call: Option<ToolCall>,
+    /// Index of the user message that triggered this edit (for selective revert)
+    pub user_message_index: Option<usize>,
 }
 
 impl FileEdit {
@@ -62,6 +64,7 @@ impl FileEdit {
             backup_path: None,
             diff_preview: None,
             tool_call: None,
+            user_message_index: None,
         }
     }
 
@@ -85,6 +88,11 @@ impl FileEdit {
         self.tool_call = Some(tool_call);
         self
     }
+
+    pub fn with_user_message_index(mut self, index: usize) -> Self {
+        self.user_message_index = Some(index);
+        self
+    }
 }
 
 /// Represents a tracked file in the changeset
@@ -102,6 +110,9 @@ pub struct TrackedFile {
     pub selected_edit: usize,
     /// Path to backup if the file was removed
     pub backup_path: Option<String>,
+    /// Path to backup of original file content before any modifications
+    /// Used for reliable revert when replaying edits fails
+    pub original_backup_path: Option<String>,
 }
 
 impl TrackedFile {
@@ -113,7 +124,14 @@ impl TrackedFile {
             is_expanded: false,
             selected_edit: 0,
             backup_path: None,
+            original_backup_path: None,
         }
+    }
+
+    /// Set the original backup path (for reverting to original state)
+    pub fn with_original_backup(mut self, path: String) -> Self {
+        self.original_backup_path = Some(path);
+        self
     }
 
     /// Add a new edit to this file
@@ -127,7 +145,15 @@ impl TrackedFile {
     }
 
     /// Get total lines added across all edits
+    /// For created files, reads actual file content for accurate count
     pub fn total_lines_added(&self) -> usize {
+        // For created files, the "lines added" is the current file content
+        // Read from disk for accurate count (handles reverts, manual edits, etc.)
+        if self.state == FileState::Created
+            && let Ok(content) = fs::read_to_string(&self.path)
+        {
+            return content.lines().count();
+        }
         self.edits.iter().map(|e| e.lines_added).sum()
     }
 
@@ -325,6 +351,232 @@ impl Changeset {
         let reverted = content.replace(new_str, old_str);
 
         Ok(reverted)
+    }
+
+    /// Revert all file changes made at or after the given user message index.
+    /// This is used for the "revert to message" feature.
+    /// The target_index message itself and all messages after it will be reverted.
+    ///
+    /// Returns (files_reverted, files_deleted) counts on success.
+    pub fn revert_from_user_message(
+        &mut self,
+        target_index: usize,
+        _session_id: &str,
+    ) -> Result<(usize, usize), String> {
+        let mut files_reverted = 0;
+        let mut files_deleted = 0;
+        let mut files_to_remove: Vec<String> = Vec::new();
+
+        // Collect file paths to process (avoid borrow issues)
+        let paths: Vec<String> = self.files.keys().cloned().collect();
+
+        for path in paths {
+            let file = match self.files.get(&path) {
+                Some(f) => f.clone(),
+                None => continue,
+            };
+
+            // Find the first edit index for this file (to determine if file was created at/after target)
+            let first_edit_index = file
+                .edits
+                .first()
+                .and_then(|e| e.user_message_index)
+                .unwrap_or(0);
+
+            // Collect edits that happened at or after the target message
+            let edits_to_revert: Vec<&FileEdit> = file
+                .edits
+                .iter()
+                .filter(|e| e.user_message_index.unwrap_or(0) >= target_index)
+                .collect();
+
+            if edits_to_revert.is_empty() {
+                // No edits at or after target, nothing to revert for this file
+                continue;
+            }
+
+            // Case 1: File was created at/after target - delete it entirely
+            if first_edit_index >= target_index && file.state == FileState::Created {
+                if Path::new(&path).exists() {
+                    if let Err(e) = fs::remove_file(&path) {
+                        log::warn!("Failed to delete created file {}: {}", path, e);
+                    } else {
+                        files_deleted += 1;
+                    }
+                }
+                files_to_remove.push(path.clone());
+                continue;
+            }
+
+            // Case 2: File was removed at/after target - restore it
+            if file.state == FileState::Removed || file.state == FileState::Deleted {
+                // Check if the removal happened at or after target
+                let removal_at_or_after_target = file.edits.iter().any(|e| {
+                    e.summary == "File removed" && e.user_message_index.unwrap_or(0) >= target_index
+                });
+
+                if removal_at_or_after_target {
+                    if let Some(backup_path) = &file.backup_path {
+                        if let Err(e) = fs::copy(backup_path, &path) {
+                            log::warn!("Failed to restore removed file {}: {}", path, e);
+                        } else {
+                            // Count lines in restored file for accurate stats
+                            let current_line_count = fs::read_to_string(&path)
+                                .map(|c| c.lines().count())
+                                .unwrap_or(0);
+
+                            // Update file state
+                            if let Some(tracked) = self.files.get_mut(&path) {
+                                // Remove edits at or after target (keep only edits before target)
+                                tracked
+                                    .edits
+                                    .retain(|e| e.user_message_index.unwrap_or(0) < target_index);
+
+                                if tracked.edits.is_empty() {
+                                    // No edits remaining - remove from changeset entirely
+                                    files_to_remove.push(path.clone());
+                                } else {
+                                    // Get the earliest user_message_index from remaining edits
+                                    let earliest_idx =
+                                        tracked.edits.first().and_then(|e| e.user_message_index);
+
+                                    // Consolidate remaining edits with accurate stats
+                                    let mut consolidated_edit =
+                                        FileEdit::new("Modified".to_string())
+                                            .with_stats(current_line_count, 0);
+                                    if let Some(idx) = earliest_idx {
+                                        consolidated_edit =
+                                            consolidated_edit.with_user_message_index(idx);
+                                    }
+                                    tracked.edits = vec![consolidated_edit];
+                                    tracked.state = FileState::Modified;
+                                }
+                            }
+                            files_reverted += 1;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Case 3: File was modified at/after target - restore to state before target
+            // Try original backup first (most reliable), then replay edits in reverse
+            if let Some(original_backup) = &file.original_backup_path {
+                // Check if we need to restore to original (all edits are at or after target)
+                let all_edits_at_or_after_target = file
+                    .edits
+                    .iter()
+                    .all(|e| e.user_message_index.unwrap_or(0) >= target_index);
+
+                if all_edits_at_or_after_target && Path::new(original_backup).exists() {
+                    // Restore from original backup
+                    if let Err(e) = fs::copy(original_backup, &path) {
+                        log::warn!(
+                            "Failed to restore from original backup {}: {}",
+                            original_backup,
+                            e
+                        );
+                    } else {
+                        files_to_remove.push(path.clone());
+                        files_reverted += 1;
+                        continue;
+                    }
+                }
+            }
+
+            // Replay edits in reverse for edits at or after target
+            if Path::new(&path).exists() {
+                match fs::read_to_string(&path) {
+                    Ok(mut content) => {
+                        // Get edits at or after target in reverse order
+                        let mut edits_to_reverse: Vec<&FileEdit> = file
+                            .edits
+                            .iter()
+                            .filter(|e| e.user_message_index.unwrap_or(0) >= target_index)
+                            .collect();
+                        edits_to_reverse.reverse();
+
+                        let mut success = true;
+                        for edit in edits_to_reverse {
+                            if let Some(tool_call) = &edit.tool_call {
+                                match Self::apply_reverse_edit(&content, tool_call) {
+                                    Ok(new_content) => content = new_content,
+                                    Err(e) => {
+                                        log::warn!("Failed to reverse edit for {}: {}", path, e);
+                                        success = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if success {
+                            // Count lines in the reverted content for accurate stats
+                            let current_line_count = content.lines().count();
+
+                            if let Err(e) = fs::write(&path, &content) {
+                                log::warn!("Failed to write reverted content to {}: {}", path, e);
+                            } else {
+                                // Update tracked file state - keep only edits before target
+                                if let Some(tracked) = self.files.get_mut(&path) {
+                                    tracked.edits.retain(|e| {
+                                        e.user_message_index.unwrap_or(0) < target_index
+                                    });
+                                    if tracked.edits.is_empty() {
+                                        // No edits remaining - remove from changeset entirely
+                                        files_to_remove.push(path.clone());
+                                    } else {
+                                        // Get the earliest user_message_index from remaining edits
+                                        let earliest_idx = tracked
+                                            .edits
+                                            .first()
+                                            .and_then(|e| e.user_message_index);
+
+                                        // Consolidate remaining edits into a single edit with accurate stats
+                                        // The old individual edit stats are no longer accurate after revert
+                                        let mut consolidated_edit =
+                                            FileEdit::new("Modified".to_string())
+                                                .with_stats(current_line_count, 0);
+                                        if let Some(idx) = earliest_idx {
+                                            consolidated_edit =
+                                                consolidated_edit.with_user_message_index(idx);
+                                        }
+                                        tracked.edits = vec![consolidated_edit];
+                                    }
+                                    // Keep the existing state (Modified) - don't change to Reverted
+                                }
+                                files_reverted += 1;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to read file {} for revert: {}", path, e);
+                    }
+                }
+            }
+        }
+
+        // Remove files from changeset that were fully reverted
+        for path in files_to_remove {
+            self.files.remove(&path);
+            self.order.retain(|p| p != &path);
+        }
+
+        // Adjust selected_index if needed
+        if self.selected_index >= self.order.len() {
+            self.selected_index = self.order.len().saturating_sub(1);
+        }
+
+        Ok((files_reverted, files_deleted))
+    }
+
+    /// Set the original backup path for a tracked file
+    pub fn set_original_backup(&mut self, path: &str, backup_path: String) {
+        if let Some(file) = self.files.get_mut(path)
+            && file.original_backup_path.is_none()
+        {
+            file.original_backup_path = Some(backup_path);
+        }
     }
 
     pub fn files_in_order(&self) -> Vec<&TrackedFile> {

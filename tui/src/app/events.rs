@@ -154,7 +154,13 @@ pub enum InputEvent {
     ToggleSidePanel,
     SidePanelNextSection,
     SidePanelToggleSection,
+
+    // Mouse events
     MouseClick(u16, u16),
+    MouseDragStart(u16, u16),
+    MouseDrag(u16, u16),
+    MouseDragEnd(u16, u16),
+    MouseMove(u16, u16),
 
     // Board tasks events
     RefreshBoardTasks,
@@ -201,6 +207,7 @@ pub enum InputEvent {
     AskUserNextOption,
     AskUserPrevOption,
     AskUserSelectOption,
+    AskUserConfirmQuestion,
     AskUserCustomInputChanged(char),
     AskUserCustomInputBackspace,
     AskUserCustomInputDelete,
@@ -210,10 +217,13 @@ pub enum InputEvent {
 
 #[derive(Debug)]
 pub enum OutputEvent {
+    /// User message with optional tool call results, image parts, and revert index
+    /// The revert index (if Some) indicates that messages should be truncated to that user message index
     UserMessage(
         String,
         Option<Vec<ToolCallResult>>,
         Vec<stakpak_shared::models::integrations::openai::ContentPart>,
+        Option<usize>, // revert_to_user_message_index
     ),
     AcceptTool(ToolCall),
     RejectTool(ToolCall, bool),

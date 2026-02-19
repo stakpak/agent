@@ -34,239 +34,300 @@ Before starting discovery, check if `APPS.md` already exists in the current dire
 
 ## Phase 1: Automated Discovery
 
-Before asking the user anything, launch parallel subagents to gather as much information as possible from the local environment. Each subagent should be scoped to a specific discovery domain.
+Before asking the user anything, discover as much as possible from the local environment. Discovery uses a **two-pass strategy** to minimize wall time: a fast breadth-first sweep to enumerate everything, then targeted deep-dives only on confirmed targets.
 
-**Important context about the current directory:**
-- The current working directory may or may not contain application source code
-- It might be an IaC repo, a monorepo, an ops repo, or just the user's home directory
-- Do NOT assume you have access to application source code — treat whatever is here as one signal among many
-- The user's applications may live in other directories, remote git repos, or running on servers you can't see yet
+**Current directory context:** The working directory may or may not contain app source code — it could be an IaC repo, monorepo, ops repo, or home directory. Treat it as one signal among many.
 
-### Subagent Execution Strategy
+### Pre-Computed Discovery Results
 
-**CRITICAL: All discovery MUST happen inside subagents. Do NOT run discovery commands directly in the foreground.** Running commands directly requires user approval for each one, which defeats the "minimal human interaction" goal. Subagents with sandbox mode run autonomously.
+This prompt is accompanied by a `<discovery_results>` block appended below. It was generated **before you started** by native Rust analyzers running in parallel. It contains:
 
-**How to delegate discovery:**
-- Each discovery domain below should be assigned to one or more **sandboxed subagents** (`enable_sandbox=true`)
-- Grant each subagent the tools it needs: `view` for file reads, `run_command` for CLI commands
-- Sandboxed subagents with `run_command` execute autonomously — no approval popups, no blocking
-- Launch all subagents in parallel in a single tool call batch
+- **Git Repositories**: all repos found under `$HOME` with language, branch, and remote
+- **Cloud Accounts**: AWS profiles (with regions, SSO/assume-role/creds method, account IDs from config), GCP configs/projects, Azure subscriptions, K8s contexts/clusters, Docker registries, other platforms (Vercel, Fly.io, etc.) — all parsed from config files, no CLI calls
+- **Listening Ports**: TCP ports currently in LISTEN state
+- **Crontabs**: user crontabs, systemd timers, launchd agents
+- **Project Markers**: languages, IaC tools, CI/CD configs, Dockerfiles, compose files, monorepo indicators, env files in the working directory
 
-**Tool selection per subagent:**
-- Domains that only read config files (e.g., IaC scanning, CI/CD config detection): grant `view` only — no sandbox needed
-- Domains that run CLI commands (e.g., `kubectl`, `aws`, `docker`, `gcloud`): grant `view` + `run_command` with `enable_sandbox=true`
+**This data is already available — do NOT re-discover it.** Specifically:
+- Do NOT launch subagents to scan for git repos, cloud account configs, K8s contexts, or listening ports — it's already in `<discovery_results>`
+- Do NOT parse `~/.aws/config`, `~/.kube/config`, `~/.azure/azureProfile.json`, or `~/.config/gcloud/` — already done
+- Do NOT run `find` for project markers, Dockerfiles, or IaC files in the working directory — already done
 
-**If Docker is not available** (sandbox requires Docker):
-- Fall back to `view`-only subagents for file-based discovery
-- Tell the user that CLI-based discovery was skipped because Docker is needed for safe autonomous command execution
-- Do NOT fall back to running commands in the foreground — that creates an approval storm
+**What the pre-computed results do NOT cover** (you still need subagents for these):
+- **Live cloud service enumeration** — the pre-computed data only reads config files, it does NOT call `aws`, `gcloud`, or `az` CLIs to list running services. You need subagents for Pass 2c.
+- **Live K8s workload scanning** — contexts are known but `kubectl get deployments` etc. was not run. You need subagents for Pass 2b.
+- **Docker container state** — running containers were not listed. You need a subagent if Docker is relevant.
+- **Deep app analysis** — entry points, dependencies, env var catalogs, health checks. You need subagents for Pass 2a.
+- **CI/CD pipeline deep reads** — file paths are known but contents were not parsed. You need subagents for Pass 2d.
+- **Observability tool detection in non-cwd repos** — only the working directory was scanned for observability markers.
 
-**Breaking down discovery tasks:**
-- Keep each subagent focused on a narrow scope so it completes quickly
-- Prefer many small subagents over few large ones — a subagent that reads 3 config files is better than one that tries to scan everything
-- If a domain is large (e.g., "Cloud Providers" covers AWS + GCP + Azure), split it into separate subagents per provider
+### How to Use the Pre-Computed Data
 
-### Discovery Domains
+1. **Parse `<discovery_results>`** to build your target list immediately — no subagents needed for this step
+2. **Extract cloud accounts** from the Cloud Accounts section. Each AWS profile with an account ID is a confirmed account. Profiles that failed auth should be noted but skipped for service enumeration.
+3. **Extract K8s contexts** from the Kubernetes section. Each context is a cluster to scan in Pass 2.
+4. **Extract git repos** to identify all the user's projects. Cross-reference with the working directory's project markers.
+5. **Skip Pass 1 entirely** for categories already covered. Jump straight to the Pass 1 → Pass 2 transition.
+6. **Launch Pass 2 subagents** based on what the pre-computed data revealed.
 
-Each domain below describes **what a subagent should discover**, not commands for you to run directly. Assign each domain to a subagent as described in the mapping below.
+### Subagent Rules
 
-Launch these discovery subagents **in parallel**:
+**All remaining discovery MUST happen inside subagents.** Running commands in the foreground requires per-command user approval, defeating autonomous discovery.
 
-#### 1. Application Source Code & Structure (HIGHEST PRIORITY)
+- **File-only tasks** (deep app analysis, IaC parsing, CI/CD reading): grant `view` only — no sandbox needed
+- **CLI tasks** (`kubectl`, `aws`, `docker`, `gcloud`): grant `view` + `run_command` with `enable_sandbox=true` for autonomous execution
+- **If Docker is unavailable** (sandbox requires Docker): use `view`-only subagents, tell the user CLI discovery was skipped, do NOT fall back to foreground commands
+- Keep subagents narrowly scoped — many small subagents beat few large ones
+- All subagents use **read-only operations only** — no mutations
+- Tag findings: `[confirmed]` (direct evidence) or `[inferred]` (indirect references)
+- On failure (tool missing, auth expired, cluster unreachable): note the gap and move on
+- **Never read, log, or output actual secret values, tokens, passwords, or private keys** — report existence and type only
 
-This is the most important discovery domain. The goal is to find and deeply understand every application the user runs.
+### Pre-Built Discovery Scripts (for sandboxed subagents)
 
-**Codebase discovery:**
-- Scan recursively for project roots (package managers, build configs, workspace definitions)
-- For monorepos, identify service boundaries (e.g., `apps/`, `services/`, workspace configs)
-- Check git remotes to understand repo structure
-- Read `README.md` files in each project root
+The agent Docker image includes pre-built discovery scripts at `~/discovery/` (full path: `/home/agent/.local/bin/discovery/`). **Sandboxed subagents SHOULD use these scripts for cloud service enumeration and K8s workload scanning** — each script replaces dozens of serial API calls with a single invocation.
 
-**Per-app analysis:**
-- **Entry point**: find what starts the app (server, CLI, worker, scheduled job, serverless handler). Read it to understand: port, framework, middleware
-- **Dependencies**: databases, caches, queues, object storage, external APIs, internal service calls. Grep for connection string patterns, ORM configs, SDK initializations, env var references. **Don't stop at the connection string** — trace each dependency to its actual deployment: if you find a database host/IP, determine *where* it runs (RDS instance? EC2-hosted? ECS service? managed cloud service?). Use cloud CLI tools, IaC definitions, DNS lookups, or running service enumeration to resolve IPs/hostnames to concrete infrastructure. An IP address alone is not a complete finding.
-- **Build**: Dockerfiles, compose files, build scripts (`Makefile`, `justfile`, npm scripts). Note base images, build steps, output artifacts
-- **Health**: health/readiness endpoints, K8s probe configs, Docker HEALTHCHECK, graceful shutdown handlers
-- Catalog every environment variable each app requires — this is critical for deployment
+| Script | For Pass | Usage |
+|--------|----------|-------|
+| `~/discovery/cloud-services-aws.sh [--profile P] [--regions R]` | 2c | AWS compute, data, networking per account |
+| `~/discovery/cloud-services-gcp.sh [--project P]` | 2c | GCP compute, data, networking per project |
+| `~/discovery/cloud-services-azure.sh [--subscription S]` | 2c | Azure compute, data, networking per subscription |
+| `~/discovery/kubernetes-workloads.sh [--context C]` | 2b | Deployments, services, ingress, cronjobs per cluster |
+| `~/discovery/docker-state.sh` | — | Running containers, compose projects |
 
+**Subagent instructions should say:** "Run `~/discovery/<script>.sh` and return the output. If the script is not found, fall back to running the equivalent commands manually."
 
-#### 2. Running Services & Live State
+Scripts are all read-only, handle missing CLIs gracefully (print skip message and exit 0), and produce concise human-readable output.
 
-This answers "what's actually running right now, and how do customers reach it?"
+### Pass 1 → Pass 2 Transition: Scope Confirmation
 
-**Kubernetes workloads** (if any cluster is reachable):
-- List deployments, statefulsets, services, ingress, and cronjobs across all namespaces
-- For each deployment: extract images, env vars, volume mounts, resource requests/limits, probes
-- Check for ConfigMaps and Secrets referenced (names only, never values)
-- Distinguish app services from infrastructure services (ingress controllers, cert-manager, monitoring)
-- Check for service mesh (Istio, Linkerd)
+Since most of Pass 1 is pre-computed, go directly to building the target list — but **ask the user to confirm scope before launching expensive deep-dive subagents.**
 
-**Docker / Compose** (if Docker is available):
-- List running containers and compose services. Distinguish app services from infrastructure (databases, caches, queues).
+1. **Build the target list from `<discovery_results>`**: git repos (= apps), cloud accounts per provider (a single provider may have many), K8s clusters, IaC tools, CI/CD systems
 
-**Cloud compute & backing services** (per available provider — AWS, GCP, Azure):
-- Enumerate running compute: containers (ECS/Cloud Run), functions (Lambda/Cloud Functions), VMs, managed platforms (Beanstalk/App Engine)
-- Enumerate managed backing services: databases (RDS/Cloud SQL), caches (ElastiCache/Redis), queues (SQS/SNS), object storage (S3)
-- Enumerate routing: API gateways, CDN distributions (CloudFront), load balancers
-- Names, types, and regions only — **never output connection strings or credentials**
+2. **Present the inventory and ask the user to confirm scope** using the `ask_user` tool with `multi_select: true`. This is the ONE interaction before deep analysis. Use **three separate multi-select questions** (one per category) so the user can process each group independently.
 
+   For the cloud accounts question, reassure the user that scanning is safe: **"All cloud scanning runs inside a network-sandboxed container — strictly read-only API calls, no write permissions, no mutations. Your infrastructure won't be modified."**
 
-**Service routing & traffic path**:
-- Ingress/gateway configs, API gateways, CDN/edge (CloudFront, Cloudflare), DNS, TLS/cert management, load balancers
+   Pre-select defaults based on signals:
+   - `selected: true` — repos with a Dockerfile or CI/CD config, cloud accounts with "prod"/"staging"/"production" in the name or profile, K8s clusters that are cloud-hosted (EKS/GKE/AKS)
+   - `selected: false` — repos with no Dockerfile AND no CI config AND no recent commits (6+ months), personal/dotfile repos, cloud accounts with "sandbox"/"dev"/"personal"/"test" in the name, local K8s clusters (minikube, kind, docker-desktop, rancher-desktop)
+   - Include the key signal in the label so the user can decide quickly: language, remote URL, last commit age for stale repos, access method for cloud accounts
+   - **Skip the question entirely** if there are ≤5 repos and ≤2 cloud accounts and ≤1 cluster — small enough to scan everything
+   - **Do NOT launch Pass 2 subagents until the user responds** — cloud enumeration is expensive and slow, don't waste it on out-of-scope accounts
+   - Only items returned in the selected values are in scope — everything else is excluded
 
-**Local dev services**:
-- Check listening ports and cross-reference with running Docker containers
+3. **After scope confirmation**, skip dead ends: no AWS profiles → no AWS enumeration. No K8s contexts → no workload scan. User excluded items → skip them.
+4. **Write APPS.md skeleton**: persist the scoped inventory immediately — before deep analysis.
+5. **Plan the subagent fan-out** using the rules below, then launch ALL Pass 2 subagents in a single parallel batch.
 
-**Goal**: For each app, build a complete picture: code repo → build → container image → runtime (EKS, ECS, Lambda, VM, Docker) → location (region/cluster) → endpoints → backing services.
+#### Mandatory Fan-Out Rules for Pass 2
 
-#### 3. Cloud Accounts & Access
+**Cloud service enumeration (2c) MUST be split per account × per category.** This is non-negotiable — a single subagent per account is too slow.
 
-For each provider (AWS, GCP, Azure, DigitalOcean, Cloudflare, Vercel, Netlify, Fly.io, etc.):
-- Read CLI config files (structure only, not secret values) and check relevant env vars
-- If CLI is available: get current identity, list profiles/projects/accounts
-- Check `~/.kube/config` — list contexts, clusters, current context
-- Container registries from `~/.docker/config.json` (entries, not credentials)
-- Helm repos, GitOps tools (ArgoCD, Flux) — CLI availability and manifests
+For each cloud account confirmed in `<discovery_results>`, create **3 separate subagents**:
 
-**Only run read-only commands — no mutations, no resource creation**
+| Subagent | Category | What it enumerates |
+|----------|----------|--------------------|
+| `{account}-compute` | Compute | ECS, Lambda, EC2, Beanstalk (AWS) / Cloud Run, GCE, Functions (GCP) / Web Apps, Function Apps, AKS (Azure) |
+| `{account}-data` | Data & Backing | RDS, ElastiCache, SQS, SNS, S3, DynamoDB (AWS) / Cloud SQL, Memorystore, Pub/Sub, GCS (GCP) / SQL, Redis, Service Bus, Storage (Azure) |
+| `{account}-networking` | Networking | API Gateway, CloudFront, ALB/NLB, Route53 (AWS) / LB, CDN, DNS (GCP) / Front Door, App Gateway, DNS (Azure) |
 
-#### 4. CI/CD & Delivery Pipeline
+**Worked example:** `<discovery_results>` shows 2 AWS profiles (prod account 123456789, staging account 987654321) and 1 GCP project (my-project). You MUST launch **9 subagents** for cloud enumeration alone:
 
-- Check for CI/CD configs in the current directory:
-  - GitHub Actions: `.github/workflows/` — read each workflow to understand: triggers, build steps, test steps, deployment targets, environment references
-  - GitLab CI: `.gitlab-ci.yml`
-  - Jenkins: `Jenkinsfile`
-  - CircleCI: `.circleci/config.yml`
-  - Bitbucket Pipelines: `bitbucket-pipelines.yml`
-  - ArgoCD, Flux, Tekton manifests
-- For each pipeline, trace the full path: code change → build → test → staging deploy → production deploy
-- Identify: deployment targets (which cluster/service/function), deployment strategy (rolling, blue-green, canary), rollback mechanisms
-- Git remote(s) and hosting platform (GitHub, GitLab, Bitbucket)
-- Check for `.env`, `.env.*` files (note their existence only, **never read or log their contents**)
+```
+AWS 123456789 compute    [sandbox, run_command: aws --profile prod ...]
+AWS 123456789 data       [sandbox, run_command: aws --profile prod ...]
+AWS 123456789 networking [sandbox, run_command: aws --profile prod ...]
+AWS 987654321 compute    [sandbox, run_command: aws --profile staging ...]
+AWS 987654321 data       [sandbox, run_command: aws --profile staging ...]
+AWS 987654321 networking [sandbox, run_command: aws --profile staging ...]
+GCP my-project compute   [sandbox, run_command: gcloud --project my-project ...]
+GCP my-project data      [sandbox, run_command: gcloud --project my-project ...]
+GCP my-project networking [sandbox, run_command: gcloud --project my-project ...]
+```
 
-#### 5. Infrastructure as Code
+Plus per-app analysis subagents (2a), per-cluster K8s subagents (2b), CI/CD (2d), IaC (2e), etc. — all in the **same parallel batch**.
 
-- Scan the current directory for:
-  - Terraform: `.tf` files, `.terraform/`, `terraform.tfstate`, `terragrunt.hcl`, `.terraform.lock.hcl`
-  - Pulumi: `Pulumi.yaml`, `Pulumi.*.yaml`
-  - CloudFormation: `template.yaml`, `template.json`, `samconfig.toml`
-  - CDK: `cdk.json`, `cdk.out/`
-  - Ansible: `ansible.cfg`, `playbook*.yml`, `inventory/`
-  - Crossplane, CDKTF, OpenTofu
-- For Terraform: identify providers, backends (S3, GCS, etc.), and module sources from `.tf` files
-- For any IaC found: **focus on what app-related resources are managed** — databases, clusters, queues, networking, DNS records — and which app depends on them
-- Identify what is managed by IaC vs what was created manually (look for resource gaps)
+**Do NOT collapse these into fewer subagents.** The whole point is wall-time reduction through parallelism. One subagent doing all 3 categories for one account takes 3× longer than three subagents doing one category each.
 
-#### 6. Secrets, Config & Environment Management
+### Pass 2: Targeted Deep Analysis
 
-- Check for secrets management tooling:
-  - HashiCorp Vault: `VAULT_ADDR` (existence only), `.vault-token` (existence only)
-  - SOPS: `.sops.yaml`
-  - Sealed Secrets, External Secrets Operator references in k8s manifests
-  - 1Password CLI, Doppler CLI
-  - AWS SSM Parameter Store, AWS Secrets Manager references in IaC/code
-  - GCP Secret Manager references
-- Check `~/.ssh/config` — list host aliases only, **never read private key files**
-- Map which secrets/config each app needs — cross-reference with the env vars cataloged in Domain 1
-- Identify the config injection pattern: env vars at deploy time? Mounted secrets? Config files baked into images?
-- **CRITICAL: Never read, log, or output actual secret values, tokens, passwords, or private keys. Only report the existence and type of secrets management, not the secrets themselves.**
+Launch all applicable subagents in a **single parallel batch**, scoped by Pass 1 results:
 
-#### 7. Observability & Reliability
+#### 2a. Per-App Deep Analysis `[view]` — one subagent per app (or small group)
 
-- Check for monitoring/APM configs (Datadog, Prometheus, New Relic, Splunk, OpenTelemetry) — existence only, not credentials
-- Logging pipeline (Fluentd, Fluent Bit, CloudWatch, ELK)
-- Per-app: does each app emit metrics, structured logs, traces? Where do they go?
-- Alerting: what triggers alerts, who gets paged, escalation path
-- Error tracking: Sentry, Bugsnag, Rollbar configs per app
+Pass each subagent the specific file paths from Pass 1. Analyze:
+- **Entry point**: what starts the app (server, CLI, worker, job, handler) — port, framework, middleware
+- **Dependencies**: databases, caches, queues, storage, external APIs, internal services. Grep for connection strings, ORM configs, SDK inits, env var refs. **Trace each dependency to its deployment** — resolve hostnames/IPs to concrete infrastructure (RDS instance, EC2, ECS service) via IaC, cloud CLI, or DNS. An IP alone is incomplete.
+- **Build**: Dockerfiles, compose files, build scripts — base images, steps, output artifacts
+- **Health**: health/readiness endpoints, K8s probes, HEALTHCHECK, graceful shutdown
+- **Env vars, config & secrets** — catalog every variable the app requires — critical for deployment/debugging
 
-### Subagent-to-Domain Mapping
+  **In source code:** grep for `os.Getenv`, `process.env`, `env::var`, `os.environ`, `ENV[`, `config.get`, `@Value`, `viper.Get`, `Settings(` and similar patterns per language. Check config loader files (e.g., `config.ts`, `settings.py`, `.env.example`, `config/default.json`). Read `.env.example` / `.env.sample` / `.env.template` if they exist.
 
-Use this mapping to create your subagents. Launch them all in a **single parallel batch**.
+  **In Dockerfiles & compose files:** `ENV` directives, `ARG` declarations, `environment:` blocks in compose, `env_file:` references. These often define defaults or required vars not visible in source code.
 
-| Subagent | Domains | Tools | Sandbox |
-|----------|---------|-------|---------|
-| App Code & Structure | Domain 1: source code scan, entry points, dependencies, build, health checks | `view` | No (file reads only) |
-| App Dependencies Deep Scan | Domain 1: database connections, queue configs, external API refs, env vars catalog | `view` | No (file reads only) |
-| Running Services — K8s | Domain 2: K8s workloads, services, ingress, cronjobs, deployment env/probes | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Running Services — Docker | Domain 2: Docker ps, compose ps, listening ports | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Running Services — AWS | Domain 2: ECS, Lambda, EC2, Beanstalk + backing services (RDS, ElastiCache, SQS, SNS, S3) + API Gateway, CloudFront | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Running Services — GCP | Domain 2: Cloud Run, GCE, Cloud Functions, App Engine + backing services (Cloud SQL, Redis) | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Running Services — Azure | Domain 2: Web Apps, Function Apps, Container Instances, AKS + backing services (SQL, Redis) | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Cloud Accounts — AWS | Domain 3: AWS config, profiles, caller identity | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Cloud Accounts — GCP | Domain 3: gcloud config, projects | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Cloud Accounts — Azure | Domain 3: Azure account, subscriptions | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| Cloud Accounts — Other | Domain 3: DO, Cloudflare, Hetzner, Vercel, Netlify, Fly.io, etc. | `view`, `run_command` | ✓ `enable_sandbox=true` |
-| CI/CD & Delivery | Domain 4: Pipelines, workflows, deployment configs, git remotes | `view` | No (file reads only) |
-| IaC Scan | Domain 5: Terraform, Pulumi, CFN, Ansible — focus on app-related resources | `view` | No (file reads only) |
-| Secrets & Config | Domain 6: Vault, SOPS, SSM, env var patterns, config injection | `view` | No (file reads only) |
-| Observability | Domain 7: Monitoring, logging, alerting, error tracking configs per app | `view` | No (file reads only) |
+  **In K8s manifests** (if present in the repo): deployment `env:` and `envFrom:` blocks, ConfigMap `data:` keys, Secret references (names only), Helm `values.yaml` defaults. These are frequently the most complete source of env vars for deployed apps.
 
-**Notes:** Skip cloud-specific subagents if that provider wasn't detected. This mapping is a starting point — combine or split as needed. Cross-reference Domain 1 (source code) against Domain 2 (live state) — discrepancies are high-value findings, flag them with `[issue]`.
+  **In CI/CD configs** (if present in the repo): workflow env blocks, deployment step environment variables, build args passed to Docker. These often contain environment-specific vars (staging URLs, feature flags).
 
-### Subagent Instructions Template
+  **In IaC** (if present in the repo): Terraform `environment` blocks in ECS task definitions / Lambda configs / App Runner, Pulumi config values, CloudFormation `Environment` properties. These define the production-actual variables.
 
-Each subagent should:
-- Use **read-only** operations only (view files, run non-mutating commands)
-- Return structured findings as a summary list
-- Tag each finding with a confidence level:
-  - `[confirmed]` — saw direct evidence (config file exists, CLI returned data, code references it)
-  - `[inferred]` — saw indirect references (mentioned in a config, referenced in IaC, found in comments)
-- Note anything that needs human clarification
-- If a command fails (tool not installed, cluster unreachable, auth expired), note the failure and move on — do not retry or block
+#### 2b. Kubernetes Workload Scan `[view, run_command, sandbox]` — one per cluster
+
+- Deployments, statefulsets, services, ingress, cronjobs across all namespaces
+- Per deployment: images, env vars, volume mounts, resource requests/limits, probes
+- ConfigMaps/Secrets referenced (names only). Service mesh detection (Istio, Linkerd).
+- Distinguish app services from infra (ingress controllers, cert-manager, monitoring)
+
+#### 2c. Cloud Service Enumeration `[view, run_command, sandbox]` — fan out per account × category
+
+Cloud enumeration is the slowest part of discovery. A single subagent per account still serially calls dozens of APIs. **Split each account into parallel subagents by service category:**
+
+| Category | AWS | GCP | Azure |
+|----------|-----|-----|-------|
+| **Compute** | ECS services/tasks, Lambda functions, EC2 instances, Beanstalk envs | Cloud Run, GCE, Cloud Functions, App Engine | Web Apps, Function Apps, Container Instances, AKS |
+| **Data & Backing** | RDS, ElastiCache, SQS, SNS, S3, DynamoDB | Cloud SQL, Memorystore, Pub/Sub, GCS, Firestore | SQL, Redis Cache, Service Bus, Storage, Cosmos DB |
+| **Networking** | API Gateway, CloudFront, ALB/NLB, Route53 zones | Cloud Load Balancing, Cloud CDN, Cloud DNS | Front Door, Application Gateway, Azure DNS |
+
+**Per account**: launch one subagent per category. 4 AWS accounts → 12 subagents (4 × 3 categories), all parallel.
+
+Each subagent receives from Pass 1: account ID, profile/project/subscription, and active regions. If an account has multiple active regions, enumerate across all of them. Output names/types/regions only — **never connection strings or credentials**.
+
+#### 2d. CI/CD Pipeline Analysis `[view]` — one subagent, scoped to detected systems
+
+- Read each workflow/pipeline: triggers, build/test/deploy steps, environment refs, deployment targets
+- Trace: code change → build → test → staging → production
+- Identify: deployment strategy (rolling, blue-green, canary), rollback mechanisms
+
+#### 2e. IaC Resource Analysis `[view]` — one per IaC tool
+
+- **Terraform**: providers, backends, module sources, app-related resources (databases, clusters, queues, DNS)
+- **Pulumi/CDK/CloudFormation/Ansible**: same focus — what app resources are defined/managed
+- Cross-reference with 2a: which app depends on which IaC resource? What's managed vs manually created?
+
+#### 2f. Secrets & Config Deep Analysis `[view]`
+
+- Map per-app: which secrets/config does each app need (cross-ref 2a env vars)
+- Identify injection pattern per app: env vars at deploy time, mounted secrets, baked config files
+- Detail secrets tooling: Vault, SOPS, Sealed Secrets, External Secrets Operator, 1Password CLI, Doppler, AWS SSM/Secrets Manager, GCP Secret Manager
+
+#### 2g. Observability Deep Analysis `[view]`
+
+- Per-app: metrics, structured logs, traces — where do they go?
+- Logging pipeline details, alerting rules, escalation paths, error tracking configs
+
+#### 2h. Service Routing & Traffic Path `[view, run_command, sandbox]`
+
+- Ingress/gateway configs, API gateways, CDN/edge, DNS, TLS/certs, load balancers
+- Local dev: listening ports cross-referenced with Docker containers
+- Complete the per-app picture: code → build → image → runtime → location → endpoints → backing services
+
+**Cross-reference Pass 2a (source code) against Pass 2b/2c (live state)** — discrepancies are high-value findings, flag with `[issue]`.
+
+### Cross-Referencing: Connecting Projects to Cloud Resources
+
+After Pass 2 subagents complete, you have two halves of the picture: **source repos** (from `<discovery_results>` + Pass 2a) and **live cloud resources** (from Pass 2b/2c). Your job is to **map every project to its cloud resources and every cloud resource back to its project.** This is the most valuable output of init — without it, APPS.md is just two disconnected inventories.
+
+**Matching signals** — use ALL of these to link repos ↔ resources:
+
+| Signal | Where to find it | Example |
+|--------|-----------------|---------|
+| **ECR/GCR/ACR image names** | Container registries, ECS task defs, K8s deployments, CI/CD build steps | ECR repo `org/api` → git repo `api/` |
+| **CI/CD deployment targets** | GitHub Actions deploy steps, ArgoCD app manifests, Terraform apply targets | Workflow deploys to ECS service `api-prod` → that's where `api/` runs |
+| **IaC resource names** | Terraform resource names, module paths, variable files | `module "api_db"` in `infra/` → RDS instance `api-db-prod` → used by `api/` |
+| **Naming conventions** | Resource names, tags, prefixes matching repo names | EC2 tag `Name=billing-worker` → git repo `billing/` |
+| **Environment variables** | ECS task def env vars, K8s configmaps, Lambda config | `DATABASE_URL` in ECS task → RDS endpoint → matches what `api/` code reads |
+| **DNS records** | Route53, Cloudflare DNS | `api.example.com` CNAME → ALB → ECS service → `api/` repo |
+| **Security group rules** | Inbound/outbound rules linking services | SG on RDS allows inbound from SG on ECS `api` → confirms `api` uses that DB |
+| **Docker Compose service names** | compose files in repos | `docker-compose.yml` in `api/` defines service `api` with `depends_on: [postgres, redis]` |
+| **K8s labels and selectors** | Deployment labels, service selectors | `app: api` label → matches repo name |
+| **CloudFront origins** | Distribution config | Origin points to ALB or S3 bucket → trace to the app or static site repo |
+| **API Gateway integrations** | API GW routes | Route `/api/*` → Lambda `api-handler` → find the source repo |
+
+**Build a mapping table** as you go:
+
+```
+Repo: ~/projects/api  →  ECR: org/api  →  ECS: api-prod (us-east-1)  →  ALB: api-alb  →  DNS: api.example.com
+                          Depends on: RDS api-db-prod, ElastiCache api-redis, SQS order-queue
+                          Deployed by: .github/workflows/deploy.yml
+                          IaC: infra/modules/api/
+
+Repo: ~/projects/web  →  S3: web-static-prod  →  CloudFront: E1ABC2DEF  →  DNS: www.example.com
+                          Deployed by: .github/workflows/web-deploy.yml
+                          IaC: infra/modules/web/
+
+Cloud resource with NO matching repo:
+  EC2 i-0abc123 (Name: legacy-cron)  →  [unknown — no matching repo found, check instance user-data]
+  ECR: org/billing  →  [unknown — no matching repo, check image labels for git SHA]
+```
+
+**Orphan detection** — flag these explicitly:
+- **Cloud resources with no matching repo**: EC2 instances, ECS services, Lambda functions that don't map to any discovered git repo. These are operational risks (who maintains them? how do you deploy?).
+- **Repos with no matching cloud resources**: git repos that don't appear to be deployed anywhere. Could be libraries, deprecated apps, or apps deployed to an account you don't have access to.
+- **Backing services with no confirmed consumer**: RDS instances, SQS queues, S3 buckets that no app references. Could be orphaned resources costing money.
+
+**This mapping IS the APPS.md.** Don't write APPS.md as separate "here are the repos" and "here are the cloud resources" sections. Each app section should tell the complete story: source → build → deploy → runtime → endpoints → dependencies → observability. The backing services table should cross-reference which apps use each service. The cloud accounts table should note which apps run in each account.
+
+### Pass 3: Automated Resolution of Unknowns
+
+After cross-referencing, you will have gaps — orphan cloud resources, repos with no deployment target, dependencies that don't resolve. **Do NOT ask the user about these yet.** Launch a final round of targeted subagents to resolve them automatically.
+
+**Priority 1 — Resolve orphan cloud resources** (resources with no matching repo):
+- **EC2 instances**: check tags (Name, Service, Purpose, Application), user-data scripts, security group rules (ports reveal what's running), SSM inventory, running processes if SSM is available
+- **ECS services/Lambda functions**: check the container image URI → trace to ECR → check image labels/tags for git SHA or branch → match to a repo
+- **ECR repos with no matching source**: pull the latest image manifest, check labels (`org.opencontainers.image.source`, `com.github.repo`), check CI/CD configs for build references
+- **CloudFront distributions**: check origin domain → trace to ALB/S3/API Gateway → match to the app behind it. Check Route53 for CNAME/alias records pointing to the distribution domain.
+- **RDS/ElastiCache/SQS with no consumer**: check security group inbound rules (what's allowed to connect?), check IaC for references, grep all repos for the resource endpoint/name
+
+**Priority 2 — Resolve unmapped dependencies from code**:
+- **Database hostnames found in code** → check Route53 private hosted zones, EC2 instance tags, IaC resource outputs, ECS task definition environment variables
+- **Service URLs found in code** → DNS lookup, trace through load balancers, check API Gateway routes
+- **Internal service names** → check K8s service discovery, ECS service connect, Docker Compose networks, Consul/etcd if present
+
+**Priority 3 — Resolve deployment gaps** (repos with no cloud target):
+- Check if the repo is a library/package (no Dockerfile, no deploy config → it's a dependency, not a deployed app)
+- Check if it deploys to a platform not yet scanned (Vercel, Netlify, Fly.io — check CI/CD configs for deploy commands)
+- Check if it's deprecated (no commits in 6+ months, archived on GitHub)
+
+**Only after automated resolution fails** should you flag something as a genuine unknown for the user. Mark resolved items as `[resolved]` and genuinely unresolvable items as `[unknown — needs human]` with a note on what you tried.
 
 ---
 
 ## Phase 2: Focused Questions
 
-After all discovery subagents complete, consolidate what you learned and identify gaps. Then ask the user questions covering only what you couldn't determine automatically.
+After all discovery subagents complete (including Pass 3 resolution), consolidate findings and identify gaps. Ask the user **only what you genuinely could not determine programmatically after exhausting automated resolution**.
 
-**Ask at most 3 questions at a time.** Wait for the user's answers before asking the next batch. This keeps the conversation manageable — users get overwhelmed by long numbered lists. Prioritize the highest-impact gaps first.
+**Before asking ANY question, verify you tried:**
+- Cross-referencing IaC, CI/CD, cloud state, and source code
+- Checking DNS records, instance tags, security groups, container labels
+- Tracing hostnames/IPs through Route53, /etc/hosts, or service discovery configs
+- Reading deployment configs for target environments
 
-Structure each batch as a short numbered list. For example:
+If you can answer it with another subagent call, do that instead of asking.
 
-> Based on my scan, I found N services (api, web, worker) running on EKS. A few quick questions:
->
-> 1. Are these all your apps, or are there others in other repos/accounts?
-> 2. Which are customer-facing vs internal?
-> 3. I see `api` references Postgres and Redis — any other backing services I missed?
->
-> Feel free to skip any — I'll note them as unknown and we can revisit later.
+**Use `ask_user` for structured questions.** Prefer `multi_select` for "which of these" questions, single-select for "pick one" questions. Always include a "none/skip" option. Key question types:
 
-Then after the user responds, follow up with the next batch (e.g., runtime gaps, operational context).
+- **Customer-facing classification** — multi-select: which apps are customer-facing vs internal? Pre-select apps with public ingress/CloudFront as `true`.
+- **Missing apps** — single-select with custom text: "Are there apps I missed?" Options: "No, you found everything" / "Yes, there are more" (allow custom input for details).
+- **Orphan resolution** — for cloud resources with no matching repo, ask if they're legacy, active (user will point to source), or deletable. List the specific orphans in the question text.
 
-**Guidelines for questions:**
-- **Maximum 3 questions per batch** — ask, wait, then ask more if needed
-- Maximum 8-10 questions total across all batches — prioritize the most impactful gaps
-- Make questions multiple-choice or yes/no where possible
-- Always give the user an out ("skip if you prefer")
-- Never ask about things you already discovered with high confidence
-- Always ask about: missing apps, customer-facing vs internal, operational context (failure modes, upcoming migrations, manual deploy steps)
+**Guidelines:**
+- Max 3 questions per `ask_user` call, max 8-10 total across the session
+- Always include a "none/skip" option — never force the user to answer
+- Never ask about things discovered with high confidence
+- Prioritize: missing apps > customer-facing classification > orphan resolution > operational context
 
 ---
 
 ## Phase 3: Present Findings
 
-After receiving the user's answers (or if they skip), present findings **one app at a time** for review. Users need to verify each app individually — don't dump the entire landscape at once.
+After receiving the user's answers (or if they skip), present findings for review using `ask_user` for efficient per-app confirmation. Don't dump the entire landscape — let the user confirm in batches.
 
-For each app, present a short summary and ask for confirmation before moving on:
+**Per-app review** — use `ask_user` with one question per app (batch up to 3-4 apps per call). Each question summarizes the app in a single line (name, language, runtime, dependencies, deploy method) with options: "Looks correct" / "Needs corrections" (allow custom text for corrections).
 
-```
-App 1/3: api (Go)
-  Runtime: REST API, EKS prod-eks (us-east-1), 3 replicas
-  Depends on: postgres (RDS), redis (ElastiCache), order-queue (SQS)
-  Entry: cmd/server/main.go :8080 — Deploy: GitHub Actions → ECR → ArgoCD
-
-Does this look right? Any corrections?
-```
-
-After the user confirms (or corrects), present the next app. Once all apps are reviewed, show a brief infrastructure summary:
-
-```
-Traffic: CloudFront → ALB → EKS ingress | Route53, cert-manager
-Infra: AWS 2 accounts, EKS 1.28, Terraform (VPC, EKS, RDS, SQS)
-```
-
-> Anything else I missed before I write this to APPS.md?
+**Final confirmation** — after all apps are reviewed, present a brief infrastructure summary (traffic path, account count, cluster version, IaC tools, app count, backing service count, orphan count) and ask "Ready to write APPS.md?" with options: "Write it" / "Wait, I have more corrections".
 
 ---
 
@@ -362,9 +423,11 @@ Shared infrastructure that apps depend on. Cross-referenced from app dependency 
 
 ## Cloud Accounts
 
-| Provider | Account/Project | Region(s) | Purpose |
-|----------|----------------|-----------|---------|
-| AWS | 123456789 (prod) | us-east-1 | Production workloads |
+| Provider | Account/Project | Region(s) | Access Method | Purpose |
+|----------|----------------|-----------|---------------|---------|
+| AWS | 123456789 (prod) | us-east-1 | SSO — prod-admin profile | Production workloads |
+| AWS | 987654321 (staging) | us-east-1 | SSO — staging profile | Staging/QA |
+| AWS | 111222333 (shared) | us-east-1, eu-west-1 | assume-role from prod | Shared services (DNS, logging) |
 
 ## Kubernetes Clusters
 
@@ -387,6 +450,25 @@ Shared infrastructure that apps depend on. Cross-referenced from app dependency 
 - `[unconfirmed]` = needs investigation — `[issue]` = known issue or stale info
 - Run `stakpak init` to refresh
 
+### Orphan Cloud Resources (no matching repo)
+
+| Resource | Type | Account/Region | Investigation Notes |
+|----------|------|---------------|---------------------|
+| EC2 i-0abc123 | t3.medium | prod / us-east-1 | Tags: Name=legacy-cron. No matching repo. Check user-data. |
+
+### Undeployed Repos (no matching cloud resource)
+
+| Repo | Language | Last Commit | Notes |
+|------|----------|-------------|-------|
+| ~/projects/old-api | Go | 8 months ago | Likely deprecated — no Dockerfile, no CI/CD |
+| ~/projects/shared-lib | TypeScript | 2 days ago | Library — published to npm, not deployed directly |
+
+### Orphan Backing Services (no confirmed consumer)
+
+| Resource | Type | Account/Region | Notes |
+|----------|------|---------------|-------|
+| old-cache | ElastiCache redis | prod / us-east-1 | No app references this endpoint. Possible cost waste. |
+
 ---
 
 *Last refreshed by Stakpak on {date}*
@@ -394,97 +476,64 @@ Shared infrastructure that apps depend on. Cross-referenced from app dependency 
 
 **APPS.md guidelines:**
 - **App sections are the core** — every app gets its own `###` block with dependencies, env vars, runtime, pipeline, and observability
-- Use tables for structured data, bullet lists for everything else
-- Mark unconfirmed items with `[unconfirmed]`
-- Mark potential issues or stale info with `[issue]`
-- Never include secrets, tokens, passwords, or private key material
-- Keep it scannable — a senior engineer should be able to understand the full application landscape in 2 minutes
-- Omit sections entirely if nothing was discovered for that domain (don't leave empty placeholders)
-- **Cross-reference everything** — backing services table should reference which apps use them; app dependency tables should reference the backing services section
-- **Include enough detail to deploy** — someone (or an agent) reading an app's section should have 80% of what they need to get that app running from scratch
+- Tables for structured data, bullet lists for everything else
+- Keep it scannable — full landscape understandable in 2 minutes
+- Omit empty sections entirely (no placeholders)
+- **Cross-reference everything** — backing services ↔ app dependencies
+- **Include enough detail to deploy** — 80% of what's needed to run each app from scratch
+- Never include secrets, tokens, or private key material
 
 ---
 
-## Phase 5: Next Steps — Configure Stakpak Autopilot
+## Phase 5: Autopilot Recommendation
 
-After writing `APPS.md`, the primary next step is **setting up Stakpak Autopilot** to continuously monitor and maintain the discovered applications. Manual one-off checks are useful for immediate issues, but autopilot ensures ongoing health.
+After writing APPS.md, present a concrete autopilot plan. **Don't sell autopilot generically — show the user the specific risks you found and how each schedule prevents them.**
 
-### Default Recommendation: Stakpak Autopilot
-
-Propose autopilot schedules **derived entirely from your discovery findings**. Analyze what you found (apps, backing services, infrastructure, delivery pipelines, observability gaps) and design schedules that address the specific risks and operational needs of *this* environment.
-
-> Now that I understand your apps, let's set up `stakpak autopilot` to keep them running and healthy. Based on what I found, here are the schedules I recommend:
-
-### Designing Schedules from Discovery
-
-**Your discovery findings are the input. Schedules are the output.** For each significant finding, ask: "What could go wrong here, and how would I detect it early?"
-
-Think about:
-- **What's critical?** Customer-facing apps, databases with no replicas, single points of failure — these need frequent checks
-- **What's fragile?** Services with known issues, manual deployment steps, missing health checks — these need monitoring
-- **What's drifting?** IaC-managed resources, multi-environment setups, config that's injected at deploy time — these need periodic reconciliation
-- **What's expiring?** Certificates, secrets, credentials without rotation policies — these need proactive alerting
-- **What's invisible?** Services without observability, backing services with no health checks, costs with no tracking — these need visibility
-
-Don't limit yourself to generic categories. If you discovered something unique about the environment (e.g., a cron job that processes payments nightly, a staging environment that's 3 versions behind prod, a manually-created CloudFront distribution), design a schedule specifically for it.
-
-**Schedule frequency should match risk:** A customer-facing API health check might run every 5 minutes; a weekly cost review is fine for non-critical spend tracking. Let the criticality of what you found drive the cadence.
-
-**Always include an `appsmd-refresh` schedule** — APPS.md is the agent's core knowledge base and must stay current. Re-run discovery periodically to add new services, update changed configs, and mark anything no longer found as `[unreachable]` or `[removed]` (never delete entries, let the user review).
-
-### Checks: Keep Autopilot Deterministic
-
-Every schedule should use a **check script** (`--check`) whenever the trigger condition can be verified deterministically. Checks are lightweight shell scripts that run *before* waking the agent — if the check passes/fails (based on `trigger_on`), the agent runs; otherwise it sleeps. This avoids wasting agent steps (and RAM) on situations that don't need attention.
-
-- Use `--trigger-on failure` (default) to wake the agent only when the check detects a problem
-- Use `--trigger-on success` to wake the agent only when a precondition is met
-- Write checks as simple scripts: curl a health endpoint, query a DB, check a file age, etc.
-- Store checks in `~/.stakpak/checks/` on the target machine
-- Use the `create` tool with remote path format (`user@host:/path`) to write check scripts to remote servers
-
-### Schedule Design Guidelines
-
-- **Stagger cron minutes** — never schedule multiple jobs at `:00`. Spread them across the hour to avoid resource spikes from concurrent agent runs
-- **Name schedules descriptively** — the name should tell you what it monitors at a glance (e.g., `payments-db-backup` not `backup-check-1`)
-- **Prefer checks over always-run** — if you can write a 5-line shell script that detects the problem, use `--check` so the agent only wakes when needed
-- **Start lean** — propose the minimum set that covers the crown jewels and highest-risk findings. The user can always add more later
-
-### Proposal Format
-
-Present schedules as a concrete plan the user can approve. Lead with the highest-priority items (based on what you discovered), and explain *why* each schedule exists by connecting it to a specific finding:
+Present it as a single table mapping **risk → schedule → what it prevents**:
 
 ```
-Based on what I found, here's what I'd set up:
+Based on what I discovered, here are the risks I'd monitor:
 
-1. **api-health** (every 3 min) — Your API is customer-facing with no redundancy
-   Check: curl /health on api.example.com → only wake agent if it's down
-2. **db-backup-verify** (daily 6am) — RDS instance has no cross-region replica
-   Check: verify last snapshot < 24h old → only wake agent if backup is stale
-3. **staging-drift** (daily 9:15am) — Staging is 2 minor versions behind prod
-   No check — always run, compare deployed versions across environments
-4. **apps-refresh** (weekly Monday 9am) — Keep APPS.md current
-   No check — always run, re-discover and update the application registry
+| Risk | Schedule | Frequency | What it does |
+|------|----------|-----------|-------------|
+| api is customer-facing, single ALB, no health monitoring | `api-health` | every 3 min | Curls /health → wakes agent only if down |
+| RDS prod-db has no cross-region replica | `db-backup-verify` | daily 6am | Checks last snapshot age → alerts if >24h stale |
+| Staging is 2 minor versions behind prod | `staging-drift` | daily 9:15am | Compares deployed versions across environments |
+| CloudFront distribution was created manually (not in IaC) | `infra-drift` | weekly Wed 8am | Runs terraform plan → alerts on unexpected diff |
+| TLS cert on api.example.com expires in 23 days | `cert-expiry` | daily 7am | Checks cert expiry → alerts if <14 days remaining |
+| APPS.md goes stale as infra changes | `apps-refresh` | weekly Mon 9am | Re-runs discovery, updates APPS.md |
 
-Want me to configure these? I'll set up the schedules and optionally connect Slack for alerts.
+All checks run in a network sandbox (read-only, no mutations).
+Want me to set these up? I can also connect Slack/Discord for alerts.
 ```
+
+**Rules for building this table:**
+- Every row must trace back to a specific discovery finding — no generic "check health" without naming the app and why it's at risk
+- Prioritize: customer-facing services first, then data loss risks, then drift, then housekeeping
+- Use `--check` scripts with `--trigger-on failure` wherever possible so the agent only wakes when something is wrong
+- Stagger cron minutes across the hour (never `:00`)
+- Keep it to 4-8 schedules — start lean, the user can add more later
+- Always include `apps-refresh` as the last row
+
+### Check Scripts
+
+Write check scripts as simple shell one-liners or short scripts. Store them in `~/.stakpak/checks/` on the target machine. Use the `create` tool with remote path format for remote servers.
+
+Examples:
+- Health check: `curl -sf https://api.example.com/health`
+- Backup age: `aws rds describe-db-snapshots --db-instance-identifier prod-db --query 'DBSnapshots[-1].SnapshotCreateTime' | ...`
+- Cert expiry: `echo | openssl s_client -connect api.example.com:443 2>/dev/null | openssl x509 -noout -enddate | ...`
 
 ### After User Approval
-
-If the user approves, configure autopilot:
 
 1. Add each schedule using `stakpak autopilot schedule add`
 2. If Slack/Discord integration is desired, configure the channel
 3. Start autopilot with `stakpak up`
-4. Verify schedules are active with `stakpak autopilot status`
+4. Verify with `stakpak autopilot status`
 
-### Fallback: Immediate One-Off Tasks
+### Fallback
 
-Only offer manual/one-off approaches if:
-- The user explicitly declines autopilot setup
-- The user needs something done *right now* before autopilot is configured
-- The task is truly one-time (e.g., "generate an architecture diagram")
-
-Even then, frame it as: "I'll do this now, and we can also schedule it in autopilot for ongoing monitoring."
+Only offer manual/one-off approaches if the user explicitly declines autopilot or needs something done immediately. Even then: "I'll do this now, and we can also schedule it in autopilot for ongoing monitoring."
 
 ---
 
@@ -492,12 +541,11 @@ Even then, frame it as: "I'll do this now, and we can also schedule it in autopi
 
 1. **Apps are the unit of understanding** — every piece of infrastructure exists to serve an application. If you find a database, the question is "which app uses this?" not "what databases exist?"
 2. **Understand enough to deploy** — for each app: what does it do, what does it depend on, how do I build it, how do I run it, how do I know it's healthy, how do I ship a new version?
-3. **Code is the source of truth** — IaC, configs, and live state can drift. When they conflict, note the discrepancy. Source code is the most reliable signal.
-4. **Speed over perfection** — get 80% of the picture fast, refine later. APPS.md is a living document.
-5. **Maximize autonomy, minimize interruptions** — automate discovery, batch questions, never run CLI commands in the foreground (use sandboxed subagents). If Docker is unavailable, skip CLI discovery and note the gap. Respect the user's time — if they skip questions, move on.
-6. **Never expose secrets** — treat all credentials, tokens, and keys as radioactive
-7. **Be honest about confidence** — clearly distinguish `[confirmed]` facts from `[inferred]` ones
-8. **Parallelize aggressively** — use subagents for all independent discovery tasks. Read-only by default — discovery must not modify infrastructure state (except writing APPS.md at the end).
-9. **Fail gracefully** — if a discovery subagent fails or times out, note the gap and continue with what you have
-10. **Don't assume source code access** — the current directory is just one signal. If it lacks app source code, extract app identities from IaC/manifests and flag that source-level analysis requires access to the source repos.
-11. **Think like an operator** — you will be maintaining these apps. Frame every finding as "will I need this at 3am?" Build APPS.md incrementally for large environments.
+3. **Code is the source of truth** — IaC, configs, and live state can drift. When they conflict, note the discrepancy.
+4. **Breadth first, depth second** — enumerate everything fast (Pass 1), then deep-dive only on confirmed targets (Pass 2). Never block enumeration waiting for analysis.
+5. **Maximize autonomy, minimize interruptions** — use sandboxed subagents for CLI discovery, batch questions, respect skipped answers. If Docker is unavailable, note the gap and continue with file-based discovery.
+6. **Never expose secrets** — report existence and type only, never values
+7. **Parallelize aggressively** — Pass 1 in one batch, Pass 2 in one batch. Fan out per account/cluster/app. Never serialize what can run in parallel.
+8. **Fail gracefully** — if a subagent fails, note the gap and continue with what you have
+9. **Don't assume source code access** — the current directory is just one signal. Extract app identities from IaC/manifests when source isn't available.
+10. **Think like an operator** — you will be maintaining these apps. Frame every finding as "will I need this at 3am?" Build APPS.md incrementally.

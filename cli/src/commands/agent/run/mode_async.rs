@@ -1,6 +1,6 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
+    add_agents_md, add_apps_md, add_local_context, add_skills, build_plan_mode_instructions,
     build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
@@ -13,14 +13,14 @@ use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
-};
+use stakpak_api::models::Skill;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
@@ -33,8 +33,8 @@ pub struct RunAsyncConfig {
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+    pub skills: Option<Vec<Skill>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -82,13 +82,20 @@ impl AsyncAutoApproveConfig {
     fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
         let mut tools = HashMap::new();
 
+        // Normalize profile auto-approve tools (mapping legacy names)
+        let normalized_profile_tools: Option<Vec<String>> = auto_approve_tools.map(|pt| {
+            pt.iter()
+                .map(|s| backward_compatibility_mapping(s).to_string())
+                .collect()
+        });
+
         // Auto-approve tools (read-only, safe):
         for name in &[
             "view",
             "generate_password",
             "search_docs",
             "search_memory",
-            "read_rulebook",
+            "load_skill",
             "local_code_search",
             "get_all_tasks",
             "get_task_details",
@@ -113,9 +120,9 @@ impl AsyncAutoApproveConfig {
         }
 
         // Apply profile overrides
-        if let Some(profile_tools) = auto_approve_tools {
-            for tool_name in profile_tools {
-                tools.insert(tool_name.clone(), AsyncApprovePolicy::Auto);
+        if let Some(profile_tools) = &normalized_profile_tools {
+            for name in profile_tools {
+                tools.insert(name.clone(), AsyncApprovePolicy::Auto);
             }
         }
 
@@ -127,9 +134,12 @@ impl AsyncAutoApproveConfig {
             && let Some(session_tools) = session_config.get("tools").and_then(|t| t.as_object())
         {
             for (name, policy_val) in session_tools {
+                let mapped_name = backward_compatibility_mapping(name);
+
                 // Don't override profile-specified tools
-                if auto_approve_tools
-                    .map(|pt| pt.contains(name))
+                if normalized_profile_tools
+                    .as_ref()
+                    .map(|pt| pt.iter().any(|s| s == mapped_name))
                     .unwrap_or(false)
                 {
                     continue;
@@ -139,7 +149,7 @@ impl AsyncAutoApproveConfig {
                     Some("Never") => AsyncApprovePolicy::Never,
                     _ => AsyncApprovePolicy::Prompt,
                 };
-                tools.insert(name.clone(), policy);
+                tools.insert(mapped_name.to_string(), policy);
             }
         }
 
@@ -150,18 +160,8 @@ impl AsyncAutoApproveConfig {
         }
     }
 
-    /// Strip MCP server prefix from tool name (e.g., "stakpak__run_command" -> "run_command").
-    fn strip_prefix(name: &str) -> &str {
-        if let Some(pos) = name.find("__")
-            && pos + 2 < name.len()
-        {
-            return &name[pos + 2..];
-        }
-        name
-    }
-
     fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
-        let stripped = Self::strip_prefix(tool_name);
+        let stripped = strip_tool_name(tool_name);
         self.tools.get(stripped).unwrap_or(&self.default_policy)
     }
 
@@ -417,10 +417,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 .await
                 .map_err(|e| e.to_string())?;
 
-        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
-            && chat_messages.is_empty()
+        let (user_input, _skills_text) = if chat_messages.is_empty()
+            && let Some(skills) = &config.skills
         {
-            add_rulebooks(&user_input, rulebooks)
+            add_skills(&user_input, skills)
         } else {
             (user_input, None)
         };

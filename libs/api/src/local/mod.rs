@@ -8,6 +8,7 @@
 pub(crate) mod context_managers;
 pub mod hooks;
 pub mod migrations;
+pub mod skills;
 pub mod storage;
 
 #[cfg(test)]

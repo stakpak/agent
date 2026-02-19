@@ -231,9 +231,9 @@ impl From<SearchMemoryRequest> for ApiSearchMemoryRequest {
     }
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ReadRulebookRequest {
+pub struct LoadSkillRequest {
     #[schemars(
-        description = "The URI of the rulebook to read. This should be a valid URI pointing to a rulebook document."
+        description = "The URI of the skill to load. For local skills this is the file path; for remote skills (rulebooks) this is the rulebook URI."
     )]
     pub uri: String,
 }
@@ -373,33 +373,63 @@ If your goal requires understanding multiple distinct topics or technologies, ma
     }
 
     #[tool(
-        description = "Read and retrieve the contents of a rulebook using its URI. This tool allows you to access and read rulebooks that contain play books, guidelines, policies, or rules defined by the user."
+        description = "Load a skill's full instructions by its URI. Use this to retrieve the complete content of any skill listed in the <available_skills> block. For local skills the URI is a file path; for remote skills the URI is the rulebook URI. This tool is auto-approved and does not require user confirmation."
     )]
-    pub async fn read_rulebook(
+    pub async fn load_skill(
         &self,
-        Parameters(ReadRulebookRequest { uri }): Parameters<ReadRulebookRequest>,
+        Parameters(LoadSkillRequest { uri }): Parameters<LoadSkillRequest>,
     ) -> Result<CallToolResult, McpError> {
+        // Try loading as a local skill first (URI is a file path to SKILL.md)
+        let path = std::path::Path::new(&uri);
+        if path.exists() && path.is_file() {
+            // Restrict to configured skill directories
+            let is_allowed = self.skill_directories.iter().any(|dir| {
+                if let (Ok(abs_path), Ok(abs_dir)) =
+                    (std::fs::canonicalize(path), std::fs::canonicalize(dir))
+                {
+                    abs_path.starts_with(abs_dir)
+                } else {
+                    false
+                }
+            });
+
+            if is_allowed {
+                match stakpak_api::local::skills::load_skill_from_path(path) {
+                    Ok((skill_dir, body)) => {
+                        let response =
+                            format!("Skill directory: {}\n\n{}", skill_dir.display(), body);
+                        return Ok(CallToolResult::success(vec![Content::text(response)]));
+                    }
+                    Err(e) => {
+                        return Ok(CallToolResult::error(vec![
+                            Content::text("LOAD_SKILL_ERROR"),
+                            Content::text(format!("Failed to load local skill: {}", e)),
+                        ]));
+                    }
+                }
+            }
+        }
+
+        // Fall back to remote rulebook fetch
         let client = match self.get_client() {
             Some(client) => client,
             None => {
                 return Ok(CallToolResult::error(vec![
-                    Content::text("CLIENT_NOT_FOUND"),
-                    Content::text("Client not found"),
+                    Content::text("LOAD_SKILL_ERROR"),
+                    Content::text("Skill not found locally and no API client available"),
                 ]));
             }
         };
 
-        let response = match client.get_rulebook_by_uri(&uri).await {
-            Ok(rulebook) => vec![Content::text(rulebook.content)],
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("READ_RULEBOOK_ERROR"),
-                    Content::text(format!("Failed to read rulebook: {}", e)),
-                ]));
-            }
-        };
-
-        Ok(CallToolResult::success(response))
+        match client.get_rulebook_by_uri(&uri).await {
+            Ok(rulebook) => Ok(CallToolResult::success(vec![Content::text(
+                rulebook.content,
+            )])),
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("LOAD_SKILL_ERROR"),
+                Content::text(format!("Failed to load skill: {}", e)),
+            ])),
+        }
     }
 }
 

@@ -21,6 +21,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::utils::strip_tool_name;
 
 /// Approval status for a tool call
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,7 +41,7 @@ pub struct ApprovalAction {
 
 impl ApprovalAction {
     pub fn new(tool_call: ToolCall) -> Self {
-        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.function.name);
 
         let label = if tool_name == "dynamic_subagent_task" {
             // Parse description and sandbox flag from arguments for a meaningful label
@@ -430,8 +431,8 @@ impl ApprovalBar {
         // Render content lines (tabs/buttons) with spacing between rows
         let mut current_y = area.y + 1;
         for (line_idx, tab_spans) in lines.iter().enumerate() {
-            if current_y >= area.y + area.height.saturating_sub(3) {
-                break; // Leave room for empty line, footer and bottom border
+            if current_y >= area.y + area.height.saturating_sub(2) {
+                break; // Leave room for footer and bottom border
             }
 
             // Add empty line before each button row (except the first)
@@ -447,7 +448,7 @@ impl ApprovalBar {
                 );
                 current_y += 1;
 
-                if current_y >= area.y + area.height.saturating_sub(3) {
+                if current_y >= area.y + area.height.saturating_sub(2) {
                     break;
                 }
             }
@@ -472,22 +473,8 @@ impl ApprovalBar {
             current_y += 1;
         }
 
-        // Empty line between buttons and footer
-        let empty_line_y = current_y;
-        if empty_line_y < area.y + area.height.saturating_sub(2) {
-            let empty_line = Line::from(vec![
-                Span::styled("│", Style::default().fg(border_color)),
-                Span::raw(" ".repeat(inner_width)),
-                Span::styled("│", Style::default().fg(border_color)),
-            ]);
-            f.render_widget(
-                Paragraph::new(empty_line),
-                Rect::new(area.x, empty_line_y, area.width, 1),
-            );
-        }
-
-        // Footer line with controls
-        let footer_y = empty_line_y + 1;
+        // Footer line with controls (directly after buttons, no empty line)
+        let footer_y = current_y;
         if footer_y < area.y + area.height.saturating_sub(1) {
             // Build footer controls with same style as approval popup
             let footer_controls = vec![

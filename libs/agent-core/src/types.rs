@@ -83,7 +83,7 @@ const DEFAULT_AUTO_APPROVE_TOOLS: &[&str] = &[
     "generate_password",
     "search_docs",
     "search_memory",
-    "read_rulebook",
+    "load_skill",
     "local_code_search",
     "get_all_tasks",
     "get_task_details",

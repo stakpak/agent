@@ -5,8 +5,10 @@ use std::process::Command;
 // ── Stakpak agent container constants ──────────────────────────────────────
 
 /// The container image used for sandboxed agent sessions.
+/// Override at runtime with STAKPAK_AGENT_IMAGE env var for local testing.
 pub fn stakpak_agent_image() -> String {
-    format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION"))
+    std::env::var("STAKPAK_AGENT_IMAGE")
+        .unwrap_or_else(|_| format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION")))
 }
 
 /// Default volume mounts for the stakpak agent container.

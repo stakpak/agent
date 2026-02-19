@@ -45,8 +45,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Calculate the required height for the input area based on content
-    let input_area_width = main_area.width.saturating_sub(4) as usize;
-    let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
+    // Subtract 2 for borders (matching render_multiline_input's content_area.width)
+    let input_area_width = main_area.width.saturating_sub(2) as usize;
+    let input_lines = calculate_input_lines(state, input_area_width);
     let input_height = (input_lines + 2) as u16;
     let margin_height = 1;
     let dropdown_showing = state.show_helper_dropdown
@@ -149,6 +150,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
+    // Store message area geometry for click/selection coordinate mapping
+    // These values are used by event handlers to convert mouse coordinates to line indices
+    state.message_area_y = message_area.y;
+    state.message_area_x = padded_message_area.x;
+    state.message_area_height = message_area.height;
+
     render_messages(
         f,
         state,
@@ -244,6 +251,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
+    // Render message action popup
+    if state.show_message_action_popup {
+        crate::services::message_action_popup::render_message_action_popup(f, state);
+    }
+
     // Render model switcher
     if state.show_model_switcher {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
@@ -254,6 +266,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
 
+    // Render toast notification (highest z-index, always on top)
+    render_toast(f, state);
+
     // Render "existing plan found" modal
     if state.existing_plan_prompt.is_some() {
         render_existing_plan_modal(f, state);
@@ -263,6 +278,58 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.show_plan_review {
         crate::services::plan_review::render_plan_review(f, state, f.area());
     }
+}
+
+/// Render toast notification in top-right corner
+fn render_toast(f: &mut Frame, state: &mut AppState) {
+    // Check and clear expired toast
+    if let Some(toast) = &state.toast
+        && toast.is_expired()
+    {
+        state.toast = None;
+        return;
+    }
+
+    let Some(_toast) = &state.toast else {
+        return;
+    };
+
+    let text = "Copied to clipboard";
+    let padding_x = 1;
+    let text_width = text.len() + (padding_x * 2);
+    let screen = f.area();
+
+    // Box dimensions (add 2 for border on each side)
+    let box_width = (text_width + 2) as u16;
+    let box_height = 3u16; // border + text + border
+
+    // Position in top-right corner with some margin
+    let x = screen.width.saturating_sub(box_width + 2);
+    let y = 1;
+
+    let area = Rect::new(x, y, box_width, box_height);
+
+    // Clear background
+    f.render_widget(ratatui::widgets::Clear, area);
+
+    // Create block with cyan border (matching our popups)
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    // Centered text
+    let text_line = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+        text,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )]);
+
+    let paragraph = Paragraph::new(text_line)
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
+
+    f.render_widget(paragraph, area);
 }
 
 fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
@@ -372,11 +439,16 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Calculate scroll position - ensure it doesn't exceed max_scroll
+    // IMPORTANT: Write the computed scroll back to state so that event handlers
+    // (hover highlighting, text selection, click detection) use the same scroll
+    // value that was used for rendering. Without this, stay_at_bottom causes
+    // state.scroll to diverge from the actual rendered scroll.
     let scroll = if state.stay_at_bottom {
         max_scroll
     } else {
         state.scroll.min(max_scroll)
     };
+    state.scroll = scroll;
 
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
@@ -390,7 +462,72 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         }
     }
 
-    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    // Apply hover highlighting for user messages
+    let visible_lines =
+        if let Some(hover_row) = state.hover_row {
+            let row_in_message_area =
+                (hover_row as usize).saturating_sub(state.message_area_y as usize);
+
+            // Check if hover is within message area
+            if row_in_message_area < height {
+                let absolute_line = scroll + row_in_message_area;
+
+                // Check if this line is a user message
+                let is_user_message = state.line_to_message_map.iter().any(
+                    |(start, end, _, is_user, _, _user_idx)| {
+                        *is_user && absolute_line >= *start && absolute_line < *end
+                    },
+                );
+
+                if is_user_message {
+                    // Highlight this line with subtle dark background
+                    visible_lines
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, line)| {
+                            if i == row_in_message_area {
+                                Line::from(
+                                    line.spans
+                                        .into_iter()
+                                        .map(|span| {
+                                            ratatui::text::Span::styled(
+                                                span.content,
+                                                span.style.bg(Color::Indexed(240)).fg(Color::White),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            } else {
+                                line
+                            }
+                        })
+                        .collect()
+                } else {
+                    visible_lines
+                }
+            } else {
+                visible_lines
+            }
+        } else {
+            visible_lines
+        };
+
+    // Apply selection highlighting if active
+    let visible_lines = if state.selection.active {
+        crate::services::text_selection::apply_selection_highlight(
+            visible_lines,
+            &state.selection,
+            scroll,
+        )
+    } else {
+        visible_lines
+    };
+
+    // NOTE: Don't use Paragraph::wrap() here - lines are already pre-wrapped to the correct width
+    // in get_wrapped_message_lines_cached(). Using wrap() would cause ratatui to potentially
+    // re-wrap lines, creating a mismatch between the cached line count and rendered line count,
+    // which breaks text selection coordinate mapping.
+    let message_widget = Paragraph::new(visible_lines);
     f.render_widget(message_widget, area);
 }
 
@@ -484,7 +621,8 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
         }
     }
 
-    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    // NOTE: Don't use Paragraph::wrap() - lines are already pre-wrapped
+    let message_widget = Paragraph::new(visible_lines);
     f.render_widget(message_widget, area);
 }
 
@@ -498,13 +636,18 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
             Style::default().fg(Color::DarkGray)
         });
 
-    // Create content area inside the block
+    // Create content area inside the block (border takes 1 char on each side)
+    // The TextArea internally accounts for prefix width when wrapping,
+    // so we only subtract 2 for the borders here.
     let content_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
-        width: area.width.saturating_sub(4),
+        width: area.width.saturating_sub(2),
         height: area.height.saturating_sub(2),
     };
+
+    // Store the content area for mouse click handling
+    state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);
