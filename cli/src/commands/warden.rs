@@ -404,6 +404,7 @@ mod tests {
             anonymous_id: None,
             collect_telemetry: None,
             editor: None,
+            recent_models: Vec::new(),
         }
     }
 

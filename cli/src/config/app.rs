@@ -56,6 +56,8 @@ pub struct AppConfig {
     pub collect_telemetry: Option<bool>,
     /// Editor command
     pub editor: Option<String>,
+    /// Recently used model IDs (most recent first)
+    pub recent_models: Vec<String>,
 }
 
 impl AppConfig {
@@ -161,6 +163,7 @@ impl AppConfig {
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
+            recent_models: profile_config.recent_models,
         }
     }
 
@@ -465,8 +468,7 @@ impl AppConfig {
     /// the config file with 0600 permissions.
     pub fn save_provider_auth(&self, provider: &str, auth: ProviderAuth) -> Result<(), String> {
         let config_path = PathBuf::from(&self.config_path);
-        let mut config_file =
-            Self::load_config_file(&config_path).map_err(|e| format!("{}", e))?;
+        let mut config_file = Self::load_config_file(&config_path).map_err(|e| format!("{}", e))?;
 
         // Get or create the profile
         let profile = config_file
@@ -479,12 +481,13 @@ impl AppConfig {
             .providers
             .entry(provider.to_string())
             .or_insert_with(|| {
-                ProviderConfig::empty_for_provider(provider)
-                    .unwrap_or_else(|| ProviderConfig::Custom {
+                ProviderConfig::empty_for_provider(provider).unwrap_or_else(|| {
+                    ProviderConfig::Custom {
                         api_key: None,
                         api_endpoint: String::new(),
                         auth: None,
-                    })
+                    }
+                })
             });
 
         // Set the auth
@@ -943,6 +946,7 @@ impl From<AppConfig> for ProfileConfig {
             provider: None,
             providers: config.providers,
             model: config.model,
+            recent_models: config.recent_models,
             // Legacy fields - not used in new format
             openai: None,
             anthropic: None,

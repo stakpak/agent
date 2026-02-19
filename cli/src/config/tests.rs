@@ -63,6 +63,7 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        recent_models: Vec::new(),
     }
 }
 
@@ -429,6 +430,7 @@ fn save_writes_profile_and_settings() {
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        recent_models: Vec::new(),
     };
 
     config.save().unwrap();
@@ -554,12 +556,16 @@ fn test_rulebook_filtering_include_patterns() {
 
     let filtered = config.filter_rulebooks(rulebooks);
     assert_eq!(filtered.len(), 2);
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/security/auth"));
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://internal.company.com/team1/stable"));
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/security/auth")
+    );
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://internal.company.com/team1/stable")
+    );
 }
 
 #[test]
@@ -583,12 +589,16 @@ fn test_rulebook_filtering_exclude_patterns() {
 
     let filtered = config.filter_rulebooks(rulebooks);
     assert_eq!(filtered.len(), 2);
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/security/stable"));
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://internal.company.com/team1/stable"));
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/security/stable")
+    );
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://internal.company.com/team1/stable")
+    );
 }
 
 #[test]
@@ -612,12 +622,16 @@ fn test_rulebook_filtering_include_tags() {
 
     let filtered = config.filter_rulebooks(rulebooks);
     assert_eq!(filtered.len(), 2);
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/r1"));
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/r3"));
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/r1")
+    );
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/r3")
+    );
 }
 
 #[test]
@@ -641,12 +655,16 @@ fn test_rulebook_filtering_exclude_tags() {
 
     let filtered = config.filter_rulebooks(rulebooks);
     assert_eq!(filtered.len(), 2);
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/r1"));
-    assert!(filtered
-        .iter()
-        .any(|r| r.uri == "https://rules.stakpak.dev/r3"));
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/r1")
+    );
+    assert!(
+        filtered
+            .iter()
+            .any(|r| r.uri == "https://rules.stakpak.dev/r3")
+    );
 }
 
 // =============================================================================

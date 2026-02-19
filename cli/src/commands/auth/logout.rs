@@ -203,6 +203,10 @@ pub fn handle_logout(
                 if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
                     if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
                         provider_config.clear_auth();
+                        // Update readonly profile if we modified the default profile
+                        if target_profile == "default" {
+                            config_file.update_readonly();
+                        }
                         if let Err(e) = config_file.save_to(&config_path) {
                             return Err(format!("Failed to save config: {}", e));
                         }
@@ -227,6 +231,10 @@ pub fn handle_logout(
                 if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
                     if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
                         provider_config.clear_auth();
+                        // Update readonly profile if we modified the default profile
+                        if target_profile == "default" {
+                            config_file.update_readonly();
+                        }
                         if config_file.save_to(&config_path).is_ok() {
                             removed = true;
                         }

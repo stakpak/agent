@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::path::Path;
 
+use super::STAKPAK_API_ENDPOINT;
 use super::profile::ProfileConfig;
 use super::types::{OldAppConfig, Settings};
-use super::STAKPAK_API_ENDPOINT;
 
 /// The complete configuration file structure.
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -163,6 +163,7 @@ pub async fn run_interactive(
         let api_endpoint = ctx.api_endpoint.clone();
         let has_stakpak_key = api_key.is_some();
         let config_path = ctx.config_path.clone();
+        let profile_name = ctx.profile_name.clone();
         let _mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
         let mut rulebooks = config.rulebooks.clone();
@@ -202,6 +203,7 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+        let recent_models_for_tui = ctx.recent_models.clone();
 
         // Use  init prompt (loaded at module level as const)
         let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
@@ -227,6 +229,7 @@ pub async fn run_interactive(
                 auth_display_info_for_tui,
                 init_prompt_content_for_tui,
                 send_init_prompt_on_start,
+                recent_models_for_tui,
             )
             .await
             .map_err(|e| e.to_string())
@@ -431,12 +434,34 @@ pub async fn run_interactive(
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::SwitchToModel(new_model) => {
-                        // Transform model for Stakpak routing if using Stakpak API
-                        model = if has_stakpak_key {
-                            stakpak_api::transform_for_stakpak(new_model)
+                        // Transform model for Stakpak routing if using Stakpak API,
+                        // but only if it's not already a Stakpak model (which already
+                        // has the correct ID format from list_models)
+                        model = if has_stakpak_key && new_model.provider != "stakpak" {
+                            stakpak_api::transform_for_stakpak(new_model.clone())
                         } else {
-                            new_model
+                            new_model.clone()
                         };
+
+                        // Save to recent models in config and update TUI state
+                        if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                            && let Some(profile) = config_file.profiles.get_mut(&profile_name)
+                        {
+                            // Use the original model ID (before Stakpak transform)
+                            profile.add_recent_model(&new_model.id);
+                            // Clone recent models before saving (to avoid borrow conflict)
+                            let updated_recent_models = profile.recent_models.clone();
+                            // Best-effort save - don't fail the switch if save fails
+                            let _ = config_file.save_to(&config_path);
+
+                            // Update TUI's recent models state for instant feedback
+                            let _ = send_input_event(
+                                &input_tx,
+                                InputEvent::RecentModelsUpdated(updated_recent_models),
+                            )
+                            .await;
+                        }
+
                         continue;
                     }
                     OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
@@ -1081,6 +1106,17 @@ pub async fn run_interactive(
                             InputEvent::AvailableModelsLoaded(available_models),
                         )
                         .await?;
+                        continue;
+                    }
+                    OutputEvent::SaveRecentModels(recent_models) => {
+                        // Save recent models list to config
+                        if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                            && let Some(profile) = config_file.profiles.get_mut(&profile_name)
+                        {
+                            profile.recent_models = recent_models;
+                            // Best-effort save
+                            let _ = config_file.save_to(&config_path);
+                        }
                         continue;
                     }
                     OutputEvent::PlanModeActivated(inline_prompt) => {

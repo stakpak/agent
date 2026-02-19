@@ -117,6 +117,7 @@ pub fn update(
             | InputEvent::RulebooksLoaded(_)
             | InputEvent::CurrentRulebooksLoaded(_)
             | InputEvent::AvailableModelsLoaded(_)
+            | InputEvent::RecentModelsUpdated(_)
             | InputEvent::Quit
             | InputEvent::AttemptQuit => {
                 // Allow these events through
@@ -472,15 +473,17 @@ pub fn update(
                 return;
             }
             InputEvent::Up | InputEvent::ScrollUp => {
-                // Navigate up in filtered model list
+                // Navigate up in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.available_models,
                     state.model_switcher_mode,
                     &state.model_switcher_search,
                 );
-                if !filtered.is_empty() {
-                    // Find current position in filtered list
-                    let current_pos = filtered
+                let nav_order =
+                    crate::services::model_switcher::get_navigation_order(state, &filtered);
+                if !nav_order.is_empty() {
+                    // Find current position in navigation order
+                    let current_pos = nav_order
                         .iter()
                         .position(|&idx| idx == state.model_switcher_selected)
                         .unwrap_or(0);
@@ -488,32 +491,34 @@ pub fn update(
                     let new_pos = if current_pos > 0 {
                         current_pos - 1
                     } else {
-                        filtered.len() - 1
+                        nav_order.len() - 1
                     };
-                    state.model_switcher_selected = filtered[new_pos];
+                    state.model_switcher_selected = nav_order[new_pos];
                 }
                 return;
             }
             InputEvent::Down | InputEvent::ScrollDown => {
-                // Navigate down in filtered model list
+                // Navigate down in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.available_models,
                     state.model_switcher_mode,
                     &state.model_switcher_search,
                 );
-                if !filtered.is_empty() {
-                    // Find current position in filtered list
-                    let current_pos = filtered
+                let nav_order =
+                    crate::services::model_switcher::get_navigation_order(state, &filtered);
+                if !nav_order.is_empty() {
+                    // Find current position in navigation order
+                    let current_pos = nav_order
                         .iter()
                         .position(|&idx| idx == state.model_switcher_selected)
                         .unwrap_or(0);
                     // Move down (with wrap)
-                    let new_pos = if current_pos < filtered.len() - 1 {
+                    let new_pos = if current_pos < nav_order.len() - 1 {
                         current_pos + 1
                     } else {
                         0
                     };
-                    state.model_switcher_selected = filtered[new_pos];
+                    state.model_switcher_selected = nav_order[new_pos];
                 }
                 return;
             }
@@ -524,29 +529,33 @@ pub fn update(
             InputEvent::InputChanged(c) | InputEvent::ModelSwitcherSearchInputChanged(c) => {
                 // Add character to search
                 state.model_switcher_search.push(c);
-                // Reset selection to first filtered result
+                // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.available_models,
                     state.model_switcher_mode,
                     &state.model_switcher_search,
                 );
-                state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+                let nav_order =
+                    crate::services::model_switcher::get_navigation_order(state, &filtered);
+                state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::InputBackspace | InputEvent::ModelSwitcherSearchBackspace => {
                 // Remove character from search
                 state.model_switcher_search.pop();
-                // Reset selection to first filtered result
+                // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.available_models,
                     state.model_switcher_mode,
                     &state.model_switcher_search,
                 );
-                state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+                let nav_order =
+                    crate::services::model_switcher::get_navigation_order(state, &filtered);
+                state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
-            InputEvent::AvailableModelsLoaded(_) => {
-                // Let this fall through to the main handler
+            InputEvent::AvailableModelsLoaded(_) | InputEvent::RecentModelsUpdated(_) => {
+                // Let these fall through to the main handler
             }
             _ => {
                 // Consume other events to prevent side effects
@@ -1082,7 +1091,7 @@ pub fn update(
             popup::handle_show_model_switcher(state, output_tx);
         }
         InputEvent::AvailableModelsLoaded(models) => {
-            popup::handle_available_models_loaded(state, models);
+            popup::handle_available_models_loaded(state, models, output_tx);
         }
         InputEvent::ModelSwitcherSelect => {
             popup::handle_model_switcher_select(state, output_tx);
@@ -1094,6 +1103,9 @@ pub fn update(
         | InputEvent::ModelSwitcherSearchBackspace => {
             // These are handled in the model switcher intercept block above
             // If we reach here, the model switcher is not visible, so ignore
+        }
+        InputEvent::RecentModelsUpdated(recent_models) => {
+            state.recent_models = recent_models;
         }
 
         // Side panel handlers
@@ -1338,6 +1350,7 @@ mod tests {
             auth_display_info: (None, None, None),
             board_agent_id: None,
             init_prompt_content: None,
+            recent_models: Vec::new(),
         })
     }
 

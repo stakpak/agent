@@ -75,6 +75,11 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
+    /// Recently used models (most recent first, max 5)
+    /// Stores model IDs which may include provider prefix for Stakpak API routing
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_models: Vec<String>,
+
     // =========================================================================
     // Legacy model fields - kept for backward compatibility during migration
     // These are read but deprecated (will migrate to 'model' field)
@@ -111,6 +116,8 @@ impl ProfileConfig {
                 providers: default.providers.clone(),
                 // Copy unified model field only (legacy fields are not copied)
                 model: default.model.clone(),
+                // Copy recent models
+                recent_models: default.recent_models.clone(),
                 // Enable warden for readonly sandboxed execution
                 warden: Some(WardenConfig::readonly_profile()),
                 // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
@@ -373,11 +380,37 @@ impl ProfileConfig {
                 .model
                 .clone()
                 .or_else(|| other.and_then(|config| config.model.clone())),
+            // Recent models - use self's if non-empty, otherwise other's
+            recent_models: if !self.recent_models.is_empty() {
+                self.recent_models.clone()
+            } else {
+                other
+                    .map(|config| config.recent_models.clone())
+                    .unwrap_or_default()
+            },
             // Legacy fields - kept for reading only, not merged
             eco_model: None,
             smart_model: None,
             recovery_model: None,
         }
+    }
+
+    /// Maximum number of recent models to store
+    const MAX_RECENT_MODELS: usize = 5;
+
+    /// Add a model to the recent models list.
+    ///
+    /// The model is added to the front of the list. If the model already exists,
+    /// it's moved to the front. The list is truncated to MAX_RECENT_MODELS entries.
+    pub fn add_recent_model(&mut self, model_id: &str) {
+        // Remove if already exists (we'll re-add at front)
+        self.recent_models.retain(|id| id != model_id);
+
+        // Add to front
+        self.recent_models.insert(0, model_id.to_string());
+
+        // Truncate to max size
+        self.recent_models.truncate(Self::MAX_RECENT_MODELS);
     }
 }
 

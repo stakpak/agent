@@ -6,11 +6,11 @@
 //! - Sessions section: List of previous sessions to resume
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Tabs},
-    Frame,
 };
 use std::sync::OnceLock;
 

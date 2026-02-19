@@ -864,7 +864,11 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
 }
 
 /// Handle available models loaded event
-pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) {
+pub fn handle_available_models_loaded(
+    state: &mut AppState,
+    models: Vec<Model>,
+    output_tx: &Sender<OutputEvent>,
+) {
     // Sort models by provider to match render order in model_switcher.rs
     // "stakpak" provider always first, then alphabetically
     let mut sorted_models = models;
@@ -879,6 +883,41 @@ pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) 
         }
     });
     state.available_models = sorted_models;
+
+    // Add the current/default model to recent_models if not already there
+    // This ensures the initial model appears in Recent section
+    let model_to_add = if let Some(current) = &state.current_model {
+        // Use current_model if set (from previous switch)
+        Some(current.id.clone())
+    } else {
+        // Use the configured default model (state.model)
+        // Try to find matching model in available_models first (for correct ID format)
+        let default_model_id = &state.model.id;
+        if let Some(matched) = state.available_models.iter().find(|m| {
+            // Match by ID or by ID suffix (for Stakpak routing: "anthropic/claude-..." matches "claude-...")
+            m.id == *default_model_id || m.id.ends_with(&format!("/{}", default_model_id))
+        }) {
+            Some(matched.id.clone())
+        } else if !default_model_id.is_empty() {
+            // For local providers with custom models not in available_models,
+            // use the configured model ID directly
+            Some(default_model_id.clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(model_id) = model_to_add
+        && !state.recent_models.contains(&model_id)
+    {
+        // Add to front of recent list
+        state.recent_models.insert(0, model_id);
+        // Keep max 5
+        state.recent_models.truncate(5);
+
+        // Persist to config so it survives model switches
+        let _ = output_tx.try_send(OutputEvent::SaveRecentModels(state.recent_models.clone()));
+    }
 
     // Pre-select current model if available and it's in the filtered list
     let filtered = crate::services::model_switcher::filter_models(

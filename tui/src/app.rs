@@ -173,6 +173,8 @@ pub struct AppState {
     pub current_model: Option<Model>,
     pub model_switcher_mode: ModelSwitcherMode,
     pub model_switcher_search: String,
+    /// Recently used model IDs (most recent first, for display in model switcher)
+    pub recent_models: Vec<String>,
 
     // ========== Command Palette State ==========
     pub show_command_palette: bool,
@@ -335,6 +337,8 @@ pub struct AppStateOptions<'a> {
     pub board_agent_id: Option<String>,
     /// Content of init prompt
     pub init_prompt_content: Option<String>,
+    /// Recently used model IDs (most recent first)
+    pub recent_models: Vec<String>,
 }
 
 impl AppState {
@@ -378,6 +382,7 @@ impl AppState {
             auth_display_info,
             board_agent_id,
             init_prompt_content,
+            recent_models,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -524,6 +529,7 @@ impl AppState {
             current_model: None,
             model_switcher_mode: ModelSwitcherMode::default(),
             model_switcher_search: String::new(),
+            recent_models,
             // Command palette initialization
             show_command_palette: false,
             command_palette_selected: 0,
