@@ -639,31 +639,39 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     )]));
 
     // Session ID line with copy shortcut
-    let session_display = if state.session_id.is_empty() {
-        "N/A".to_string()
-    } else {
-        truncate_session_id(&state.session_id)
-    };
-
     // Check if we recently copied (within 2 seconds)
     let recently_copied = state
         .session_id_copied_at
         .map(|t| t.elapsed().as_secs() < 2)
         .unwrap_or(false);
 
+    // Calculate available width for session ID
+    // Fixed parts: LEFT_PADDING (2) + "Session " (8) + suffix + right padding (2)
+    // Use unicode width for suffix since ✓ is multi-byte but displays as 1 char
+    let suffix = if recently_copied { "  ✓" } else { "  ctrl+x" };
+    let suffix_width = unicode_width::UnicodeWidthStr::width(suffix);
+    let fixed_width = LEFT_PADDING.len() + 8 + suffix_width + 2;
+    let available_width = (area.width as usize).saturating_sub(fixed_width);
+
+    let session_display = if state.session_id.is_empty() {
+        "N/A".to_string()
+    } else {
+        truncate_session_id(&state.session_id, available_width)
+    };
+
     let session_line = if recently_copied {
         Line::from(vec![
             Span::styled(LEFT_PADDING, Style::default()),
             Span::styled("Session ", Style::default().fg(Color::DarkGray)),
             Span::styled(session_display, Style::default().fg(Color::Green)),
-            Span::styled("  ✓", Style::default().fg(Color::Green)),
+            Span::styled(suffix, Style::default().fg(Color::Green)),
         ])
     } else {
         Line::from(vec![
             Span::styled(LEFT_PADDING, Style::default()),
             Span::styled("Session ", Style::default().fg(Color::DarkGray)),
             Span::styled(session_display, Style::default().fg(Color::White)),
-            Span::styled("  ctrl+x", Style::default().fg(Color::DarkGray)),
+            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
         ])
     };
     lines.push(session_line);
@@ -709,20 +717,28 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-/// Truncate a session ID to show first 6 and last 4 characters with ellipsis
-fn truncate_session_id(id: &str) -> String {
-    if id.len() <= 12 {
+/// Truncate a session ID to fit within max_width, keeping last 4 chars and reducing the front
+fn truncate_session_id(id: &str, max_width: usize) -> String {
+    let id_len = id.chars().count();
+
+    // If it fits, return as-is
+    if id_len <= max_width {
         return id.to_string();
     }
-    let start: String = id.chars().take(6).collect();
-    let end: String = id
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+
+    // We want to keep last 4 chars + "..." = 7 chars minimum
+    // If max_width < 7, just show what we can from the end
+    if max_width < 7 {
+        // Show just the last max_width chars
+        return id.chars().skip(id_len.saturating_sub(max_width)).collect();
+    }
+
+    // Keep last 4 chars, use remaining space for start chars
+    let end_chars = 4;
+    let start_chars = max_width.saturating_sub(end_chars + 3); // -3 for "..."
+
+    let start: String = id.chars().take(start_chars).collect();
+    let end: String = id.chars().skip(id_len.saturating_sub(end_chars)).collect();
     format!("{}...{}", start, end)
 }
 
