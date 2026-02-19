@@ -42,14 +42,19 @@
 ## Slack
 
 1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps) with Socket Mode enabled
-2. Add OAuth scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`, `reactions:write`
-3. Generate an **App-Level Token** (scope: `connections:write`) and install the app to your workspace
-4. Add the channel:
+2. **OAuth & Permissions** → add Bot Token Scopes:
+   `app_mentions:read`, `channels:history`, `channels:read`, `chat:write`,
+   `groups:history`, `groups:read`, `im:history`, `im:read`,
+   `mpim:history`, `mpim:read`, `reactions:read`, `reactions:write`
+3. **Event Subscriptions** → subscribe to bot events:
+   `message.channels`, `message.groups`, `message.im`, `app_mention`
+4. Generate an **App-Level Token** (scope: `connections:write`) and install the app to your workspace
+5. Add the channel:
    ```
-   stakpak autopilot channel add slack --token "<BOT_TOKEN>" --app-token "<APP_TOKEN>"
+   stakpak autopilot channel add slack --bot-token "<BOT_TOKEN>" --app-token "<APP_TOKEN>"
    ```
-5. Start: `stakpak --profile <PROFILE> up`
-6. Config (`~/.stakpak/autopilot.toml`):
+6. Start: `stakpak --profile <PROFILE> up`
+7. Config (`~/.stakpak/autopilot.toml`):
    ```toml
    [channels.slack]
    bot_token = "xoxb-..."

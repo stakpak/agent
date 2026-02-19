@@ -8,15 +8,15 @@ mod constants;
 mod event;
 mod event_loop;
 mod terminal;
-mod view;
-
 pub mod utils;
-
-pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
+mod view;
+pub use app::{
+    AppState, ExistingPlanPrompt, InputEvent, LoadingOperation, OutputEvent, SessionInfo,
+};
 pub use event_loop::{RulebookConfig, run_tui};
 pub use ratatui::style::Color;
 
-mod services;
+pub mod services;
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;

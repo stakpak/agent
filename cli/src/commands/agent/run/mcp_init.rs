@@ -14,7 +14,9 @@ use crate::utils::network;
 use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{
+    EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server,
+};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::collections::HashMap;
@@ -35,6 +37,8 @@ pub struct McpInitConfig {
     pub enable_subagents: bool,
     /// Optional list of allowed tool names (filters tools if specified)
     pub allowed_tools: Option<Vec<String>>,
+    /// Configuration inherited by subagents (profile, config path)
+    pub subagent_config: SubagentConfig,
 
     // --- proxy config (secret redaction is handled exclusively by the proxy) ---
     /// Whether to redact secrets in tool responses
@@ -50,6 +54,7 @@ impl Default for McpInitConfig {
             enable_mtls: true,
             enable_subagents: true,
             allowed_tools: None,
+            subagent_config: SubagentConfig::default(),
             redact_secrets: true,
             privacy_mode: false,
         }
@@ -134,6 +139,7 @@ async fn start_mcp_server(
     let bind_address = binding.address.clone();
     let enabled_tools = mcp_config.enabled_tools.clone();
     let enable_subagents = mcp_config.enable_subagents;
+    let subagent_config = mcp_config.subagent_config.clone();
 
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
@@ -143,6 +149,7 @@ async fn start_mcp_server(
             tool_mode: ToolMode::Combined,
             enable_subagents,
             certificate_chain: cert_chain,
+            subagent_config,
             server_tls_config: None,
         };
 

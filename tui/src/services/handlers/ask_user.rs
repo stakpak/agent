@@ -237,39 +237,6 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     refresh_ask_user_block(state);
 }
 
-/// Quick select an option by number (1-9)
-pub fn handle_ask_user_quick_select(
-    state: &mut AppState,
-    num: usize,
-    output_tx: &Sender<OutputEvent>,
-) {
-    if !state.show_ask_user_popup {
-        return;
-    }
-
-    // Can't quick select on Submit tab
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
-        return;
-    }
-
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    let total_options = get_total_options(current_q);
-
-    // num is 1-indexed, convert to 0-indexed
-    let option_idx = num.saturating_sub(1);
-
-    if option_idx < total_options {
-        state.ask_user_selected_option = option_idx;
-        // If it's a regular option (not custom), select it immediately
-        if option_idx < current_q.options.len() {
-            handle_ask_user_select_option(state, output_tx);
-        } else {
-            // Custom option — just focus it, refresh to show selection
-            refresh_ask_user_block(state);
-        }
-    }
-}
-
 /// Handle character input for custom answer
 pub fn handle_ask_user_custom_input_changed(state: &mut AppState, c: char) {
     if !state.show_ask_user_popup {
@@ -896,41 +863,6 @@ mod tests {
             }
             _ => panic!("Expected AskUserResponse event"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_quick_select() {
-        let mut state = create_test_state();
-        let questions = create_test_questions();
-        let tool_call = create_test_tool_call();
-        let (output_tx, _output_rx) = mpsc::channel(10);
-
-        handle_show_ask_user_popup(&mut state, tool_call, questions);
-
-        // Quick select option 2 (index 1 = "prod")
-        handle_ask_user_quick_select(&mut state, 2, &output_tx);
-
-        // Should have selected and submitted
-        assert!(state.ask_user_answers.contains_key("Environment"));
-        let answer = &state.ask_user_answers["Environment"];
-        assert_eq!(answer.answer, "prod");
-    }
-
-    #[tokio::test]
-    async fn test_quick_select_custom_just_focuses() {
-        let mut state = create_test_state();
-        let questions = create_test_questions();
-        let tool_call = create_test_tool_call();
-        let (output_tx, _output_rx) = mpsc::channel(10);
-
-        handle_show_ask_user_popup(&mut state, tool_call, questions);
-
-        // Quick select option 3 (custom option)
-        handle_ask_user_quick_select(&mut state, 3, &output_tx);
-
-        // Should just focus, not submit (need to type first)
-        assert!(!state.ask_user_answers.contains_key("Environment"));
-        assert_eq!(state.ask_user_selected_option, 2); // Custom option
     }
 
     #[tokio::test]

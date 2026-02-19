@@ -57,6 +57,7 @@ pub enum CommandAction {
     NewSession,
     ShowUsage,
     SwitchModel,
+    PlanMode,
 }
 
 impl CommandAction {
@@ -72,6 +73,7 @@ impl CommandAction {
             CommandAction::NewSession => Some("/new"),
             CommandAction::ShowUsage => Some("/usage"),
             CommandAction::SwitchModel => Some("/model"),
+            CommandAction::PlanMode => Some("/plan"),
             // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
@@ -188,6 +190,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Ctrl+M",
             CommandAction::SwitchModel,
         ),
+        Command::new(
+            "Plan Mode",
+            "Enter plan mode — research and draft before executing",
+            "/plan",
+            CommandAction::PlanMode,
+        ),
     ]
 }
 
@@ -269,6 +277,10 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         HelperCommand {
             command: "/shortcuts",
             description: "Show keyboard shortcuts",
+        },
+        HelperCommand {
+            command: "/plan",
+            description: "Enter plan mode: /plan [optional prompt]",
         },
         HelperCommand {
             command: "/init",
@@ -470,6 +482,47 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
+        "/plan" => {
+            // Already in plan mode? Show a message instead
+            if ctx.state.plan_mode_active {
+                crate::services::helper_block::push_styled_message(
+                    ctx.state,
+                    " Already in plan mode. Use ctrl+p to review the plan.",
+                    ratatui::style::Color::Yellow,
+                    "⚠ ",
+                    ratatui::style::Color::Yellow,
+                );
+                ctx.state.text_area.set_text("");
+                ctx.state.show_helper_dropdown = false;
+                return Ok(());
+            }
+
+            // Parse optional inline prompt: "/plan deploy auth service" → Some("deploy auth service")
+            let input = ctx.state.input().trim().to_string();
+            let inline_prompt = input
+                .strip_prefix("/plan")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+
+            // Check for existing plan — show modal if one exists
+            let session_dir = std::path::Path::new(".stakpak/session");
+            if crate::services::plan::plan_file_exists(session_dir) {
+                let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
+                ctx.state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
+                    inline_prompt,
+                    metadata: meta,
+                });
+            } else {
+                let _ = ctx
+                    .output_tx
+                    .try_send(OutputEvent::PlanModeActivated(inline_prompt));
+            }
+            Ok(())
+        }
 
         "/init" => {
             //  init prompt is always available (embedded at compile time)
@@ -578,6 +631,22 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
+
+    // Clear plan mode state
+    state.plan_mode_active = false;
+    state.plan_metadata = None;
+    state.plan_content_hash = None;
+    state.plan_previous_status = None;
+    state.plan_review_auto_opened = false;
+    state.show_plan_review = false;
+    state.plan_review_content.clear();
+    state.plan_review_lines.clear();
+    state.plan_review_comments = None;
+    state.plan_review_resolved_anchors.clear();
+    state.plan_review_show_comment_modal = false;
+    state.plan_review_comment_input.clear();
+    state.plan_review_selected_comment = None;
+    state.plan_review_modal_kind = None;
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {

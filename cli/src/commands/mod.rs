@@ -671,8 +671,9 @@ editor = "nano"
 /// Re-execute stakpak with a specific profile
 fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path::Path>) {
     let mut cmd = Command::new("stakpak");
-    cmd.arg("--profile").arg(profile);
-
+    if !profile.is_empty() {
+        cmd.arg("--profile").arg(profile);
+    }
     if let Some(config_path) = config_path {
         cmd.arg("--config").arg(config_path);
     }

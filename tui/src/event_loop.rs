@@ -565,6 +565,37 @@ pub async fn run_tui(
                    // Update shell cursor blink (toggles every ~5 ticks = 500ms)
                    crate::services::shell_popup::update_cursor_blink(&mut state);
                    state.poll_file_search_results();
+
+                   // Poll plan file and handle status transitions
+                   if let Some((old_status, new_status)) = state.poll_plan_file() {
+                       use crate::services::plan::PlanStatus;
+                       match new_status {
+                           PlanStatus::PendingReview => {
+                               // Auto-open plan review when agent sets status to pending_review
+                               if !state.plan_review_auto_opened {
+                                   state.plan_review_auto_opened = true;
+                                   crate::services::plan_review::open_plan_review(&mut state);
+                                   // Show system message
+                                   crate::services::helper_block::push_styled_message(
+                                       &mut state,
+                                       " Plan ready for review. Opening reviewer... (ctrl+p to toggle)",
+                                       ratatui::style::Color::Cyan,
+                                       ">> ",
+                                       ratatui::style::Color::Cyan,
+                                   );
+                               }
+                           }
+                           PlanStatus::Approved => {
+                               // External approval (e.g. agent set it) — no extra state to update
+                               let _ = old_status; // suppress unused warning
+                           }
+                           PlanStatus::Drafting => {
+                               // New revision — reset auto-open flag so next pending_review triggers it
+                               state.plan_review_auto_opened = false;
+                           }
+                       }
+                   }
+
                    terminal.draw(|f| view(f, &mut state))?;
                }
            }

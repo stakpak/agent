@@ -11,7 +11,7 @@ on:
     # - v1.2.3-beta.1: beta/prerelease
     tags: ["v*"]
   # pull_request:
-  #   branches: [main]
+  #   branches: [main, beta]
 
 permissions:
   contents: write
@@ -53,12 +53,11 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact_name: stakpak-linux-x86_64
             features: --features jemalloc
-          # TODO: re-enable once libsql SIGSEGV on aarch64-musl exit is resolved
-          # - os: ubuntu-22.04-arm
-          #   target: aarch64-unknown-linux-musl
-          #   artifact_name: stakpak-linux-aarch64
-          #   features: --features jemalloc
-          #   docker: rust:1.91-alpine3.21
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact_name: stakpak-linux-aarch64
+            features: --features jemalloc
+            docker: rust:1.91-alpine3.21
           - os: macos-15
             target: x86_64-apple-darwin
             artifact_name: stakpak-darwin-x86_64
@@ -100,24 +99,37 @@ jobs:
           key: docker-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: docker-cargo-${{ matrix.target }}-
 
-      # Alpine Linux is musl-native — GCC has full C11 atomics support
-      # without the broken musl-gcc wrapper that Ubuntu's musl-tools uses.
-      # This is the same approach Turso uses for libsql aarch64-musl builds.
+      # Alpine is required for aarch64-musl: Ubuntu's musl-gcc wrapper lacks
+      # C11 atomics support needed by jemalloc and libsql-ffi on ARM.
       - name: Build and test in Alpine container
         if: matrix.docker
-        uses: addnab/docker-run-action@v3
-        with:
-          image: ${{ matrix.docker }}
-          options: >-
-            --user 0:0
-            -v ${{ github.workspace }}:/build
-            -w /build
-            -v /home/runner/.cargo-docker/registry:/usr/local/cargo/registry
-            -v /home/runner/.cargo-docker/git:/usr/local/cargo/git
-          run: |
-            apk add --no-cache gcc musl-dev make
-            cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
-            cargo test --target ${{ matrix.target }} ${{ matrix.features }}
+        run: |
+          mkdir -p ~/.cargo-docker/registry ~/.cargo-docker/git
+          docker run --rm \
+            --user 0:0 \
+            -v "${{ github.workspace }}:/build" \
+            -w /build \
+            -v "$HOME/.cargo-docker/registry:/usr/local/cargo/registry" \
+            -v "$HOME/.cargo-docker/git:/usr/local/cargo/git" \
+            -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+            ${{ matrix.docker }} sh -c '
+              set -euo pipefail
+              apk add --no-cache gcc musl-dev make binutils pkgconfig openssl-dev openssl-libs-static ca-certificates vim
+              cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
+              cargo test --target ${{ matrix.target }} ${{ matrix.features }}
+
+              # Verify jemalloc overrides musl malloc
+              BINARY="target/${{ matrix.target }}/release/stakpak"
+              if nm "$BINARY" 2>/dev/null | grep -q " W malloc$"; then
+                echo "FAIL: jemalloc not overriding musl malloc — SQLite will SIGSEGV"
+                exit 1
+              fi
+              echo "OK: jemalloc override verified"
+            '
+
+      - name: Fix Docker cache permissions
+        if: matrix.docker
+        run: sudo chown -R $(id -u):$(id -g) ~/.cargo-docker
 
       - name: Build
         if: ${{ !matrix.docker }}
@@ -125,7 +137,17 @@ jobs:
 
       - name: Run tests
         if: ${{ !matrix.docker }}
-        run: cargo test --target ${{ matrix.target }}
+        run: cargo test --target ${{ matrix.target }} ${{ matrix.features }}
+
+      - name: Verify jemalloc overrides musl malloc
+        if: endsWith(matrix.target, 'linux-musl') && !matrix.docker
+        run: |
+          BINARY="target/${{ matrix.target }}/release/stakpak"
+          if nm "$BINARY" 2>/dev/null | grep -q " W malloc$"; then
+            echo "FAIL: jemalloc not overriding musl malloc — SQLite will SIGSEGV"
+            exit 1
+          fi
+          echo "OK: jemalloc override verified"
 
       - name: Prepare binary
         if: startsWith(github.ref, 'refs/tags/')
@@ -160,7 +182,7 @@ jobs:
         with:
           files: |
             stakpak-linux-x86_64/stakpak-linux-x86_64.tar.gz
-            # stakpak-linux-aarch64/stakpak-linux-aarch64.tar.gz
+            stakpak-linux-aarch64/stakpak-linux-aarch64.tar.gz
             stakpak-darwin-x86_64/stakpak-darwin-x86_64.tar.gz
             stakpak-darwin-aarch64/stakpak-darwin-aarch64.tar.gz
             stakpak-windows-x86_64/stakpak-windows-x86_64.zip

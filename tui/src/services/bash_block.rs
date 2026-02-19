@@ -2797,9 +2797,6 @@ pub fn render_ask_user_block(
                     Span::styled("←/→", Style::default().fg(Color::DarkGray)),
                     Span::styled(" questions", Style::default().fg(Color::Cyan)),
                     Span::raw(" · "),
-                    Span::styled("1-9", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" quick", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
                     Span::styled("Tab", Style::default().fg(Color::DarkGray)),
                     Span::styled(" scroll", Style::default().fg(Color::Cyan)),
                 ]

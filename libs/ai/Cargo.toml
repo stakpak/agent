@@ -21,6 +21,7 @@ default = ["openai"]
 openai = []
 bedrock = ["dep:aws-sdk-bedrockruntime", "dep:aws-config", "dep:aws-smithy-types"]
 tracing = ["dep:tracing", "dep:tracing-opentelemetry"]
+network-tests = []
 
 [dependencies]
 # Async runtime

@@ -1130,7 +1130,13 @@ impl StakpakAcpAgent {
             McpInitConfig, initialize_mcp_server_and_tools,
         };
 
-        let mcp_config = McpInitConfig::default();
+        let mcp_config = McpInitConfig {
+            subagent_config: stakpak_mcp_server::SubagentConfig {
+                profile_name: Some(config.profile_name.clone()),
+                config_path: Some(config.config_path.clone()),
+            },
+            ..McpInitConfig::default()
+        };
 
         initialize_mcp_server_and_tools(config, mcp_config, None).await
     }

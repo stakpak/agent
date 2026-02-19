@@ -132,6 +132,182 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for "existing plan found" modal
+    if state.existing_plan_prompt.is_some() {
+        match event {
+            InputEvent::InputChanged('u') => {
+                // Use existing plan — proceed with plan mode, keep plan.md
+                if let Some(prompt) = state.existing_plan_prompt.take() {
+                    let _ =
+                        output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                }
+                return;
+            }
+            InputEvent::InputChanged('n') => {
+                // Start new — archive existing plan, then activate
+                let session_dir = std::path::Path::new(".stakpak/session");
+                crate::services::plan::archive_plan_file(session_dir);
+                if let Some(prompt) = state.existing_plan_prompt.take() {
+                    let _ =
+                        output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
+                }
+                return;
+            }
+            InputEvent::HandleEsc => {
+                // Cancel — dismiss modal, don't enter plan mode
+                state.existing_plan_prompt = None;
+                return;
+            }
+            InputEvent::AttemptQuit | InputEvent::Quit => {
+                // Allow quit through
+            }
+            _ => {
+                return; // Consume everything else
+            }
+        }
+    }
+
+    // Intercept keys for Plan Review overlay
+    if state.show_plan_review {
+        // Sub-intercept: comment modal is open
+        if state.plan_review_show_comment_modal {
+            match event {
+                InputEvent::HandleEsc => {
+                    crate::services::plan_review::close_comment_modal(state);
+                    return;
+                }
+                InputEvent::InputChanged(c) => {
+                    crate::services::plan_review::modal_input_char(state, c);
+                    return;
+                }
+                InputEvent::InputBackspace => {
+                    crate::services::plan_review::modal_input_backspace(state);
+                    return;
+                }
+                InputEvent::InputChangedNewline => {
+                    // Enter adds newline in modal
+                    crate::services::plan_review::modal_input_newline(state);
+                    return;
+                }
+                InputEvent::InputSubmitted => {
+                    // Ctrl+Enter submits
+                    crate::services::plan_review::submit_comment(state);
+                    return;
+                }
+                InputEvent::AttemptQuit | InputEvent::Quit => {
+                    // Allow quit through
+                }
+                _ => {
+                    return; // Consume everything else
+                }
+            }
+        } else if state.plan_review_confirm.is_some() {
+            // Confirmation dialog is open — y/Enter confirms, n/Esc cancels
+            match event {
+                InputEvent::HandleEsc | InputEvent::InputChanged('n') => {
+                    state.plan_review_confirm = None;
+                    return;
+                }
+                InputEvent::InputSubmitted
+                | InputEvent::InputChangedNewline
+                | InputEvent::InputChanged('y') => {
+                    crate::services::plan_review::execute_confirm(state, output_tx);
+                    return;
+                }
+                InputEvent::AttemptQuit | InputEvent::Quit => {
+                    // Allow quit through
+                }
+                _ => {
+                    return; // Consume everything else
+                }
+            }
+        } else {
+            match event {
+                InputEvent::HandleEsc
+                | InputEvent::PlanReviewClose
+                | InputEvent::TogglePlanReview => {
+                    crate::services::plan_review::close_plan_review(state);
+                    return;
+                }
+                InputEvent::Up | InputEvent::PlanReviewCursorUp => {
+                    crate::services::plan_review::cursor_up(state);
+                    return;
+                }
+                InputEvent::Down | InputEvent::PlanReviewCursorDown => {
+                    crate::services::plan_review::cursor_down(state);
+                    return;
+                }
+                InputEvent::InputChanged('k') => {
+                    crate::services::plan_review::cursor_up(state);
+                    return;
+                }
+                InputEvent::InputChanged('j') => {
+                    crate::services::plan_review::cursor_down(state);
+                    return;
+                }
+                InputEvent::InputChanged('c') => {
+                    crate::services::plan_review::open_comment_modal(state);
+                    return;
+                }
+                InputEvent::InputChanged('r') => {
+                    // 'r' key is no longer bound (replies removed)
+                    return;
+                }
+                InputEvent::InputChanged('x') => {
+                    // 'x' key is no longer bound (resolve removed)
+                    return;
+                }
+                InputEvent::InputChanged('d') => {
+                    crate::services::plan_review::open_delete_confirm(state);
+                    return;
+                }
+                InputEvent::Tab | InputEvent::PlanReviewNextComment => {
+                    crate::services::plan_review::next_comment(state);
+                    return;
+                }
+                InputEvent::PlanReviewPrevComment => {
+                    crate::services::plan_review::prev_comment(state);
+                    return;
+                }
+                InputEvent::PageUp | InputEvent::PlanReviewPageUp => {
+                    crate::services::plan_review::page_up(state, message_area_height);
+                    return;
+                }
+                InputEvent::PageDown | InputEvent::PlanReviewPageDown => {
+                    crate::services::plan_review::page_down(state, message_area_height);
+                    return;
+                }
+                InputEvent::PlanReviewComment => {
+                    crate::services::plan_review::open_comment_modal(state);
+                    return;
+                }
+                InputEvent::PlanReviewResolve => {
+                    // Resolve removed — no-op
+                    return;
+                }
+                InputEvent::InputSubmitted
+                | InputEvent::InputChangedNewline
+                | InputEvent::PlanReviewApprove
+                | InputEvent::PlanReviewFeedback => {
+                    crate::services::plan_review::open_submit_confirm(state);
+                    return;
+                }
+                InputEvent::InputChanged('a') | InputEvent::InputChanged('f') => {
+                    // Legacy bindings — route to unified submit
+                    crate::services::plan_review::open_submit_confirm(state);
+                    return;
+                }
+                InputEvent::AttemptQuit | InputEvent::Quit => {
+                    // Allow quit events through
+                }
+                _ => {
+                    // Consume all other events while plan review is open
+                    return;
+                }
+            }
+        }
+    }
+
     // Intercept keys for File Changes Popup
     if state.show_file_changes_popup {
         match event {
@@ -252,12 +428,6 @@ pub fn update(
                     return;
                 }
                 InputEvent::InputChanged(c) => {
-                    if let Some(num) = c.to_digit(10)
-                        && (1..=9).contains(&num)
-                    {
-                        ask_user::handle_ask_user_quick_select(state, num as usize, output_tx);
-                        return;
-                    }
                     if ask_user::is_custom_input_selected(state) {
                         ask_user::handle_ask_user_custom_input_changed(state, c);
                     }
@@ -297,22 +467,82 @@ pub fn update(
                 popup::handle_model_switcher_cancel(state);
                 return;
             }
+            InputEvent::Tab => {
+                // Tabs are hidden for now, consume the event to prevent side effects
+                return;
+            }
             InputEvent::Up | InputEvent::ScrollUp => {
-                // Navigate up in model list
-                if state.model_switcher_selected > 0 {
-                    state.model_switcher_selected -= 1;
+                // Navigate up in filtered model list
+                let filtered = crate::services::model_switcher::filter_models(
+                    &state.available_models,
+                    state.model_switcher_mode,
+                    &state.model_switcher_search,
+                );
+                if !filtered.is_empty() {
+                    // Find current position in filtered list
+                    let current_pos = filtered
+                        .iter()
+                        .position(|&idx| idx == state.model_switcher_selected)
+                        .unwrap_or(0);
+                    // Move up (with wrap)
+                    let new_pos = if current_pos > 0 {
+                        current_pos - 1
+                    } else {
+                        filtered.len() - 1
+                    };
+                    state.model_switcher_selected = filtered[new_pos];
                 }
                 return;
             }
             InputEvent::Down | InputEvent::ScrollDown => {
-                // Navigate down in model list
-                if state.model_switcher_selected < state.available_models.len().saturating_sub(1) {
-                    state.model_switcher_selected += 1;
+                // Navigate down in filtered model list
+                let filtered = crate::services::model_switcher::filter_models(
+                    &state.available_models,
+                    state.model_switcher_mode,
+                    &state.model_switcher_search,
+                );
+                if !filtered.is_empty() {
+                    // Find current position in filtered list
+                    let current_pos = filtered
+                        .iter()
+                        .position(|&idx| idx == state.model_switcher_selected)
+                        .unwrap_or(0);
+                    // Move down (with wrap)
+                    let new_pos = if current_pos < filtered.len() - 1 {
+                        current_pos + 1
+                    } else {
+                        0
+                    };
+                    state.model_switcher_selected = filtered[new_pos];
                 }
                 return;
             }
             InputEvent::InputSubmitted => {
                 popup::handle_model_switcher_select(state, output_tx);
+                return;
+            }
+            InputEvent::InputChanged(c) | InputEvent::ModelSwitcherSearchInputChanged(c) => {
+                // Add character to search
+                state.model_switcher_search.push(c);
+                // Reset selection to first filtered result
+                let filtered = crate::services::model_switcher::filter_models(
+                    &state.available_models,
+                    state.model_switcher_mode,
+                    &state.model_switcher_search,
+                );
+                state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+                return;
+            }
+            InputEvent::InputBackspace | InputEvent::ModelSwitcherSearchBackspace => {
+                // Remove character from search
+                state.model_switcher_search.pop();
+                // Reset selection to first filtered result
+                let filtered = crate::services::model_switcher::filter_models(
+                    &state.available_models,
+                    state.model_switcher_mode,
+                    &state.model_switcher_search,
+                );
+                state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::AvailableModelsLoaded(_) => {
@@ -860,6 +1090,11 @@ pub fn update(
         InputEvent::ModelSwitcherCancel => {
             popup::handle_model_switcher_cancel(state);
         }
+        InputEvent::ModelSwitcherSearchInputChanged(_)
+        | InputEvent::ModelSwitcherSearchBackspace => {
+            // These are handled in the model switcher intercept block above
+            // If we reach here, the model switcher is not visible, so ignore
+        }
 
         // Side panel handlers
         InputEvent::ToggleSidePanel => {
@@ -985,6 +1220,75 @@ pub fn update(
         }
         InputEvent::BoardTasksError(err) => {
             misc::handle_board_tasks_error(state, err);
+        }
+
+        // Plan mode events
+        InputEvent::PlanModeChanged(active) => {
+            use crate::services::helper_block::push_styled_message;
+
+            let was_active = state.plan_mode_active;
+            state.plan_mode_active = active;
+
+            // Show system message when entering plan mode
+            if active && !was_active {
+                push_styled_message(
+                    state,
+                    " Plan mode activated - what are we working on today?",
+                    ratatui::style::Color::Cyan,
+                    "⚙ ",
+                    ratatui::style::Color::Cyan,
+                );
+            }
+        }
+        InputEvent::ExistingPlanFound(prompt) => {
+            // Backend detected an existing plan at --plan startup.
+            // Show the modal so the user can choose to resume or start fresh.
+            state.existing_plan_prompt = Some(prompt);
+        }
+
+        // Plan review events
+        InputEvent::TogglePlanReview => {
+            if state.show_plan_review {
+                crate::services::plan_review::close_plan_review(state);
+            } else if state.plan_mode_active {
+                crate::services::plan_review::open_plan_review(state);
+            } else {
+                // Fall through to command palette when not in plan mode
+                popup::handle_show_command_palette(state);
+            }
+        }
+        InputEvent::PlanReviewClose => {
+            crate::services::plan_review::close_plan_review(state);
+        }
+        InputEvent::PlanReviewCursorUp => {
+            crate::services::plan_review::cursor_up(state);
+        }
+        InputEvent::PlanReviewCursorDown => {
+            crate::services::plan_review::cursor_down(state);
+        }
+        InputEvent::PlanReviewNextComment => {
+            crate::services::plan_review::next_comment(state);
+        }
+        InputEvent::PlanReviewPrevComment => {
+            crate::services::plan_review::prev_comment(state);
+        }
+        InputEvent::PlanReviewPageUp => {
+            crate::services::plan_review::page_up(state, message_area_height);
+        }
+        InputEvent::PlanReviewPageDown => {
+            crate::services::plan_review::page_down(state, message_area_height);
+        }
+        InputEvent::PlanReviewComment => {
+            // Handled by plan review interceptor above
+        }
+        InputEvent::PlanReviewApprove => {
+            // Handled by plan review interceptor
+        }
+        InputEvent::PlanReviewFeedback => {
+            // Handled by plan review interceptor
+        }
+        InputEvent::PlanReviewResolve => {
+            // Handled by plan review interceptor above
         }
 
         // Ask User popup events (handled in intercept block above, but need match arms)

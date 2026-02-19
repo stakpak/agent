@@ -416,7 +416,7 @@ stakpak auth login --provider anthropic --api-key <anthropic_api_key>
 stakpak up --non-interactive        # Start autopilot + install as system service (alias: stakpak autopilot up)
 stakpak down                        # Stop autopilot + remove system service (alias: stakpak autopilot down)
 stakpak autopilot status            # Show health, uptime, schedules, channels, recent activity
-stakpak autopilot logs              # Stream autopilot logs (-f to follow, -c to filter by component)
+stakpak autopilot logs              # Stream autopilot logs (-f to follow, -n <lines>, -c to filter by component)
 stakpak autopilot restart           # Restart autopilot (reload config)
 stakpak autopilot doctor            # Run preflight checks for autopilot setup/runtime
 ```
@@ -430,18 +430,24 @@ stakpak autopilot schedule enable <name>            # Enable a schedule
 stakpak autopilot schedule disable <name>           # Disable a schedule
 stakpak autopilot schedule trigger <name>           # Manually trigger a schedule (--dry-run to preview)
 stakpak autopilot schedule history <name>           # Show run history (--limit <N>)
-stakpak autopilot schedule show <run_id>            # Show details of a specific run
+stakpak autopilot schedule show <id>                # Show details of a specific run
 stakpak autopilot schedule clean                    # Clean up stale runs (--older-than-days <N>)
 ```
 
-`schedule add` options: `--cron` (required), `--prompt` (required), `--check <PATH>`, `--trigger-on <success|failure|any>` (default: failure), `--max-steps <N>` (default: 50), `--channel <NAME>`, `--pause-on-approval`, `--sandbox`
+`schedule add` options: `--cron` (required), `--prompt` (required), `--check <PATH>`, `--trigger-on <success|failure|any>` (default: failure), `--max-steps <N>` (default: 50), `--channel <NAME>`, `--pause-on-approval`, `--sandbox`, `--enabled` (default: true)
 
 ### Channel Management
 ```bash
 stakpak autopilot channel list                      # List all channels
-stakpak autopilot channel add <type> [--token|--bot-token|--app-token]  # Add a channel
+stakpak autopilot channel add <type> [--token|--bot-token|--app-token] [--target]  # Add a channel
 stakpak autopilot channel remove <type>             # Remove a channel
 stakpak autopilot channel test                      # Test channel connectivity
+
+# Slack (requires both --bot-token and --app-token)
+stakpak autopilot channel add slack --bot-token $SLACK_BOT --app-token $SLACK_APP
+# Telegram / Discord (use --token)
+stakpak autopilot channel add telegram --token $TELEGRAM_BOT_TOKEN
+stakpak autopilot channel add discord --token $DISCORD_BOT_TOKEN
 ```
 
 **IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
@@ -449,43 +455,6 @@ stakpak autopilot channel test                      # Test channel connectivity
 **Production trust model:** When setting up autopilot on production servers, recommend starting with **read-only IAM permissions** (e.g., `ReadOnlyAccess`, `ViewOnlyAccess`, or equivalent). This lets the user build confidence in autopilot's behavior before granting write access. Escalate permissions only after the user explicitly requests mutating actions (e.g., auto-remediation, scaling).
 
 **Remote file operations:** When writing files to remote servers (configs, check scripts, autopilot.toml), use the `create` tool with remote path format (`user@host:/path`) instead of piping content through SSH commands. Same for `str_replace` and `view`. This is cleaner, safer, and doesn't require shell escaping.
-
-## Schedule Configuration
-Edit `~/.stakpak/autopilot.toml`:
-```toml
-[[schedules]]
-name = "daily-backup-check"      # Required: unique identifier
-cron = "0 6 * * *"               # Required: cron expression (minute hour day month weekday)
-prompt = """                     # Required: prompt sent to agent
-Check backup status for all databases.
-Verify last backup < 24h old.
-"""
-# Optional fields:
-check = "~/.stakpak/checks/weekday.sh"  # Gate script that determines if agent should run
-trigger_on = "success"           # "success" (exit 0), "failure" (exit 1+), or "any"
-max_steps = 50                   # Max agent steps (default: 50)
-channel = "slack"                # Report results to this channel
-pause_on_approval = false        # Require approval before acting
-sandbox = false                  # Run tools inside a warden container (network-isolated)
-enabled = true                   # Enable immediately
-```
-
-## Channel Configuration
-```toml
-[channels.slack]
-type = "slack"
-token_env = "SLACK_BOT_TOKEN"    # No token needed if using backend integration from https://stakpak.dev/stakpak/settings/integrations
-target = "#infra"
-enabled = true
-```
-
-## Non-Interactive Setup (CI/scripts)
-```bash
-stakpak auth login --api-key $KEY
-stakpak autopilot schedule add health --cron '0 */6 * * *' --prompt 'Check health'
-stakpak autopilot channel add slack --bot-token $SLACK_BOT --app-token $SLACK_APP
-stakpak up --non-interactive
-```
 
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.

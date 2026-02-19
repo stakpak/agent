@@ -396,7 +396,7 @@ fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "libsql-test"))]
 mod tests {
     use serde_json::json;
 

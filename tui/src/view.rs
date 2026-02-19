@@ -253,6 +253,93 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render "existing plan found" modal
+    if state.existing_plan_prompt.is_some() {
+        render_existing_plan_modal(f, state);
+    }
+
+    // Render plan review overlay (full-screen, on top of everything)
+    if state.show_plan_review {
+        crate::services::plan_review::render_plan_review(f, state, f.area());
+    }
+}
+
+fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
+    use ratatui::style::Modifier;
+    use ratatui::widgets::{Clear, Wrap};
+
+    let area = f.area();
+
+    let (title_text, status_text) = state
+        .existing_plan_prompt
+        .as_ref()
+        .and_then(|p| p.metadata.as_ref())
+        .map(|m| {
+            let truncated = if m.title.len() > 40 {
+                format!("{}…", &m.title[..39])
+            } else {
+                m.title.clone()
+            };
+            (truncated, format!("{}  v{}", m.status, m.version))
+        })
+        .unwrap_or_else(|| ("(unknown)".to_string(), String::new()));
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Plan: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                title_text,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
+    if !status_text.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Status: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(status_text, Style::default().fg(Color::Yellow)),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  u", Style::default().fg(Color::Cyan)),
+        Span::styled(" use existing  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("n", Style::default().fg(Color::Green)),
+        Span::styled(" start new  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(Color::Red)),
+        Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    let modal_width = 52u16.min(area.width.saturating_sub(4));
+    let content_lines = lines.len() as u16;
+    let modal_height = (content_lines + 2)
+        .min(area.height.saturating_sub(4))
+        .max(4);
+
+    let x = area.x + (area.width - modal_width) / 2;
+    let y = area.y + (area.height - modal_height) / 2;
+    let modal_area = Rect::new(x, y, modal_width, modal_height);
+
+    f.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            " Existing Plan Found ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(modal_area);
+    f.render_widget(block, modal_area);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, inner);
 }
 
 // Calculate how many lines the input will take up when wrapped

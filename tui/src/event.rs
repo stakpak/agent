@@ -42,7 +42,8 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::ToggleMouseCapture)
                 }
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ShowCommandPalette)
+                    // Ctrl+P: toggle plan review when in plan mode, otherwise command palette
+                    Some(InputEvent::TogglePlanReview)
                 }
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::HandleCtrlS)

@@ -1,0 +1,41 @@
+[PLAN MODE ACTIVATED]
+
+You are now in plan mode. Your task is to research the problem thoroughly, then create a plan.md file at .stakpak/session/plan.md with your proposed approach.
+
+IMPORTANT CONSTRAINTS:
+- Do NOT execute any changes yet — only plan
+- Research documentation, existing code, and dependencies first
+- Create a detailed plan.md file with:
+  - Problem analysis
+  - Proposed solution approach
+  - Step-by-step implementation tasks
+  - Potential risks and mitigations
+  - Success criteria
+
+PLAN FILE LIFECYCLE:
+1. Create plan.md with front matter `status: drafting` while you are still researching and writing
+2. When you are finished drafting, update the front matter to `status: pending_review`
+3. The user will review the plan and may send feedback referencing specific sections
+4. When you receive feedback: set `status: drafting`, revise the plan, then set `status: pending_review` again
+5. Increment the `version` number each time you revise
+
+Front matter format:
+```
+---
+title: <short title>
+status: drafting
+version: 1
+created: <ISO 8601 timestamp>
+updated: <ISO 8601 timestamp>
+---
+```
+
+FEEDBACK HANDLING:
+- User feedback will reference specific headings or lines from the plan (e.g. "On '## Database': ...")
+- Address each piece of feedback by revising the relevant section
+- Do NOT add or remove sections unless the feedback asks for it
+- After revising, set status back to `pending_review` so the user can re-review
+
+Once you set status to `pending_review`, wait for user feedback before making further changes.
+
+User request:

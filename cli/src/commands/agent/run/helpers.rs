@@ -193,6 +193,18 @@ pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, Str
     (formatted_input, agents_text)
 }
 
+/// Returns the plan mode instruction text that gets prepended to the user's
+/// first message when the session is in Planning phase.
+///
+/// The instructions tell the agent to:
+/// - Create .stakpak/session/plan.md with YAML front matter
+/// - Use status lifecycle: draft -> reviewing -> approved
+/// - Structure the plan with Overview, Steps, Risks, Estimated Effort
+/// - Use existing tools (create, str_replace, view) for plan management
+pub fn build_plan_mode_instructions() -> &'static str {
+    include_str!("prompts/plan_mode_activated.txt")
+}
+
 pub fn add_apps_md(user_input: &str, apps_md: &AppsMdInfo) -> (String, String) {
     let apps_text = format_apps_md_for_context(apps_md);
     let formatted_input = format!("{}\n<apps_md>\n{}\n</apps_md>", user_input, apps_text);
@@ -219,5 +231,40 @@ pub async fn refresh_billing_info(
             )
             .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_plan_mode_instructions_contains_key_sections() {
+        let instructions = build_plan_mode_instructions();
+
+        // Must mention plan mode activation
+        assert!(instructions.contains("PLAN MODE ACTIVATED"));
+
+        // Must include front matter schema guidance
+        assert!(instructions.contains("status: drafting"));
+        assert!(instructions.contains("status: pending_review"));
+
+        // Must include plan file path
+        assert!(instructions.contains(".stakpak/session/plan.md"));
+
+        // Must instruct not to execute changes
+        assert!(instructions.contains("Do NOT execute any changes"));
+
+        // Must include front matter fields
+        assert!(instructions.contains("title:"));
+        assert!(instructions.contains("version:"));
+        assert!(instructions.contains("created:"));
+        assert!(instructions.contains("updated:"));
+    }
+
+    #[test]
+    fn test_build_plan_mode_instructions_ends_with_user_request_marker() {
+        let instructions = build_plan_mode_instructions();
+        assert!(instructions.trim().ends_with("User request:"));
     }
 }

@@ -147,18 +147,59 @@ Channel target formats:
 
 ---
 
-## Slack behavior
+## Slack setup
+
+### Behavior
 
 - DMs always work
 - In channels: bot responds when mentioned
 - Thread sessions are supported
 - Receipt reaction (`:eyes:`) is added on accepted inbound messages
 
-Make sure Slack bot scopes include at least:
-- `chat:write`
-- `reactions:write`
-- `channels:history`, `groups:history`, `im:history`, `mpim:history`
-- Socket Mode app token (`connections:write`)
+### Required Bot Token Scopes
+
+The Slack bot needs specific OAuth scopes. Without the read/history scopes, the bot can send notifications but **cannot receive inbound messages**.
+
+| Scope | Purpose | Required for |
+|-------|---------|-------------|
+| `chat:write` | Send messages to channels | Outbound (notifications) |
+| `reactions:read` | Read emoji reactions | Inbound |
+| `reactions:write` | Add emoji reactions (`:eyes:` receipt) | Outbound |
+| `channels:read` | See public channels the bot is in | Inbound |
+| `groups:read` | See private channels the bot is in | Inbound |
+| `im:read` | See DM conversations | Inbound |
+| `mpim:read` | See group DM conversations | Inbound |
+| `channels:history` | Read messages in public channels | Inbound |
+| `groups:history` | Read messages in private channels | Inbound |
+| `im:history` | Read DM messages | Inbound |
+| `mpim:history` | Read group DM messages | Inbound |
+| `app_mentions:read` | Receive @mention events | Inbound |
+
+Socket Mode also requires an **App-Level Token** (`xapp-*`) with the `connections:write` scope.
+
+### Slack App Configuration
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → select the app
+2. **OAuth & Permissions** → add all Bot Token Scopes listed above
+3. **Socket Mode** → enable (requires App-Level Token / `xapp-*`)
+4. **Event Subscriptions** → enable and subscribe to bot events:
+   - `message.channels` — messages in public channels
+   - `message.groups` — messages in private channels
+   - `message.im` — direct messages
+   - `app_mention` — @mentions
+5. **Reinstall the app** to the workspace (scope changes require reinstall)
+6. Update `autopilot.toml` with the new `xoxb-*` bot token (or re-run `stakpak autopilot channel add slack ...`)
+
+### Troubleshooting
+
+If `stakpak autopilot channel test` passes (✓) but the bot never responds to messages:
+
+```bash
+# Check if bot has read scopes
+curl -s https://slack.com/api/users.conversations \
+  -H "Authorization: Bearer $SLACK_BOT_TOKEN" | jq .error
+# "missing_scope" → bot only has chat:write, needs read scopes above
+```
 
 ---
 

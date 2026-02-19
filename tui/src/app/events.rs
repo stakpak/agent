@@ -7,7 +7,7 @@ use stakpak_shared::models::{
 };
 use uuid::Uuid;
 
-use crate::app::{LoadingOperation, SessionInfo};
+use crate::app::{ExistingPlanPrompt, LoadingOperation, SessionInfo};
 use crate::services::board_tasks::FetchTasksResult;
 
 #[derive(Debug)]
@@ -145,6 +145,8 @@ pub enum InputEvent {
     AvailableModelsLoaded(Vec<Model>),
     ModelSwitcherSelect,
     ModelSwitcherCancel,
+    ModelSwitcherSearchInputChanged(char),
+    ModelSwitcherSearchBackspace,
 
     // Side panel events
     ToggleSidePanel,
@@ -156,6 +158,36 @@ pub enum InputEvent {
     RefreshBoardTasks,
     BoardTasksLoaded(FetchTasksResult),
     BoardTasksError(String),
+
+    // Plan mode events
+    /// Plan mode toggled on/off (sent from backend to TUI to sync state)
+    PlanModeChanged(bool),
+    /// Existing plan found at startup — show the modal with metadata and stashed prompt
+    ExistingPlanFound(ExistingPlanPrompt),
+    /// Toggle plan review overlay (Ctrl+P in plan mode)
+    TogglePlanReview,
+    /// Close plan review overlay
+    PlanReviewClose,
+    /// Move cursor up in plan review
+    PlanReviewCursorUp,
+    /// Move cursor down in plan review
+    PlanReviewCursorDown,
+    /// Open comment modal for current line
+    PlanReviewComment,
+    /// Approve the plan
+    PlanReviewApprove,
+    /// Submit feedback (unresolved comments)
+    PlanReviewFeedback,
+    /// Jump to next commented line
+    PlanReviewNextComment,
+    /// Jump to previous commented line
+    PlanReviewPrevComment,
+    /// Toggle resolve on selected comment
+    PlanReviewResolve,
+    /// Scroll plan review up by a page
+    PlanReviewPageUp,
+    /// Scroll plan review down by a page
+    PlanReviewPageDown,
 
     // Ask User popup events
     ShowAskUserPopup(
@@ -195,6 +227,12 @@ pub enum OutputEvent {
     RequestTotalUsage,
     RequestAvailableModels,
     SwitchToModel(Model),
+    /// Plan mode activated via /plan command. Contains optional inline prompt.
+    PlanModeActivated(Option<String>),
+    /// Feedback on the plan — formatted unresolved comments injected as user message.
+    PlanFeedback(String),
+    /// Plan approved — transition to Executing phase.
+    PlanApproved,
     /// Response from ask_user popup with the tool call and result
     AskUserResponse(ToolCallResult),
 }

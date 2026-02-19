@@ -12,6 +12,7 @@ readme = "../README.md"
 default = ["bedrock"]
 bedrock = ["stakpak-shared/bedrock", "stakai/bedrock"]
 jemalloc = ["dep:tikv-jemallocator"]
+libsql-test = []
 
 [dependencies]
 stakpak-api = { workspace = true }
@@ -71,7 +72,12 @@ which = "7.0"
 
 # jemalloc replaces musl's default allocator which aggressively munmap's pages,
 # causing use-after-free SIGSEGV in libsql's sqlite3Close() on Linux musl targets.
-tikv-jemallocator = { version = "0.6", optional = true }
+# `unprefixed_malloc_on_supported_platforms` makes jemalloc provide the actual
+# malloc/free symbols, overriding musl's allocator for ALL code in the process
+# (including SQLite's embedded C code compiled via libsql-ffi). Without this,
+# only Rust allocations go through jemalloc while SQLite's sqlite3Malloc still
+# calls musl's aggressive allocator.
+tikv-jemallocator = { version = "0.6", features = ["unprefixed_malloc_on_supported_platforms"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
