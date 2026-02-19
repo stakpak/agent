@@ -1,7 +1,6 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
-    build_resume_command, tool_result, user_message,
+    build_plan_mode_instructions, build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -10,12 +9,8 @@ use crate::commands::agent::run::pause::{
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
-use crate::utils::agents_md::AgentsMdInfo;
-use crate::utils::apps_md::AppsMdInfo;
-use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
-};
+use crate::utils::agent_context::AgentContext;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
@@ -29,11 +24,10 @@ pub struct RunAsyncConfig {
     pub prompt: String,
     pub checkpoint_id: Option<String>,
     pub session_id: Option<String>,
-    pub local_context: Option<LocalContext>,
+    pub agent_context: Option<AgentContext>,
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
@@ -42,8 +36,6 @@ pub struct RunAsyncConfig {
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
-    pub agents_md: Option<AgentsMdInfo>,
-    pub apps_md: Option<AppsMdInfo>,
     #[allow(dead_code)] // consumed in Phase 11: Async Mode Plan Support
     pub plan_mode: bool,
     /// Auto-approve the plan when status becomes 'reviewing'
@@ -417,35 +409,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
     };
 
     if should_add_prompt && !config.prompt.is_empty() {
-        let (user_input, _local_context) =
-            add_local_context(&chat_messages, &config.prompt, &config.local_context, false)
-                .await
-                .map_err(|e| e.to_string())?;
-
-        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
-            && chat_messages.is_empty()
-        {
-            add_rulebooks(&user_input, rulebooks)
+        let user_input = if let Some(ref agent_context) = config.agent_context {
+            let is_first = chat_messages.is_empty();
+            agent_context.enrich_prompt(&config.prompt, is_first, false)
         } else {
-            (user_input, None)
-        };
-
-        let user_input = if chat_messages.is_empty()
-            && let Some(agents_md) = &config.agents_md
-        {
-            let (user_input, _agents_md_text) = add_agents_md(&user_input, agents_md);
-            user_input
-        } else {
-            user_input
-        };
-
-        let user_input = if chat_messages.is_empty()
-            && let Some(apps_md) = &config.apps_md
-        {
-            let (user_input, _apps_md_text) = add_apps_md(&user_input, apps_md);
-            user_input
-        } else {
-            user_input
+            config.prompt.clone()
         };
 
         chat_messages.push(user_message(user_input));

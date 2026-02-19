@@ -4,12 +4,14 @@
 //! with context about the schedule and check script results.
 
 use crate::commands::watch::{CheckResult, Schedule};
+use crate::utils::agent_context::AgentContext;
 
 /// Assemble the final prompt to pass to the agent.
 ///
 /// The prompt structure is:
 /// ```text
 /// {user_prompt}
+/// {agent_context (local_context, rulebooks, agents_md, apps_md)}
 ///
 /// ---
 /// Schedule: {schedule_name}
@@ -32,14 +34,25 @@ use crate::commands::watch::{CheckResult, Schedule};
 /// # Arguments
 /// * `schedule` - The schedule configuration
 /// * `check_result` - Optional result from running the check script
+/// * `agent_context` - Optional agent context (local system info, rulebooks, AGENTS.md, APPS.md)
 ///
 /// # Returns
 /// The assembled prompt string ready to pass to the agent.
-pub fn assemble_prompt(schedule: &Schedule, check_result: Option<&CheckResult>) -> String {
+pub fn assemble_prompt(
+    schedule: &Schedule,
+    check_result: Option<&CheckResult>,
+    agent_context: Option<&AgentContext>,
+) -> String {
     let mut parts = Vec::new();
 
-    // User's prompt
-    parts.push(schedule.prompt.clone());
+    // User's prompt, enriched with agent context if available
+    let user_prompt = if let Some(ctx) = agent_context {
+        // Always treat as first message for scheduled runs
+        ctx.enrich_prompt(&schedule.prompt, true, false)
+    } else {
+        schedule.prompt.clone()
+    };
+    parts.push(user_prompt);
 
     // Context block
     let mut context_lines = Vec::new();
@@ -157,7 +170,7 @@ mod tests {
         let schedule = full_schedule();
         let check_result = check_result_with_stdout("Disk usage: 92%\n/var/log: 5GB");
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Verify user prompt is included
         assert!(prompt.contains("Analyze disk usage and safely free up space."));
@@ -189,7 +202,7 @@ mod tests {
         let schedule = full_schedule();
 
         // No check result provided
-        let prompt = assemble_prompt(&schedule, None);
+        let prompt = assemble_prompt(&schedule, None, None);
 
         // Verify user prompt is included
         assert!(prompt.contains("Analyze disk usage and safely free up space."));
@@ -212,7 +225,7 @@ mod tests {
         schedule.board_id = None;
 
         let check_result = check_result_with_stdout("All good");
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Verify user prompt and schedule
         assert!(prompt.contains("Analyze disk usage and safely free up space."));
@@ -233,7 +246,7 @@ mod tests {
         let schedule = minimal_schedule();
 
         // No check result, no board
-        let prompt = assemble_prompt(&schedule, None);
+        let prompt = assemble_prompt(&schedule, None, None);
 
         // Verify user prompt
         assert!(prompt.contains("Do something simple."));
@@ -260,7 +273,7 @@ mod tests {
             "Line 1: First item\nLine 2: Second item\nLine 3: Third item\n\nLine 5: After blank",
         );
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // All lines should be preserved
         assert!(prompt.contains("Line 1: First item"));
@@ -277,7 +290,7 @@ mod tests {
         let schedule = full_schedule();
         let check_result = check_result_with_stdout("");
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Check script path and exit code should be included
         assert!(prompt.contains("Check script: ~/.stakpak/schedules/check-disk.sh"));
@@ -292,7 +305,7 @@ mod tests {
         let schedule = full_schedule();
         let check_result = check_result_with_stdout("   \n\n  \t  ");
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Check stdout section should be omitted when stdout is only whitespace
         assert!(!prompt.contains("Check stdout:"));
@@ -308,7 +321,7 @@ mod tests {
             timed_out: false,
         };
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Both stdout and stderr should be included
         assert!(prompt.contains("Check stdout:"));
@@ -330,7 +343,7 @@ mod tests {
             timed_out: false,
         };
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // Only stderr should be included (stdout is empty)
         assert!(!prompt.contains("Check stdout:"));
@@ -344,7 +357,7 @@ mod tests {
         let schedule = full_schedule();
         let check_result = check_result_with_stdout("test output");
 
-        let prompt = assemble_prompt(&schedule, Some(&check_result));
+        let prompt = assemble_prompt(&schedule, Some(&check_result), None);
 
         // User prompt should come first
         let user_prompt_pos = prompt.find("Analyze disk usage").unwrap();
@@ -361,5 +374,53 @@ mod tests {
             schedule_pos > delimiter_pos,
             "Schedule name should be inside context block"
         );
+    }
+
+    #[test]
+    fn test_prompt_with_agent_context() {
+        use crate::utils::agent_context::AgentContext;
+        use crate::utils::agents_md::AgentsMdInfo;
+        use std::path::PathBuf;
+
+        let schedule = minimal_schedule();
+        let ctx = AgentContext {
+            local_context_formatted: Some("# System Details\n\nMachine: test-host".to_string()),
+            rulebooks: None,
+            agents_md: Some(AgentsMdInfo {
+                content: "## Build\ncargo test".to_string(),
+                path: PathBuf::from("/project/AGENTS.md"),
+            }),
+            apps_md: None,
+        };
+
+        let prompt = assemble_prompt(&schedule, None, Some(&ctx));
+
+        // User prompt should be present
+        assert!(prompt.contains("Do something simple."));
+
+        // Agent context should be injected
+        assert!(prompt.contains("<local_context>"));
+        assert!(prompt.contains("Machine: test-host"));
+        assert!(prompt.contains("</local_context>"));
+        assert!(prompt.contains("<agents_md>"));
+        assert!(prompt.contains("## Build"));
+        assert!(prompt.contains("</agents_md>"));
+
+        // Schedule context should still be present
+        assert!(prompt.contains("Schedule: simple-task"));
+        assert!(prompt.contains("---"));
+    }
+
+    #[test]
+    fn test_prompt_without_agent_context_unchanged() {
+        let schedule = minimal_schedule();
+
+        let with_none = assemble_prompt(&schedule, None, None);
+
+        // Should not contain any context XML tags
+        assert!(!with_none.contains("<local_context>"));
+        assert!(!with_none.contains("<rulebooks>"));
+        assert!(!with_none.contains("<agents_md>"));
+        assert!(!with_none.contains("<apps_md>"));
     }
 }

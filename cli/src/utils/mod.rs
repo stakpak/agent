@@ -1,3 +1,4 @@
+pub mod agent_context;
 pub mod agents_md;
 pub mod apps_md;
 pub mod check_update;

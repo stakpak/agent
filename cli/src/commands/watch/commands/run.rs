@@ -16,6 +16,7 @@ use crate::commands::watch::{
     AgentServerConnection, RunStatus, ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig,
     assemble_prompt, is_process_running, run_check_script, spawn_agent,
 };
+use crate::utils::agent_context::AgentContext;
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use stakpak_shared::utils::sanitize_text_output;
@@ -636,8 +637,15 @@ async fn handle_schedule_event(
         None
     };
 
+    // Gather fresh agent context for this schedule fire (includes current time, latest files)
+    let agent_context = {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let profile = schedule.effective_profile(&config.defaults);
+        AgentContext::gather(profile, &cwd).await
+    };
+
     // Assemble prompt
-    let prompt = assemble_prompt(schedule, check_result.as_ref());
+    let prompt = assemble_prompt(schedule, check_result.as_ref(), Some(&agent_context));
 
     info!(schedule = %schedule.name, "Waking agent");
     print_event("agent", &schedule.name, "Spawning agent...");

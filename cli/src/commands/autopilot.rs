@@ -1082,8 +1082,33 @@ async fn start_foreground_runtime(
             expand_gateway_approval_allowlist(auto_approve_tools);
     }
 
+    // --- Build context callback for gateway ---
+    // Called on each new channel-triggered session to produce fresh context
+    // (current time, latest AGENTS.md/APPS.md, rulebooks).
+    let gateway_profile = config.profile_name.clone();
+    let gateway_context_fn: Option<Arc<dyn Fn() -> Option<String> + Send + Sync>> =
+        Some(Arc::new(move || {
+            let profile = gateway_profile.clone();
+            let handle = tokio::runtime::Handle::try_current().ok()?;
+            // block_in_place allows blocking the current thread within a multi-threaded runtime
+            tokio::task::block_in_place(|| {
+                handle.block_on(async {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let ctx =
+                        crate::utils::agent_context::AgentContext::gather(&profile, &cwd).await;
+                    let enriched = ctx.enrich_prompt("", true, false);
+                    let trimmed = enriched.trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                })
+            })
+        }));
+
     let gateway_runtime = if gateway_cfg.has_channels() {
-        match stakpak_gateway::Gateway::new(gateway_cfg).await {
+        match stakpak_gateway::Gateway::with_context(gateway_cfg, gateway_context_fn).await {
             Ok(gw) => Some(Arc::new(gw)),
             Err(e) => {
                 eprintln!(

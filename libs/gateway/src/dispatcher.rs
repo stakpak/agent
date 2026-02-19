@@ -34,6 +34,10 @@ pub struct Dispatcher {
     approval_mode: ApprovalMode,
     approval_allowlist: HashSet<String>,
     title_template: String,
+    /// Optional callback that produces a fresh context string (local_context,
+    /// rulebooks, AGENTS.md, APPS.md) for the first message of each new session.
+    /// Called on every new session to ensure current time, latest files, etc.
+    context_prefix_fn: Option<Arc<dyn Fn() -> Option<String> + Send + Sync>>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +88,7 @@ impl Dispatcher {
         approval_mode: ApprovalMode,
         approval_allowlist: Vec<String>,
         title_template: String,
+        context_prefix_fn: Option<Arc<dyn Fn() -> Option<String> + Send + Sync>>,
     ) -> Self {
         Self {
             client,
@@ -97,6 +102,7 @@ impl Dispatcher {
             approval_mode,
             approval_allowlist: approval_allowlist.into_iter().collect(),
             title_template,
+            context_prefix_fn,
         }
     }
 
@@ -165,12 +171,12 @@ impl Dispatcher {
             .await
             .map_err(|error| format!("failed to get mapping: {error}"))?;
 
-        let mapping = if let Some(mapping) = maybe_mapping {
+        let (mapping, is_new_session) = if let Some(mapping) = maybe_mapping {
             let delivery = self.delivery_context_from_inbound(&inbound);
             if let Err(error) = self.store.update_delivery(&routing_key, &delivery).await {
                 warn!(error = %error, "failed to update delivery context");
             }
-            mapping
+            (mapping, false)
         } else {
             let title = self.render_title(&inbound);
             let created = self
@@ -192,7 +198,22 @@ impl Dispatcher {
                 .await
                 .map_err(|error| format!("failed to persist mapping: {error}"))?;
 
-            mapping
+            (mapping, true)
+        };
+
+        // Prepend agent context to the first message of a new session
+        let enriched_text = if is_new_session {
+            if let Some(ref prefix_fn) = self.context_prefix_fn {
+                if let Some(prefix) = prefix_fn() {
+                    format!("{enriched_text}\n{prefix}")
+                } else {
+                    enriched_text
+                }
+            } else {
+                enriched_text
+            }
+        } else {
+            enriched_text
         };
 
         let queued = QueuedMessage {

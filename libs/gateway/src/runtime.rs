@@ -24,6 +24,18 @@ pub struct Gateway {
 
 impl Gateway {
     pub async fn new(config: GatewayConfig) -> Result<Self> {
+        Self::with_context(config, None).await
+    }
+
+    /// Create a new gateway with an optional agent context callback.
+    ///
+    /// The `context_prefix_fn` is called on each new session to produce a fresh
+    /// context string (e.g., local_context, rulebooks, AGENTS.md, APPS.md XML tags)
+    /// that gets prepended to the first message.
+    pub async fn with_context(
+        config: GatewayConfig,
+        context_prefix_fn: Option<Arc<dyn Fn() -> Option<String> + Send + Sync>>,
+    ) -> Result<Self> {
         config.validate()?;
 
         let store = Arc::new(GatewayStore::open(&config.gateway.store_path).await?);
@@ -44,6 +56,7 @@ impl Gateway {
             config.gateway.approval_mode.clone(),
             config.gateway.approval_allowlist.clone(),
             config.gateway.title_template.clone(),
+            context_prefix_fn,
         ));
 
         let api_state = Arc::new(GatewayApiState {

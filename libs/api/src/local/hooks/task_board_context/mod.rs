@@ -8,7 +8,7 @@ use crate::local::context_managers::task_board_context_manager::{
 };
 use crate::models::AgentState;
 
-const SYSTEM_PROMPT: &str = include_str!("./system_prompt.txt");
+const SYSTEM_PROMPT: &str = include_str!("../../../prompts/system.v1.md");
 
 pub struct TaskBoardContextHook {
     pub context_manager: TaskBoardContextManager,

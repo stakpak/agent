@@ -4,9 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_plan_mode_instructions,
-    build_resume_command, extract_last_checkpoint_id, refresh_billing_info,
-    tool_call_history_string, tool_result, user_message,
+    build_plan_mode_instructions, build_resume_command, extract_last_checkpoint_id,
+    refresh_billing_info, tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -15,10 +14,8 @@ use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
 use crate::config::AppConfig;
-use crate::utils::agents_md::AgentsMdInfo;
-use crate::utils::apps_md::AppsMdInfo;
+use crate::utils::agent_context::AgentContext;
 use crate::utils::check_update::get_latest_cli_version;
-use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
@@ -116,10 +113,9 @@ fn has_pending_tool_calls(messages: &[ChatMessage], tools_queue: &[ToolCall]) ->
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub session_id: Option<String>,
-    pub local_context: Option<LocalContext>,
+    pub agent_context: Option<AgentContext>,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
@@ -130,8 +126,6 @@ pub struct RunInteractiveConfig {
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
-    pub agents_md: Option<AgentsMdInfo>,
-    pub apps_md: Option<AppsMdInfo>,
     /// When true, send init_prompt_content as first user message on session start (stakpak init)
     pub send_init_prompt_on_start: bool,
 }
@@ -164,13 +158,10 @@ pub async fn run_interactive(
         let has_stakpak_key = api_key.is_some();
         let config_path = ctx.config_path.clone();
         let _mcp_server_host = ctx.mcp_server_host.clone();
-        let local_context = config.local_context.clone();
-        let mut rulebooks = config.rulebooks.clone();
+        let mut agent_context = config.agent_context.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let enable_subagents = config.enable_subagents;
-        let agents_md = config.agents_md.clone();
-        let apps_md = config.apps_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let session_id = config.session_id.clone();
         let allowed_tools = config.allowed_tools.clone();
@@ -449,46 +440,19 @@ pub async fn run_interactive(
                             user_input = format!("{}\n\n{}", history_str, user_input);
                         }
 
-                        // Add local context to user input for new sessions
-                        // Add rulebooks to user input for new sessions or when rulebook settings change
-                        let (user_input, _) =
-                            if messages.is_empty() || should_update_rulebooks_on_next_message {
-                                let (user_input_with_context, _) =
-                                    add_local_context(&messages, &user_input, &local_context, true)
-                                        .await
-                                        .map_err(|e| {
-                                            format!("Failed to format local context: {}", e)
-                                        })?;
-
-                                let (user_input_with_rulebooks, _) =
-                                    if let Some(rulebooks) = &rulebooks {
-                                        add_rulebooks(&user_input_with_context, rulebooks)
-                                    } else {
-                                        (user_input_with_context, None)
-                                    };
-
-                                should_update_rulebooks_on_next_message = false; // Reset the flag
-                                (user_input_with_rulebooks, None::<String>)
+                        // Enrich user input with agent context for new sessions
+                        // or when rulebook settings change
+                        let user_input = if let Some(ref agent_ctx) = agent_context {
+                            let is_first = messages.is_empty();
+                            let force = should_update_rulebooks_on_next_message;
+                            if is_first || force {
+                                should_update_rulebooks_on_next_message = false;
+                                agent_ctx.enrich_prompt(&user_input, is_first, force)
                             } else {
-                                (user_input.to_string(), None::<String>)
-                            };
-
-                        let user_input = if messages.is_empty()
-                            && let Some(agents_md_info) = &agents_md
-                        {
-                            let (user_input, _) = add_agents_md(&user_input, agents_md_info);
-                            user_input
+                                user_input.to_string()
+                            }
                         } else {
-                            user_input
-                        };
-
-                        let user_input = if messages.is_empty()
-                            && let Some(apps_md_info) = &apps_md
-                        {
-                            let (user_input, _) = add_apps_md(&user_input, apps_md_info);
-                            user_input
-                        } else {
-                            user_input
+                            user_input.to_string()
                         };
 
                         // Inject plan mode instructions on the first user message
@@ -1042,8 +1006,10 @@ pub async fn run_interactive(
                                 .cloned()
                                 .collect();
 
-                            // Update the rulebooks with the filtered list
-                            rulebooks = Some(filtered_rulebooks);
+                            // Update the rulebooks in agent context
+                            if let Some(ref mut ctx) = agent_context {
+                                ctx.update_rulebooks(Some(filtered_rulebooks));
+                            }
 
                             // Set flag to update rulebooks on next message
                             should_update_rulebooks_on_next_message = true;
@@ -1052,7 +1018,9 @@ pub async fn run_interactive(
                     }
                     OutputEvent::RequestCurrentRulebooks => {
                         // Send currently active rulebook URIs to TUI
-                        if let Some(current_rulebooks) = &rulebooks {
+                        if let Some(ref ctx) = agent_context
+                            && let Some(current_rulebooks) = &ctx.rulebooks
+                        {
                             let current_uris: Vec<String> =
                                 current_rulebooks.iter().map(|rb| rb.uri.clone()).collect();
 
@@ -1457,8 +1425,10 @@ pub async fn run_interactive(
                 }
             });
 
-            // Update config with new rulebooks
-            config.rulebooks = new_rulebooks;
+            // Update config with new rulebooks via agent context
+            if let Some(ref mut ctx) = config.agent_context {
+                ctx.update_rulebooks(new_rulebooks);
+            }
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
 

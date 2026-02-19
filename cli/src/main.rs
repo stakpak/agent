@@ -49,6 +49,7 @@ use commands::{
 };
 use config::{AppConfig, ModelsCache};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utils::agent_context::AgentContext;
 use utils::agents_md::discover_agents_md;
 use utils::apps_md::discover_apps_md;
 use utils::check_update::{auto_update, check_update};
@@ -396,6 +397,10 @@ async fn main() {
                 let _ = update_result;
                 let rulebooks = rulebooks_result;
 
+                // Build unified agent context from gathered parts
+                let agent_context =
+                    AgentContext::from_parts(local_context, rulebooks, agents_md, apps_md).await;
+
                 let enable_subagents = !cli.disable_subagents;
 
                 // match get_or_build_local_code_index(&config, None, cli.index_big_project)
@@ -489,10 +494,9 @@ async fn main() {
                                 verbose: cli.verbose,
                                 checkpoint_id: checkpoint_id.clone(),
                                 session_id: session_id.clone(),
-                                local_context,
+                                agent_context: Some(agent_context.clone()),
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
-                                rulebooks,
                                 enable_subagents,
                                 max_steps,
                                 output_format: cli.output_format,
@@ -503,8 +507,6 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: default_model.clone(),
-                                agents_md: agents_md.clone(),
-                                apps_md: apps_md.clone(),
                                 plan_mode: cli.plan,
                                 plan_approved: cli.plan_approved,
                                 plan_feedback: cli.plan_feedback.clone(),
@@ -557,10 +559,9 @@ async fn main() {
                             RunInteractiveConfig {
                                 checkpoint_id,
                                 session_id,
-                                local_context,
+                                agent_context: Some(agent_context),
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
-                                rulebooks,
                                 enable_subagents,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
@@ -573,8 +574,6 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: default_model,
-                                agents_md,
-                                apps_md,
                                 send_init_prompt_on_start,
                             },
                         )

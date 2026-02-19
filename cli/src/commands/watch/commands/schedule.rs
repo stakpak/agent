@@ -3,6 +3,7 @@
 use crate::commands::watch::{
     RunStatus, ScheduleConfig, ScheduleDb, assemble_prompt, is_process_running, run_check_script,
 };
+use crate::utils::agent_context::AgentContext;
 
 /// Show detailed information about a schedule.
 pub async fn show_schedule(name: &str) -> Result<(), String> {
@@ -179,8 +180,13 @@ pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
             None
         };
 
-        // Assemble prompt
-        let prompt = assemble_prompt(schedule, check_result.as_ref());
+        // Assemble prompt (gather full context for dry-run preview)
+        let agent_ctx = {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let profile = schedule.effective_profile(&config.defaults);
+            AgentContext::gather(profile, &cwd).await
+        };
+        let prompt = assemble_prompt(schedule, check_result.as_ref(), Some(&agent_ctx));
 
         println!("\nAssembled prompt:");
         println!("---");

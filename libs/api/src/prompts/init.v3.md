@@ -124,7 +124,7 @@ This answers "what's actually running right now, and how do customers reach it?"
 For each provider (AWS, GCP, Azure, DigitalOcean, Cloudflare, Vercel, Netlify, Fly.io, etc.):
 - Read CLI config files (structure only, not secret values) and check relevant env vars
 - If CLI is available: get current identity, list profiles/projects/accounts
-- Check `~/.kube/config` — list contexts, clusters, current context
+- Check `~/.kube` — list configs, contexts, clusters, current context
 - Container registries from `~/.docker/config.json` (entries, not credentials)
 - Helm repos, GitOps tools (ArgoCD, Flux) — CLI availability and manifests
 
