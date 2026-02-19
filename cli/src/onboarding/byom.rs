@@ -11,8 +11,7 @@
 //! ```toml
 //! [profiles.default]
 //! provider = "local"
-//! smart_model = "offline/llama3"
-//! eco_model = "offline/phi3"
+//! model = "offline/llama3"
 //!
 //! [profiles.default.providers.offline]
 //! type = "custom"
@@ -45,15 +44,18 @@ use crate::onboarding::styled_output::{self, StepStatus};
 /// - Provider name (e.g., "litellm", "ollama") - becomes the model prefix
 /// - API endpoint as required by the provider (e.g., "http://localhost:4000" or "http://localhost:11434/v1")
 /// - API key (optional)
-/// - Smart model name (without provider prefix)
-/// - Eco model name (without provider prefix, defaults to smart model)
+/// - Model name (without provider prefix)
 ///
 /// Model names are automatically prefixed with the provider name.
 /// For example, with provider "litellm" and model "anthropic/claude-opus":
 /// - Full model string: "litellm/anthropic/claude-opus"
 /// - Provider lookup: "litellm" (matches config key)
 /// - Model sent to API: "anthropic/claude-opus"
-pub fn configure_byom(current_step: usize, total_steps: usize) -> Option<ProfileConfig> {
+pub fn configure_byom(
+    current_step: usize,
+    total_steps: usize,
+    profile_name: &str,
+) -> Option<ProfileConfig> {
     // Render step indicators
     let steps: Vec<_> = (0..total_steps)
         .map(|i| {
@@ -107,57 +109,39 @@ pub fn configure_byom(current_step: usize, total_steps: usize) -> Option<Profile
         NavResult::Back | NavResult::Cancel => return None,
     };
 
-    // Step 4: Smart model name
+    // Step 4: Model name
     println!();
     styled_output::render_info(&format!(
-        "Model names will be prefixed with '{}/' automatically.",
+        "Model name will be prefixed with '{}/' automatically.",
         provider_name
     ));
-    let smart_model = match prompt_text("Enter smart model name (e.g., claude-opus-4-5)", true) {
+    let model_name = match prompt_text("Enter model name (e.g., claude-opus-4-5, llama3)", true) {
         NavResult::Forward(Some(model)) => model.trim().to_string(),
         NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
     };
 
-    if smart_model.is_empty() {
-        styled_output::render_error("Smart model name cannot be empty.");
+    if model_name.is_empty() {
+        styled_output::render_error("Model name cannot be empty.");
         return None;
     }
-
-    // Step 5: Eco model name (optional, defaults to smart model)
-    println!();
-    styled_output::render_info("Eco model is used for smaller tasks and cost saving.");
-    let eco_model_input = match prompt_text(
-        &format!(
-            "Enter eco model name (press Enter to use '{}')",
-            smart_model
-        ),
-        false,
-    ) {
-        NavResult::Forward(input) => input,
-        NavResult::Back | NavResult::Cancel => return None,
-    };
-
-    let eco_model = match eco_model_input {
-        Some(input) if !input.trim().is_empty() => input.trim().to_string(),
-        _ => smart_model.clone(),
-    };
 
     // Generate profile
     let profile = generate_custom_provider_profile(
         provider_name.clone(),
         api_endpoint,
         api_key,
-        smart_model.clone(),
-        eco_model.clone(),
+        model_name.clone(),
     );
 
     // Show preview
     println!();
-    styled_output::render_info(&format!("Smart model: {}/{}", provider_name, smart_model));
-    styled_output::render_info(&format!("Eco model: {}/{}", provider_name, eco_model));
+    styled_output::render_info(&format!("Model: {}/{}", provider_name, model_name));
     println!();
 
-    styled_output::render_config_preview(&config_templates::config_to_toml_preview(&profile));
+    styled_output::render_config_preview(&config_templates::config_to_toml_preview(
+        &profile,
+        profile_name,
+    ));
 
     // Confirm
     match prompt_yes_no("Save this configuration?", true) {

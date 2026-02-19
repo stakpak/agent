@@ -204,9 +204,10 @@ async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
     AgentClient::new(AgentClientConfig {
         stakpak,
         providers,
-        eco_model: config.eco_model.clone(),
-        recovery_model: config.recovery_model.clone(),
-        smart_model: config.smart_model.clone(),
+        // Pass unified model as smart_model for AgentClient compatibility
+        smart_model: config.model.clone(),
+        eco_model: None,
+        recovery_model: None,
         store_path: None,
         hook_registry: None,
     })

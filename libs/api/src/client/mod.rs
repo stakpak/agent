@@ -170,8 +170,9 @@ impl AgentClient {
             providers.providers.insert(
                 "stakpak".to_string(),
                 ProviderConfig::Stakpak {
-                    api_key: stakpak.api_key.clone(),
+                    api_key: Some(stakpak.api_key.clone()),
                     api_endpoint: Some(stakpak.api_endpoint.clone()),
+                    auth: None,
                 },
             );
         }

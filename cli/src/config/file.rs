@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::path::Path;
 
-use super::STAKPAK_API_ENDPOINT;
 use super::profile::ProfileConfig;
 use super::types::{OldAppConfig, Settings};
+use super::STAKPAK_API_ENDPOINT;
 
 /// The complete configuration file structure.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -130,16 +130,40 @@ impl ConfigFile {
     }
 
     /// Save the config file to disk.
+    ///
+    /// Uses atomic write (temp file + rename) and sets 0600 permissions on Unix
+    /// since config may contain sensitive credentials.
     pub(crate) fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
-        if let Some(parent) = path.as_ref().parent() {
+        let path = path.as_ref();
+
+        if let Some(parent) = path.parent() {
             create_dir_all(parent).map_err(|e| {
                 ConfigError::Message(format!("Failed to create config directory: {}", e))
             })?;
         }
+
         let body = toml::to_string_pretty(self)
             .map_err(|e| ConfigError::Message(format!("Failed to serialize config file: {}", e)))?;
-        write(path, body)
-            .map_err(|e| ConfigError::Message(format!("Failed to write config file: {}", e)))
+
+        // Write to temp file first for atomicity
+        let temp_path = path.with_extension("toml.tmp");
+        write(&temp_path, &body)
+            .map_err(|e| ConfigError::Message(format!("Failed to write config file: {}", e)))?;
+
+        // Set file permissions to 0600 (owner read/write only) on Unix
+        // This is important since config may contain API keys and OAuth tokens
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&temp_path, permissions).map_err(|e| {
+                ConfigError::Message(format!("Failed to set config file permissions: {}", e))
+            })?;
+        }
+
+        // Atomic rename
+        std::fs::rename(&temp_path, path)
+            .map_err(|e| ConfigError::Message(format!("Failed to save config file: {}", e)))
     }
 }
 

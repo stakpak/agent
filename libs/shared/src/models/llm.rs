@@ -55,6 +55,8 @@ use serde::{Deserialize, Serialize};
 use stakai::Model;
 use std::collections::HashMap;
 
+use super::auth::ProviderAuth;
+
 // =============================================================================
 // Provider Configuration
 // =============================================================================
@@ -75,12 +77,20 @@ use std::collections::HashMap;
 /// ```toml
 /// [profiles.myprofile.providers.openai]
 /// type = "openai"
-/// api_key = "sk-..."
+///
+/// [profiles.myprofile.providers.openai.auth]
+/// type = "api"
+/// key = "sk-..."
 ///
 /// [profiles.myprofile.providers.anthropic]
 /// type = "anthropic"
-/// api_key = "sk-ant-..."
-/// access_token = "oauth-token"
+///
+/// [profiles.myprofile.providers.anthropic.auth]
+/// type = "oauth"
+/// access = "eyJ..."
+/// refresh = "eyJ..."
+/// expires = 1735600000000
+/// name = "Claude Max"
 ///
 /// [profiles.myprofile.providers.offline]
 /// type = "custom"
@@ -91,27 +101,39 @@ use std::collections::HashMap;
 pub enum ProviderConfig {
     /// OpenAI provider configuration
     OpenAI {
+        /// Legacy API key field (prefer `auth` field)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
     },
     /// Anthropic provider configuration
     Anthropic {
+        /// Legacy API key field (prefer `auth` field)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
-        /// OAuth access token (for Claude subscription)
+        /// Legacy OAuth access token (prefer `auth` field with OAuth type)
         #[serde(skip_serializing_if = "Option::is_none")]
         access_token: Option<String>,
+        /// Authentication credentials (preferred over api_key/access_token)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
     },
     /// Google Gemini provider configuration
     Gemini {
+        /// Legacy API key field (prefer `auth` field)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
     },
     /// Custom OpenAI-compatible provider (Ollama, vLLM, etc.)
     ///
@@ -127,15 +149,18 @@ pub enum ProviderConfig {
     /// api_endpoint = "http://localhost:11434/v1"
     ///
     /// # Then use models as:
-    /// smart_model = "offline/llama3"
-    /// eco_model = "offline/phi3"
+    /// model = "offline/llama3"
     /// ```
     Custom {
+        /// Legacy API key field (prefer `auth` field)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         /// API endpoint URL (required for custom providers)
         /// Use the base URL as required by your provider (e.g., "http://localhost:11434/v1")
         api_endpoint: String,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
     },
     /// Stakpak provider configuration
     ///
@@ -148,18 +173,26 @@ pub enum ProviderConfig {
     /// ```toml
     /// [profiles.myprofile.providers.stakpak]
     /// type = "stakpak"
-    /// api_key = "your-stakpak-api-key"
     /// api_endpoint = "https://apiv2.stakpak.dev"  # optional, this is the default
     ///
+    /// [profiles.myprofile.providers.stakpak.auth]
+    /// type = "api"
+    /// key = "your-stakpak-api-key"
+    ///
     /// # Then use models as:
-    /// smart_model = "stakpak/anthropic/claude-sonnet-4-5-20250929"
+    /// model = "stakpak/anthropic/claude-sonnet-4-5-20250929"
     /// ```
     Stakpak {
-        /// Stakpak API key (required)
-        api_key: String,
+        /// Legacy API key field (prefer `auth` field)
+        /// Note: This field is optional when using `auth`
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_key: Option<String>,
         /// API endpoint URL (default: https://apiv2.stakpak.dev)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
     },
     /// AWS Bedrock provider configuration
     ///
@@ -199,15 +232,122 @@ impl ProviderConfig {
         }
     }
 
-    /// Get the API key if set
+    /// Get the API key if set (checks `auth` field first, then legacy `api_key`)
     pub fn api_key(&self) -> Option<&str> {
+        // First check auth field
+        if let Some(auth) = self.get_auth_ref() {
+            if let Some(key) = auth.api_key_value() {
+                return Some(key);
+            }
+        }
+        // Fall back to legacy api_key field
         match self {
             ProviderConfig::OpenAI { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Anthropic { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
-            ProviderConfig::Stakpak { api_key, .. } => Some(api_key.as_str()),
+            ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
+        }
+    }
+
+    /// Get the auth credentials reference
+    fn get_auth_ref(&self) -> Option<&ProviderAuth> {
+        match self {
+            ProviderConfig::OpenAI { auth, .. } => auth.as_ref(),
+            ProviderConfig::Anthropic { auth, .. } => auth.as_ref(),
+            ProviderConfig::Gemini { auth, .. } => auth.as_ref(),
+            ProviderConfig::Custom { auth, .. } => auth.as_ref(),
+            ProviderConfig::Stakpak { auth, .. } => auth.as_ref(),
+            ProviderConfig::Bedrock { .. } => None,
+        }
+    }
+
+    /// Get resolved authentication credentials.
+    ///
+    /// Resolution order:
+    /// 1. `auth` field (preferred)
+    /// 2. Legacy `api_key` field (converted to ProviderAuth::Api)
+    /// 3. Legacy `access_token` field for Anthropic (converted to ProviderAuth with access token)
+    pub fn get_auth(&self) -> Option<ProviderAuth> {
+        // First check auth field
+        if let Some(auth) = self.get_auth_ref() {
+            return Some(auth.clone());
+        }
+
+        // Fall back to legacy fields
+        match self {
+            ProviderConfig::OpenAI { api_key, .. }
+            | ProviderConfig::Gemini { api_key, .. }
+            | ProviderConfig::Custom { api_key, .. }
+            | ProviderConfig::Stakpak { api_key, .. } => {
+                api_key.as_ref().map(|k| ProviderAuth::api_key(k))
+            }
+            ProviderConfig::Anthropic {
+                api_key,
+                access_token,
+                ..
+            } => {
+                // Prefer api_key, then access_token
+                if let Some(key) = api_key {
+                    Some(ProviderAuth::api_key(key))
+                } else {
+                    access_token.as_ref().map(|t| ProviderAuth::api_key(t))
+                }
+            }
+            ProviderConfig::Bedrock { .. } => None,
+        }
+    }
+
+    /// Set authentication credentials on this provider config.
+    pub fn set_auth(&mut self, auth: ProviderAuth) {
+        match self {
+            ProviderConfig::OpenAI {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Anthropic {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Gemini {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Custom {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Stakpak {
+                auth: auth_field, ..
+            } => {
+                *auth_field = Some(auth);
+            }
+            ProviderConfig::Bedrock { .. } => {
+                // Bedrock uses AWS credential chain, no auth field
+            }
+        }
+    }
+
+    /// Clear authentication credentials from this provider config.
+    pub fn clear_auth(&mut self) {
+        match self {
+            ProviderConfig::OpenAI {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Anthropic {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Gemini {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Custom {
+                auth: auth_field, ..
+            }
+            | ProviderConfig::Stakpak {
+                auth: auth_field, ..
+            } => {
+                *auth_field = None;
+            }
+            ProviderConfig::Bedrock { .. } => {
+                // Bedrock uses AWS credential chain, no auth field
+            }
         }
     }
 
@@ -245,51 +385,112 @@ impl ProviderConfig {
     }
 
     /// Get the access token (Anthropic only)
+    ///
+    /// Checks the `auth` field first for OAuth access token, then falls back
+    /// to the legacy `access_token` field.
     pub fn access_token(&self) -> Option<&str> {
+        // First check auth field for OAuth access token
+        if let Some(auth) = self.get_auth_ref() {
+            if let Some(token) = auth.access_token() {
+                return Some(token);
+            }
+        }
+        // Fall back to legacy access_token field
         match self {
             ProviderConfig::Anthropic { access_token, .. } => access_token.as_deref(),
             _ => None,
         }
     }
 
-    /// Create an OpenAI provider config
+    /// Create an OpenAI provider config (legacy, uses api_key field)
     pub fn openai(api_key: Option<String>) -> Self {
         ProviderConfig::OpenAI {
             api_key,
             api_endpoint: None,
+            auth: None,
         }
     }
 
-    /// Create an Anthropic provider config
+    /// Create an OpenAI provider config with auth
+    pub fn openai_with_auth(auth: ProviderAuth) -> Self {
+        ProviderConfig::OpenAI {
+            api_key: None,
+            api_endpoint: None,
+            auth: Some(auth),
+        }
+    }
+
+    /// Create an Anthropic provider config (legacy, uses api_key/access_token fields)
     pub fn anthropic(api_key: Option<String>, access_token: Option<String>) -> Self {
         ProviderConfig::Anthropic {
             api_key,
             api_endpoint: None,
             access_token,
+            auth: None,
         }
     }
 
-    /// Create a Gemini provider config
+    /// Create an Anthropic provider config with auth
+    pub fn anthropic_with_auth(auth: ProviderAuth) -> Self {
+        ProviderConfig::Anthropic {
+            api_key: None,
+            api_endpoint: None,
+            access_token: None,
+            auth: Some(auth),
+        }
+    }
+
+    /// Create a Gemini provider config (legacy, uses api_key field)
     pub fn gemini(api_key: Option<String>) -> Self {
         ProviderConfig::Gemini {
             api_key,
             api_endpoint: None,
+            auth: None,
         }
     }
 
-    /// Create a custom provider config
+    /// Create a Gemini provider config with auth
+    pub fn gemini_with_auth(auth: ProviderAuth) -> Self {
+        ProviderConfig::Gemini {
+            api_key: None,
+            api_endpoint: None,
+            auth: Some(auth),
+        }
+    }
+
+    /// Create a custom provider config (legacy, uses api_key field)
     pub fn custom(api_endpoint: String, api_key: Option<String>) -> Self {
         ProviderConfig::Custom {
             api_key,
             api_endpoint,
+            auth: None,
         }
     }
 
-    /// Create a Stakpak provider config
+    /// Create a custom provider config with auth
+    pub fn custom_with_auth(api_endpoint: String, auth: ProviderAuth) -> Self {
+        ProviderConfig::Custom {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
+        }
+    }
+
+    /// Create a Stakpak provider config (legacy, uses api_key field)
     pub fn stakpak(api_key: String, api_endpoint: Option<String>) -> Self {
         ProviderConfig::Stakpak {
-            api_key,
+            api_key: Some(api_key),
             api_endpoint,
+            auth: None,
+        }
+    }
+
+    /// Create a Stakpak provider config with auth
+    pub fn stakpak_with_auth(auth: ProviderAuth, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::Stakpak {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
         }
     }
 
@@ -313,6 +514,38 @@ impl ProviderConfig {
     pub fn profile_name(&self) -> Option<&str> {
         match self {
             ProviderConfig::Bedrock { profile_name, .. } => profile_name.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Create an empty provider config for a given provider name.
+    ///
+    /// Used during migration when we need to create a provider config
+    /// to attach auth credentials to.
+    pub fn empty_for_provider(provider_name: &str) -> Option<Self> {
+        match provider_name {
+            "openai" => Some(ProviderConfig::OpenAI {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
+            }),
+            "anthropic" => Some(ProviderConfig::Anthropic {
+                api_key: None,
+                api_endpoint: None,
+                access_token: None,
+                auth: None,
+            }),
+            "gemini" => Some(ProviderConfig::Gemini {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
+            }),
+            "stakpak" => Some(ProviderConfig::Stakpak {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
+            }),
+            // Custom providers need an endpoint, Bedrock uses AWS credential chain
             _ => None,
         }
     }
@@ -729,6 +962,7 @@ mod tests {
         let config = ProviderConfig::OpenAI {
             api_key: Some("sk-test".to_string()),
             api_endpoint: None,
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"type\":\"openai\""));
@@ -741,6 +975,7 @@ mod tests {
         let config = ProviderConfig::OpenAI {
             api_key: Some("sk-test".to_string()),
             api_endpoint: Some("https://custom.openai.com/v1".to_string()),
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"api_endpoint\":\"https://custom.openai.com/v1\""));
@@ -752,6 +987,7 @@ mod tests {
             api_key: Some("sk-ant-test".to_string()),
             api_endpoint: None,
             access_token: Some("oauth-token".to_string()),
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"type\":\"anthropic\""));
@@ -764,6 +1000,7 @@ mod tests {
         let config = ProviderConfig::Gemini {
             api_key: Some("gemini-key".to_string()),
             api_endpoint: None,
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"type\":\"gemini\""));
@@ -775,6 +1012,7 @@ mod tests {
         let config = ProviderConfig::Custom {
             api_key: Some("sk-custom".to_string()),
             api_endpoint: "http://localhost:4000".to_string(),
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"type\":\"custom\""));
@@ -787,6 +1025,7 @@ mod tests {
         let config = ProviderConfig::Custom {
             api_key: None,
             api_endpoint: "http://localhost:11434/v1".to_string(),
+            auth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"type\":\"custom\""));

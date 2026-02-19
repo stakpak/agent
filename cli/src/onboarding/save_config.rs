@@ -51,17 +51,10 @@ pub fn save_to_profile(
     // This ensures readonly always mirrors default's provider settings
     config_file.update_readonly();
 
-    // Ensure config directory exists
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
-    // Write config file
-    let config_str = toml::to_string_pretty(&config_file)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    fs::write(&path, config_str).map_err(|e| format!("Failed to write config file: {}", e))?;
+    // Save config file (uses atomic write with 0600 permissions for security)
+    config_file
+        .save_to(&path)
+        .map_err(|e| format!("Failed to save config file: {}", e))?;
 
     if is_local_provider
         && is_first_telemetry_setup
@@ -89,7 +82,7 @@ pub fn preview_and_save_to_profile(
     profile: ProfileConfig,
 ) -> Result<TelemetrySettings, String> {
     // Show preview
-    styled_output::render_config_preview(&config_to_toml_preview(&profile));
+    styled_output::render_config_preview(&config_to_toml_preview(&profile, profile_name));
 
     // Save
     let telemetry_settings = save_to_profile(config_path, profile_name, profile)?;

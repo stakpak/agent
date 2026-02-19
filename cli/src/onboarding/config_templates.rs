@@ -55,17 +55,16 @@
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
-use stakpak_shared::models::integrations::anthropic::AnthropicModel;
-use stakpak_shared::models::integrations::gemini::GeminiModel;
-use stakpak_shared::models::integrations::openai::OpenAIModel;
 use stakpak_shared::models::llm::ProviderConfig;
 
-/// Generate OpenAI profile configuration (credentials stored separately in auth.toml)
+/// Default model for all new profiles
+pub const DEFAULT_MODEL: &str = "claude-opus-4-5";
+
+/// Generate OpenAI profile configuration (credentials stored separately in config.toml auth field)
 pub fn generate_openai_profile() -> ProfileConfig {
     let mut profile = ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(OpenAIModel::default_smart_model()),
-        eco_model: Some(OpenAIModel::default_eco_model()),
+        model: Some("gpt-4.1".to_string()),
         ..ProfileConfig::default()
     };
     profile.providers.insert(
@@ -73,17 +72,17 @@ pub fn generate_openai_profile() -> ProfileConfig {
         ProviderConfig::OpenAI {
             api_key: None,
             api_endpoint: None,
+            auth: None,
         },
     );
     profile
 }
 
-/// Generate Gemini profile configuration (credentials stored separately in auth.toml)
+/// Generate Gemini profile configuration (credentials stored separately in config.toml auth field)
 pub fn generate_gemini_profile() -> ProfileConfig {
     let mut profile = ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(GeminiModel::default_smart_model()),
-        eco_model: Some(GeminiModel::default_eco_model()),
+        model: Some("gemini-2.5-pro".to_string()),
         ..ProfileConfig::default()
     };
     profile.providers.insert(
@@ -91,17 +90,17 @@ pub fn generate_gemini_profile() -> ProfileConfig {
         ProviderConfig::Gemini {
             api_key: None,
             api_endpoint: None,
+            auth: None,
         },
     );
     profile
 }
 
-/// Generate Anthropic profile configuration (credentials stored separately in auth.toml)
+/// Generate Anthropic profile configuration (credentials stored separately in config.toml auth field)
 pub fn generate_anthropic_profile() -> ProfileConfig {
     let mut profile = ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(AnthropicModel::default_smart_model()),
-        eco_model: Some(AnthropicModel::default_eco_model()),
+        model: Some(DEFAULT_MODEL.to_string()),
         ..ProfileConfig::default()
     };
     profile.providers.insert(
@@ -110,6 +109,7 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
             api_key: None,
             api_endpoint: None,
             access_token: None,
+            auth: None,
         },
     );
     profile
@@ -124,8 +124,7 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
 /// * `provider_name` - Name of the provider (e.g., "litellm", "ollama") - becomes the model prefix
 /// * `api_endpoint` - API endpoint URL as required by the provider (e.g., "http://localhost:4000")
 /// * `api_key` - Optional API key (some providers like Ollama don't require auth)
-/// * `smart_model` - Smart model name/path (e.g., "claude-opus" or "anthropic/claude-opus" for LiteLLM)
-/// * `eco_model` - Eco model name/path (e.g., "claude-haiku" or "anthropic/claude-haiku")
+/// * `model_name` - Model name/path (e.g., "claude-opus" or "anthropic/claude-opus" for LiteLLM)
 ///
 /// # Example
 /// For LiteLLM with Anthropic models:
@@ -135,20 +134,17 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
 ///     "http://localhost:4000".to_string(),
 ///     Some("sk-litellm".to_string()),
 ///     "anthropic/claude-opus".to_string(),  // Will become "litellm/anthropic/claude-opus"
-///     "anthropic/claude-haiku".to_string(), // Will become "litellm/anthropic/claude-haiku"
 /// )
 /// ```
 pub fn generate_custom_provider_profile(
     provider_name: String,
     api_endpoint: String,
     api_key: Option<String>,
-    smart_model: String,
-    eco_model: String,
+    model_name: String,
 ) -> ProfileConfig {
     let mut profile = ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(format!("{}/{}", provider_name, smart_model)),
-        eco_model: Some(format!("{}/{}", provider_name, eco_model)),
+        model: Some(format!("{}/{}", provider_name, model_name)),
         ..ProfileConfig::default()
     };
     profile.providers.insert(
@@ -156,96 +152,105 @@ pub fn generate_custom_provider_profile(
         ProviderConfig::Custom {
             api_key,
             api_endpoint,
+            auth: None,
         },
     );
     profile
 }
 
-/// Hybrid model configuration for smart or eco model
-#[derive(Debug, Clone)]
-pub struct HybridModelConfig {
-    pub provider: HybridProvider,
-    pub model: String,
-    pub api_key: String,
-}
-
-/// Provider options for hybrid configuration
+/// Built-in provider types for multi-provider configuration
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HybridProvider {
+pub enum BuiltinProvider {
     OpenAI,
     Gemini,
     Anthropic,
 }
 
-impl HybridProvider {
-    pub fn as_str(&self) -> &'static str {
+impl BuiltinProvider {
+    pub fn display_name(&self) -> &'static str {
         match self {
-            HybridProvider::OpenAI => "OpenAI",
-            HybridProvider::Gemini => "Gemini",
-            HybridProvider::Anthropic => "Anthropic",
+            BuiltinProvider::OpenAI => "OpenAI",
+            BuiltinProvider::Gemini => "Gemini",
+            BuiltinProvider::Anthropic => "Anthropic",
+        }
+    }
+
+    pub fn default_model(&self) -> &'static str {
+        match self {
+            BuiltinProvider::OpenAI => "gpt-4.1",
+            BuiltinProvider::Gemini => "gemini-2.5-pro",
+            BuiltinProvider::Anthropic => DEFAULT_MODEL,
         }
     }
 }
 
-/// Generate hybrid configuration (mix providers)
-pub fn generate_hybrid_config(smart: HybridModelConfig, eco: HybridModelConfig) -> ProfileConfig {
+/// Configuration for a provider in multi-provider setup
+#[derive(Debug, Clone)]
+pub struct ProviderSetup {
+    pub provider: BuiltinProvider,
+    pub api_key: String,
+}
+
+/// Generate a multi-provider profile configuration.
+///
+/// This creates a profile with multiple providers configured, allowing the user
+/// to switch between them using the `/model` command at runtime.
+///
+/// # Arguments
+/// * `providers` - List of providers to configure with their API keys
+/// * `default_model` - The model to use by default (e.g., "claude-opus-4-5")
+pub fn generate_multi_provider_profile(
+    providers: Vec<ProviderSetup>,
+    default_model: String,
+) -> ProfileConfig {
     let mut profile = ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(smart.model.clone()),
-        eco_model: Some(eco.model.clone()),
+        model: Some(default_model),
         ..ProfileConfig::default()
     };
 
-    // Add provider configs based on what's needed
-    if smart.provider == HybridProvider::OpenAI || eco.provider == HybridProvider::OpenAI {
-        profile.providers.insert(
-            "openai".to_string(),
-            ProviderConfig::OpenAI {
-                api_key: if smart.provider == HybridProvider::OpenAI {
-                    Some(smart.api_key.clone())
-                } else {
-                    Some(eco.api_key.clone())
-                },
-                api_endpoint: None,
-            },
-        );
-    }
-
-    if smart.provider == HybridProvider::Gemini || eco.provider == HybridProvider::Gemini {
-        profile.providers.insert(
-            "gemini".to_string(),
-            ProviderConfig::Gemini {
-                api_key: if smart.provider == HybridProvider::Gemini {
-                    Some(smart.api_key.clone())
-                } else {
-                    Some(eco.api_key.clone())
-                },
-                api_endpoint: None,
-            },
-        );
-    }
-
-    if smart.provider == HybridProvider::Anthropic || eco.provider == HybridProvider::Anthropic {
-        profile.providers.insert(
-            "anthropic".to_string(),
-            ProviderConfig::Anthropic {
-                api_key: if smart.provider == HybridProvider::Anthropic {
-                    Some(smart.api_key.clone())
-                } else {
-                    Some(eco.api_key.clone())
-                },
-                api_endpoint: None,
-                access_token: None,
-            },
-        );
+    for setup in providers {
+        match setup.provider {
+            BuiltinProvider::OpenAI => {
+                profile.providers.insert(
+                    "openai".to_string(),
+                    ProviderConfig::OpenAI {
+                        api_key: Some(setup.api_key),
+                        api_endpoint: None,
+                        auth: None,
+                    },
+                );
+            }
+            BuiltinProvider::Gemini => {
+                profile.providers.insert(
+                    "gemini".to_string(),
+                    ProviderConfig::Gemini {
+                        api_key: Some(setup.api_key),
+                        api_endpoint: None,
+                        auth: None,
+                    },
+                );
+            }
+            BuiltinProvider::Anthropic => {
+                profile.providers.insert(
+                    "anthropic".to_string(),
+                    ProviderConfig::Anthropic {
+                        api_key: Some(setup.api_key),
+                        api_endpoint: None,
+                        access_token: None,
+                        auth: None,
+                    },
+                );
+            }
+        }
     }
 
     profile
 }
 
 /// Convert profile config to TOML string for preview
-pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
-    let mut toml = String::from("[profiles.default]\n");
+pub fn config_to_toml_preview(profile: &ProfileConfig, profile_name: &str) -> String {
+    let mut toml = format!("[profiles.{}]\n", profile_name);
 
     if let Some(provider) = &profile.provider {
         toml.push_str(&format!(
@@ -257,22 +262,22 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
         ));
     }
 
-    if let Some(ref smart_model) = profile.smart_model {
-        toml.push_str(&format!("smart_model = \"{}\"\n", smart_model));
-    }
-
-    if let Some(ref eco_model) = profile.eco_model {
-        toml.push_str(&format!("eco_model = \"{}\"\n", eco_model));
+    if let Some(ref model) = profile.model {
+        toml.push_str(&format!("model = \"{}\"\n", model));
     }
 
     // Output providers in the new unified format
     for (name, config) in &profile.providers {
-        toml.push_str(&format!("\n[profiles.default.providers.{}]\n", name));
+        toml.push_str(&format!(
+            "\n[profiles.{}.providers.{}]\n",
+            profile_name, name
+        ));
 
         match config {
             ProviderConfig::OpenAI {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 toml.push_str("type = \"openai\"\n");
                 if let Some(endpoint) = api_endpoint {
@@ -289,6 +294,7 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
                 api_key,
                 api_endpoint,
                 access_token,
+                ..
             } => {
                 toml.push_str("type = \"anthropic\"\n");
                 if let Some(endpoint) = api_endpoint {
@@ -310,6 +316,7 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
             ProviderConfig::Gemini {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 toml.push_str("type = \"gemini\"\n");
                 if let Some(endpoint) = api_endpoint {
@@ -325,6 +332,7 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
             ProviderConfig::Custom {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 toml.push_str("type = \"custom\"\n");
                 toml.push_str(&format!("api_endpoint = \"{}\"\n", api_endpoint));
@@ -338,12 +346,15 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
             ProviderConfig::Stakpak {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 toml.push_str("type = \"stakpak\"\n");
-                toml.push_str(&format!(
-                    "api_key = \"{}\"\n",
-                    if api_key.is_empty() { "" } else { "***" }
-                ));
+                if let Some(key) = api_key {
+                    toml.push_str(&format!(
+                        "api_key = \"{}\"\n",
+                        if key.is_empty() { "" } else { "***" }
+                    ));
+                }
                 if let Some(endpoint) = api_endpoint {
                     toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
                 }
@@ -375,12 +386,10 @@ mod tests {
             "http://localhost:4000".to_string(),
             Some("sk-1234".to_string()),
             "claude-opus".to_string(),
-            "claude-haiku".to_string(),
         );
 
         assert!(matches!(profile.provider, Some(ProviderType::Local)));
-        assert_eq!(profile.smart_model, Some("litellm/claude-opus".to_string()));
-        assert_eq!(profile.eco_model, Some("litellm/claude-haiku".to_string()));
+        assert_eq!(profile.model, Some("litellm/claude-opus".to_string()));
 
         // Check providers HashMap
         let provider = profile
@@ -391,6 +400,7 @@ mod tests {
             ProviderConfig::Custom {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 assert_eq!(api_endpoint, "http://localhost:4000");
                 assert_eq!(api_key, &Some("sk-1234".to_string()));
@@ -406,12 +416,10 @@ mod tests {
             "http://localhost:11434/v1".to_string(),
             None,
             "llama3".to_string(),
-            "llama3".to_string(),
         );
 
         assert!(matches!(profile.provider, Some(ProviderType::Local)));
-        assert_eq!(profile.smart_model, Some("ollama/llama3".to_string()));
-        assert_eq!(profile.eco_model, Some("ollama/llama3".to_string()));
+        assert_eq!(profile.model, Some("ollama/llama3".to_string()));
 
         let provider = profile
             .providers
@@ -421,6 +429,7 @@ mod tests {
             ProviderConfig::Custom {
                 api_key,
                 api_endpoint,
+                ..
             } => {
                 assert_eq!(api_endpoint, "http://localhost:11434/v1");
                 assert!(api_key.is_none());
@@ -433,8 +442,7 @@ mod tests {
     fn test_config_to_toml_preview_with_custom_provider() {
         let mut profile = ProfileConfig {
             provider: Some(ProviderType::Local),
-            smart_model: Some("litellm/claude-opus".to_string()),
-            eco_model: Some("litellm/claude-haiku".to_string()),
+            model: Some("litellm/claude-opus".to_string()),
             ..ProfileConfig::default()
         };
         profile.providers.insert(
@@ -442,14 +450,14 @@ mod tests {
             ProviderConfig::Custom {
                 api_endpoint: "http://localhost:4000".to_string(),
                 api_key: Some("sk-1234".to_string()),
+                auth: None,
             },
         );
 
-        let toml = config_to_toml_preview(&profile);
+        let toml = config_to_toml_preview(&profile, "default");
 
         assert!(toml.contains("provider = \"local\""));
-        assert!(toml.contains("smart_model = \"litellm/claude-opus\""));
-        assert!(toml.contains("eco_model = \"litellm/claude-haiku\""));
+        assert!(toml.contains("model = \"litellm/claude-opus\""));
         assert!(toml.contains("[profiles.default.providers.litellm]"));
         assert!(toml.contains("type = \"custom\""));
         assert!(toml.contains("api_endpoint = \"http://localhost:4000\""));
@@ -460,8 +468,7 @@ mod tests {
     fn test_config_to_toml_preview_custom_provider_no_api_key() {
         let mut profile = ProfileConfig {
             provider: Some(ProviderType::Local),
-            smart_model: Some("ollama/llama3".to_string()),
-            eco_model: Some("ollama/llama3".to_string()),
+            model: Some("ollama/llama3".to_string()),
             ..ProfileConfig::default()
         };
         profile.providers.insert(
@@ -469,10 +476,11 @@ mod tests {
             ProviderConfig::Custom {
                 api_endpoint: "http://localhost:11434/v1".to_string(),
                 api_key: None,
+                auth: None,
             },
         );
 
-        let toml = config_to_toml_preview(&profile);
+        let toml = config_to_toml_preview(&profile, "default");
 
         assert!(toml.contains("[profiles.default.providers.ollama]"));
         assert!(toml.contains("type = \"custom\""));
@@ -485,5 +493,26 @@ mod tests {
             .take_while(|l| !l.starts_with('[') || l.contains("providers.ollama"))
             .any(|l| l.contains("api_key"));
         assert!(!has_api_key_in_ollama_section);
+    }
+
+    #[test]
+    fn test_generate_multi_provider_profile() {
+        let providers = vec![
+            ProviderSetup {
+                provider: BuiltinProvider::Anthropic,
+                api_key: "sk-ant-xxx".to_string(),
+            },
+            ProviderSetup {
+                provider: BuiltinProvider::OpenAI,
+                api_key: "sk-xxx".to_string(),
+            },
+        ];
+
+        let profile = generate_multi_provider_profile(providers, DEFAULT_MODEL.to_string());
+
+        assert!(matches!(profile.provider, Some(ProviderType::Local)));
+        assert_eq!(profile.model, Some(DEFAULT_MODEL.to_string()));
+        assert!(profile.providers.contains_key("anthropic"));
+        assert!(profile.providers.contains_key("openai"));
     }
 }

@@ -18,8 +18,9 @@ use crate::apikey_auth::prompt_for_api_key;
 use crate::config::AppConfig;
 use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
-    HybridModelConfig, config_to_toml_preview, generate_anthropic_profile, generate_gemini_profile,
-    generate_hybrid_config, generate_openai_profile,
+    BuiltinProvider, DEFAULT_MODEL, ProviderSetup, config_to_toml_preview,
+    generate_anthropic_profile, generate_gemini_profile, generate_multi_provider_profile,
+    generate_openai_profile,
 };
 use crate::onboarding::menu::{
     prompt_password, prompt_profile_name, select_option, select_option_no_header,
@@ -27,11 +28,6 @@ use crate::onboarding::menu::{
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
 use crate::onboarding::styled_output::{StepStatus, render_profile_name};
-use stakpak_shared::auth_manager::AuthManager;
-use stakpak_shared::models::integrations::anthropic::AnthropicModel;
-use stakpak_shared::models::integrations::gemini::GeminiModel;
-use stakpak_shared::models::integrations::openai::OpenAIModel;
-use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::oauth::{OAuthFlow, ProviderRegistry};
 use std::io::{self, Write};
 
@@ -319,11 +315,8 @@ async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: 
     );
     print!("\r\n");
 
-    // Show default models
-    crate::onboarding::styled_output::render_default_models(
-        &AnthropicModel::DEFAULT_SMART_MODEL.model_name(),
-        &AnthropicModel::DEFAULT_ECO_MODEL.model_name(),
-    );
+    // Show default model
+    crate::onboarding::styled_output::render_default_model(DEFAULT_MODEL);
 
     // Get OAuth provider and config
     let registry = ProviderRegistry::new();
@@ -403,31 +396,13 @@ async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: 
         }
     };
 
-    // Get config directory
-    let config_dir = config.get_config_dir();
+    // Generate profile config with auth credentials embedded
+    let mut profile = generate_anthropic_profile();
 
-    // Save credentials to auth.toml
-    let mut auth_manager = match AuthManager::new(&config_dir) {
-        Ok(m) => m,
-        Err(e) => {
-            crate::onboarding::styled_output::render_error(&format!(
-                "Failed to load auth manager: {}",
-                e
-            ));
-            return false;
-        }
-    };
-
-    if let Err(e) = auth_manager.set(profile_name, "anthropic", auth) {
-        crate::onboarding::styled_output::render_error(&format!(
-            "Failed to save credentials: {}",
-            e
-        ));
-        return false;
+    // Set auth on the anthropic provider config
+    if let Some(provider_config) = profile.providers.get_mut("anthropic") {
+        provider_config.set_auth(auth);
     }
-
-    // Generate profile config (credentials are in auth.toml)
-    let profile = generate_anthropic_profile();
 
     // Save profile config
     let config_path = get_config_path_string(config);
@@ -453,8 +428,7 @@ async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: 
         .provider
         .unwrap_or(crate::config::ProviderType::Local);
     config.providers = profile.providers.clone();
-    config.smart_model = profile.smart_model.clone();
-    config.eco_model = profile.eco_model.clone();
+    config.model = profile.model.clone();
     config.anonymous_id = telemetry.anonymous_id;
     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -483,41 +457,21 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models (using same names as config templates)
-    crate::onboarding::styled_output::render_default_models(
-        &OpenAIModel::DEFAULT_SMART_MODEL.model_name(),
-        &OpenAIModel::DEFAULT_ECO_MODEL.model_name(),
-    );
+    // Show default model
+    crate::onboarding::styled_output::render_default_model("gpt-4.1");
 
     match prompt_password("Enter your OpenAI API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            // Save API key to auth.toml
-            let config_dir = config.get_config_dir();
-            let mut auth_manager = match AuthManager::new(&config_dir) {
-                Ok(m) => m,
-                Err(e) => {
-                    crate::onboarding::styled_output::render_error(&format!(
-                        "Failed to load auth manager: {}",
-                        e
-                    ));
-                    return false;
-                }
-            };
-
+            // Generate profile config with auth credentials embedded
+            let mut profile = generate_openai_profile();
             let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
-            if let Err(e) = auth_manager.set(profile_name, "openai", auth) {
-                crate::onboarding::styled_output::render_error(&format!(
-                    "Failed to save credentials: {}",
-                    e
-                ));
-                return false;
+            if let Some(provider_config) = profile.providers.get_mut("openai") {
+                provider_config.set_auth(auth);
             }
-
-            // Generate profile config (credentials are in auth.toml)
-            let profile = generate_openai_profile();
 
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
+                profile_name,
             ));
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
@@ -546,8 +500,7 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
                     config.providers = profile.providers.clone();
-                    config.smart_model = profile.smart_model.clone();
-                    config.eco_model = profile.eco_model.clone();
+                    config.model = profile.model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -583,42 +536,22 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models (using same names as config templates)
-    crate::onboarding::styled_output::render_default_models(
-        &GeminiModel::DEFAULT_SMART_MODEL.model_name(),
-        &GeminiModel::DEFAULT_ECO_MODEL.model_name(),
-    );
+    // Show default model
+    crate::onboarding::styled_output::render_default_model("gemini-2.5-pro");
 
     match prompt_password("Enter your Gemini API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            // Save API key to auth.toml
-            let config_dir = config.get_config_dir();
-            let mut auth_manager = match AuthManager::new(&config_dir) {
-                Ok(m) => m,
-                Err(e) => {
-                    crate::onboarding::styled_output::render_error(&format!(
-                        "Failed to load auth manager: {}",
-                        e
-                    ));
-                    return false;
-                }
-            };
-
+            // Generate profile config with auth credentials embedded
+            let mut profile = generate_gemini_profile();
             let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
-            if let Err(e) = auth_manager.set(profile_name, "gemini", auth) {
-                crate::onboarding::styled_output::render_error(&format!(
-                    "Failed to save credentials: {}",
-                    e
-                ));
-                return false;
+            if let Some(provider_config) = profile.providers.get_mut("gemini") {
+                provider_config.set_auth(auth);
             }
-
-            // Generate profile config (credentials are in auth.toml)
-            let profile = generate_gemini_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
+                profile_name,
             ));
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
@@ -648,8 +581,7 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
                     config.providers = profile.providers.clone();
-                    config.smart_model = profile.smart_model.clone();
-                    config.eco_model = profile.eco_model.clone();
+                    config.model = profile.model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -686,42 +618,22 @@ async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &s
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models (using same names as config templates)
-    crate::onboarding::styled_output::render_default_models(
-        &AnthropicModel::DEFAULT_SMART_MODEL.model_name(),
-        &AnthropicModel::DEFAULT_ECO_MODEL.model_name(),
-    );
+    // Show default model
+    crate::onboarding::styled_output::render_default_model(DEFAULT_MODEL);
 
     match prompt_password("Enter your Anthropic API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            // Save API key to auth.toml
-            let config_dir = config.get_config_dir();
-            let mut auth_manager = match AuthManager::new(&config_dir) {
-                Ok(m) => m,
-                Err(e) => {
-                    crate::onboarding::styled_output::render_error(&format!(
-                        "Failed to load auth manager: {}",
-                        e
-                    ));
-                    return false;
-                }
-            };
-
+            // Generate profile config with auth credentials embedded
+            let mut profile = generate_anthropic_profile();
             let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
-            if let Err(e) = auth_manager.set(profile_name, "anthropic", auth) {
-                crate::onboarding::styled_output::render_error(&format!(
-                    "Failed to save credentials: {}",
-                    e
-                ));
-                return false;
+            if let Some(provider_config) = profile.providers.get_mut("anthropic") {
+                provider_config.set_auth(auth);
             }
-
-            // Generate profile config (credentials are in auth.toml)
-            let profile = generate_anthropic_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
+                profile_name,
             ));
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
@@ -751,8 +663,7 @@ async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &s
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
                     config.providers = profile.providers.clone();
-                    config.smart_model = profile.smart_model.clone();
-                    config.eco_model = profile.eco_model.clone();
+                    config.model = profile.model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -766,7 +677,7 @@ async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &s
     }
 }
 
-/// Handle Hybrid Providers setup
+/// Handle Multi-Provider setup (formerly Hybrid Providers)
 /// Returns true if completed, false if cancelled/back
 async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     let config_path = get_config_path_string(config);
@@ -778,7 +689,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
     let _ = io::stdout().flush();
 
     // Render step 3 - start immediately after welcome message (no extra newline)
-    crate::onboarding::styled_output::render_title("Hybrid Providers Configuration");
+    crate::onboarding::styled_output::render_title("Multi-Provider Configuration");
     print!("\r\n");
 
     // Show step indicators on one line
@@ -791,30 +702,89 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
     print!("\r\n");
 
     crate::onboarding::styled_output::render_info(
-        "You'll configure smart_model and eco_model separately, each from different providers if desired.",
+        "Configure multiple providers so you can switch between models at runtime using /model.",
     );
     print!("\r\n");
 
-    // Configure smart model
-    crate::onboarding::styled_output::render_subtitle("Configure Smart Model");
-    let smart = match configure_hybrid_model(None) {
-        Some(model) => model,
-        None => return false,
-    };
+    // Collect providers
+    let mut providers: Vec<ProviderSetup> = Vec::new();
+    let available_providers = [
+        (BuiltinProvider::Anthropic, "Anthropic (recommended)", true),
+        (BuiltinProvider::OpenAI, "OpenAI", false),
+        (BuiltinProvider::Gemini, "Gemini", false),
+    ];
 
+    loop {
+        crate::onboarding::styled_output::render_subtitle("Add a provider");
+
+        // Filter out already configured providers
+        let remaining: Vec<_> = available_providers
+            .iter()
+            .filter(|(p, _, _)| !providers.iter().any(|setup| setup.provider == *p))
+            .cloned()
+            .collect();
+
+        if remaining.is_empty() {
+            crate::onboarding::styled_output::render_info("All providers configured!");
+            break;
+        }
+
+        let provider = match select_option_no_header(&remaining, true) {
+            NavResult::Forward(p) => p,
+            NavResult::Back | NavResult::Cancel => {
+                if providers.is_empty() {
+                    return false;
+                }
+                break;
+            }
+        };
+
+        // Ask for API key
+        let api_key = match crate::onboarding::menu::prompt_password(
+            &format!("Enter {} API key", provider.display_name()),
+            true,
+        ) {
+            NavResult::Forward(Some(key)) => key,
+            NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => continue,
+        };
+
+        providers.push(ProviderSetup { provider, api_key });
+
+        // Ask if they want to add more
+        if remaining.len() > 1 {
+            match crate::onboarding::menu::prompt_yes_no("Add another provider?", false) {
+                NavResult::Forward(Some(true)) => continue,
+                _ => break,
+            }
+        } else {
+            break;
+        }
+    }
+
+    if providers.is_empty() {
+        crate::onboarding::styled_output::render_warning("No providers configured.");
+        return false;
+    }
+
+    // Ask for default model
     print!("\r\n");
+    crate::onboarding::styled_output::render_subtitle("Select default model");
+    crate::onboarding::styled_output::render_info(
+        "You can switch models at runtime using /model command.",
+    );
 
-    // Configure eco model - pass smart provider to reuse API key if same
-    crate::onboarding::styled_output::render_subtitle("Configure Eco Model");
-    let eco = match configure_hybrid_model(Some(&smart)) {
-        Some(model) => model,
-        None => return false,
-    };
+    let default_model = providers
+        .first()
+        .map(|p| p.provider.default_model().to_string())
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
 
-    let profile = generate_hybrid_config(smart, eco);
+    let profile = generate_multi_provider_profile(providers, default_model);
 
     // Show confirmation
-    crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(&profile));
+    crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
+        &profile,
+        profile_name,
+    ));
 
     match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
         NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
@@ -838,9 +808,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 .provider
                 .unwrap_or(crate::config::ProviderType::Local);
             config.providers = profile.providers.clone();
-            config.smart_model = profile.smart_model.clone();
-            config.eco_model = profile.eco_model.clone();
-            config.recovery_model = profile.recovery_model.clone();
+            config.model = profile.model.clone();
             if let Some(key) = &profile.api_key {
                 config.api_key = Some(key.clone());
             }
@@ -853,131 +821,12 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
     }
 }
 
-/// Configure a single model for hybrid setup
-/// If `previous_config` is provided and uses the same provider, reuse the API key
-fn configure_hybrid_model(
-    previous_config: Option<&HybridModelConfig>,
-) -> Option<HybridModelConfig> {
-    use crate::onboarding::config_templates::HybridProvider;
-
-    // Select provider
-    let providers = [
-        (HybridProvider::OpenAI, "OpenAI", false),
-        (HybridProvider::Gemini, "Gemini", false),
-        (HybridProvider::Anthropic, "Anthropic", false),
-    ];
-
-    let provider = match select_option_no_header(&providers, true) {
-        NavResult::Forward(p) => p,
-        NavResult::Back | NavResult::Cancel => return None,
-    };
-
-    // Select model based on provider
-    let model = select_model_for_provider(&provider)?;
-
-    // Check if we can reuse API key from previous config
-    let api_key = if let Some(prev) = previous_config {
-        if prev.provider == provider {
-            // Same provider, reuse API key
-            prev.api_key.clone()
-        } else {
-            // Different provider, ask for API key
-            match crate::onboarding::menu::prompt_password(
-                &format!("Enter {} API key", provider.as_str()),
-                true,
-            ) {
-                NavResult::Forward(Some(key)) => key,
-                NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
-            }
-        }
-    } else {
-        // No previous config, ask for API key
-        match crate::onboarding::menu::prompt_password(
-            &format!("Enter {} API key", provider.as_str()),
-            true,
-        ) {
-            NavResult::Forward(Some(key)) => key,
-            NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
-        }
-    };
-
-    Some(HybridModelConfig {
-        provider,
-        model,
-        api_key,
-    })
-}
-
-/// Select model for a provider
-fn select_model_for_provider(
-    provider: &crate::onboarding::config_templates::HybridProvider,
-) -> Option<String> {
-    use std::collections::HashSet;
-
-    let (candidates, smart_id) = match provider {
-        crate::onboarding::config_templates::HybridProvider::OpenAI => {
-            let smart = OpenAIModel::DEFAULT_SMART_MODEL;
-            let eco = OpenAIModel::DEFAULT_ECO_MODEL;
-            (
-                vec![
-                    (smart.to_string(), smart.model_name()),
-                    (eco.to_string(), eco.model_name()),
-                ],
-                smart.to_string(),
-            )
-        }
-        crate::onboarding::config_templates::HybridProvider::Gemini => {
-            let smart = GeminiModel::DEFAULT_SMART_MODEL;
-            let eco = GeminiModel::DEFAULT_ECO_MODEL;
-            (
-                vec![
-                    (smart.to_string(), smart.model_name()),
-                    (eco.to_string(), eco.model_name()),
-                ],
-                smart.to_string(),
-            )
-        }
-        crate::onboarding::config_templates::HybridProvider::Anthropic => {
-            let smart = AnthropicModel::DEFAULT_SMART_MODEL;
-            let eco = AnthropicModel::DEFAULT_ECO_MODEL;
-            (
-                vec![
-                    (smart.to_string(), smart.model_name()),
-                    (eco.to_string(), eco.model_name()),
-                ],
-                smart.to_string(),
-            )
-        }
-    };
-
-    let mut options = Vec::new();
-    let mut seen = HashSet::new();
-
-    for (id, name) in candidates {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let is_recommended = id == smart_id;
-        options.push((id, name, is_recommended));
-    }
-
-    let options_refs: Vec<(String, &str, bool)> = options
-        .iter()
-        .map(|(id, name, rec)| (id.clone(), name.as_str(), *rec))
-        .collect();
-
-    match select_option_no_header(&options_refs, true) {
-        NavResult::Forward(model) => Some(model),
-        NavResult::Back | NavResult::Cancel => None,
-    }
-}
-
 /// Handle BYOM / Custom Provider setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     let config_path = get_config_path_string(config);
 
-    if let Some(profile) = configure_byom(2, 4) {
+    if let Some(profile) = configure_byom(2, 4, profile_name) {
         let telemetry =
             match preview_and_save_to_profile(&config_path, profile_name, profile.clone()) {
                 Ok(t) => t,
@@ -995,9 +844,7 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
             .provider
             .unwrap_or(crate::config::ProviderType::Local);
         config.providers = profile.providers.clone();
-        config.smart_model = profile.smart_model.clone();
-        config.eco_model = profile.eco_model.clone();
-        config.recovery_model = profile.recovery_model.clone();
+        config.model = profile.model.clone();
         if let Some(key) = &profile.api_key {
             config.api_key = Some(key.clone());
         }

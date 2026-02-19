@@ -266,14 +266,9 @@ pub async fn run_interactive(
                         .with_endpoint(api_endpoint_for_client.clone()),
                 );
             }
-            if let Some(smart_model) = &ctx_clone.smart_model {
-                client_config = client_config.with_smart_model(smart_model.clone());
-            }
-            if let Some(eco_model) = &ctx_clone.eco_model {
-                client_config = client_config.with_eco_model(eco_model.clone());
-            }
-            if let Some(recovery_model) = &ctx_clone.recovery_model {
-                client_config = client_config.with_recovery_model(recovery_model.clone());
+            // Pass unified model as smart_model for AgentClient compatibility
+            if let Some(model) = &ctx_clone.model {
+                client_config = client_config.with_smart_model(model.clone());
             }
 
             let client: Arc<dyn AgentProvider> = Arc::new(
@@ -405,7 +400,12 @@ pub async fn run_interactive(
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::SwitchToModel(new_model) => {
-                        model = new_model;
+                        // Transform model for Stakpak routing if using Stakpak API
+                        model = if has_stakpak_key {
+                            stakpak_api::transform_for_stakpak(new_model)
+                        } else {
+                            new_model
+                        };
                         continue;
                     }
                     OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
@@ -1352,14 +1352,9 @@ pub async fn run_interactive(
                         .with_endpoint(new_config.api_endpoint.clone()),
                 );
             }
-            if let Some(smart_model) = &new_config.smart_model {
-                new_client_config = new_client_config.with_smart_model(smart_model.clone());
-            }
-            if let Some(eco_model) = &new_config.eco_model {
-                new_client_config = new_client_config.with_eco_model(eco_model.clone());
-            }
-            if let Some(recovery_model) = &new_config.recovery_model {
-                new_client_config = new_client_config.with_recovery_model(recovery_model.clone());
+            // Pass unified model as smart_model for AgentClient compatibility
+            if let Some(model) = &new_config.model {
+                new_client_config = new_client_config.with_smart_model(model.clone());
             }
 
             let client: Box<dyn AgentProvider> = Box::new(
@@ -1419,14 +1414,9 @@ pub async fn run_interactive(
                 stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
             );
         }
-        if let Some(smart_model) = &ctx.smart_model {
-            final_client_config = final_client_config.with_smart_model(smart_model.clone());
-        }
-        if let Some(eco_model) = &ctx.eco_model {
-            final_client_config = final_client_config.with_eco_model(eco_model.clone());
-        }
-        if let Some(recovery_model) = &ctx.recovery_model {
-            final_client_config = final_client_config.with_recovery_model(recovery_model.clone());
+        // Pass unified model as smart_model for AgentClient compatibility
+        if let Some(model) = &ctx.model {
+            final_client_config = final_client_config.with_smart_model(model.clone());
         }
 
         let client: Box<dyn AgentProvider> = Box::new(

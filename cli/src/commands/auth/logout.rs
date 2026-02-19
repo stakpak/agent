@@ -1,10 +1,59 @@
 //! Logout command - remove provider credentials
 
+use crate::config::AppConfig;
 use crate::onboarding::menu::select_option_no_header;
 use crate::onboarding::navigation::NavResult;
 use stakpak_shared::auth_manager::AuthManager;
+use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::oauth::ProviderRegistry;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Collect all credentials from both config.toml and auth.toml
+fn collect_all_credentials(
+    config_dir: &Path,
+) -> HashMap<String, HashMap<String, (ProviderAuth, CredentialSource)>> {
+    let mut all_credentials: HashMap<String, HashMap<String, (ProviderAuth, CredentialSource)>> =
+        HashMap::new();
+
+    // 1. Read from config.toml (new format)
+    let config_path = config_dir.join("config.toml");
+    if let Ok(config_file) = AppConfig::load_config_file(&config_path) {
+        for (profile_name, profile_config) in &config_file.profiles {
+            for (provider_name, provider_config) in &profile_config.providers {
+                if let Some(auth) = provider_config.get_auth() {
+                    all_credentials
+                        .entry(profile_name.clone())
+                        .or_default()
+                        .insert(provider_name.clone(), (auth, CredentialSource::ConfigToml));
+                }
+            }
+        }
+    }
+
+    // 2. Read from auth.toml (legacy)
+    if let Ok(auth_manager) = AuthManager::new(config_dir) {
+        for (profile_name, providers) in auth_manager.list() {
+            for (provider_name, auth) in providers {
+                let profile_creds = all_credentials.entry(profile_name.clone()).or_default();
+                if !profile_creds.contains_key(provider_name.as_str()) {
+                    profile_creds.insert(
+                        provider_name.clone(),
+                        (auth.clone(), CredentialSource::AuthToml),
+                    );
+                }
+            }
+        }
+    }
+
+    all_credentials
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CredentialSource {
+    ConfigToml,
+    AuthToml,
+}
 
 /// Handle the logout command
 pub fn handle_logout(
@@ -12,12 +61,15 @@ pub fn handle_logout(
     provider: Option<&str>,
     profile: Option<&str>,
 ) -> Result<(), String> {
-    let mut auth_manager =
-        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
     let registry = ProviderRegistry::new();
+    let all_credentials = collect_all_credentials(config_dir);
 
     // If no credentials exist, inform the user
-    if !auth_manager.has_credentials() {
+    if all_credentials.is_empty()
+        || all_credentials
+            .values()
+            .all(|providers| providers.is_empty())
+    {
         println!("No credentials configured.");
         return Ok(());
     }
@@ -27,10 +79,9 @@ pub fn handle_logout(
         Some(p) => p.to_string(),
         None => {
             // Interactive selection - list all configured providers
-            let credentials = auth_manager.list();
             let mut all_providers: Vec<String> = Vec::new();
 
-            for providers in credentials.values() {
+            for providers in all_credentials.values() {
                 for provider_id in providers.keys() {
                     if !all_providers.contains(provider_id) {
                         all_providers.push(provider_id.clone());
@@ -83,8 +134,7 @@ pub fn handle_logout(
         Some(p) => p.to_string(),
         None => {
             // Find all profiles that have this provider
-            let credentials = auth_manager.list();
-            let profiles_with_provider: Vec<&String> = credentials
+            let profiles_with_provider: Vec<&String> = all_credentials
                 .iter()
                 .filter(|(_, providers)| providers.contains_key(&provider_id))
                 .map(|(profile, _)| profile)
@@ -136,10 +186,63 @@ pub fn handle_logout(
         }
     };
 
-    // Remove the credentials
-    let removed = auth_manager
-        .remove(&target_profile, &provider_id)
-        .map_err(|e| format!("Failed to remove credentials: {}", e))?;
+    // Find the source of credentials
+    let source = all_credentials
+        .get(&target_profile)
+        .and_then(|providers| providers.get(&provider_id))
+        .map(|(_, source)| *source);
+
+    let mut removed = false;
+
+    // Remove from the appropriate source
+    match source {
+        Some(CredentialSource::ConfigToml) => {
+            // Remove from config.toml
+            let config_path = config_dir.join("config.toml");
+            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path) {
+                if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
+                    if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
+                        provider_config.clear_auth();
+                        if let Err(e) = config_file.save_to(&config_path) {
+                            return Err(format!("Failed to save config: {}", e));
+                        }
+                        removed = true;
+                    }
+                }
+            }
+        }
+        Some(CredentialSource::AuthToml) => {
+            // Remove from auth.toml (legacy)
+            if let Ok(mut auth_manager) = AuthManager::new(config_dir) {
+                removed = auth_manager
+                    .remove(&target_profile, &provider_id)
+                    .map_err(|e| format!("Failed to remove credentials: {}", e))?;
+            }
+        }
+        None => {
+            // Try both sources
+            // First try config.toml
+            let config_path = config_dir.join("config.toml");
+            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path) {
+                if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
+                    if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
+                        provider_config.clear_auth();
+                        if config_file.save_to(&config_path).is_ok() {
+                            removed = true;
+                        }
+                    }
+                }
+            }
+            // Then try auth.toml
+            if !removed {
+                if let Ok(mut auth_manager) = AuthManager::new(config_dir) {
+                    if let Ok(r) = auth_manager.remove(&target_profile, &provider_id) {
+                        removed = r;
+                    }
+                }
+            }
+        }
+    }
 
     let provider_name = registry
         .get(&provider_id)

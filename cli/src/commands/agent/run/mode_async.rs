@@ -221,14 +221,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
             stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
         );
     }
-    if let Some(smart_model) = &ctx.smart_model {
-        client_config = client_config.with_smart_model(smart_model.clone());
-    }
-    if let Some(eco_model) = &ctx.eco_model {
-        client_config = client_config.with_eco_model(eco_model.clone());
-    }
-    if let Some(recovery_model) = &ctx.recovery_model {
-        client_config = client_config.with_recovery_model(recovery_model.clone());
+    // Pass unified model as smart_model for AgentClient compatibility
+    if let Some(model) = &ctx.model {
+        client_config = client_config.with_smart_model(model.clone());
     }
 
     let client = AgentClient::new(client_config)

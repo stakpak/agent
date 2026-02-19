@@ -109,11 +109,8 @@ impl ProfileConfig {
                 api_key: default.api_key.clone(),
                 provider: default.provider,
                 providers: default.providers.clone(),
-                // Copy model fields
+                // Copy unified model field only (legacy fields are not copied)
                 model: default.model.clone(),
-                smart_model: default.smart_model.clone(),
-                eco_model: default.eco_model.clone(),
-                recovery_model: default.recovery_model.clone(),
                 // Enable warden for readonly sandboxed execution
                 warden: Some(WardenConfig::readonly_profile()),
                 // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
@@ -164,6 +161,7 @@ impl ProfileConfig {
                 e.insert(ProviderConfig::OpenAI {
                     api_key: openai.api_key,
                     api_endpoint: Self::clean_api_endpoint(openai.api_endpoint),
+                    auth: None,
                 });
                 migrated = true;
             }
@@ -178,6 +176,7 @@ impl ProfileConfig {
                         api_key: anthropic.api_key,
                         api_endpoint: Self::clean_api_endpoint(anthropic.api_endpoint),
                         access_token: anthropic.access_token,
+                        auth: None,
                     },
                 );
                 migrated = true;
@@ -192,6 +191,7 @@ impl ProfileConfig {
                     ProviderConfig::Gemini {
                         api_key: gemini.api_key,
                         api_endpoint: Self::clean_api_endpoint(gemini.api_endpoint),
+                        auth: None,
                     },
                 );
                 migrated = true;
@@ -284,6 +284,40 @@ impl ProfileConfig {
         false
     }
 
+    /// Check if this profile has legacy model fields that need migration.
+    pub fn needs_model_migration(&self) -> bool {
+        // If we have legacy fields but no unified model field, migration is needed
+        self.model.is_none()
+            && (self.smart_model.is_some()
+                || self.eco_model.is_some()
+                || self.recovery_model.is_some())
+    }
+
+    /// Migrate legacy model fields (smart_model, eco_model, recovery_model) to unified 'model' field.
+    ///
+    /// Priority: smart_model > eco_model > recovery_model > default (claude-opus-4-5)
+    ///
+    /// After migration, legacy fields are cleared so they won't be serialized.
+    /// Returns true if migration was performed.
+    pub fn migrate_model_fields(&mut self) -> bool {
+        if !self.needs_model_migration() {
+            return false;
+        }
+
+        // Take ownership of legacy fields and pick the best one
+        let smart = self.smart_model.take();
+        let eco = self.eco_model.take();
+        let recovery = self.recovery_model.take();
+
+        // Priority: smart > eco > recovery > default
+        self.model = smart
+            .or(eco)
+            .or(recovery)
+            .or_else(|| Some("claude-opus-4-5".to_string()));
+
+        true
+    }
+
     /// Merge this profile with another, using self's values if present.
     pub(crate) fn merge(&self, other: Option<&ProfileConfig>) -> ProfileConfig {
         // Merge providers: start with other's providers, then overlay self's
@@ -334,24 +368,15 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
-            // New unified model field
+            // Unified model field
             model: self
                 .model
                 .clone()
                 .or_else(|| other.and_then(|config| config.model.clone())),
-            // Legacy fields - merge for backward compatibility during transition
-            eco_model: self
-                .eco_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.eco_model.clone())),
-            smart_model: self
-                .smart_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.smart_model.clone())),
-            recovery_model: self
-                .recovery_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.recovery_model.clone())),
+            // Legacy fields - kept for reading only, not merged
+            eco_model: None,
+            smart_model: None,
+            recovery_model: None,
         }
     }
 }

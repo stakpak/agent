@@ -1,10 +1,25 @@
 //! Authentication manager for storing and retrieving provider credentials
 //!
-//! This module manages provider credentials stored in `auth.toml` in the config directory.
-//! Credentials are organized by profile and provider, with support for a shared "all" profile
-//! that serves as a fallback for all other profiles.
+//! # Deprecated
 //!
-//! # File Structure
+//! This module is **deprecated**. Credentials are now stored directly in `config.toml`
+//! under `[profiles.{profile}.providers.{provider}.auth]` instead of in a separate
+//! `auth.toml` file.
+//!
+//! The `AuthManager` is kept temporarily for:
+//! - Reading existing `auth.toml` files during migration
+//! - Backward compatibility during the transition period
+//!
+//! New code should use `ProviderConfig::set_auth()` and `ProviderConfig::get_auth()`
+//! to manage provider credentials directly in `config.toml`.
+//!
+//! ## Migration
+//!
+//! When `config.toml` is loaded, any credentials in `auth.toml` are automatically
+//! migrated to the new format in `config.toml`, and `auth.toml` is backed up to
+//! `auth.toml.bak`.
+//!
+//! # Legacy File Structure (auth.toml - deprecated)
 //!
 //! ```toml
 //! # Shared across all profiles

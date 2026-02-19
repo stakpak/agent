@@ -1,18 +1,48 @@
 //! List credentials command
 
+use crate::config::AppConfig;
 use stakpak_shared::auth_manager::AuthManager;
+use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::oauth::ProviderRegistry;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Handle the list credentials command
 pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), String> {
-    let auth_manager =
-        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
     let registry = ProviderRegistry::new();
 
-    let credentials = auth_manager.list();
+    // Collect credentials from both config.toml and auth.toml (legacy)
+    let mut all_credentials: HashMap<String, HashMap<String, ProviderAuth>> = HashMap::new();
 
-    if credentials.is_empty() {
+    // 1. Read from config.toml (new format)
+    let config_path = config_dir.join("config.toml");
+    if let Ok(config_file) = AppConfig::load_config_file(&config_path) {
+        for (profile_name, profile_config) in &config_file.profiles {
+            for (provider_name, provider_config) in &profile_config.providers {
+                if let Some(auth) = provider_config.get_auth() {
+                    all_credentials
+                        .entry(profile_name.clone())
+                        .or_default()
+                        .insert(provider_name.clone(), auth);
+                }
+            }
+        }
+    }
+
+    // 2. Read from auth.toml (legacy, for users who haven't migrated)
+    if let Ok(auth_manager) = AuthManager::new(config_dir) {
+        for (profile_name, providers) in auth_manager.list() {
+            for (provider_name, auth) in providers {
+                // Only add if not already in config.toml
+                let profile_creds = all_credentials.entry(profile_name.clone()).or_default();
+                if !profile_creds.contains_key(provider_name.as_str()) {
+                    profile_creds.insert(provider_name.clone(), auth.clone());
+                }
+            }
+        }
+    }
+
+    if all_credentials.is_empty() {
         println!("No credentials configured.");
         println!();
         println!("Run 'stakpak auth login' to add credentials.");
@@ -23,7 +53,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
     println!();
 
     // Sort profiles for consistent output
-    let mut profile_names: Vec<_> = credentials.keys().collect();
+    let mut profile_names: Vec<_> = all_credentials.keys().collect();
     profile_names.sort();
 
     // Put "all" first if present
@@ -46,7 +76,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
             continue;
         }
 
-        let Some(providers) = credentials.get(profile_name) else {
+        let Some(providers) = all_credentials.get(profile_name) else {
             continue;
         };
         if providers.is_empty() {
