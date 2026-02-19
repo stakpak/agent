@@ -30,5 +30,8 @@ bytes = "1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 tempfile = { workspace = true }
 
+[features]
+libsql-test = []
+
 [lints]
 workspace = true

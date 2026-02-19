@@ -1,9 +1,44 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use regex::Regex;
 use similar::TextDiff;
 use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::utils::strip_tool_name;
 
 use crate::services::detect_term::AdaptiveColors;
+
+/// Extract the starting line number from a diff result string.
+/// Parses the hunk header like "@@ -21 +21 @@" or "@@ -21,3 +21,3 @@" and returns the old line number.
+pub fn extract_starting_line_from_diff(diff_result: &str) -> Option<usize> {
+    // Match patterns like "@@ -21 +21 @@" or "@@ -21,3 +21,3 @@"
+    let re = Regex::new(r"@@\s*-(\d+)").ok()?;
+    if let Some(captures) = re.captures(diff_result)
+        && let Some(line_match) = captures.get(1)
+    {
+        return line_match.as_str().parse::<usize>().ok();
+    }
+    None
+}
+
+/// Find the starting line number of `old_str` within a file.
+/// Returns the 1-based line number where old_str starts, or None if not found.
+pub fn find_starting_line_in_file(file_path: &str, old_str: &str) -> Option<usize> {
+    // Don't try to find line number for empty old_str (new file creation)
+    if old_str.is_empty() {
+        return Some(1);
+    }
+
+    // Try to read the file
+    let file_content = std::fs::read_to_string(file_path).ok()?;
+
+    // Find the position of old_str in the file content
+    let pos = file_content.find(old_str)?;
+
+    // Count newlines before this position to get the line number (1-based)
+    let line_number = file_content[..pos].matches('\n').count() + 1;
+
+    Some(line_number)
+}
 
 pub fn render_file_diff_block(
     tool_call: &ToolCall,
@@ -11,15 +46,18 @@ pub fn render_file_diff_block(
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     // Use the same diff-only approach as render_file_diff_block_from_args
     // This shows only the actual changes (old_str vs new_str), not the whole file
-    render_file_diff_block_from_args(tool_call, terminal_width)
+    render_file_diff_block_from_args(tool_call, terminal_width, None)
 }
 
 /// Generate a diff directly from old_str and new_str without reading from file.
 /// This is used as a fallback when the file has already been modified (e.g., on session resume).
+/// The `starting_line` parameter allows specifying the starting line number offset
+/// (e.g., if the old_str starts at line 21 in the actual file, pass Some(21)).
 pub fn preview_diff_from_strings(
     old_str: &str,
     new_str: &str,
     terminal_width: usize,
+    starting_line: Option<usize>,
 ) -> (Vec<Line<'static>>, usize, usize, usize, usize) {
     // Create a line-by-line diff directly from the strings
     let diff = TextDiff::from_lines(old_str, new_str);
@@ -30,8 +68,10 @@ pub fn preview_diff_from_strings(
     let mut first_change_index = None;
     let mut last_change_index = 0usize;
 
-    let mut old_line_num = 0;
-    let mut new_line_num = 0;
+    // Use starting_line offset if provided (subtract 1 because we'll increment before display)
+    let line_offset = starting_line.unwrap_or(1).saturating_sub(1);
+    let mut old_line_num = line_offset;
+    let mut new_line_num = line_offset;
 
     // Helper function to wrap content while maintaining proper indentation
     fn wrap_content(content: &str, terminal_width: usize, prefix_width: usize) -> Vec<String> {
@@ -438,15 +478,17 @@ pub fn preview_diff_from_strings(
 /// Render a diff block directly from tool call arguments (old_str and new_str).
 /// This function SKIPS file-based diff entirely and is used for fullscreen popup
 /// when the file has already been modified (e.g., on session resume).
+/// The `result` parameter can be provided to extract the starting line number from the diff output.
 pub fn render_file_diff_block_from_args(
     tool_call: &ToolCall,
     terminal_width: usize,
+    result: Option<&str>,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
 
     let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-    let new_str = if crate::utils::strip_tool_name(&tool_call.function.name) == "create" {
+    let new_str = if strip_tool_name(&tool_call.function.name) == "create" {
         args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
     } else {
         args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")
@@ -458,9 +500,16 @@ pub fn render_file_diff_block_from_args(
         return (vec![], vec![]);
     }
 
+    // Try to get the starting line number:
+    // 1. First, try to extract from the result (if provided) - this is the most accurate
+    // 2. If no result, try to find old_str in the file to determine the line number
+    let starting_line = result
+        .and_then(extract_starting_line_from_diff)
+        .or_else(|| find_starting_line_in_file(path, old_str));
+
     // Generate diff directly from the strings
     let (diff_lines, deletions, insertions, first_change_index, last_change_index) =
-        preview_diff_from_strings(old_str, new_str, terminal_width);
+        preview_diff_from_strings(old_str, new_str, terminal_width, starting_line);
 
     if deletions == 0 && insertions == 0 {
         return (vec![], vec![]);

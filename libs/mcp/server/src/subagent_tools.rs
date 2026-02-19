@@ -12,6 +12,9 @@ use stakpak_shared::local_store::LocalStore;
 use tracing::error;
 use uuid::Uuid;
 
+/// Default config path inside container (matches ~/.stakpak/config.toml convention).
+const CONTAINER_CONFIG_PATH: &str = "/agent/.stakpak/config.toml";
+
 /// Request for creating a dynamic subagent with full control over its configuration.
 /// Based on the AOrchestra 4-tuple model: (Instruction, Context, Tools, Model)
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -172,6 +175,9 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         }
 
         let session_id = self.get_session_id(&ctx);
+        // Use the main agent's profile and config path, passed explicitly through config structs.
+        let profile_name = self.subagent_config.profile_name.clone();
+        let config_path = self.subagent_config.config_path.clone();
         let max_steps = max_steps.unwrap_or(30);
 
         let model = if let Some(serde_json::Value::String(model_id)) = ctx.meta.get("model_id") {
@@ -197,6 +203,8 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             max_steps,
             enable_sandbox,
             session_id.as_deref(),
+            profile_name.as_deref(),
+            config_path.as_deref(),
         ) {
             Ok(command) => command,
             Err(e) => {
@@ -409,6 +417,8 @@ NOTES:
         max_steps: usize,
         enable_sandbox: bool,
         session_id: Option<&str>,
+        profile_name: Option<&str>,
+        config_path: Option<&str>,
     ) -> Result<String, McpError> {
         // Combine instruction and context into the prompt
         let full_prompt = match context {
@@ -456,6 +466,14 @@ NOTES:
         // Build the stakpak command arguments
         let mut args = vec![exe_for_command.clone(), "-a".to_string()];
 
+        // Add profile and config so subagent uses same profile/config as main agent (skip empty to avoid broken command)
+        if let Some(profile) = profile_name.filter(|p| !p.is_empty()) {
+            args.extend(["--profile".to_string(), profile.to_string()]);
+        }
+        if let Some(path) = config_path.filter(|p| !p.is_empty()) {
+            args.extend(["--config".to_string(), path.to_string()]);
+        }
+
         // --pause-on-approval only when NOT in sandbox mode
         if !enable_sandbox {
             args.push("--pause-on-approval".to_string());
@@ -480,12 +498,14 @@ NOTES:
 
         let mut command = args.join(" ");
 
-        // If sandbox mode is enabled, wrap the command in warden
+        // If sandbox mode is enabled, wrap the command in warden.
+        //
+        // NOTE: We only add subagent-specific volumes here (prompt file, config
+        // overlay).  All default mounts (cloud creds, SSH, working dir, aqua
+        // cache, etc.) are handled by the `warden wrap` CLI handler which calls
+        // `prepare_volumes()` → `stakpak_agent_default_mounts()` automatically.
         if enable_sandbox {
-            use stakpak_shared::container::{
-                ensure_named_volumes_exist, expand_volume_path, is_named_volume,
-                stakpak_agent_default_mounts, stakpak_agent_image,
-            };
+            use stakpak_shared::container::{ensure_named_volumes_exist, stakpak_agent_image};
 
             // Pre-create named volumes to prevent race conditions with parallel subagents
             ensure_named_volumes_exist();
@@ -498,22 +518,36 @@ NOTES:
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
             warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
 
-            // Add default sandbox volumes (cloud creds, working dir, aqua cache, etc.)
-            for vol in stakpak_agent_default_mounts() {
-                let expanded = expand_volume_path(&vol);
-                let host_path = expanded.split(':').next().unwrap_or(&expanded);
-                // Named volumes are always mounted; bind mounts only if the host path exists
-                if is_named_volume(host_path) || Path::new(host_path).exists() {
-                    warden_command.push_str(&format!(" -v {}", expanded));
+            // When a config path was passed, overlay it at the default location
+            // (~/.stakpak/config.toml → /agent/.stakpak/config.toml).
+            // User-specified `-v` volumes are appended after `prepare_volumes()`
+            // defaults, so this overlay takes precedence.
+            let container_config_path = config_path.and_then(|p| {
+                let path = Path::new(p);
+                if path.exists() && path.is_file() {
+                    warden_command.push_str(&format!(
+                        " -v {}:{}:ro",
+                        path.display(),
+                        CONTAINER_CONFIG_PATH
+                    ));
+                    Some(CONTAINER_CONFIG_PATH.to_string())
+                } else {
+                    None
                 }
-            }
+            });
+
+            // Replace host paths in the inner command with container paths
+            let inner_command = command.replace(&prompt_file_path, &warden_prompt_path);
+            let inner_command = if let (Some(host_cfg), Some(ref container_cfg)) =
+                (config_path, container_config_path)
+            {
+                inner_command.replace(host_cfg, container_cfg)
+            } else {
+                inner_command
+            };
 
             // wrap uses -- separator before the command
-            command = format!(
-                "{} -- {}",
-                warden_command,
-                command.replace(&prompt_file_path, &warden_prompt_path)
-            );
+            command = format!("{} -- {}", warden_command, inner_command);
         }
 
         Ok(command)

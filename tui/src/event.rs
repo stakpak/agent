@@ -42,7 +42,8 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::ToggleMouseCapture)
                 }
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ShowCommandPalette)
+                    // Ctrl+P: toggle plan review when in plan mode, otherwise command palette
+                    Some(InputEvent::TogglePlanReview)
                 }
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::HandleCtrlS)
@@ -173,8 +174,15 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             MouseEventKind::ScrollUp => Some(InputEvent::ScrollUp),
             MouseEventKind::ScrollDown => Some(InputEvent::ScrollDown),
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                Some(InputEvent::MouseClick(me.column, me.row))
+                Some(InputEvent::MouseDragStart(me.column, me.row))
             }
+            MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                Some(InputEvent::MouseDrag(me.column, me.row))
+            }
+            MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                Some(InputEvent::MouseDragEnd(me.column, me.row))
+            }
+            MouseEventKind::Moved => Some(InputEvent::MouseMove(me.column, me.row)),
             _ => None,
         },
         Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),

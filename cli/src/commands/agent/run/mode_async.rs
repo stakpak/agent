@@ -1,7 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command,
-    tool_result, user_message,
+    add_agents_md, add_apps_md, add_local_context, add_skills, build_plan_mode_instructions,
+    build_resume_command, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -13,14 +13,14 @@ use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage, models::ListRuleBook,
-};
+use stakpak_api::models::Skill;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
@@ -33,8 +33,8 @@ pub struct RunAsyncConfig {
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
-    pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+    pub skills: Option<Vec<Skill>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -44,6 +44,14 @@ pub struct RunAsyncConfig {
     pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
     pub apps_md: Option<AppsMdInfo>,
+    #[allow(dead_code)] // consumed in Phase 11: Async Mode Plan Support
+    pub plan_mode: bool,
+    /// Auto-approve the plan when status becomes 'reviewing'
+    pub plan_approved: bool,
+    /// Path to file containing feedback to inject
+    pub plan_feedback: Option<String>,
+    /// Archive any existing plan and start fresh (only with --plan)
+    pub plan_new: bool,
     /// When true, respect auto-approve config and pause when tools require approval.
     pub pause_on_approval: bool,
     /// Resume input (tool decisions or text prompt) when resuming from a paused checkpoint.
@@ -74,13 +82,20 @@ impl AsyncAutoApproveConfig {
     fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
         let mut tools = HashMap::new();
 
+        // Normalize profile auto-approve tools (mapping legacy names)
+        let normalized_profile_tools: Option<Vec<String>> = auto_approve_tools.map(|pt| {
+            pt.iter()
+                .map(|s| backward_compatibility_mapping(s).to_string())
+                .collect()
+        });
+
         // Auto-approve tools (read-only, safe):
         for name in &[
             "view",
             "generate_password",
             "search_docs",
             "search_memory",
-            "read_rulebook",
+            "load_skill",
             "local_code_search",
             "get_all_tasks",
             "get_task_details",
@@ -105,9 +120,9 @@ impl AsyncAutoApproveConfig {
         }
 
         // Apply profile overrides
-        if let Some(profile_tools) = auto_approve_tools {
-            for tool_name in profile_tools {
-                tools.insert(tool_name.clone(), AsyncApprovePolicy::Auto);
+        if let Some(profile_tools) = &normalized_profile_tools {
+            for name in profile_tools {
+                tools.insert(name.clone(), AsyncApprovePolicy::Auto);
             }
         }
 
@@ -119,9 +134,12 @@ impl AsyncAutoApproveConfig {
             && let Some(session_tools) = session_config.get("tools").and_then(|t| t.as_object())
         {
             for (name, policy_val) in session_tools {
+                let mapped_name = backward_compatibility_mapping(name);
+
                 // Don't override profile-specified tools
-                if auto_approve_tools
-                    .map(|pt| pt.contains(name))
+                if normalized_profile_tools
+                    .as_ref()
+                    .map(|pt| pt.iter().any(|s| s == mapped_name))
                     .unwrap_or(false)
                 {
                     continue;
@@ -131,7 +149,7 @@ impl AsyncAutoApproveConfig {
                     Some("Never") => AsyncApprovePolicy::Never,
                     _ => AsyncApprovePolicy::Prompt,
                 };
-                tools.insert(name.clone(), policy);
+                tools.insert(mapped_name.to_string(), policy);
             }
         }
 
@@ -142,18 +160,8 @@ impl AsyncAutoApproveConfig {
         }
     }
 
-    /// Strip MCP server prefix from tool name (e.g., "stakpak__run_command" -> "run_command").
-    fn strip_prefix(name: &str) -> &str {
-        if let Some(pos) = name.find("__")
-            && pos + 2 < name.len()
-        {
-            return &name[pos + 2..];
-        }
-        name
-    }
-
     fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
-        let stripped = Self::strip_prefix(tool_name);
+        let stripped = strip_tool_name(tool_name);
         self.tools.get(stripped).unwrap_or(&self.default_policy)
     }
 
@@ -202,6 +210,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
         enable_mtls: config.enable_mtls,
         enable_subagents: config.enable_subagents,
         allowed_tools: config.allowed_tools.clone(),
+        subagent_config: stakpak_mcp_server::SubagentConfig {
+            profile_name: Some(ctx.profile_name.clone()),
+            config_path: Some(ctx.config_path.clone()),
+        },
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;
@@ -410,10 +422,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 .await
                 .map_err(|e| e.to_string())?;
 
-        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
-            && chat_messages.is_empty()
+        let (user_input, _skills_text) = if chat_messages.is_empty()
+            && let Some(skills) = &config.skills
         {
-            add_rulebooks(&user_input, rulebooks)
+            add_skills(&user_input, skills)
         } else {
             (user_input, None)
         };
@@ -441,6 +453,55 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
 
     let mut step = 0;
     let max_steps = config.max_steps.unwrap_or(50); // Safety limit to prevent infinite loops
+    let mut plan_instructions_injected = false;
+    let mut plan_previous_status: Option<stakpak_tui::services::plan::PlanStatus> = None;
+
+    // If plan mode, handle existing plan file
+    if config.plan_mode && config.plan_new {
+        let session_dir = std::path::Path::new(".stakpak/session");
+        if let Some(archive_path) = stakpak_tui::services::plan::archive_plan_file(session_dir) {
+            print!(
+                "{}",
+                renderer.render_info(&format!(
+                    "Archived existing plan to {}",
+                    archive_path.display()
+                ))
+            );
+        }
+    }
+
+    // If plan mode, inject plan instructions into the first user message
+    if config.plan_mode && !chat_messages.is_empty() {
+        let instructions = build_plan_mode_instructions();
+        if let Some(last_user_msg) = chat_messages
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == Role::User)
+            && let Some(stakpak_shared::models::integrations::openai::MessageContent::String(
+                ref mut text,
+            )) = last_user_msg.content
+        {
+            *text = format!("{instructions} {text}");
+            plan_instructions_injected = true;
+        }
+    }
+
+    // If --plan-feedback, validate the file exists and read it
+    if let Some(ref feedback_path) = config.plan_feedback {
+        if !std::path::Path::new(feedback_path).exists() {
+            return Err(format!("Plan feedback file not found: {}", feedback_path));
+        }
+        let feedback_text = std::fs::read_to_string(feedback_path)
+            .map_err(|e| format!("Failed to read feedback file '{}': {}", feedback_path, e))?;
+        let feedback_msg = if !plan_instructions_injected {
+            let instructions = build_plan_mode_instructions();
+            format!("{instructions}\n\n{feedback_text}")
+        } else {
+            feedback_text
+        };
+        chat_messages.push(user_message(feedback_msg));
+        print!("{}", renderer.render_info("Plan feedback loaded from file"));
+    }
 
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
@@ -707,6 +768,65 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 renderer.render_success("No more tools to execute - agent completed successfully")
             );
             break;
+        }
+
+        // Plan mode: check if plan.md status has changed after tool execution
+        if config.plan_mode {
+            let session_dir = std::path::Path::new(".stakpak/session");
+            if let Some((meta, _content)) = stakpak_tui::services::plan::read_plan_file(session_dir)
+            {
+                let new_status = meta.status;
+                if plan_previous_status != Some(new_status) {
+                    let old = plan_previous_status;
+                    plan_previous_status = Some(new_status);
+
+                    match new_status {
+                        stakpak_tui::services::plan::PlanStatus::PendingReview => {
+                            if config.plan_approved {
+                                // Auto-approve: inject approval message — the agent will update plan.md status
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Plan status: pending_review → auto-approved (--plan-approved)"
+                                    )
+                                );
+                                chat_messages.push(user_message(
+                                    "Plan approved. Update the plan front matter status to `approved` and proceed with execution.".to_string(),
+                                ));
+                            } else {
+                                // No auto-approve: print plan path and exit
+                                print!(
+                                    "{}",
+                                    renderer.render_info(&format!(
+                                        "Plan ready for review at: {}/plan.md",
+                                        session_dir.display()
+                                    ))
+                                );
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Review the plan, then re-run with --plan-approved or --plan-feedback <file>"
+                                    )
+                                );
+                                break;
+                            }
+                        }
+                        stakpak_tui::services::plan::PlanStatus::Approved => {
+                            if old == Some(stakpak_tui::services::plan::PlanStatus::PendingReview) {
+                                print!(
+                                    "{}",
+                                    renderer.render_info(
+                                        "Plan approved externally, continuing execution"
+                                    )
+                                );
+                            }
+                        }
+                        stakpak_tui::services::plan::PlanStatus::Drafting => {
+                            // Plan revision, continue
+                        }
+                    }
+                }
+            }
         }
     }
 

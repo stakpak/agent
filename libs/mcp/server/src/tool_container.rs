@@ -1,4 +1,4 @@
-use super::EnabledToolsConfig;
+use super::{EnabledToolsConfig, SubagentConfig};
 use rmcp::tool_handler;
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
@@ -7,6 +7,7 @@ use rmcp::{
 use stakpak_api::AgentProvider;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -16,6 +17,8 @@ pub struct ToolContainer {
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
+    pub skill_directories: Vec<PathBuf>,
+    pub subagent_config: SubagentConfig,
 }
 
 #[tool_router]
@@ -25,6 +28,8 @@ impl ToolContainer {
         enabled_tools: EnabledToolsConfig,
         task_manager: Arc<TaskManagerHandle>,
         tool_router: ToolRouter<Self>,
+        skill_directories: Vec<PathBuf>,
+        subagent_config: SubagentConfig,
     ) -> Result<Self, String> {
         Ok(Self {
             client,
@@ -32,6 +37,8 @@ impl ToolContainer {
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
             enabled_tools,
             tool_router,
+            skill_directories,
+            subagent_config,
         })
     }
 

@@ -20,6 +20,11 @@ pub fn handle_stream_message(
     s: String,
     message_area_height: usize,
 ) {
+    // Ignore late streaming events after cancellation was requested
+    if state.cancel_requested {
+        return;
+    }
+
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
         state.is_streaming = true;
         if !state.loading {
@@ -91,6 +96,9 @@ pub fn handle_stream_message(
 
 /// Handle adding user message
 pub fn handle_add_user_message(state: &mut AppState, s: String) {
+    // Increment user message count (used for tracking file edits for selective revert)
+    state.user_message_count += 1;
+
     // Add extra spacing before user message if not the first message
     if !state.messages.is_empty() {
         state.messages.push(Message::plain_text(""));
@@ -118,6 +126,8 @@ pub fn handle_has_user_message(state: &mut AppState) {
     state.message_tool_calls = None;
     state.tool_call_execution_order.clear();
     state.is_dialog_open = false;
+    // Clear any pending cancellation from a previous interaction
+    state.cancel_requested = false;
 }
 
 /// Handle stream usage event

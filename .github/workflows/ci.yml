@@ -34,3 +34,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --verbose
+
+      - name: Test (feature-gated)
+        run: |
+          cargo test -p stakpak --features libsql-test --verbose
+          cargo test -p stakpak-gateway --features libsql-test --verbose
+          cargo test -p stakai --features network-tests --verbose

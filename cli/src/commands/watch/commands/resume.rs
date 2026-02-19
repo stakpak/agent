@@ -63,7 +63,9 @@ pub async fn resume_run(run_id: i64, force: bool) -> Result<(), String> {
 
     // Build command args for TUI mode with checkpoint
     let mut cmd = std::process::Command::new(&exe_path);
-    cmd.arg("--profile").arg(profile);
+    if !profile.is_empty() {
+        cmd.arg("--profile").arg(profile);
+    }
     cmd.arg("-c").arg(checkpoint_id);
 
     // Replace current process with TUI (exec on Unix)

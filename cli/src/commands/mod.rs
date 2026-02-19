@@ -564,9 +564,9 @@ fn print_sample_config() {
 [profiles.all]
 api_endpoint = "https://apiv2.stakpak.dev"
 # Common tools that should be available across all profiles
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search"]
 # Conservative auto-approve list that works for all environments
-auto_approve = ["view", "search_docs", "read_rulebook"]
+auto_approve = ["view", "search_docs", "load_skill"]
 
 [profiles.all.rulebooks]
 # Common rulebook patterns for all profiles
@@ -581,9 +581,9 @@ exclude_tags = ["archived", "obsolete"]
 api_key = "your_api_key_here"
 
 # Extends the 'all' profile's allowed_tools with additional development tools
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search", "create", "str_replace", "run_command"]
 
-# Inherits auto_approve from 'all' profile (view, search_docs, read_rulebook)
+# Inherits auto_approve from 'all' profile (view, search_docs, load_skill)
 # No need to redefine unless you want to override
 
 # Rulebook filtering configuration
@@ -623,7 +623,7 @@ volumes = [
 api_key = "prod_api_key_here"
 
 # Restricts allowed_tools to only read-only operations (overrides 'all' profile)
-allowed_tools = ["view", "search_docs", "read_rulebook"]
+allowed_tools = ["view", "search_docs", "load_skill"]
 
 # Uses the same conservative auto_approve list from 'all' profile
 # No need to redefine since 'all' profile already has safe defaults
@@ -641,10 +641,10 @@ exclude_tags = ["dev", "test", "experimental"]
 api_key = "dev_api_key_here"
 
 # Extends 'all' profile's allowed_tools with write operations for development
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search", "create", "str_replace", "run_command"]
 
 # Extends 'all' profile's auto_approve with additional development tools
-auto_approve = ["view", "search_docs", "read_rulebook", "create"]
+auto_approve = ["view", "search_docs", "load_skill", "create"]
 
 [profiles.development.rulebooks]
 # Include development and test rulebooks
@@ -670,8 +670,9 @@ editor = "nano"
 /// Re-execute stakpak with a specific profile
 fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path::Path>) {
     let mut cmd = Command::new("stakpak");
-    cmd.arg("--profile").arg(profile);
-
+    if !profile.is_empty() {
+        cmd.arg("--profile").arg(profile);
+    }
     if let Some(config_path) = config_path {
         cmd.arg("--config").arg(config_path);
     }

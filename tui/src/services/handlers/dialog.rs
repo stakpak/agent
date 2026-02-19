@@ -12,6 +12,7 @@ use crate::services::message::{
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::utils::strip_tool_name;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -20,7 +21,7 @@ use super::EventChannels;
 /// Update a run_command block from Pending to Running state
 /// This should be called when a run_command tool is approved and starts executing
 pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall) {
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name != "run_command" {
         return;
     }
@@ -59,7 +60,7 @@ pub fn update_pending_tool_to_first(
         state.messages.retain(|m| m.id != pending_id);
     }
 
-    let tool_name = crate::utils::strip_tool_name(&first_tool.function.name);
+    let tool_name = strip_tool_name(&first_tool.function.name);
 
     // Create the appropriate pending block based on tool type
     if tool_name == "run_command" {
@@ -120,7 +121,7 @@ pub fn handle_esc_event(
     state.tool_call_execution_order.clear();
     // Store the latest tool call for potential retry (only for run_command)
     if let Some(tool_call) = &state.dialog_command
-        && crate::utils::strip_tool_name(&tool_call.function.name) == "run_command"
+        && strip_tool_name(&tool_call.function.name) == "run_command"
     {
         state.latest_tool_call = Some(tool_call.clone());
     }
@@ -157,6 +158,9 @@ pub fn handle_esc(
         let _ = cancel_tx.send(());
     }
 
+    let was_streaming = state.is_streaming;
+    let was_dialog_open = state.is_dialog_open;
+    let was_shell_mode = state.show_shell_mode;
     state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
@@ -169,7 +173,7 @@ pub fn handle_esc(
                 .output_tx
                 .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
 
-            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.function.name);
             if tool_name == "run_command" {
                 // For run_command, remove the pending unified block and add rejected unified block
                 // Remove pending message by tool_call_id
@@ -218,9 +222,6 @@ pub fn handle_esc(
                     is_collapsed: None,
                 });
             }
-            // Invalidate cache and scroll to bottom to show the updated block
-            crate::services::message::invalidate_message_lines_cache(state);
-            state.stay_at_bottom = true;
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -279,6 +280,12 @@ pub fn handle_esc(
             super::shell::background_shell_session(state);
         }
     } else {
+        // No dialog, no shell — if streaming was active, this is a cancellation.
+        // Mark cancel_requested so late streaming events that are already queued
+        // in the channel get dropped instead of re-creating content.
+        if was_streaming {
+            state.cancel_requested = true;
+        }
         state.text_area.set_text("");
     }
 
@@ -286,6 +293,14 @@ pub fn handle_esc(
         m.id != state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.pending_bash_message_id.unwrap_or_default()
     });
+
+    // Invalidate cache and scroll to bottom when something was actually
+    // cancelled/rejected (dialog open, shell resolved, or streaming interrupted).
+    // Skip for idle ESC (just clearing text or closing a popup/dropdown).
+    if was_streaming || was_dialog_open || was_shell_mode {
+        crate::services::message::invalidate_message_lines_cache(state);
+        state.stay_at_bottom = true;
+    }
 }
 
 /// Handle show confirmation dialog event
@@ -305,7 +320,7 @@ pub fn handle_show_confirmation_dialog(
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
     {
-        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.function.name);
         if tool_name == "run_command" {
             // Use unified block for run_command
             let command =
@@ -338,7 +353,7 @@ pub fn handle_show_confirmation_dialog(
     }
 
     state.dialog_command = Some(tool_call.clone());
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name == "run_command" {
         state.latest_tool_call = Some(tool_call.clone());
     }
@@ -396,6 +411,9 @@ pub fn handle_show_confirmation_dialog(
         ));
     }
     state.pending_bash_message_id = Some(message_id);
+
+    // Invalidate cache so the new message gets rendered
+    invalidate_message_lines_cache(state);
 
     state.dialog_command = Some(tool_call.clone());
     // Only set is_dialog_open if NOT using the new approval bar flow
@@ -493,16 +511,15 @@ pub fn handle_show_confirmation_dialog(
     if !tool_calls.is_empty() && state.toggle_approved_message {
         let was_empty = state.approval_bar.actions().is_empty();
 
-        // Only add tools that aren't already in the bar
+        // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
-            let already_in_bar = state
-                .approval_bar
-                .actions()
-                .iter()
-                .any(|a| a.tool_call.id == tc.id);
-            if !already_in_bar {
-                state.approval_bar.add_action(tc);
-            }
+            state.approval_bar.add_action(tc);
+        }
+
+        // If this is the first time showing the approval bar, scroll to show the tool call
+        if was_empty && !state.approval_bar.actions().is_empty() {
+            state.scroll_to_last_message_start = true;
+            state.stay_at_bottom = false;
         }
 
         // If we just added tools to an empty bar, the first one's pending block

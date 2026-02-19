@@ -10,8 +10,9 @@ use stakpak_shared::models::integrations::openai::{
 use tokio::sync::mpsc::Sender;
 
 /// Get the total number of options for a question (including custom if allowed)
+/// Multi-select questions never show the custom input option.
 fn get_total_options(question: &AskUserQuestion) -> usize {
-    if question.allow_custom {
+    if question.allow_custom && !question.multi_select {
         question.options.len() + 1
     } else {
         question.options.len()
@@ -36,6 +37,37 @@ pub fn handle_show_ask_user_popup(
     state.ask_user_selected_option = 0;
     state.ask_user_custom_input.clear();
     state.ask_user_tool_call = Some(tool_call);
+    state.ask_user_multi_selections.clear();
+
+    // Initialize multi-select defaults from option.selected flags
+    for q in &questions {
+        if q.multi_select {
+            let defaults: Vec<String> = q
+                .options
+                .iter()
+                .filter(|o| o.selected)
+                .map(|o| o.value.clone())
+                .collect();
+            if !defaults.is_empty() {
+                state
+                    .ask_user_multi_selections
+                    .insert(q.label.clone(), defaults.clone());
+
+                // Also pre-populate the answer so the tab shows as answered
+                let answer_json =
+                    serde_json::to_string(&defaults).unwrap_or_else(|_| "[]".to_string());
+                state.ask_user_answers.insert(
+                    q.label.clone(),
+                    AskUserAnswer {
+                        question_label: q.label.clone(),
+                        answer: answer_json,
+                        is_custom: false,
+                        selected_values: defaults,
+                    },
+                );
+            }
+        }
+    }
 
     // Create inline message block
     let msg = crate::services::message::Message::render_ask_user_block(
@@ -140,15 +172,16 @@ fn restore_selection_for_current_tab(state: &mut AppState) {
     }
 }
 
-/// Navigate to the next option within the current question
-pub fn handle_ask_user_next_option(state: &mut AppState) {
+/// Navigate to the next option within the current question.
+/// Returns `true` if the cursor moved, `false` if already at the last option (boundary).
+pub fn handle_ask_user_next_option(state: &mut AppState) -> bool {
     if !state.show_ask_user_popup {
-        return;
+        return false;
     }
 
     // Can't navigate options on Submit tab
     if state.ask_user_current_tab >= state.ask_user_questions.len() {
-        return;
+        return false;
     }
 
     let current_q = &state.ask_user_questions[state.ask_user_current_tab];
@@ -156,34 +189,42 @@ pub fn handle_ask_user_next_option(state: &mut AppState) {
 
     if state.ask_user_selected_option < total_options.saturating_sub(1) {
         state.ask_user_selected_option += 1;
+        refresh_ask_user_block(state);
+        true
+    } else {
+        false
     }
-    refresh_ask_user_block(state);
 }
 
-/// Navigate to the previous option within the current question
-pub fn handle_ask_user_prev_option(state: &mut AppState) {
+/// Navigate to the previous option within the current question.
+/// Returns `true` if the cursor moved, `false` if already at the first option (boundary).
+pub fn handle_ask_user_prev_option(state: &mut AppState) -> bool {
     if !state.show_ask_user_popup {
-        return;
+        return false;
     }
 
     // Can't navigate options on Submit tab
     if state.ask_user_current_tab >= state.ask_user_questions.len() {
-        return;
+        return false;
     }
 
     if state.ask_user_selected_option > 0 {
         state.ask_user_selected_option -= 1;
+        refresh_ask_user_block(state);
+        true
+    } else {
+        false
     }
-    refresh_ask_user_block(state);
 }
 
-/// Select the current option (or submit if on Submit tab)
+/// Toggle/select the current option WITHOUT advancing to the next question.
+/// This is triggered by Space. It selects in single-select or toggles in multi-select.
 pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     if !state.show_ask_user_popup {
         return;
     }
 
-    // If on Submit tab, try to submit
+    // If on Submit tab, submit (Space on submit = submit)
     if state.ask_user_current_tab >= state.ask_user_questions.len() {
         handle_ask_user_submit(state, output_tx);
         return;
@@ -192,82 +233,122 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     let current_q = &state.ask_user_questions[state.ask_user_current_tab];
     let question_label = current_q.label.clone();
 
-    // Check if custom input is selected
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
-        // Custom input selected - save the custom answer if not empty
-        if !state.ask_user_custom_input.is_empty() {
+    // --- Multi-select mode: toggle the option ---
+    if current_q.multi_select {
+        // Custom input is not supported in multi-select mode (allow_custom is ignored)
+        if state.ask_user_selected_option < current_q.options.len() {
+            let opt_value = current_q.options[state.ask_user_selected_option]
+                .value
+                .clone();
+            let selections = state
+                .ask_user_multi_selections
+                .entry(question_label.clone())
+                .or_default();
+
+            // Toggle: add if absent, remove if present
+            if selections.contains(&opt_value) {
+                selections.retain(|v| v != &opt_value);
+            } else {
+                selections.push(opt_value);
+            }
+
+            // Build the answer from current selections
+            let selected = state
+                .ask_user_multi_selections
+                .get(&question_label)
+                .cloned()
+                .unwrap_or_default();
+
+            let answer_json = serde_json::to_string(&selected).unwrap_or_else(|_| "[]".to_string());
+
             let answer = AskUserAnswer {
                 question_label: question_label.clone(),
-                answer: state.ask_user_custom_input.clone(),
-                is_custom: true,
+                answer: answer_json,
+                is_custom: false,
+                selected_values: selected,
             };
-            state
-                .ask_user_answers
-                .insert(current_q.label.clone(), answer);
 
-            // Auto-advance to next question or Submit
-            if state.ask_user_current_tab < state.ask_user_questions.len() {
-                state.ask_user_current_tab += 1;
-                state.ask_user_selected_option = 0;
-                state.ask_user_custom_input.clear();
+            if answer.selected_values.is_empty() {
+                // No selections — remove the answer so "required" validation works
+                state.ask_user_answers.remove(&question_label);
+            } else {
+                state.ask_user_answers.insert(question_label, answer);
             }
         }
         refresh_ask_user_block(state);
         return;
     }
 
-    // Regular option selected
+    // --- Single-select mode: select without advancing ---
+
+    // Check if custom input is selected
+    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
+        // Custom input selected - save the custom answer if not empty (no advance)
+        if !state.ask_user_custom_input.is_empty() {
+            let answer = AskUserAnswer {
+                question_label: question_label.clone(),
+                answer: state.ask_user_custom_input.clone(),
+                is_custom: true,
+                selected_values: vec![],
+            };
+            state
+                .ask_user_answers
+                .insert(current_q.label.clone(), answer);
+        }
+        refresh_ask_user_block(state);
+        return;
+    }
+
+    // Regular option selected (no advance)
     if let Some(opt) = current_q.options.get(state.ask_user_selected_option) {
         let answer = AskUserAnswer {
             question_label,
             answer: opt.value.clone(),
             is_custom: false,
+            selected_values: vec![],
         };
         state
             .ask_user_answers
             .insert(current_q.label.clone(), answer);
-
-        // Auto-advance to next question or Submit
-        if state.ask_user_current_tab < state.ask_user_questions.len() {
-            state.ask_user_current_tab += 1;
-            state.ask_user_selected_option = 0;
-            state.ask_user_custom_input.clear();
-        }
     }
     refresh_ask_user_block(state);
 }
 
-/// Quick select an option by number (1-9)
-pub fn handle_ask_user_quick_select(
-    state: &mut AppState,
-    num: usize,
-    output_tx: &Sender<OutputEvent>,
-) {
+/// Confirm the current question and advance to the next one.
+/// This is triggered by Enter. It ONLY advances — it never selects or toggles.
+/// Use Space to select/toggle options. On the submit tab, Enter submits.
+pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     if !state.show_ask_user_popup {
         return;
     }
 
-    // Can't quick select on Submit tab
+    // If on Submit tab, submit
     if state.ask_user_current_tab >= state.ask_user_questions.len() {
+        handle_ask_user_submit(state, output_tx);
         return;
     }
 
     let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    let total_options = get_total_options(current_q);
 
-    // num is 1-indexed, convert to 0-indexed
-    let option_idx = num.saturating_sub(1);
-
-    if option_idx < total_options {
-        state.ask_user_selected_option = option_idx;
-        // If it's a regular option (not custom), select it immediately
-        if option_idx < current_q.options.len() {
-            handle_ask_user_select_option(state, output_tx);
-        } else {
-            // Custom option — just focus it, refresh to show selection
-            refresh_ask_user_block(state);
-        }
+    // If custom input is selected and has text, save it before advancing
+    if !current_q.multi_select
+        && current_q.allow_custom
+        && state.ask_user_selected_option == current_q.options.len()
+        && !state.ask_user_custom_input.is_empty()
+    {
+        let answer = AskUserAnswer {
+            question_label: current_q.label.clone(),
+            answer: state.ask_user_custom_input.clone(),
+            is_custom: true,
+            selected_values: vec![],
+        };
+        state
+            .ask_user_answers
+            .insert(current_q.label.clone(), answer);
     }
+
+    // Just advance — don't select anything
+    handle_ask_user_next_tab(state);
 }
 
 /// Handle character input for custom answer
@@ -427,6 +508,7 @@ fn close_ask_user_popup(state: &mut AppState) {
     state.ask_user_selected_option = 0;
     state.ask_user_custom_input.clear();
     state.ask_user_tool_call = None;
+    state.ask_user_multi_selections.clear();
 
     // Invalidate cache to update display
     crate::services::message::invalidate_message_lines_cache(state);
@@ -483,15 +565,18 @@ mod tests {
                         value: "dev".to_string(),
                         label: "Development".to_string(),
                         description: Some("For testing".to_string()),
+                        selected: false,
                     },
                     AskUserOption {
                         value: "prod".to_string(),
                         label: "Production".to_string(),
                         description: None,
+                        selected: false,
                     },
                 ],
                 allow_custom: true,
                 required: true,
+                multi_select: false,
             },
             AskUserQuestion {
                 label: "Confirm".to_string(),
@@ -501,15 +586,18 @@ mod tests {
                         value: "yes".to_string(),
                         label: "Yes".to_string(),
                         description: None,
+                        selected: false,
                     },
                     AskUserOption {
                         value: "no".to_string(),
                         label: "No".to_string(),
                         description: None,
+                        selected: false,
                     },
                 ],
                 allow_custom: false,
                 required: true,
+                multi_select: false,
             },
         ]
     }
@@ -655,7 +743,7 @@ mod tests {
 
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
-        // Select first option (dev)
+        // Select first option (dev) via Space — should NOT auto-advance
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Should have recorded the answer
@@ -664,7 +752,11 @@ mod tests {
         assert_eq!(answer.answer, "dev");
         assert!(!answer.is_custom);
 
-        // Should auto-advance to next question
+        // Should stay on the same tab (no auto-advance)
+        assert_eq!(state.ask_user_current_tab, 0);
+
+        // Now confirm via Enter — should advance to next question
+        handle_ask_user_confirm_question(&mut state, &output_tx);
         assert_eq!(state.ask_user_current_tab, 1);
     }
 
@@ -798,6 +890,7 @@ mod tests {
                 question_label: "Environment".to_string(),
                 answer: "dev".to_string(),
                 is_custom: false,
+                selected_values: vec![],
             },
         );
         state.ask_user_answers.insert(
@@ -806,6 +899,7 @@ mod tests {
                 question_label: "Confirm".to_string(),
                 answer: "yes".to_string(),
                 is_custom: false,
+                selected_values: vec![],
             },
         );
 
@@ -851,6 +945,7 @@ mod tests {
                 question_label: "Environment".to_string(),
                 answer: "dev".to_string(),
                 is_custom: false,
+                selected_values: vec![],
             },
         );
 
@@ -899,41 +994,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_quick_select() {
-        let mut state = create_test_state();
-        let questions = create_test_questions();
-        let tool_call = create_test_tool_call();
-        let (output_tx, _output_rx) = mpsc::channel(10);
-
-        handle_show_ask_user_popup(&mut state, tool_call, questions);
-
-        // Quick select option 2 (index 1 = "prod")
-        handle_ask_user_quick_select(&mut state, 2, &output_tx);
-
-        // Should have selected and submitted
-        assert!(state.ask_user_answers.contains_key("Environment"));
-        let answer = &state.ask_user_answers["Environment"];
-        assert_eq!(answer.answer, "prod");
-    }
-
-    #[tokio::test]
-    async fn test_quick_select_custom_just_focuses() {
-        let mut state = create_test_state();
-        let questions = create_test_questions();
-        let tool_call = create_test_tool_call();
-        let (output_tx, _output_rx) = mpsc::channel(10);
-
-        handle_show_ask_user_popup(&mut state, tool_call, questions);
-
-        // Quick select option 3 (custom option)
-        handle_ask_user_quick_select(&mut state, 3, &output_tx);
-
-        // Should just focus, not submit (need to type first)
-        assert!(!state.ask_user_answers.contains_key("Environment"));
-        assert_eq!(state.ask_user_selected_option, 2); // Custom option
-    }
-
-    #[tokio::test]
     async fn test_handlers_no_op_when_popup_not_visible() {
         let mut state = create_test_state();
         let (output_tx, _output_rx) = mpsc::channel::<OutputEvent>(10);
@@ -972,5 +1032,215 @@ mod tests {
 
         handle_ask_user_prev_option(&mut state);
         assert_eq!(state.ask_user_selected_option, 0);
+    }
+
+    // ========== Multi-select tests ==========
+
+    /// Helper to create a multi-select question
+    fn create_multi_select_questions() -> Vec<AskUserQuestion> {
+        vec![AskUserQuestion {
+            label: "Scope".to_string(),
+            question: "Which repos should I include?".to_string(),
+            options: vec![
+                AskUserOption {
+                    value: "repo:api".to_string(),
+                    label: "~/projects/api".to_string(),
+                    description: None,
+                    selected: true,
+                },
+                AskUserOption {
+                    value: "repo:web".to_string(),
+                    label: "~/projects/web".to_string(),
+                    description: None,
+                    selected: true,
+                },
+                AskUserOption {
+                    value: "repo:dotfiles".to_string(),
+                    label: "~/projects/dotfiles".to_string(),
+                    description: None,
+                    selected: false,
+                },
+            ],
+            allow_custom: false,
+            required: true,
+            multi_select: true,
+        }]
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_defaults_initialized() {
+        let mut state = create_test_state();
+        let questions = create_multi_select_questions();
+        let tool_call = create_test_tool_call();
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // Should have pre-populated multi-select state from option.selected
+        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        assert_eq!(selections.len(), 2);
+        assert!(selections.contains(&"repo:api".to_string()));
+        assert!(selections.contains(&"repo:web".to_string()));
+
+        // Should also have pre-populated the answer
+        let answer = state.ask_user_answers.get("Scope").unwrap();
+        assert_eq!(answer.selected_values.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_toggle_on() {
+        let mut state = create_test_state();
+        let questions = create_multi_select_questions();
+        let tool_call = create_test_tool_call();
+        let (output_tx, _output_rx) = mpsc::channel(10);
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // Navigate to dotfiles (index 2, currently unselected)
+        handle_ask_user_next_option(&mut state);
+        handle_ask_user_next_option(&mut state);
+        assert_eq!(state.ask_user_selected_option, 2);
+
+        // Toggle it on
+        handle_ask_user_select_option(&mut state, &output_tx);
+
+        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        assert_eq!(selections.len(), 3);
+        assert!(selections.contains(&"repo:dotfiles".to_string()));
+
+        // Should NOT auto-advance (still on same tab)
+        assert_eq!(state.ask_user_current_tab, 0);
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_toggle_off() {
+        let mut state = create_test_state();
+        let questions = create_multi_select_questions();
+        let tool_call = create_test_tool_call();
+        let (output_tx, _output_rx) = mpsc::channel(10);
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // api is at index 0, currently selected by default
+        assert_eq!(state.ask_user_selected_option, 0);
+
+        // Toggle it off
+        handle_ask_user_select_option(&mut state, &output_tx);
+
+        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        assert_eq!(selections.len(), 1);
+        assert!(!selections.contains(&"repo:api".to_string()));
+        assert!(selections.contains(&"repo:web".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_deselect_all_removes_answer() {
+        let mut state = create_test_state();
+        // Use a question with only one default selected
+        let questions = vec![AskUserQuestion {
+            label: "Pick".to_string(),
+            question: "Pick items".to_string(),
+            options: vec![AskUserOption {
+                value: "a".to_string(),
+                label: "A".to_string(),
+                description: None,
+                selected: true,
+            }],
+            allow_custom: false,
+            required: true,
+            multi_select: true,
+        }];
+        let tool_call = create_test_tool_call();
+        let (output_tx, _output_rx) = mpsc::channel(10);
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // Initially "a" is selected
+        assert!(state.ask_user_answers.contains_key("Pick"));
+
+        // Toggle off the only selection
+        handle_ask_user_select_option(&mut state, &output_tx);
+
+        // Answer should be removed (required validation will catch this)
+        assert!(!state.ask_user_answers.contains_key("Pick"));
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_submit() {
+        let mut state = create_test_state();
+        let questions = create_multi_select_questions();
+        let tool_call = create_test_tool_call();
+        let (output_tx, mut output_rx) = mpsc::channel(10);
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // Defaults are already set (api + web selected)
+        // Navigate to Submit tab
+        state.ask_user_current_tab = 1; // 1 question + submit tab
+
+        handle_ask_user_submit(&mut state, &output_tx);
+
+        assert!(!state.show_ask_user_popup);
+
+        let event = output_rx.try_recv().unwrap();
+        match event {
+            OutputEvent::AskUserResponse(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Success);
+                let parsed: AskUserResult = serde_json::from_str(&result.result).unwrap();
+                assert!(parsed.completed);
+                assert_eq!(parsed.answers.len(), 1);
+                assert_eq!(parsed.answers[0].selected_values.len(), 2);
+                assert!(
+                    parsed.answers[0]
+                        .selected_values
+                        .contains(&"repo:api".to_string())
+                );
+                assert!(
+                    parsed.answers[0]
+                        .selected_values
+                        .contains(&"repo:web".to_string())
+                );
+            }
+            _ => panic!("Expected AskUserResponse event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multi_select_no_custom_option() {
+        let mut state = create_test_state();
+        // Multi-select with allow_custom = true should still not show custom
+        let questions = vec![AskUserQuestion {
+            label: "Pick".to_string(),
+            question: "Pick items".to_string(),
+            options: vec![
+                AskUserOption {
+                    value: "a".to_string(),
+                    label: "A".to_string(),
+                    description: None,
+                    selected: false,
+                },
+                AskUserOption {
+                    value: "b".to_string(),
+                    label: "B".to_string(),
+                    description: None,
+                    selected: false,
+                },
+            ],
+            allow_custom: true, // should be ignored for multi-select
+            required: false,
+            multi_select: true,
+        }];
+        let tool_call = create_test_tool_call();
+
+        handle_show_ask_user_popup(&mut state, tool_call, questions);
+
+        // Total options should be 2 (no custom slot)
+        let q = &state.ask_user_questions[0];
+        assert_eq!(get_total_options(q), 2);
+
+        // Can't navigate beyond last option
+        handle_ask_user_next_option(&mut state);
+        assert_eq!(state.ask_user_selected_option, 1);
+        handle_ask_user_next_option(&mut state);
+        assert_eq!(state.ask_user_selected_option, 1); // stuck at 1, no custom slot
     }
 }

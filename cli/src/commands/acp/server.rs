@@ -435,7 +435,7 @@ impl StakpakAcpAgent {
                     "Search local context".to_string()
                 }
             }
-            tool_names::READ_RULEBOOK => "Read rulebook".to_string(),
+            tool_names::LOAD_SKILL => "Load skill".to_string(),
             _ => {
                 // Default case: format tool name nicely and add path if available
                 let formatted_name = self.format_tool_name(tool_name);
@@ -468,7 +468,7 @@ impl StakpakAcpAgent {
     // Helper method to get appropriate ToolKind based on tool name
     fn get_tool_kind(&self, tool_name: &str) -> acp::ToolKind {
         use super::tool_names;
-        if tool_names::is_fs_file_read(tool_name) || tool_name == tool_names::READ_RULEBOOK {
+        if tool_names::is_fs_file_read(tool_name) || tool_name == tool_names::LOAD_SKILL {
             acp::ToolKind::Read
         } else if tool_names::is_fs_file_write(tool_name) {
             acp::ToolKind::Edit
@@ -1131,7 +1131,13 @@ impl StakpakAcpAgent {
             McpInitConfig, initialize_mcp_server_and_tools,
         };
 
-        let mcp_config = McpInitConfig::default();
+        let mcp_config = McpInitConfig {
+            subagent_config: stakpak_mcp_server::SubagentConfig {
+                profile_name: Some(config.profile_name.clone()),
+                config_path: Some(config.config_path.clone()),
+            },
+            ..McpInitConfig::default()
+        };
 
         initialize_mcp_server_and_tools(config, mcp_config, None).await
     }

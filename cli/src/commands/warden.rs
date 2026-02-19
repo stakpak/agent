@@ -352,9 +352,9 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
     // Set environment variable to prevent infinite recursion
     cmd.args(["--env", "STAKPAK_SKIP_WARDEN=1"]);
 
-    // If profile was specified, pass it through
-    if let Ok(profile) = std::env::var("STAKPAK_PROFILE") {
-        cmd.args(["--env", &format!("STAKPAK_PROFILE={}", profile)]);
+    // Pass the profile through from config (skip only when empty to avoid broken command)
+    if !config.profile_name.is_empty() {
+        cmd.args(["--env", &format!("STAKPAK_PROFILE={}", config.profile_name)]);
     }
 
     // Pass through API key if set

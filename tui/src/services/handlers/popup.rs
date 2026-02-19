@@ -3,6 +3,7 @@
 //! Handles all popup-related events including profile switcher, rulebook switcher, model switcher, command palette, shortcuts, collapsed messages, and context popup.
 
 use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::services::changeset::Changeset;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
@@ -168,6 +169,10 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.last_user_message_for_retry = None;
     state.is_retrying = false;
 
+    // Clear changeset and todos from previous session
+    state.changeset = Changeset::default();
+    state.todos.clear();
+
     // CRITICAL: Close profile switcher to prevent stray selects
     state.show_profile_switcher = false;
     state.profile_switcher_selected = 0;
@@ -201,7 +206,7 @@ pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
         Some(Style::default().fg(AdaptiveColors::red())),
     ));
     state.messages.push(Message::info(
-        "Staying in current profile. Press Ctrl+P to try again.",
+        "Staying in current profile. Press ctrl+p to try again.",
         None,
     ));
 }
@@ -858,23 +863,53 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
 
     state.show_model_switcher = true;
     state.model_switcher_selected = 0;
+    // Reset filter mode and search when opening
+    state.model_switcher_mode = crate::app::ModelSwitcherMode::default();
+    state.model_switcher_search.clear();
 }
 
 /// Handle available models loaded event
 pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) {
-    // Sort models by provider (alphabetically) to match render order in model_switcher.rs
+    // Sort models by provider to match render order in model_switcher.rs
+    // "stakpak" provider always first, then alphabetically
     let mut sorted_models = models;
-    sorted_models.sort_by(|a, b| a.provider.cmp(&b.provider));
+    sorted_models.sort_by(|a, b| {
+        match (
+            a.provider.as_str() == "stakpak",
+            b.provider.as_str() == "stakpak",
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.provider.cmp(&b.provider),
+        }
+    });
     state.available_models = sorted_models;
 
-    // Pre-select current model if available
-    if let Some(current) = &state.current_model
-        && let Some(idx) = state
+    // Pre-select current model if available and it's in the filtered list
+    let filtered = crate::services::model_switcher::filter_models(
+        &state.available_models,
+        state.model_switcher_mode,
+        &state.model_switcher_search,
+    );
+
+    if let Some(current) = &state.current_model {
+        // Check if current model is in the filtered list
+        if let Some(idx) = state
             .available_models
             .iter()
             .position(|m| m.id == current.id)
-    {
-        state.model_switcher_selected = idx;
+        {
+            if filtered.contains(&idx) {
+                state.model_switcher_selected = idx;
+            } else {
+                // Current model not in filter, select first filtered item
+                state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+            }
+        } else {
+            state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+        }
+    } else {
+        state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
     }
 }
 
@@ -884,6 +919,17 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
         && !state.available_models.is_empty()
         && state.model_switcher_selected < state.available_models.len()
     {
+        // Verify the selected index is in the current filtered set
+        let filtered = crate::services::model_switcher::filter_models(
+            &state.available_models,
+            state.model_switcher_mode,
+            &state.model_switcher_search,
+        );
+        if !filtered.contains(&state.model_switcher_selected) {
+            // Selected model is not in the filtered list, ignore selection
+            return;
+        }
+
         let selected_model = state.available_models[state.model_switcher_selected].clone();
 
         // Don't switch if already on this model
@@ -893,14 +939,16 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
             .is_some_and(|m| m.id == selected_model.id)
         {
             state.show_model_switcher = false;
+            state.model_switcher_search.clear();
             return;
         }
 
         // Update current model
         state.current_model = Some(selected_model.clone());
 
-        // Close the switcher
+        // Close the switcher and clear search
         state.show_model_switcher = false;
+        state.model_switcher_search.clear();
 
         // Send request to switch model
         let _ = output_tx.try_send(OutputEvent::SwitchToModel(selected_model.clone()));
@@ -910,4 +958,128 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
 /// Handle model switcher cancel event
 pub fn handle_model_switcher_cancel(state: &mut AppState) {
     state.show_model_switcher = false;
+    // Clear search when closing
+    state.model_switcher_search.clear();
+}
+// ========== Message Action Popup Handlers ==========
+
+/// Close the message action popup
+pub fn handle_message_action_popup_close(state: &mut AppState) {
+    state.show_message_action_popup = false;
+    state.message_action_popup_selected = 0;
+    state.message_action_popup_position = None;
+    state.message_action_target_message_id = None;
+    state.message_action_target_text = None;
+}
+
+/// Navigate within the message action popup
+pub fn handle_message_action_popup_navigate(state: &mut AppState, direction: i32) {
+    let num_actions = crate::services::message_action_popup::MessageAction::all().len();
+    if num_actions == 0 {
+        return;
+    }
+
+    if direction < 0 {
+        if state.message_action_popup_selected > 0 {
+            state.message_action_popup_selected -= 1;
+        } else {
+            state.message_action_popup_selected = num_actions - 1;
+        }
+    } else {
+        state.message_action_popup_selected =
+            (state.message_action_popup_selected + 1) % num_actions;
+    }
+}
+
+/// Execute the selected action in the message action popup
+pub fn handle_message_action_popup_execute(state: &mut AppState) {
+    use crate::services::message_action_popup::{MessageAction, get_selected_action};
+    use crate::services::text_selection::copy_to_clipboard;
+    use crate::services::toast::Toast;
+
+    let Some(action) = get_selected_action(state) else {
+        handle_message_action_popup_close(state);
+        return;
+    };
+
+    match action {
+        MessageAction::CopyMessage => {
+            // Copy the message text to clipboard
+            if let Some(text) = &state.message_action_target_text {
+                match copy_to_clipboard(text) {
+                    Ok(()) => {
+                        state.toast = Some(Toast::success("Copied!"));
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to copy to clipboard: {}", e);
+                        state.toast = Some(Toast::error("Copy failed"));
+                    }
+                }
+            }
+        }
+        MessageAction::RevertToMessage => {
+            if let Some(target_id) = state.message_action_target_message_id {
+                // Find the user message index from the line_to_message_map
+                let target_user_idx = state
+                    .line_to_message_map
+                    .iter()
+                    .find(|(_, _, id, is_user, _, user_idx)| {
+                        *id == target_id && *is_user && *user_idx > 0
+                    })
+                    .map(|(_, _, _, _, _, user_idx)| *user_idx);
+
+                if let Some(target_idx) = target_user_idx {
+                    // Revert file changes for edits at or after target_idx
+                    // (the clicked message and everything after it)
+                    let revert_result = state
+                        .changeset
+                        .revert_from_user_message(target_idx, &state.session_id);
+
+                    // Find the TUI message index and truncate
+                    if let Some(msg_idx) = state.messages.iter().position(|m| m.id == target_id) {
+                        // Truncate messages - remove target message and everything after
+                        state.messages.truncate(msg_idx);
+                    }
+
+                    // Store pending revert for backend sync
+                    state.pending_revert_index = Some(target_idx);
+
+                    // Update user_message_count to match the new state
+                    // We removed the clicked message (target_idx) and everything after,
+                    // so we now have (target_idx - 1) user messages remaining
+                    state.user_message_count = target_idx.saturating_sub(1);
+
+                    // Clear todos
+                    state.todos.clear();
+
+                    // Invalidate message cache
+                    invalidate_message_lines_cache(state);
+
+                    // Show appropriate toast
+                    match revert_result {
+                        Ok((files_reverted, files_deleted)) => {
+                            let message = if files_reverted > 0 || files_deleted > 0 {
+                                format!(
+                                    "Reverted {} file(s), deleted {} created file(s)",
+                                    files_reverted, files_deleted
+                                )
+                            } else {
+                                "Reverted to message".to_string()
+                            };
+                            state.toast = Some(Toast::success(&message));
+                        }
+                        Err(e) => {
+                            log::warn!("Revert failed: {}", e);
+                            state.toast =
+                                Some(Toast::success("Reverted messages (file revert failed)"));
+                        }
+                    }
+                } else {
+                    state.toast = Some(Toast::error("Could not find message index"));
+                }
+            }
+        }
+    }
+
+    handle_message_action_popup_close(state);
 }

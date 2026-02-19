@@ -219,7 +219,7 @@ pub enum AutopilotChannelCommands {
 
     /// Add a channel
     #[command(
-        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add scopes: app_mentions:read, chat:write, im:history, im:read, im:write\n    4. Event Subscriptions → subscribe to: app_mention, message.im\n    5. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/chat_id for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
+        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add Bot Token Scopes:\n       app_mentions:read, channels:history, channels:read, chat:write,\n       groups:history, groups:read, im:history, im:read,\n       mpim:history, mpim:read, reactions:read, reactions:write\n    4. Event Subscriptions → subscribe to bot events:\n       message.channels, message.groups, message.im, app_mention\n    5. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/chat_id for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
     )]
     Add {
         /// Channel type (slack, telegram, discord)
@@ -991,6 +991,10 @@ async fn start_foreground_runtime(
         enable_mtls: true,
         enable_subagents: true,
         allowed_tools,
+        subagent_config: stakpak_mcp_server::SubagentConfig {
+            profile_name: Some(config.profile_name.clone()),
+            config_path: Some(config.config_path.clone()),
+        },
     };
 
     let mcp_init_result = crate::commands::agent::run::mcp_init::initialize_mcp_server_and_tools(
@@ -2846,7 +2850,7 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
 
     let mut exec_parts = vec![binary.display().to_string()];
-    if config.profile_name != "default" {
+    if !config.profile_name.is_empty() {
         exec_parts.push("--profile".to_string());
         exec_parts.push(config.profile_name.clone());
     }
@@ -2928,7 +2932,7 @@ fn install_launchd_service(config: &AppConfig) -> Result<(), String> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
 
     let mut args = Vec::new();
-    if config.profile_name != "default" {
+    if !config.profile_name.is_empty() {
         args.push("<string>--profile</string>".to_string());
         args.push(format!(
             "<string>{}</string>",

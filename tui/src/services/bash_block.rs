@@ -11,6 +11,7 @@ use regex::Regex;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
 };
+use stakpak_shared::utils::strip_tool_name;
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 
@@ -572,7 +573,7 @@ pub fn extract_bash_block_info(
     };
     let outside_title = get_command_type_name(tool_call);
     let bubble_title = extract_command_purpose(&command, &outside_title);
-    let colors = match crate::utils::strip_tool_name(&tool_call.function.name) {
+    let colors = match strip_tool_name(&tool_call.function.name) {
         "create_file" => BubbleColors {
             border_color: Color::Green,
             title_color: term_color(Color::Gray),
@@ -921,15 +922,17 @@ pub fn render_styled_header_and_borders(
 /// Render file diff for full screen popup - shows diff lines with context
 /// Uses the same diff-only approach as the TUI view for consistency
 /// Returns None if there's no diff to show (e.g., old_str not found)
+/// The `result` parameter can be provided to extract the starting line number from the diff output.
 pub fn render_file_diff_full(
     tool_call: &ToolCall,
     terminal_width: usize,
     do_show: Option<bool>,
+    result: Option<&str>,
 ) -> Option<Vec<Line<'static>>> {
     // Get diff lines - use the truncated version which starts from first change
     // but we'll show all diff lines without truncation for the full screen view
     let (_truncated_diff_lines, full_diff_lines) =
-        render_file_diff_block_from_args(tool_call, terminal_width);
+        render_file_diff_block_from_args(tool_call, terminal_width, result);
 
     let title: String = get_command_type_name(tool_call);
 
@@ -965,7 +968,7 @@ pub fn render_file_diff_full(
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name == "str_replace" || tool_name == "create" {
         // Use full diff (not truncated) for pending approval blocks
         let (_, mut diff_lines) = render_file_diff_block(tool_call, terminal_width);
@@ -1022,7 +1025,7 @@ pub fn render_bash_block(
         &bubble_title,
         Some(colors.clone()),
         terminal_width,
-        crate::utils::strip_tool_name(&tool_call.function.name),
+        strip_tool_name(&tool_call.function.name),
         None,
     )
 }
@@ -1061,9 +1064,14 @@ pub fn render_markdown_block(
 /// Render str_replace/create results - clean diff view without borders
 /// Uses the same approach as fullscreen popup for consistency
 /// Returns None if there's no diff (fallback to standard result rendering)
-pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Option<Vec<Line<'static>>> {
+/// The `result` parameter can be provided to extract the starting line number from the diff output.
+pub fn render_diff_result_block(
+    tool_call: &ToolCall,
+    width: usize,
+    result: Option<&str>,
+) -> Option<Vec<Line<'static>>> {
     // Use the same clean diff rendering as the fullscreen popup
-    render_file_diff_full(tool_call, width, Some(true))
+    render_file_diff_full(tool_call, width, Some(true), result)
 }
 
 pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
@@ -1090,7 +1098,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
 
     // Handle str_replace/create with diff-only content
     // If render_diff_result_block returns None (no diff), fall through to standard rendering
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name == "str_replace" || tool_name == "create" {
         // Check for rejected/cancelled in result text
         if result.contains("TOOL_CALL_REJECTED") {
@@ -1110,7 +1118,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             );
         }
 
-        if let Some(diff_lines) = render_diff_result_block(&tool_call, width) {
+        if let Some(diff_lines) = render_diff_result_block(&tool_call, width, Some(&result)) {
             return diff_lines;
         }
         // Fall through to standard result rendering if no diff
@@ -1692,7 +1700,7 @@ pub fn render_refreshed_terminal_bubble(
 }
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name == "run_command_task" {
         return false;
     }
@@ -2011,8 +2019,9 @@ pub fn render_run_command_block(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Border color: DarkGray for error/cancelled/rejected/skipped states, Gray otherwise
+    // Border color: Cyan for pending (preview), DarkGray for error/cancelled/rejected/skipped, Gray otherwise
     let border_color = match state {
+        RunCommandState::Pending => Color::Cyan,
         RunCommandState::Error
         | RunCommandState::Cancelled
         | RunCommandState::Rejected
@@ -2286,7 +2295,7 @@ pub fn render_ask_user_block(
     selected_option: usize,
     custom_input: &str,
     terminal_width: usize,
-    focused: bool,
+    _focused: bool,
 ) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
         terminal_width - 4
@@ -2295,23 +2304,11 @@ pub fn render_ask_user_block(
     };
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
-    let border_color = if focused {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    };
-    let dot_color = if focused {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    };
+    let border_color = Color::Cyan;
+    let dot_color = Color::Cyan;
 
-    // Title with focus indicator
-    let base_title = if focused {
-        "Ask User (Tab to scroll)"
-    } else {
-        "Ask User (Tab to focus)"
-    };
+    // Title
+    let base_title = "Ask User";
     let title_display_len = calculate_display_width(base_title);
     let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
 
@@ -2436,38 +2433,66 @@ pub fn render_ask_user_block(
             ]));
 
             if let Some(answer) = answers.get(&q.label) {
-                let display = if answer.is_custom {
-                    answer.answer.clone()
-                } else {
-                    q.options
-                        .iter()
-                        .find(|o| o.value == answer.answer)
-                        .map(|o| o.label.clone())
-                        .unwrap_or_else(|| answer.answer.clone())
-                };
-                let max_display = max_content_width.saturating_sub(4);
-                let display = if display.chars().count() > max_display {
-                    format!(
-                        "{}…",
-                        display
-                            .chars()
-                            .take(max_display.saturating_sub(1))
-                            .collect::<String>()
-                    )
-                } else {
-                    display
-                };
-                let answer_text = format!("    {}", display);
-                let answer_width = calculate_display_width(&answer_text);
-                let answer_padding = max_content_width.saturating_sub(answer_width);
-                formatted_lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(border_color)),
-                    Span::from(" "),
-                    Span::raw("    "),
-                    Span::styled(display, Style::default().fg(Color::Cyan)),
-                    Span::from(" ".repeat(answer_padding)),
-                    Span::styled(" │", Style::default().fg(border_color)),
-                ]));
+                // Collect display labels for the answer(s)
+                let answer_labels: Vec<String> =
+                    if q.multi_select && !answer.selected_values.is_empty() {
+                        answer
+                            .selected_values
+                            .iter()
+                            .map(|val| {
+                                q.options
+                                    .iter()
+                                    .find(|o| &o.value == val)
+                                    .map(|o| o.label.clone())
+                                    .unwrap_or_else(|| val.clone())
+                            })
+                            .collect()
+                    } else {
+                        let display = if answer.is_custom {
+                            answer.answer.clone()
+                        } else {
+                            q.options
+                                .iter()
+                                .find(|o| o.value == answer.answer)
+                                .map(|o| o.label.clone())
+                                .unwrap_or_else(|| answer.answer.clone())
+                        };
+                        vec![display]
+                    };
+
+                // Render each answer label with uniform [✓] style
+                for label in &answer_labels {
+                    let max_display = max_content_width.saturating_sub(8);
+                    let display = if label.chars().count() > max_display {
+                        format!(
+                            "{}…",
+                            label
+                                .chars()
+                                .take(max_display.saturating_sub(1))
+                                .collect::<String>()
+                        )
+                    } else {
+                        label.clone()
+                    };
+                    let answer_text = format!("    [✓] {}", display);
+                    let answer_width = calculate_display_width(&answer_text);
+                    let answer_padding = max_content_width.saturating_sub(answer_width);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::raw("    "),
+                        Span::styled(
+                            "[✓]",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(display, Style::default().fg(Color::Cyan)),
+                        Span::from(" ".repeat(answer_padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+                }
             } else if q.required {
                 let text = "  □ not answered";
                 let text_width = calculate_display_width(text);
@@ -2554,24 +2579,54 @@ pub fn render_ask_user_block(
 
         // Options
         for (i, opt) in q.options.iter().enumerate() {
-            let is_selected = i == selected_option;
-            let is_answered = previous_answer
-                .map(|a| !a.is_custom && a.answer == opt.value)
-                .unwrap_or(false);
+            let is_cursor = i == selected_option;
 
-            let bracket = if is_answered {
+            // Determine if this option is "checked" (answered/selected)
+            let is_checked = if q.multi_select {
+                // Multi-select: check if this value is in selected_values
+                previous_answer
+                    .map(|a| a.selected_values.contains(&opt.value))
+                    .unwrap_or(false)
+            } else {
+                // Single-select: check if this is the chosen answer
+                previous_answer
+                    .map(|a| !a.is_custom && a.answer == opt.value)
+                    .unwrap_or(false)
+            };
+
+            // Uniform bracket rendering:
+            //   [›] = cursor is here, not checked (multi-select)
+            //   [✓] = checked (cursor shown via underline/bold style)
+            //   [ ] = unchecked (not cursor)
+            //   [›] = cursor is here (single-select, not yet selected)
+            //   [✓] = selected in single-select
+            //   [n] = numbered in single-select (not cursor, not selected)
+            let bracket = if q.multi_select {
+                if is_checked {
+                    "[✓]".to_string()
+                } else if is_cursor {
+                    "[›]".to_string()
+                } else {
+                    "[ ]".to_string()
+                }
+            } else if is_checked {
                 "[✓]".to_string()
-            } else if is_selected {
-                "[*]".to_string()
+            } else if is_cursor {
+                "[›]".to_string()
             } else {
                 format!("[{}]", i + 1)
             };
 
-            let bracket_style = if is_answered {
+            let bracket_style = if is_cursor && is_checked {
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD)
-            } else if is_selected {
+                    .add_modifier(Modifier::UNDERLINED)
+            } else if is_checked {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_cursor {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
@@ -2579,9 +2634,14 @@ pub fn render_ask_user_block(
                 Style::default().fg(Color::DarkGray)
             };
 
-            let label_style = if is_answered {
+            let label_style = if is_cursor && is_checked {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED)
+            } else if is_checked {
                 Style::default().fg(Color::Cyan)
-            } else if is_selected {
+            } else if is_cursor {
                 Style::default()
                     .fg(term_color(Color::White))
                     .add_modifier(Modifier::BOLD)
@@ -2603,7 +2663,7 @@ pub fn render_ask_user_block(
             ]));
 
             if let Some(desc) = &opt.description {
-                let desc_style = if is_selected || is_answered {
+                let desc_style = if is_cursor || is_checked {
                     Style::default().fg(Color::Gray)
                 } else {
                     Style::default().fg(Color::DarkGray)
@@ -2621,8 +2681,8 @@ pub fn render_ask_user_block(
             }
         }
 
-        // Custom input option
-        if q.allow_custom {
+        // Custom input option (not available for multi-select)
+        if q.allow_custom && !q.multi_select {
             let custom_idx = q.options.len();
             let is_selected = selected_option == custom_idx;
             let is_custom_answered = previous_answer.map(|a| a.is_custom).unwrap_or(false);
@@ -2636,7 +2696,7 @@ pub fn render_ask_user_block(
                 )
             } else if is_selected {
                 (
-                    "[*]".to_string(),
+                    "[›]".to_string(),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -2732,16 +2792,7 @@ pub fn render_ask_user_block(
 
     // --- Help text ---
     {
-        let help_spans = if !focused {
-            // Unfocused: just show how to focus
-            vec![
-                Span::styled("Tab", Style::default().fg(Color::DarkGray)),
-                Span::styled(" focus", Style::default().fg(Color::Cyan)),
-                Span::raw(" · "),
-                Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                Span::styled(" cancel", Style::default().fg(Color::Cyan)),
-            ]
-        } else if is_submit_tab && all_required_answered {
+        let help_spans = if is_submit_tab && all_required_answered {
             vec![
                 Span::styled("Enter", Style::default().fg(Color::DarkGray)),
                 Span::styled(" submit", Style::default().fg(Color::Green)),
@@ -2749,27 +2800,21 @@ pub fn render_ask_user_block(
                 Span::styled("←/→", Style::default().fg(Color::DarkGray)),
                 Span::styled(" questions", Style::default().fg(Color::Cyan)),
                 Span::raw(" · "),
-                Span::styled("Tab", Style::default().fg(Color::DarkGray)),
-                Span::styled(" scroll", Style::default().fg(Color::Cyan)),
-                Span::raw(" · "),
                 Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                Span::styled(" unfocus", Style::default().fg(Color::Cyan)),
+                Span::styled(" cancel", Style::default().fg(Color::Cyan)),
             ]
         } else if is_submit_tab {
             vec![
                 Span::styled("←/→", Style::default().fg(Color::DarkGray)),
                 Span::styled(" questions", Style::default().fg(Color::Cyan)),
                 Span::raw(" · "),
-                Span::styled("Tab", Style::default().fg(Color::DarkGray)),
-                Span::styled(" scroll", Style::default().fg(Color::Cyan)),
-                Span::raw(" · "),
                 Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                Span::styled(" unfocus", Style::default().fg(Color::Cyan)),
+                Span::styled(" cancel", Style::default().fg(Color::Cyan)),
             ]
         } else {
             let is_custom_selected = questions
                 .get(current_tab)
-                .map(|q| q.allow_custom && selected_option == q.options.len())
+                .map(|q| q.allow_custom && !q.multi_select && selected_option == q.options.len())
                 .unwrap_or(false);
 
             if is_custom_selected {
@@ -2780,29 +2825,50 @@ pub fn render_ask_user_block(
                     Span::styled("Enter", Style::default().fg(Color::DarkGray)),
                     Span::styled(" confirm", Style::default().fg(Color::Cyan)),
                     Span::raw(" · "),
-                    Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" options", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
-                    Span::styled("Tab", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+                    Span::styled("↑", Style::default().fg(Color::DarkGray)),
+                    Span::styled(" back", Style::default().fg(Color::Cyan)),
                 ]
             } else {
-                vec![
-                    Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" select", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
-                    Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" options", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
-                    Span::styled("←/→", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" questions", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
-                    Span::styled("1-9", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" quick", Style::default().fg(Color::Cyan)),
-                    Span::raw(" · "),
-                    Span::styled("Tab", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" scroll", Style::default().fg(Color::Cyan)),
-                ]
+                let is_multi = questions
+                    .get(current_tab)
+                    .map(|q| q.multi_select)
+                    .unwrap_or(false);
+
+                if is_multi {
+                    vec![
+                        Span::styled("Space", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" next", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" options", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("←/→", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" questions", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+                    ]
+                } else {
+                    vec![
+                        Span::styled("Space", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" select", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" next", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" options", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("←/→", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" questions", Style::default().fg(Color::Cyan)),
+                        Span::raw(" · "),
+                        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+                    ]
+                }
             }
         };
 
@@ -3641,7 +3707,7 @@ fn circled_number(n: usize) -> String {
 }
 
 fn format_tool_display_name(name: &str) -> String {
-    let stripped = crate::utils::strip_tool_name(name);
+    let stripped = strip_tool_name(name);
     stripped
         .replace('_', " ")
         .split_whitespace()

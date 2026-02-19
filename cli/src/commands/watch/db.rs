@@ -680,7 +680,7 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>, DbError> {
         .map_err(|e| DbError::Query(format!("Failed to parse datetime '{}': {}", s, e)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "libsql-test"))]
 mod tests {
     use super::*;
     use tempfile::{TempDir, tempdir};

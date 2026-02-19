@@ -4,9 +4,9 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_rulebooks, build_resume_command,
-    extract_last_checkpoint_id, refresh_billing_info, tool_call_history_string, tool_result,
-    user_message,
+    add_agents_md, add_apps_md, add_local_context, add_skills, build_plan_mode_instructions,
+    build_resume_command, extract_last_checkpoint_id, refresh_billing_info,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -20,7 +20,9 @@ use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
+use stakpak_api::local::skills::{default_skill_directories, discover_skills};
 use stakpak_api::models::ApiStreamError;
+use stakpak_api::models::Skill;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
 
 use stakpak_mcp_server::EnabledToolsConfig;
@@ -32,7 +34,7 @@ use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
-const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v3.md");
+const INIT_PROMPT: &str = include_str!("../../../../../libs/api/src/prompts/init.v4.md");
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -132,6 +134,21 @@ fn has_pending_tool_calls(messages: &[ChatMessage], tools_queue: &[ToolCall]) ->
     !get_unresolved_tool_call_ids(messages).is_empty()
 }
 
+/// Find the index in the messages Vec of the nth user message (1-indexed).
+/// Used for reverting to a specific user message by truncating the messages array.
+fn find_nth_user_message_index(messages: &[ChatMessage], n: usize) -> Option<usize> {
+    let mut count = 0;
+    for (idx, msg) in messages.iter().enumerate() {
+        if msg.role == Role::User {
+            count += 1;
+            if count == n {
+                return Some(idx);
+            }
+        }
+    }
+    None
+}
+
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub session_id: Option<String>,
@@ -140,9 +157,11 @@ pub struct RunInteractiveConfig {
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_subagents: bool,
+    pub skills: Option<Vec<Skill>>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
     pub study_mode: bool,
+    pub plan_mode: bool,
     pub system_prompt: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
@@ -154,6 +173,7 @@ pub struct RunInteractiveConfig {
     pub send_init_prompt_on_start: bool,
 }
 
+#[allow(unused_assignments)] // plan_mode_active: written in PlanModeActivated, read in later phases
 pub async fn run_interactive(
     mut ctx: AppConfig,
     mut config: RunInteractiveConfig,
@@ -163,6 +183,10 @@ pub async fn run_interactive(
         let mut model = config.model.clone();
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
+        // Plan mode tracking — written in PlanModeActivated, read in later phases
+        #[allow(unused_variables, unused_assignments)]
+        let mut plan_mode_active = false;
+        let mut plan_instructions_injected = false;
         let mut should_update_rulebooks_on_next_message = false;
         let mut total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
@@ -179,6 +203,7 @@ pub async fn run_interactive(
         let _mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
         let mut rulebooks = config.rulebooks.clone();
+        let mut skills = config.skills.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let enable_subagents = config.enable_subagents;
@@ -217,7 +242,22 @@ pub async fn run_interactive(
         let model_for_tui = model.clone();
 
         // Use  init prompt (loaded at module level as const)
-        let init_prompt_content_for_tui = Some(INIT_PROMPT.to_string());
+        // When send_init_prompt_on_start is true (stakpak init), run discovery
+        // probes in parallel and append results to the init prompt.
+        let init_prompt_content_for_tui = if config.send_init_prompt_on_start {
+            let discovery_output = crate::utils::discovery::run_all().await;
+            if discovery_output.is_empty() {
+                Some(INIT_PROMPT.to_string())
+            } else {
+                Some(format!(
+                    "{}\n\n<discovery_results>\n{}</discovery_results>",
+                    INIT_PROMPT,
+                    discovery_output.trim()
+                ))
+            }
+        } else {
+            Some(INIT_PROMPT.to_string())
+        };
 
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
         let tui_handle = tokio::spawn(async move {
@@ -308,6 +348,10 @@ pub async fn run_interactive(
                 enable_mtls,
                 enable_subagents,
                 allowed_tools: allowed_tools_for_tui.clone(),
+                subagent_config: stakpak_mcp_server::SubagentConfig {
+                    profile_name: Some(ctx_clone.profile_name.clone()),
+                    config_path: Some(ctx_clone.config_path.clone()),
+                },
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
             let (mcp_client, mcp_tools, tools, _server_shutdown_tx, _proxy_shutdown_tx) =
@@ -357,6 +401,25 @@ pub async fn run_interactive(
                 all_available_rulebooks = Some(all_rulebooks.clone());
                 let _ =
                     send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
+            }
+
+            // Build unified skills list: convert remote rulebooks + discover local skills
+            if skills.is_none() {
+                let mut merged_skills: Vec<Skill> = Vec::new();
+
+                // Convert remote rulebooks to skills
+                if let Some(rbs) = &rulebooks {
+                    merged_skills.extend(rbs.iter().cloned().map(Skill::from));
+                }
+
+                // Discover local skills
+                let skill_dirs = stakpak_api::local::skills::default_skill_directories();
+                let local_skills = stakpak_api::local::skills::discover_skills(&skill_dirs);
+                merged_skills.extend(local_skills);
+
+                if !merged_skills.is_empty() {
+                    skills = Some(merged_skills);
+                }
             }
 
             if let Some(session_id_str) = session_id {
@@ -419,6 +482,27 @@ pub async fn run_interactive(
                 messages.insert(0, system_message(system_prompt_text));
             }
 
+            // Handle --plan CLI flag: activate plan mode at startup
+            if config.plan_mode {
+                let session_dir = std::path::Path::new(".stakpak/session");
+                if stakpak_tui::services::plan::plan_file_exists(session_dir) {
+                    // Existing plan found — let the TUI show the modal
+                    let meta =
+                        stakpak_tui::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ExistingPlanFound(stakpak_tui::ExistingPlanPrompt {
+                            inline_prompt: None,
+                            metadata: meta,
+                        }),
+                    )
+                    .await?;
+                } else {
+                    plan_mode_active = true;
+                    send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+                }
+            }
+
             let mut retry_attempts = 0;
             const MAX_RETRY_ATTEMPTS: u32 = 2;
 
@@ -428,7 +512,31 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
-                    OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
+                    OutputEvent::UserMessage(
+                        user_input,
+                        tool_calls_results,
+                        image_parts,
+                        revert_index,
+                    ) => {
+                        // Handle revert if provided - truncate messages to the specified user message index
+                        if let Some(target_user_idx) = revert_index {
+                            // Find the ChatMessage index for the nth user message
+                            let truncate_at =
+                                find_nth_user_message_index(&messages, target_user_idx);
+
+                            if let Some(idx) = truncate_at {
+                                // Truncate: remove target message and everything after
+                                messages.truncate(idx);
+                                // Clear the tools queue since we're reverting
+                                tools_queue.clear();
+                                log::info!(
+                                    "Reverted messages to user message index {} (truncated to {} messages)",
+                                    target_user_idx,
+                                    messages.len()
+                                );
+                            }
+                        }
+
                         let mut user_input = user_input.clone();
 
                         // Add user shell history to the user input
@@ -439,7 +547,6 @@ pub async fn run_interactive(
                         }
 
                         // Add local context to user input for new sessions
-                        // Add rulebooks to user input for new sessions or when rulebook settings change
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
                                 let (user_input_with_context, _) =
@@ -449,15 +556,14 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                let (user_input_with_rulebooks, _) =
-                                    if let Some(rulebooks) = &rulebooks {
-                                        add_rulebooks(&user_input_with_context, rulebooks)
-                                    } else {
-                                        (user_input_with_context, None)
-                                    };
+                                let (user_input_with_skills, _) = if let Some(skills) = &skills {
+                                    add_skills(&user_input_with_context, skills)
+                                } else {
+                                    (user_input_with_context, None)
+                                };
 
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
-                                (user_input_with_rulebooks, None::<String>)
+                                (user_input_with_skills, None::<String>)
                             } else {
                                 (user_input.to_string(), None::<String>)
                             };
@@ -476,6 +582,16 @@ pub async fn run_interactive(
                         {
                             let (user_input, _) = add_apps_md(&user_input, apps_md_info);
                             user_input
+                        } else {
+                            user_input
+                        };
+
+                        // Inject plan mode instructions on the first user message
+                        // after plan mode is activated (via /plan or --plan)
+                        let user_input = if plan_mode_active && !plan_instructions_injected {
+                            plan_instructions_injected = true;
+                            let plan_prompt = build_plan_mode_instructions();
+                            format!("{} {}", plan_prompt, user_input)
                         } else {
                             user_input
                         };
@@ -1028,7 +1144,15 @@ pub async fn run_interactive(
                                 .collect();
 
                             // Update the rulebooks with the filtered list
-                            rulebooks = Some(filtered_rulebooks);
+                            rulebooks = Some(filtered_rulebooks.clone());
+
+                            // Rebuild unified skills: filtered remote + all local
+                            let mut merged_skills: Vec<Skill> =
+                                filtered_rulebooks.into_iter().map(Skill::from).collect();
+                            let skill_dirs = default_skill_directories();
+                            let local_skills = discover_skills(&skill_dirs);
+                            merged_skills.extend(local_skills);
+                            skills = Some(merged_skills);
 
                             // Set flag to update rulebooks on next message
                             should_update_rulebooks_on_next_message = true;
@@ -1067,6 +1191,46 @@ pub async fn run_interactive(
                         )
                         .await?;
                         continue;
+                    }
+                    OutputEvent::PlanModeActivated(inline_prompt) => {
+                        // Transition to plan mode
+                        plan_mode_active = true;
+                        send_input_event(&input_tx, InputEvent::PlanModeChanged(true)).await?;
+
+                        // If there's an inline prompt, inject plan instructions + prompt
+                        // as a user message so the agent starts planning immediately.
+                        if let Some(prompt) = inline_prompt {
+                            let instructions = build_plan_mode_instructions();
+                            let plan_prompt = format!("{instructions} {prompt}");
+                            let user_msg = user_message(plan_prompt);
+                            plan_instructions_injected = true;
+                            send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                            messages.push(user_msg);
+                        } else {
+                            // No inline prompt — wait for the user to type their message.
+                            // Don't fall through to the API call with empty messages.
+                            continue;
+                        }
+                    }
+                    OutputEvent::PlanFeedback(feedback_text) => {
+                        // User submitted feedback from plan review.
+                        // Inject as direct user message — the feedback already contains
+                        // anchor references so the agent knows what to revise.
+                        let user_msg = user_message(feedback_text.clone());
+                        messages.push(user_msg);
+                        send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                        send_input_event(&input_tx, InputEvent::AddUserMessage(feedback_text))
+                            .await?;
+                    }
+                    OutputEvent::PlanApproved => {
+                        // User approved the plan — plan_mode stays active, PlanStatus drives behavior.
+                        // The agent is responsible for updating plan.md front matter to status: approved.
+                        let approval_msg = "Plan approved. Update the plan front matter status to `approved` and proceed with creating a new task board breaking down the plan.".to_string();
+                        let user_msg = user_message(approval_msg.clone());
+                        messages.push(user_msg);
+                        send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                        send_input_event(&input_tx, InputEvent::AddUserMessage(approval_msg))
+                            .await?;
                     }
                     OutputEvent::AskUserResponse(tool_call_result) => {
                         // User responded to ask_user popup - add the result to messages
@@ -1407,8 +1571,22 @@ pub async fn run_interactive(
                 }
             });
 
-            // Update config with new rulebooks
-            config.rulebooks = new_rulebooks;
+            // Update config with new rulebooks and rebuild skills
+            config.rulebooks = new_rulebooks.clone();
+            // Rebuild unified skills for the new profile
+            let mut new_skills: Vec<Skill> = new_rulebooks
+                .unwrap_or_default()
+                .into_iter()
+                .map(Skill::from)
+                .collect();
+            let skill_dirs = default_skill_directories();
+            let local_skills = discover_skills(&skill_dirs);
+            new_skills.extend(local_skills);
+            config.skills = if new_skills.is_empty() {
+                None
+            } else {
+                Some(new_skills)
+            };
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
 
@@ -1420,12 +1598,6 @@ pub async fn run_interactive(
                 && std::env::var("STAKPAK_SKIP_WARDEN").is_err();
 
             if should_use_warden {
-                // Set the profile environment variable so warden knows which profile to use
-                // This is safe because we're setting it for the current process before re-execution
-                unsafe {
-                    std::env::set_var("STAKPAK_PROFILE", &ctx.profile_name);
-                }
-
                 // Re-execute stakpak inside warden container
                 if let Err(e) =
                     warden::run_stakpak_in_warden(ctx, &std::env::args().collect::<Vec<_>>()).await

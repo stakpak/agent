@@ -128,165 +128,6 @@ pub fn is_supported_file(file_path: &Path) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::io::Write;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_matches_gitignore_pattern_exact() {
-        assert!(matches_gitignore_pattern("node_modules", "node_modules"));
-        assert!(matches_gitignore_pattern(
-            "node_modules",
-            "node_modules/package.json"
-        ));
-        assert!(!matches_gitignore_pattern(
-            "node_modules",
-            "src/node_modules"
-        ));
-    }
-
-    #[test]
-    fn test_matches_gitignore_pattern_wildcard_prefix() {
-        assert!(matches_gitignore_pattern("*.log", "debug.log"));
-        assert!(matches_gitignore_pattern("*.log", "error.log"));
-        assert!(!matches_gitignore_pattern("*.log", "log.txt"));
-    }
-
-    #[test]
-    fn test_matches_gitignore_pattern_wildcard_suffix() {
-        assert!(matches_gitignore_pattern("temp*", "temp"));
-        assert!(matches_gitignore_pattern("temp*", "temp.txt"));
-        assert!(matches_gitignore_pattern("temp*", "temporary"));
-        assert!(!matches_gitignore_pattern("temp*", "mytemp"));
-    }
-
-    #[test]
-    fn test_matches_gitignore_pattern_wildcard_middle() {
-        assert!(matches_gitignore_pattern("*temp*", "temp"));
-        assert!(matches_gitignore_pattern("*temp*", "mytemp"));
-        assert!(matches_gitignore_pattern("*temp*", "temporary"));
-        assert!(matches_gitignore_pattern("*temp*", "mytemporary"));
-        assert!(!matches_gitignore_pattern("*temp*", "example"));
-    }
-
-    #[test]
-    fn test_pattern_matches_glob() {
-        assert!(pattern_matches_glob("test*.txt", "test.txt"));
-        assert!(pattern_matches_glob("test*.txt", "test123.txt"));
-        assert!(pattern_matches_glob("*test*.txt", "mytest.txt"));
-        assert!(pattern_matches_glob("*test*.txt", "mytestfile.txt"));
-        assert!(!pattern_matches_glob("test*.txt", "test.log"));
-        assert!(!pattern_matches_glob("*test*.txt", "example.txt"));
-    }
-
-    #[test]
-    fn test_read_gitignore_patterns() -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = TempDir::new()?;
-        let temp_path = temp_dir.path();
-
-        // Create a .gitignore file
-        let gitignore_content = r#"
-# This is a comment
-node_modules
-*.log
-dist/
-.env
-
-# Another comment
-temp*
-"#;
-
-        let gitignore_path = temp_path.join(".gitignore");
-        let mut file = fs::File::create(&gitignore_path)?;
-        file.write_all(gitignore_content.as_bytes())?;
-
-        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
-
-        // Should include .git by default
-        assert!(patterns.contains(&".git".to_string()));
-        assert!(patterns.contains(&"node_modules".to_string()));
-        assert!(patterns.contains(&"*.log".to_string()));
-        assert!(patterns.contains(&"dist/".to_string()));
-        assert!(patterns.contains(&".env".to_string()));
-        assert!(patterns.contains(&"temp*".to_string()));
-
-        // Should not include comments or empty lines
-        assert!(!patterns.iter().any(|p| p.starts_with('#')));
-        assert!(!patterns.contains(&"".to_string()));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_read_gitignore_patterns_no_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-
-        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
-
-        // Should only contain .git when no .gitignore exists
-        assert_eq!(patterns, vec![".git".to_string()]);
-    }
-
-    #[test]
-    fn test_gitignore_integration() -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = TempDir::new()?;
-        let temp_path = temp_dir.path();
-
-        // Create a .gitignore file
-        let gitignore_content = "node_modules\n*.log\ndist/\n";
-        let gitignore_path = temp_path.join(".gitignore");
-        let mut file = fs::File::create(&gitignore_path)?;
-        file.write_all(gitignore_content.as_bytes())?;
-
-        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
-
-        // Test various paths
-        assert!(
-            patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "node_modules"))
-        );
-        assert!(
-            patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "node_modules/package.json"))
-        );
-        assert!(
-            patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "debug.log"))
-        );
-        assert!(
-            patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "dist/bundle.js"))
-        );
-        assert!(
-            patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, ".git"))
-        );
-
-        // These should not match
-        assert!(
-            !patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "src/main.js"))
-        );
-        assert!(
-            !patterns
-                .iter()
-                .any(|p| matches_gitignore_pattern(p, "README.md"))
-        );
-
-        Ok(())
-    }
-}
-
 /// Generate a secure password with alphanumeric characters and optional symbols
 pub fn generate_password(length: usize, no_symbols: bool) -> String {
     let mut rng = rand::rng();
@@ -625,6 +466,35 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
     Ok(result)
 }
 
+/// Strip the MCP server prefix and any trailing "()" from a tool name.
+/// Example: "stakpak__run_command" -> "run_command"
+/// Example: "run_command" -> "run_command"
+/// Example: "str_replace()" -> "str_replace"
+pub fn strip_tool_name(name: &str) -> &str {
+    let mut result = name;
+
+    // Strip the MCP server prefix (e.g., "stakpak__")
+    if let Some((_, suffix)) = result.split_once("__") {
+        result = suffix;
+    }
+
+    // Strip trailing "()" if present
+    if let Some(stripped) = result.strip_suffix("()") {
+        result = stripped;
+    }
+
+    backward_compatibility_mapping(result)
+}
+
+/// Map legacy tool names to their current counterparts.
+/// Currently handles mapping "read_rulebook" to "load_skill".
+pub fn backward_compatibility_mapping(name: &str) -> &str {
+    match name {
+        "read_rulebook" | "read_rulebooks" => "load_skill",
+        _ => name,
+    }
+}
+
 /// Local file system provider implementation
 pub struct LocalFileSystemProvider;
 
@@ -650,5 +520,192 @@ impl FileSystemProvider for LocalFileSystemProvider {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_matches_gitignore_pattern_exact() {
+        assert!(matches_gitignore_pattern("node_modules", "node_modules"));
+        assert!(matches_gitignore_pattern(
+            "node_modules",
+            "node_modules/package.json"
+        ));
+        assert!(!matches_gitignore_pattern(
+            "node_modules",
+            "src/node_modules"
+        ));
+    }
+
+    #[test]
+    fn test_matches_gitignore_pattern_wildcard_prefix() {
+        assert!(matches_gitignore_pattern("*.log", "debug.log"));
+        assert!(matches_gitignore_pattern("*.log", "error.log"));
+        assert!(!matches_gitignore_pattern("*.log", "log.txt"));
+    }
+
+    #[test]
+    fn test_matches_gitignore_pattern_wildcard_suffix() {
+        assert!(matches_gitignore_pattern("temp*", "temp"));
+        assert!(matches_gitignore_pattern("temp*", "temp.txt"));
+        assert!(matches_gitignore_pattern("temp*", "temporary"));
+        assert!(!matches_gitignore_pattern("temp*", "mytemp"));
+    }
+
+    #[test]
+    fn test_matches_gitignore_pattern_wildcard_middle() {
+        assert!(matches_gitignore_pattern("*temp*", "temp"));
+        assert!(matches_gitignore_pattern("*temp*", "mytemp"));
+        assert!(matches_gitignore_pattern("*temp*", "temporary"));
+        assert!(matches_gitignore_pattern("*temp*", "mytemporary"));
+        assert!(!matches_gitignore_pattern("*temp*", "example"));
+    }
+
+    #[test]
+    fn test_pattern_matches_glob() {
+        assert!(pattern_matches_glob("test*.txt", "test.txt"));
+        assert!(pattern_matches_glob("test*.txt", "test123.txt"));
+        assert!(pattern_matches_glob("*test*.txt", "mytest.txt"));
+        assert!(pattern_matches_glob("*test*.txt", "mytestfile.txt"));
+        assert!(!pattern_matches_glob("test*.txt", "test.log"));
+        assert!(!pattern_matches_glob("*test*.txt", "example.txt"));
+    }
+
+    #[test]
+    fn test_read_gitignore_patterns() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = TempDir::new()?;
+        let temp_path = temp_dir.path();
+
+        // Create a .gitignore file
+        let gitignore_content = r#"
+# This is a comment
+node_modules
+*.log
+dist/
+.env
+
+# Another comment
+temp*
+"#;
+
+        let gitignore_path = temp_path.join(".gitignore");
+        let mut file = fs::File::create(&gitignore_path)?;
+        file.write_all(gitignore_content.as_bytes())?;
+
+        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
+
+        // Should include .git by default
+        assert!(patterns.contains(&".git".to_string()));
+        assert!(patterns.contains(&"node_modules".to_string()));
+        assert!(patterns.contains(&"*.log".to_string()));
+        assert!(patterns.contains(&"dist/".to_string()));
+        assert!(patterns.contains(&".env".to_string()));
+        assert!(patterns.contains(&"temp*".to_string()));
+
+        // Should not include comments or empty lines
+        assert!(!patterns.iter().any(|p| p.starts_with('#')));
+        assert!(!patterns.contains(&"".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_gitignore_patterns_no_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
+
+        // Should only contain .git when no .gitignore exists
+        assert_eq!(patterns, vec![".git".to_string()]);
+    }
+
+    #[test]
+    fn test_strip_tool_name() {
+        assert_eq!(strip_tool_name("stakpak__run_command"), "run_command");
+        assert_eq!(strip_tool_name("run_command"), "run_command");
+        assert_eq!(strip_tool_name("str_replace()"), "str_replace");
+        assert_eq!(strip_tool_name("stakpak__read_rulebook"), "load_skill");
+        assert_eq!(strip_tool_name("read_rulebook()"), "load_skill");
+        assert_eq!(strip_tool_name("read_rulebooks"), "load_skill");
+        // Additional edge cases
+        assert_eq!(strip_tool_name("just_name"), "just_name");
+        assert_eq!(strip_tool_name("prefix__name()"), "name");
+        assert_eq!(strip_tool_name("nested__prefix__tool"), "prefix__tool");
+        assert_eq!(strip_tool_name("empty_suffix()"), "empty_suffix");
+    }
+
+    #[test]
+    fn test_backward_compatibility_mapping() {
+        assert_eq!(
+            backward_compatibility_mapping("read_rulebook"),
+            "load_skill"
+        );
+        assert_eq!(
+            backward_compatibility_mapping("read_rulebooks"),
+            "load_skill"
+        );
+        assert_eq!(backward_compatibility_mapping("run_command"), "run_command");
+    }
+
+    #[test]
+    fn test_gitignore_integration() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = TempDir::new()?;
+        let temp_path = temp_dir.path();
+
+        // Create a .gitignore file
+        let gitignore_content = "node_modules\n*.log\ndist/\n";
+        let gitignore_path = temp_path.join(".gitignore");
+        let mut file = fs::File::create(&gitignore_path)?;
+        file.write_all(gitignore_content.as_bytes())?;
+
+        let patterns = read_gitignore_patterns(temp_path.to_str().unwrap());
+
+        // Test various paths
+        assert!(
+            patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "node_modules"))
+        );
+        assert!(
+            patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "node_modules/package.json"))
+        );
+        assert!(
+            patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "debug.log"))
+        );
+        assert!(
+            patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "dist/bundle.js"))
+        );
+        assert!(
+            patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, ".git"))
+        );
+
+        // These should not match
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "src/main.js"))
+        );
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| matches_gitignore_pattern(p, "README.md"))
+        );
+
+        Ok(())
     }
 }
