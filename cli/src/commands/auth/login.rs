@@ -220,7 +220,7 @@ async fn handle_oauth_login(
         .providers
         .entry(provider.id().to_string())
         .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or_else(|| {
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or({
                 ProviderConfig::Anthropic {
                     api_key: None,
                     api_endpoint: None,
@@ -487,7 +487,7 @@ async fn handle_api_key_login(
         .providers
         .entry(provider.id().to_string())
         .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or_else(|| {
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or({
                 ProviderConfig::OpenAI {
                     api_key: None,
                     api_endpoint: None,

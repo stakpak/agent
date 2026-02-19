@@ -235,10 +235,10 @@ impl ProviderConfig {
     /// Get the API key if set (checks `auth` field first, then legacy `api_key`)
     pub fn api_key(&self) -> Option<&str> {
         // First check auth field
-        if let Some(auth) = self.get_auth_ref() {
-            if let Some(key) = auth.api_key_value() {
-                return Some(key);
-            }
+        if let Some(auth) = self.get_auth_ref()
+            && let Some(key) = auth.api_key_value()
+        {
+            return Some(key);
         }
         // Fall back to legacy api_key field
         match self {
@@ -281,7 +281,7 @@ impl ProviderConfig {
             | ProviderConfig::Gemini { api_key, .. }
             | ProviderConfig::Custom { api_key, .. }
             | ProviderConfig::Stakpak { api_key, .. } => {
-                api_key.as_ref().map(|k| ProviderAuth::api_key(k))
+                api_key.as_ref().map(ProviderAuth::api_key)
             }
             ProviderConfig::Anthropic {
                 api_key,
@@ -292,7 +292,7 @@ impl ProviderConfig {
                 if let Some(key) = api_key {
                     Some(ProviderAuth::api_key(key))
                 } else {
-                    access_token.as_ref().map(|t| ProviderAuth::api_key(t))
+                    access_token.as_ref().map(ProviderAuth::api_key)
                 }
             }
             ProviderConfig::Bedrock { .. } => None,
@@ -390,10 +390,10 @@ impl ProviderConfig {
     /// to the legacy `access_token` field.
     pub fn access_token(&self) -> Option<&str> {
         // First check auth field for OAuth access token
-        if let Some(auth) = self.get_auth_ref() {
-            if let Some(token) = auth.access_token() {
-                return Some(token);
-            }
+        if let Some(auth) = self.get_auth_ref()
+            && let Some(token) = auth.access_token()
+        {
+            return Some(token);
         }
         // Fall back to legacy access_token field
         match self {

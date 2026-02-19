@@ -199,20 +199,19 @@ pub fn handle_logout(
         Some(CredentialSource::ConfigToml) => {
             // Remove from config.toml
             let config_path = config_dir.join("config.toml");
-            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path) {
-                if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
-                    if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
-                        provider_config.clear_auth();
-                        // Update readonly profile if we modified the default profile
-                        if target_profile == "default" {
-                            config_file.update_readonly();
-                        }
-                        if let Err(e) = config_file.save_to(&config_path) {
-                            return Err(format!("Failed to save config: {}", e));
-                        }
-                        removed = true;
-                    }
+            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                && let Some(profile_config) = config_file.profiles.get_mut(&target_profile)
+                && let Some(provider_config) = profile_config.providers.get_mut(&provider_id)
+            {
+                provider_config.clear_auth();
+                // Update readonly profile if we modified the default profile
+                if target_profile == "default" {
+                    config_file.update_readonly();
                 }
+                if let Err(e) = config_file.save_to(&config_path) {
+                    return Err(format!("Failed to save config: {}", e));
+                }
+                removed = true;
             }
         }
         Some(CredentialSource::AuthToml) => {
@@ -227,27 +226,25 @@ pub fn handle_logout(
             // Try both sources
             // First try config.toml
             let config_path = config_dir.join("config.toml");
-            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path) {
-                if let Some(profile_config) = config_file.profiles.get_mut(&target_profile) {
-                    if let Some(provider_config) = profile_config.providers.get_mut(&provider_id) {
-                        provider_config.clear_auth();
-                        // Update readonly profile if we modified the default profile
-                        if target_profile == "default" {
-                            config_file.update_readonly();
-                        }
-                        if config_file.save_to(&config_path).is_ok() {
-                            removed = true;
-                        }
-                    }
+            if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                && let Some(profile_config) = config_file.profiles.get_mut(&target_profile)
+                && let Some(provider_config) = profile_config.providers.get_mut(&provider_id)
+            {
+                provider_config.clear_auth();
+                // Update readonly profile if we modified the default profile
+                if target_profile == "default" {
+                    config_file.update_readonly();
+                }
+                if config_file.save_to(&config_path).is_ok() {
+                    removed = true;
                 }
             }
             // Then try auth.toml
-            if !removed {
-                if let Ok(mut auth_manager) = AuthManager::new(config_dir) {
-                    if let Ok(r) = auth_manager.remove(&target_profile, &provider_id) {
-                        removed = r;
-                    }
-                }
+            if !removed
+                && let Ok(mut auth_manager) = AuthManager::new(config_dir)
+                && let Ok(r) = auth_manager.remove(&target_profile, &provider_id)
+            {
+                removed = r;
             }
         }
     }

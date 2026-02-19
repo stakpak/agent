@@ -373,10 +373,10 @@ impl AppConfig {
     /// 5. Environment variable (e.g., ANTHROPIC_API_KEY)
     pub fn resolve_provider_auth(&self, provider: &str) -> Option<ProviderAuth> {
         // 1 & 2: Check config.toml providers HashMap (get_auth checks auth field then legacy fields)
-        if let Some(provider_config) = self.providers.get(provider) {
-            if let Some(auth) = provider_config.get_auth() {
-                return Some(auth);
-            }
+        if let Some(provider_config) = self.providers.get(provider)
+            && let Some(auth) = provider_config.get_auth()
+        {
+            return Some(auth);
         }
 
         // 3 & 4: Check auth.toml (legacy, for users who haven't migrated yet)
@@ -572,11 +572,10 @@ impl AppConfig {
         // First check providers HashMap
         if let Some(ProviderConfig::OpenAI { api_endpoint, .. }) = self.providers.get("openai") {
             if let Some(auth) = self.resolve_provider_auth("openai") {
-                let mut config =
-                    OpenAIConfig::from_provider_auth(&auth).unwrap_or_else(|| OpenAIConfig {
-                        api_key: None,
-                        api_endpoint: None,
-                    });
+                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
                 config.api_endpoint = api_endpoint.clone();
                 return Some(config);
             }
@@ -603,11 +602,10 @@ impl AppConfig {
                         auth
                     }
                 };
-                let mut config =
-                    OpenAIConfig::from_provider_auth(&auth).unwrap_or_else(|| OpenAIConfig {
-                        api_key: None,
-                        api_endpoint: None,
-                    });
+                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
                 config.api_endpoint = api_endpoint.clone();
                 return Some(config);
             }
@@ -637,11 +635,10 @@ impl AppConfig {
         // First check providers HashMap
         if let Some(ProviderConfig::Gemini { api_endpoint, .. }) = self.providers.get("gemini") {
             if let Some(auth) = self.resolve_provider_auth("gemini") {
-                let mut config =
-                    GeminiConfig::from_provider_auth(&auth).unwrap_or_else(|| GeminiConfig {
-                        api_key: None,
-                        api_endpoint: None,
-                    });
+                let mut config = GeminiConfig::from_provider_auth(&auth).unwrap_or(GeminiConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
                 config.api_endpoint = api_endpoint.clone();
                 return Some(config);
             }
@@ -668,11 +665,10 @@ impl AppConfig {
                         auth
                     }
                 };
-                let mut config =
-                    GeminiConfig::from_provider_auth(&auth).unwrap_or_else(|| GeminiConfig {
-                        api_key: None,
-                        api_endpoint: None,
-                    });
+                let mut config = GeminiConfig::from_provider_auth(&auth).unwrap_or(GeminiConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
                 config.api_endpoint = api_endpoint.clone();
                 return Some(config);
             }
