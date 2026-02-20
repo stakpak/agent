@@ -12,7 +12,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    channels::{Channel, ChannelTestResult, DeliveryReceipt},
+    channels::{
+        ApprovalButton, ButtonStyle, Channel, ChannelTestResult, DeliveryReceipt,
+        parse_approval_callback,
+    },
     chunking::chunk_text,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
@@ -98,11 +101,13 @@ impl SlackChannel {
         channel: &str,
         text: &str,
         thread_ts: Option<&str>,
+        blocks: Option<Vec<serde_json::Value>>,
     ) -> Result<String> {
         let payload = ChatPostMessage {
             channel: channel.to_string(),
             text: text.to_string(),
             thread_ts: thread_ts.map(ToOwned::to_owned),
+            blocks,
         };
 
         loop {
@@ -142,6 +147,94 @@ impl SlackChannel {
                 payload.error.unwrap_or_else(|| "unknown error".to_string())
             ));
         }
+    }
+
+    async fn update_message(
+        &self,
+        channel: &str,
+        ts: &str,
+        text: &str,
+        blocks: Vec<serde_json::Value>,
+    ) -> Result<()> {
+        let payload = ChatUpdateMessage {
+            channel: channel.to_string(),
+            ts: ts.to_string(),
+            text: text.to_string(),
+            blocks,
+        };
+
+        loop {
+            let response = self
+                .http
+                .post("https://slack.com/api/chat.update")
+                .bearer_auth(&self.bot_token)
+                .json(&payload)
+                .send()
+                .await
+                .context("slack chat.update request failed")?;
+
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let retry_after = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(1);
+                tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
+                continue;
+            }
+
+            let payload: SlackApiResponse = response
+                .json()
+                .await
+                .context("slack chat.update decode failed")?;
+
+            if payload.ok {
+                return Ok(());
+            }
+
+            return Err(anyhow!(
+                "slack chat.update failed: {}",
+                payload.error.unwrap_or_else(|| "unknown error".to_string())
+            ));
+        }
+    }
+
+    fn extract_target(reply: &OutboundReply) -> Result<(String, String, Option<String>)> {
+        let channel = reply
+            .metadata
+            .get("channel")
+            .and_then(value_as_string)
+            .unwrap_or_else(|| reply.peer_id.0.clone());
+
+        if channel.is_empty() {
+            return Err(anyhow!("slack reply missing target channel"));
+        }
+
+        let channel_type = reply
+            .metadata
+            .get("channel_type")
+            .and_then(value_as_string)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| match reply.chat_type {
+                ChatType::Direct => "im".to_string(),
+                _ => "channel".to_string(),
+            });
+
+        let thread_ts = reply
+            .metadata
+            .get("thread_ts")
+            .and_then(value_as_string)
+            .or_else(|| {
+                if channel_type == "im" {
+                    None
+                } else {
+                    reply.metadata.get("ts").and_then(value_as_string)
+                }
+            })
+            .filter(|value| !value.is_empty());
+
+        Ok((channel, channel_type, thread_ts))
     }
 
     async fn add_reaction(&self, channel: &str, ts: &str, name: &str) -> Result<()> {
@@ -356,6 +449,78 @@ impl SlackChannel {
 
                 Ok(HandleAction::Continue)
             }
+            "interactive" => {
+                let Some(envelope_id) = payload.envelope_id else {
+                    return Ok(HandleAction::Continue);
+                };
+
+                let ack = SocketAck {
+                    envelope_id: envelope_id.clone(),
+                };
+                let ack_text = serde_json::to_string(&ack).context("slack ack encode failed")?;
+                writer
+                    .send(WsMessage::Text(ack_text))
+                    .await
+                    .context("slack ack send failed")?;
+
+                let Some(interaction_raw) = payload.payload else {
+                    return Ok(HandleAction::Continue);
+                };
+
+                let interaction: SlackInteractionPayload = serde_json::from_value(interaction_raw)
+                    .context("slack interaction payload decode failed")?;
+
+                if interaction.payload_type != "block_actions" {
+                    return Ok(HandleAction::Continue);
+                }
+
+                let channel_id = match interaction.channel.as_ref() {
+                    Some(channel) if !channel.id.is_empty() => channel.id.clone(),
+                    _ => {
+                        warn!("slack interaction missing channel; skipping");
+                        return Ok(HandleAction::Continue);
+                    }
+                };
+                let message_ts = interaction
+                    .message
+                    .as_ref()
+                    .map(|message| message.ts.clone())
+                    .unwrap_or_default();
+                let thread_ts = interaction
+                    .message
+                    .as_ref()
+                    .and_then(|message| message.thread_ts.clone());
+
+                for action in &interaction.actions {
+                    let Some((approval_id, decision)) = parse_approval_callback(&action.action_id)
+                    else {
+                        continue;
+                    };
+
+                    let inbound = InboundMessage {
+                        channel: self.id.clone(),
+                        peer_id: PeerId(interaction.user.id.clone()),
+                        chat_type: map_chat_type(&channel_id, "channel", thread_ts.as_deref()),
+                        text: String::new(),
+                        media: Vec::new(),
+                        metadata: serde_json::json!({
+                            "type": "approval_response",
+                            "approval_id": approval_id,
+                            "decision": decision,
+                            "channel": channel_id.clone(),
+                            "ts": message_ts.clone(),
+                            "thread_ts": thread_ts.clone(),
+                        }),
+                        timestamp: Utc::now(),
+                    };
+
+                    if inbound_tx.send(inbound).await.is_err() {
+                        return Ok(HandleAction::Stop);
+                    }
+                }
+
+                Ok(HandleAction::Continue)
+            }
             _ => Ok(HandleAction::Continue),
         }
     }
@@ -494,44 +659,13 @@ impl Channel for SlackChannel {
     }
 
     async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
-        let channel = reply
-            .metadata
-            .get("channel")
-            .and_then(value_as_string)
-            .unwrap_or_else(|| reply.peer_id.0.clone());
-
-        if channel.is_empty() {
-            return Err(anyhow!("slack reply missing target channel"));
-        }
-
-        let channel_type = reply
-            .metadata
-            .get("channel_type")
-            .and_then(value_as_string)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| match reply.chat_type {
-                ChatType::Direct => "im".to_string(),
-                _ => "channel".to_string(),
-            });
-
-        let thread_ts = reply
-            .metadata
-            .get("thread_ts")
-            .and_then(value_as_string)
-            .or_else(|| {
-                if channel_type == "im" {
-                    None
-                } else {
-                    reply.metadata.get("ts").and_then(value_as_string)
-                }
-            })
-            .filter(|value| !value.is_empty());
+        let (channel, channel_type, thread_ts) = Self::extract_target(&reply)?;
 
         let chunks = chunk_text(&reply.text, SLACK_TEXT_LIMIT);
         let mut first_message_ts: Option<String> = None;
         for chunk in chunks {
             let ts = self
-                .post_message(&channel, &chunk, thread_ts.as_deref())
+                .post_message(&channel, &chunk, thread_ts.as_deref(), None)
                 .await?;
             if first_message_ts.is_none() {
                 first_message_ts = Some(ts);
@@ -550,6 +684,27 @@ impl Channel for SlackChannel {
             message_id: first_message_ts,
             thread_id: effective_thread_id,
         })
+    }
+
+    async fn send_with_buttons(
+        &self,
+        reply: OutboundReply,
+        buttons: Vec<ApprovalButton>,
+    ) -> Result<String> {
+        let (channel, _channel_type, thread_ts) = Self::extract_target(&reply)?;
+        let blocks = build_approval_blocks(&reply.text, &buttons);
+        let ts = self
+            .post_message(&channel, &reply.text, thread_ts.as_deref(), Some(blocks))
+            .await?;
+        Ok(format!("{channel}:{ts}"))
+    }
+
+    async fn edit_message(&self, message_id: &str, new_text: &str) -> Result<()> {
+        let Some((channel, ts)) = parse_slack_message_id(message_id) else {
+            return Ok(());
+        };
+
+        self.update_message(channel, ts, new_text, Vec::new()).await
     }
 
     async fn test(&self) -> Result<ChannelTestResult> {
@@ -620,6 +775,41 @@ struct SlackEvent {
     bot_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SlackInteractionPayload {
+    #[serde(rename = "type")]
+    payload_type: String,
+    user: SlackInteractionUser,
+    #[serde(default)]
+    actions: Vec<SlackInteractionAction>,
+    #[serde(default)]
+    channel: Option<SlackInteractionChannel>,
+    #[serde(default)]
+    message: Option<SlackInteractionMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackInteractionUser {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackInteractionAction {
+    action_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackInteractionChannel {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackInteractionMessage {
+    ts: String,
+    #[serde(default)]
+    thread_ts: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct SocketAck {
     envelope_id: String,
@@ -631,6 +821,16 @@ struct ChatPostMessage {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     thread_ts: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatUpdateMessage {
+    channel: String,
+    ts: String,
+    text: String,
+    blocks: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -771,6 +971,48 @@ fn value_as_string(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::Number(number) => Some(number.to_string()),
         _ => None,
     }
+}
+
+fn build_approval_blocks(text: &str, buttons: &[ApprovalButton]) -> Vec<serde_json::Value> {
+    let mut blocks = vec![serde_json::json!({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": text,
+        }
+    })];
+
+    let elements = buttons
+        .iter()
+        .map(|button| {
+            let style = match button.style {
+                ButtonStyle::Success => "primary",
+                ButtonStyle::Danger => "danger",
+            };
+            serde_json::json!({
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": button.label,
+                    "emoji": true,
+                },
+                "action_id": button.callback_data,
+                "style": style,
+                "value": button.callback_data,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    blocks.push(serde_json::json!({
+        "type": "actions",
+        "elements": elements,
+    }));
+
+    blocks
+}
+
+fn parse_slack_message_id(message_id: &str) -> Option<(&str, &str)> {
+    message_id.split_once(':')
 }
 
 fn is_bot_mentioned(text: &str, bot_user_id: &str) -> bool {
