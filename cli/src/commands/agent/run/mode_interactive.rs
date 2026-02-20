@@ -488,9 +488,15 @@ pub async fn run_interactive(
                 match output_event {
                     OutputEvent::SwitchToModel(new_model) => {
                         // Transform model for Stakpak routing if using Stakpak API,
-                        // but only if it's not already a Stakpak model (which already
-                        // has the correct ID format from list_models)
-                        model = if has_stakpak_key && new_model.provider != "stakpak" {
+                        // but only for known cloud providers. Local/custom providers
+                        // (litellm, ollama, custom, etc.) should not be transformed.
+                        let known_cloud_providers =
+                            ["anthropic", "openai", "google", "gemini", "amazon-bedrock"];
+                        let should_transform = has_stakpak_key
+                            && new_model.provider != "stakpak"
+                            && known_cloud_providers.contains(&new_model.provider.as_str());
+
+                        model = if should_transform {
                             stakpak_api::transform_for_stakpak(new_model.clone())
                         } else {
                             new_model.clone()

@@ -1183,6 +1183,8 @@ pub fn update(
         }
         InputEvent::RecentModelsUpdated(recent_models) => {
             state.recent_models = recent_models;
+            // Ensure any custom models in recent_models are added to available_models
+            popup::ensure_custom_models_in_available(state);
         }
 
         // Side panel handlers

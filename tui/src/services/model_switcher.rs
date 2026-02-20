@@ -348,11 +348,8 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
     let mut line_to_model_idx: Vec<Option<usize>> = Vec::new(); // Maps line index to model index
 
     // === Recent Models Section ===
-    // Collect recent models: either from available_models or as custom models
-    // Custom models (not in available_models) are shown but not selectable via navigation
-    let search_lower = state.model_switcher_search.to_lowercase();
-
-    // Find recent models that exist in available_models
+    // Recent models are now always in available_models (custom models are synthesized
+    // with provider inferred from model ID prefix or the user's default provider)
     let recent_model_indices: Vec<usize> = state
         .recent_models
         .iter()
@@ -365,24 +362,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         .filter(|idx| filtered_indices.contains(idx))
         .collect();
 
-    // Find recent models that are NOT in available_models (custom models)
-    let custom_recent_models: Vec<&String> = state
-        .recent_models
-        .iter()
-        .filter(|recent_id| {
-            // Not in available_models
-            !state.available_models.iter().any(|m| &m.id == *recent_id)
-        })
-        .filter(|recent_id| {
-            // Matches search filter
-            state.model_switcher_search.is_empty()
-                || recent_id.to_lowercase().contains(&search_lower)
-        })
-        .collect();
-
-    let has_recent = !recent_model_indices.is_empty() || !custom_recent_models.is_empty();
-
-    if has_recent {
+    if !recent_model_indices.is_empty() {
         // Recent header
         lines.push(Line::from(vec![Span::styled(
             " Recent ",
@@ -392,7 +372,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         )]));
         line_to_model_idx.push(None); // Header is not selectable
 
-        // Recent model items (from available_models)
+        // Recent model items
         for &model_idx in &recent_model_indices {
             let model = &state.available_models[model_idx];
             let is_selected = model_idx == state.model_switcher_selected;
@@ -409,40 +389,6 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
                 list_area.width,
             ));
             line_to_model_idx.push(Some(model_idx));
-        }
-
-        // Custom recent models (not in available_models) - shown but not navigable
-        for custom_id in &custom_recent_models {
-            let is_current = state
-                .current_model
-                .as_ref()
-                .is_some_and(|m| &m.id == *custom_id)
-                || state.model.id == **custom_id;
-
-            // Render custom model line (simplified, no selection since not navigable)
-            let mut spans = vec![];
-            if is_current {
-                spans.push(Span::styled("  ", Style::default().fg(Color::Green)));
-            } else {
-                spans.push(Span::raw("   "));
-            }
-
-            let name_style = if is_current {
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-
-            spans.push(Span::styled((*custom_id).clone(), name_style));
-            spans.push(Span::styled(
-                " (custom)",
-                Style::default().fg(Color::DarkGray),
-            ));
-
-            lines.push(Line::from(spans));
-            line_to_model_idx.push(None); // Custom models are not selectable
         }
     }
 

@@ -868,6 +868,36 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
     state.model_switcher_search.clear();
 }
 
+/// Add custom models from recent_models to available_models.
+///
+/// Custom models are those in recent_models but not in available_models.
+/// The provider is inferred from:
+/// 1. The model ID prefix if it has a "/" (e.g., "litellm/glm-4.6" -> provider "litellm")
+/// 2. Otherwise, use the same provider as the configured default model (state.model)
+pub fn ensure_custom_models_in_available(state: &mut AppState) {
+    // Get the default provider from the configured model
+    let default_provider = state.model.provider.clone();
+
+    for recent_id in state.recent_models.clone() {
+        // Check if this model is already in available_models
+        let exists = state.available_models.iter().any(|m| m.id == recent_id);
+        if !exists {
+            // Try to infer provider from model ID prefix (e.g., "litellm/glm-4.6" -> "litellm")
+            // Only use the prefix if it's non-empty (handles edge case like "/model")
+            let provider = if let Some(slash_pos) = recent_id.find('/')
+                && slash_pos > 0
+            {
+                recent_id[..slash_pos].to_string()
+            } else {
+                // Use the configured default provider
+                default_provider.clone()
+            };
+            let custom_model = Model::custom(recent_id.clone(), provider);
+            state.available_models.push(custom_model);
+        }
+    }
+}
+
 /// Handle available models loaded event
 pub fn handle_available_models_loaded(
     state: &mut AppState,
@@ -888,6 +918,9 @@ pub fn handle_available_models_loaded(
         }
     });
     state.available_models = sorted_models;
+
+    // Add custom models from recent_models that aren't in available_models
+    ensure_custom_models_in_available(state);
 
     // Add the current/default model to recent_models if not already there
     // This ensures the initial model appears in Recent section
