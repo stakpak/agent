@@ -1,7 +1,9 @@
 //! Side Panel UI rendering
 //!
-//! This module handles rendering the side panel with its four sections:
+//! This module handles rendering the side panel with its sections:
+//! - Plan: Plan mode status, title, and version (visible only during plan mode)
 //! - Context: Token usage, credits, session time, model
+//! - Billing: Subscription plan and credit balance
 //! - Tasks: Task list from agent-board cards
 //! - Changeset: Files modified with edit history
 
@@ -14,7 +16,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 
 /// Left padding for content inside the side panel
 const LEFT_PADDING: &str = "  ";
@@ -43,6 +44,22 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Calculate section heights
     let collapsed_height = 1; // Height when collapsed (just header)
     let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
+
+    // Plan section is only visible when plan mode is active
+    let plan_active = state.plan_mode_active;
+    let plan_collapsed = state
+        .side_panel_section_collapsed
+        .get(&SidePanelSection::Plan)
+        .copied()
+        .unwrap_or(false);
+
+    let plan_height: u16 = if !plan_active {
+        0
+    } else if plan_collapsed {
+        collapsed_height
+    } else {
+        5 // Header + Status + Title + Version + blank
+    };
 
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
@@ -109,6 +126,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(plan_height),
             Constraint::Length(context_height),
             Constraint::Length(billing_height),
             Constraint::Length(tasks_height),
@@ -120,24 +138,120 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Store areas for mouse handling
     state.side_panel_areas.clear();
+    if plan_active {
+        state
+            .side_panel_areas
+            .insert(SidePanelSection::Plan, chunks[0]);
+    }
     state
         .side_panel_areas
-        .insert(SidePanelSection::Context, chunks[0]);
+        .insert(SidePanelSection::Context, chunks[1]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Billing, chunks[1]);
+        .insert(SidePanelSection::Billing, chunks[2]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Tasks, chunks[2]);
+        .insert(SidePanelSection::Tasks, chunks[3]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Changeset, chunks[3]);
+        .insert(SidePanelSection::Changeset, chunks[4]);
 
-    render_context_section(f, state, chunks[0], context_collapsed);
-    render_billing_section(f, state, chunks[1], billing_collapsed);
-    render_tasks_section(f, state, chunks[2], tasks_collapsed);
-    render_changeset_section(f, state, chunks[3], changeset_collapsed);
-    render_footer_section(f, state, chunks[5]);
+    if plan_active {
+        render_plan_section(f, state, chunks[0], plan_collapsed);
+    }
+    render_context_section(f, state, chunks[1], context_collapsed);
+    render_billing_section(f, state, chunks[2], billing_collapsed);
+    render_tasks_section(f, state, chunks[3], tasks_collapsed);
+    render_changeset_section(f, state, chunks[4], changeset_collapsed);
+    render_footer_section(f, state, chunks[6]);
+}
+
+/// Render the Plan section (visible only during plan mode)
+fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
+    use crate::services::plan::PlanStatus;
+
+    let focused = state.side_panel_focus == SidePanelSection::Plan;
+    let header_style = section_header_style(focused);
+
+    let collapse_indicator = if collapsed { "▸" } else { "▾" };
+
+    // Derive phase badge from plan_metadata status
+    let phase_badge = match state.plan_metadata.as_ref().map(|m| m.status) {
+        Some(PlanStatus::Drafting) => "",
+        Some(PlanStatus::PendingReview) => "",
+        Some(PlanStatus::Approved) => "",
+        None => "",
+    };
+
+    let header = Line::from(Span::styled(
+        format!("{}{} Plan{}", LEFT_PADDING, collapse_indicator, phase_badge),
+        header_style,
+    ));
+
+    if collapsed {
+        let paragraph = Paragraph::new(vec![header]);
+        f.render_widget(paragraph, area);
+        return;
+    }
+
+    let mut lines = vec![header];
+
+    // Helper for right-aligned value row (same pattern as other sections)
+    let make_row = |label: &str, value: String, value_color: Color| -> Line<'_> {
+        let label_span = Span::styled(
+            format!("{}  {} ", LEFT_PADDING, label),
+            Style::default().fg(Color::DarkGray),
+        );
+        let label_len = LEFT_PADDING.len() + 2 + label.len();
+        let value_len = value.chars().count();
+        let right_padding = 2;
+        let available_width = area.width as usize;
+        let spacing = available_width.saturating_sub(label_len + value_len + right_padding);
+
+        Line::from(vec![
+            label_span,
+            Span::raw(" ".repeat(spacing)),
+            Span::styled(value, Style::default().fg(value_color)),
+        ])
+    };
+
+    // Phase row — derived from plan_metadata status
+    let (phase_label, phase_color) = match state.plan_metadata.as_ref().map(|m| m.status) {
+        Some(PlanStatus::Drafting) => ("Drafting", Color::Yellow),
+        Some(PlanStatus::PendingReview) => ("Pending Review", Color::Cyan),
+        Some(PlanStatus::Approved) => ("Approved", Color::Green),
+        None => ("Planning", Color::Yellow),
+    };
+    lines.push(make_row("Phase", phase_label.to_string(), phase_color));
+
+    // Plan metadata (from polled file)
+    if let Some(ref meta) = state.plan_metadata {
+        // Title — truncate to fit
+        let avail_for_title = (area.width as usize).saturating_sub(12);
+        let title = truncate_string(&meta.title, avail_for_title);
+        lines.push(make_row("Title", title, Color::White));
+
+        // Status from front matter
+        let (status_label, status_color) = match meta.status {
+            PlanStatus::Drafting => ("Drafting", Color::Yellow),
+            PlanStatus::PendingReview => ("Pending Review", Color::Cyan),
+            PlanStatus::Approved => ("Approved", Color::Green),
+        };
+        lines.push(make_row(
+            "Status",
+            format!("v{} · {}", meta.version, status_label),
+            status_color,
+        ));
+    } else {
+        lines.push(make_row(
+            "File",
+            "Not created yet".to_string(),
+            Color::DarkGray,
+        ));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, area);
 }
 
 /// Render the Context section
@@ -183,19 +297,17 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         ])
     };
 
-    // Token usage
-    let tokens = state.current_message_usage.total_tokens;
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|m| m.context_info())
-        .unwrap_or_default();
-    let max_tokens = context_info.max_tokens as u32;
+    // Get the active model (current_model if set, otherwise default model)
+    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
 
-    // Show N/A when no content yet (tokens == 0)
+    // Token usage - use current message's prompt_tokens for context window utilization
+    // (prompt_tokens represents the actual context size, not accumulated across messages)
+    let tokens = state.current_message_usage.prompt_tokens;
+    let max_tokens = active_model.limit.context as u32;
+
+    // Show tokens info
     if tokens == 0 {
         lines.push(make_row("Tokens", "N/A".to_string(), Color::DarkGray));
-        lines.push(make_row("Model", "N/A".to_string(), Color::DarkGray));
     } else {
         let percentage = if max_tokens > 0 {
             ((tokens as f64 / max_tokens as f64) * 100.0).round() as u32
@@ -206,36 +318,27 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         lines.push(make_row(
             "Tokens",
             format!(
-                "{} / {}K ({}%)",
+                "{} / {} ({}%)",
                 format_tokens(tokens),
-                max_tokens / 1000,
+                format_tokens(max_tokens),
                 percentage
             ),
             Color::White,
         ));
-
-        // Model name
-        let model_name = state
-            .llm_model
-            .as_ref()
-            .map(|m| m.model_name())
-            .unwrap_or_else(|| state.agent_model.to_string());
-
-        // Truncate model name if needed, assuming label len ~10 ("   Model:")
-        let avail_for_model = area.width as usize - 10;
-        let truncated_model = truncate_string(&model_name, avail_for_model);
-
-        lines.push(make_row("Model", truncated_model, Color::Cyan));
     }
 
-    // Provider - show subscription, auth provider, or config provider
-    let provider_value = match &state.auth_display_info {
-        (_, Some(_), Some(subscription)) => subscription.clone(),
-        (_, Some(auth_provider), None) => auth_provider.clone(),
-        (Some(config_provider), None, None) => config_provider.clone(),
-        _ => "Remote".to_string(),
-    };
-    lines.push(make_row("Provider", provider_value, Color::DarkGray));
+    // Model name - from active model
+    let model_name = &active_model.name;
+
+    // Truncate model name if needed, assuming label len ~10 ("   Model:")
+    let avail_for_model = area.width as usize - 10;
+    let truncated_model = truncate_string(model_name, avail_for_model);
+
+    lines.push(make_row("Model", truncated_model, Color::Cyan));
+
+    // Provider - from active model (display name)
+    let provider = format_provider_display_name(&active_model.provider);
+    lines.push(make_row("Provider", provider, Color::DarkGray));
 
     // Profile
     lines.push(make_row(
@@ -574,7 +677,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
             };
 
             // Calculate available width
-            let available_width = area.width as usize;
+            let available_width = area.width.saturating_sub(1) as usize;
 
             // Format: [PREFIX] [STATE_LABEL] [NAME] ... [STATS]
             // We want the state label to be next to the name
@@ -697,6 +800,28 @@ fn section_header_style(focused: bool) -> Style {
     }
 }
 
+/// Format a provider ID into a human-readable display name.
+///
+/// Maps known provider IDs to their proper display names.
+/// Unknown providers get simple capitalization of the first letter.
+fn format_provider_display_name(provider_id: &str) -> String {
+    match provider_id {
+        "amazon-bedrock" => "Amazon Bedrock".to_string(),
+        "openai" => "OpenAI".to_string(),
+        "anthropic" => "Anthropic".to_string(),
+        "gemini" | "google" => "Google Gemini".to_string(),
+        "stakpak" => "Stakpak".to_string(),
+        other => {
+            // Fallback: capitalize first letter
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
 /// Format token count with separators
 fn format_tokens(tokens: u32) -> String {
     if tokens >= 1000 {
@@ -706,14 +831,15 @@ fn format_tokens(tokens: u32) -> String {
     }
 }
 
-/// Truncate a string to fit within a given width
+/// Truncate a string to fit within a given width, respecting char boundaries.
 fn truncate_string(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
+    if s.chars().count() <= max_width {
         s.to_string()
     } else if max_width > 3 {
-        format!("{}...", &s[..max_width - 3])
+        let truncated: String = s.chars().take(max_width - 3).collect();
+        format!("{}...", truncated)
     } else {
-        s[..max_width].to_string()
+        s.chars().take(max_width).collect()
     }
 }
 

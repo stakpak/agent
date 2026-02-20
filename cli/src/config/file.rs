@@ -120,6 +120,15 @@ impl ConfigFile {
         }
     }
 
+    /// Update the readonly profile to match the current default profile.
+    /// This should be called after modifying the default profile.
+    pub(crate) fn update_readonly(&mut self) {
+        self.profiles.insert(
+            "readonly".into(),
+            ProfileConfig::readonly_profile(self.profile_config("default")),
+        );
+    }
+
     /// Save the config file to disk.
     pub(crate) fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
         if let Some(parent) = path.as_ref().parent() {

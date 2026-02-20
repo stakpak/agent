@@ -140,6 +140,8 @@ pub enum ServerConfig {
         headers: Option<HashMap<String, String>>,
         /// Optional certificate chain for mTLS (used for local server connections)
         certificate_chain: Arc<Option<CertificateChain>>,
+        /// Pre-built client TLS config. When set, takes precedence over `certificate_chain`.
+        client_tls_config: Option<Arc<rustls::ClientConfig>>,
     },
 }
 
@@ -211,6 +213,7 @@ impl ClientPoolConfig {
                     url,
                     headers,
                     certificate_chain: Arc::new(None),
+                    client_tls_config: None,
                 },
             };
             servers.insert(name, server_config);

@@ -17,6 +17,8 @@ pub fn truncate_output(output: &str) -> String {
             .map(|(i, _)| i)
             .unwrap_or(0);
 
+        // start/end from char_indices() — always valid char boundaries
+        #[allow(clippy::string_slice)]
         return format!("{}\n...truncated...\n{}", &output[..start], &output[end..]);
     }
 

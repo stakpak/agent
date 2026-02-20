@@ -11,12 +11,17 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod autopilot;
 pub mod board;
 pub mod browser;
 pub mod mcp;
 pub mod warden;
+pub mod watch;
+
+use autopilot::{StartArgs, StopArgs};
 
 pub use auth::AuthCommands;
+pub use autopilot::AutopilotCommands;
 pub use mcp::McpCommands;
 
 /// Frontmatter structure for rulebook metadata
@@ -138,6 +143,9 @@ pub enum Commands {
     /// Get current account
     Account,
 
+    /// Analyze your infrastructure setup
+    Init,
+
     /// MCP commands
     #[command(subcommand)]
     Mcp(McpCommands),
@@ -175,9 +183,25 @@ pub enum Commands {
     },
     /// Update Stakpak Agent to the latest version
     Update,
+
+    /// Autonomous 24/7 lifecycle commands
+    #[command(subcommand)]
+    Autopilot(AutopilotCommands),
+
+    /// Start autopilot — auto-configures on first run (alias: stakpak autopilot up)
+    Up {
+        #[command(flatten)]
+        args: StartArgs,
+    },
+
+    /// Alias for `stakpak autopilot down`
+    Down {
+        #[command(flatten)]
+        args: StopArgs,
+    },
 }
 
-async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
+async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
     // Use credential resolution with auth.toml fallback chain
     // Refresh OAuth tokens in parallel to minimize startup delay
     let providers = config.get_llm_provider_config_async().await;
@@ -187,7 +211,7 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
         api_endpoint: config.api_endpoint.clone(),
     });
 
-    let client = AgentClient::new(AgentClientConfig {
+    AgentClient::new(AgentClientConfig {
         stakpak,
         providers,
         eco_model: config.eco_model.clone(),
@@ -197,8 +221,11 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
         hook_registry: None,
     })
     .await
-    .map_err(|e| format!("Failed to create agent client: {}", e))?;
-    Ok(Arc::new(client))
+    .map_err(|e| format!("Failed to create agent client: {}", e))
+}
+
+async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
+    Ok(Arc::new(build_agent_client(config).await?))
 }
 
 /// Helper function to convert AppConfig's config_path to Option<&Path>
@@ -222,6 +249,9 @@ impl Commands {
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
+                | Commands::Autopilot(_)
+                | Commands::Up { .. }
+                | Commands::Down { .. }
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -433,6 +463,10 @@ impl Commands {
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }
+            Commands::Init => {
+                // Handled in main: starts interactive session with init prompt sent on start
+                unreachable!("stakpak init is handled before Commands::run()")
+            }
             Commands::Version => {
                 println!(
                     "stakpak v{} (https://github.com/stakpak/agent)",
@@ -461,7 +495,21 @@ impl Commands {
                 browser::run_browser(args).await?;
             }
             Commands::Update => {
-                auto_update::run_auto_update().await?;
+                auto_update::run_auto_update(false).await?;
+            }
+            Commands::Autopilot(autopilot_command) => {
+                autopilot_command.run(config).await?;
+            }
+            Commands::Up { args } => {
+                AutopilotCommands::Up {
+                    args,
+                    from_service: false,
+                }
+                .run(config)
+                .await?;
+            }
+            Commands::Down { args } => {
+                AutopilotCommands::Down { args }.run(config).await?;
             }
             Commands::Auth(auth_command) => {
                 auth_command.run(config).await?;
@@ -529,9 +577,9 @@ fn print_sample_config() {
 [profiles.all]
 api_endpoint = "https://apiv2.stakpak.dev"
 # Common tools that should be available across all profiles
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search"]
 # Conservative auto-approve list that works for all environments
-auto_approve = ["view", "search_docs", "read_rulebook"]
+auto_approve = ["view", "search_docs", "load_skill"]
 
 [profiles.all.rulebooks]
 # Common rulebook patterns for all profiles
@@ -546,9 +594,9 @@ exclude_tags = ["archived", "obsolete"]
 api_key = "your_api_key_here"
 
 # Extends the 'all' profile's allowed_tools with additional development tools
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search", "create", "str_replace", "run_command"]
 
-# Inherits auto_approve from 'all' profile (view, search_docs, read_rulebook)
+# Inherits auto_approve from 'all' profile (view, search_docs, load_skill)
 # No need to redefine unless you want to override
 
 # Rulebook filtering configuration
@@ -588,7 +636,7 @@ volumes = [
 api_key = "prod_api_key_here"
 
 # Restricts allowed_tools to only read-only operations (overrides 'all' profile)
-allowed_tools = ["view", "search_docs", "read_rulebook"]
+allowed_tools = ["view", "search_docs", "load_skill"]
 
 # Uses the same conservative auto_approve list from 'all' profile
 # No need to redefine since 'all' profile already has safe defaults
@@ -606,10 +654,10 @@ exclude_tags = ["dev", "test", "experimental"]
 api_key = "dev_api_key_here"
 
 # Extends 'all' profile's allowed_tools with write operations for development
-allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+allowed_tools = ["view", "search_docs", "load_skill", "local_code_search", "create", "str_replace", "run_command"]
 
 # Extends 'all' profile's auto_approve with additional development tools
-auto_approve = ["view", "search_docs", "read_rulebook", "create"]
+auto_approve = ["view", "search_docs", "load_skill", "create"]
 
 [profiles.development.rulebooks]
 # Include development and test rulebooks
@@ -635,8 +683,9 @@ editor = "nano"
 /// Re-execute stakpak with a specific profile
 fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path::Path>) {
     let mut cmd = Command::new("stakpak");
-    cmd.arg("--profile").arg(profile);
-
+    if !profile.is_empty() {
+        cmd.arg("--profile").arg(profile);
+    }
     if let Some(config_path) = config_path {
         cmd.arg("--config").arg(config_path);
     }
@@ -677,5 +726,26 @@ fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path
         Err(_) => {
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn up_defaults_to_background_mode() {
+        let args = StartArgs {
+            bind: "127.0.0.1:4096".to_string(),
+            show_token: false,
+            no_auth: false,
+            model: None,
+            auto_approve_all: false,
+            foreground: false,
+            non_interactive: false,
+            force: false,
+        };
+        // Without --foreground, args.foreground should be false (background/service mode)
+        assert!(!args.foreground);
     }
 }

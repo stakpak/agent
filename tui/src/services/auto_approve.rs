@@ -2,6 +2,7 @@ use crate::app::InputEvent;
 use crate::constants::AUTO_APPROVE_CONFIG_PATH;
 use serde::{Deserialize, Serialize};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,7 +40,7 @@ impl Default for AutoApproveConfig {
         tools.insert("generate_password".to_string(), AutoApprovePolicy::Auto);
         tools.insert("search_docs".to_string(), AutoApprovePolicy::Auto);
         tools.insert("search_memory".to_string(), AutoApprovePolicy::Auto);
-        tools.insert("read_rulebook".to_string(), AutoApprovePolicy::Auto);
+        tools.insert("load_skill".to_string(), AutoApprovePolicy::Auto);
         tools.insert("local_code_search".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_all_tasks".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_task_details".to_string(), AutoApprovePolicy::Auto);
@@ -202,7 +203,7 @@ impl AutoApproveManager {
 
     pub fn get_policy_for_tool(&self, tool_call: &ToolCall) -> AutoApprovePolicy {
         let binding = tool_call.function.name.clone();
-        let tool_name = crate::utils::strip_tool_name(&binding);
+        let tool_name = strip_tool_name(&binding);
 
         // Check if there's a specific policy for this tool
         if let Some(policy) = self.config.tools.get(tool_name) {
@@ -215,11 +216,7 @@ impl AutoApproveManager {
 
     pub fn get_policy_for_tool_name(&self, tool_name: &str) -> AutoApprovePolicy {
         // Check if there's a specific policy for this tool
-        if let Some(policy) = self
-            .config
-            .tools
-            .get(crate::utils::strip_tool_name(tool_name))
-        {
+        if let Some(policy) = self.config.tools.get(strip_tool_name(tool_name)) {
             return policy.clone();
         }
 
@@ -329,12 +326,17 @@ impl AutoApproveManager {
         // Start with default config
         let mut config = AutoApproveConfig::default();
 
+        // Normalize profile auto-approve tools (mapping legacy names)
+        let normalized_profile_tools: Option<Vec<String>> = auto_approve_tools.map(|pt| {
+            pt.iter()
+                .map(|s| backward_compatibility_mapping(s).to_string())
+                .collect()
+        });
+
         // Apply profile auto-approve tools (these override default config)
-        if let Some(profile_tools) = auto_approve_tools {
-            for tool_name in profile_tools {
-                config
-                    .tools
-                    .insert(tool_name.clone(), AutoApprovePolicy::Auto);
+        if let Some(profile_tools) = &normalized_profile_tools {
+            for name in profile_tools {
+                config.tools.insert(name.clone(), AutoApprovePolicy::Auto);
             }
         }
 
@@ -347,14 +349,16 @@ impl AutoApproveManager {
 
             // Session tool policies override both default and profile settings
             for (tool_name, policy) in &session.tools {
+                let mapped_name = backward_compatibility_mapping(tool_name);
+
                 // Only override if this tool is NOT in the profile auto_approve list
                 // This ensures profile settings take precedence over session for profile-specified tools
-                if let Some(profile_tools) = auto_approve_tools {
-                    if !profile_tools.contains(tool_name) {
-                        config.tools.insert(tool_name.clone(), policy.clone());
+                if let Some(profile_tools) = &normalized_profile_tools {
+                    if !profile_tools.iter().any(|s| s == mapped_name) {
+                        config.tools.insert(mapped_name.to_string(), policy.clone());
                     }
                 } else {
-                    config.tools.insert(tool_name.clone(), policy.clone());
+                    config.tools.insert(mapped_name.to_string(), policy.clone());
                 }
             }
         }

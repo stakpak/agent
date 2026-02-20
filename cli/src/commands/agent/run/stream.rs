@@ -1,12 +1,14 @@
 use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
+use stakai::Model;
 use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::{
     integrations::openai::{
         ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
         FinishReason, FunctionCall, MessageContent, Role, ToolCall, ToolCallDelta,
+        ToolCallStreamInfo,
     },
-    llm::{LLMModel, LLMTokenUsage},
+    llm::LLMTokenUsage,
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
@@ -48,6 +50,10 @@ impl ToolCallAccumulator {
                         tool_call.function.arguments.push_str(args);
                     }
                 }
+                // Merge metadata (later deltas can carry metadata, e.g. ToolCallEnd)
+                if delta.metadata.is_some() {
+                    tool_call.metadata = delta.metadata.clone();
+                }
             }
             None => {
                 // Create new tool call
@@ -78,6 +84,7 @@ impl ToolCallAccumulator {
                     name: String::new(),
                     arguments: String::new(),
                 },
+                metadata: None,
             });
         }
 
@@ -89,6 +96,7 @@ impl ToolCallAccumulator {
                 name: func.and_then(|f| f.name.clone()).unwrap_or_default(),
                 arguments: func.and_then(|f| f.arguments.clone()).unwrap_or_default(),
             },
+            metadata: delta.metadata.clone(),
         });
     }
 
@@ -97,6 +105,27 @@ impl ToolCallAccumulator {
         self.tool_calls
             .into_iter()
             .filter(|tc| !tc.id.is_empty())
+            .collect()
+    }
+
+    /// Get a snapshot of current streaming progress for each tool call.
+    /// Used to send progress updates to the TUI during streaming.
+    pub fn progress_snapshot(&self) -> Vec<ToolCallStreamInfo> {
+        self.tool_calls
+            .iter()
+            .filter(|tc| !tc.id.is_empty())
+            .map(|tc| {
+                // Best-effort: try to extract "description" from partial JSON args
+                let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                    .ok()
+                    .and_then(|v| v.get("description")?.as_str().map(String::from));
+
+                ToolCallStreamInfo {
+                    name: tc.function.name.clone(),
+                    args_tokens: tc.function.arguments.len() / 4, // rough chars-to-tokens estimate
+                    description,
+                }
+            })
             .collect()
     }
 }
@@ -122,8 +151,9 @@ pub async fn process_responses_stream(
         system_fingerprint: None,
         metadata: None,
     };
+    let mut response_metadata: Option<serde_json::Value> = None;
 
-    let mut llm_model: Option<LLMModel> = None;
+    let mut current_model: Option<Model> = None;
 
     let mut chat_message = ChatMessage {
         role: Role::Assistant,
@@ -154,6 +184,9 @@ pub async fn process_responses_stream(
                     // Send usage to TUI for display immediately when we receive it
                     send_input_event(input_tx, InputEvent::StreamUsage(usage.clone())).await?;
                 }
+                if let Some(metadata) = &response.metadata {
+                    response_metadata = Some(metadata.clone());
+                }
 
                 // Skip chunks with no choices (e.g., usage-only events)
                 if response.choices.is_empty() {
@@ -162,20 +195,20 @@ pub async fn process_responses_stream(
 
                 let delta = &response.choices[0].delta;
                 if !response.model.is_empty() {
-                    let current_model: LLMModel = response.model.clone().into();
-                    match &llm_model {
-                        Some(model) => {
-                            if *model != current_model {
-                                llm_model = Some(current_model.clone());
-                                send_input_event(input_tx, InputEvent::StreamModel(current_model))
-                                    .await?;
-                            }
-                        }
-                        None => {
-                            llm_model = Some(current_model.clone());
-                            send_input_event(input_tx, InputEvent::StreamModel(current_model))
-                                .await?;
-                        }
+                    // Look up the model in the catalog to get proper display name
+                    // Use false for use_stakpak since the response already has the resolved model ID
+                    let model = stakpak_api::find_model(&response.model, false)
+                        .unwrap_or_else(|| Model::custom(response.model.clone(), "unknown"));
+
+                    // Only send event if model changed
+                    let should_send = match &current_model {
+                        Some(existing) => existing.id != model.id,
+                        None => true,
+                    };
+
+                    if should_send {
+                        current_model = Some(model.clone());
+                        send_input_event(input_tx, InputEvent::StreamModel(model)).await?;
                     }
                 }
 
@@ -183,9 +216,9 @@ pub async fn process_responses_stream(
                     id: response.id.clone(),
                     object: response.object.clone(),
                     created: response.created,
-                    model: llm_model
-                        .clone()
-                        .map(|model| model.to_string())
+                    model: current_model
+                        .as_ref()
+                        .map(|m| m.id.clone())
                         .unwrap_or_default(),
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
@@ -210,6 +243,12 @@ pub async fn process_responses_stream(
                 if let Some(tool_calls) = &delta.tool_calls {
                     for delta_tool_call in tool_calls {
                         tool_call_accumulator.process_delta(delta_tool_call);
+                    }
+                    // Send streaming progress to TUI so users see what's being generated
+                    let snapshot = tool_call_accumulator.progress_snapshot();
+                    if !snapshot.is_empty() {
+                        send_input_event(input_tx, InputEvent::StreamToolCallProgress(snapshot))
+                            .await?;
                     }
                 }
             }
@@ -239,6 +278,7 @@ pub async fn process_responses_stream(
         finish_reason: FinishReason::Stop,
         logprobs: None,
     });
+    chat_completion_response.metadata = response_metadata;
 
     // End stream processing loading when stream completes
     send_input_event(
@@ -280,6 +320,7 @@ mod tests {
                         id,
                         r#type: Some("function".to_string()),
                         function: Some(FunctionCallDelta { name, arguments }),
+                        metadata: None,
                     }]),
                 },
                 finish_reason: None,

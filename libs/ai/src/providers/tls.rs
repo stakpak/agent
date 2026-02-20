@@ -59,6 +59,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "network-tests")]
     async fn test_tls_client_validates_valid_certificate() {
         let client = create_platform_tls_client().unwrap();
         // A GET to a well-known HTTPS site should succeed with proper TLS validation
@@ -71,6 +72,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "network-tests")]
     async fn test_tls_client_rejects_self_signed_certificate() {
         let client = create_platform_tls_client().unwrap();
         // self-signed.badssl.com uses a self-signed certificate that should be rejected
@@ -82,6 +84,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "network-tests")]
     async fn test_tls_client_rejects_expired_certificate() {
         let client = create_platform_tls_client().unwrap();
         // expired.badssl.com uses an expired certificate that should be rejected
@@ -93,6 +96,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "network-tests")]
     async fn test_tls_client_rejects_wrong_host_certificate() {
         let client = create_platform_tls_client().unwrap();
         // wrong.host.badssl.com uses a certificate for a different host

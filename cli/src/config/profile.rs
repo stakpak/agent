@@ -71,11 +71,22 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic: Option<AnthropicConfig>,
 
-    /// Eco (fast/cheap) model name
+    /// User's preferred model (replaces smart_model/eco_model/recovery_model)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    // =========================================================================
+    // Legacy model fields - kept for backward compatibility during migration
+    // These are read but deprecated (will migrate to 'model' field)
+    // =========================================================================
+    /// Eco (fast/cheap) model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub eco_model: Option<String>,
-    /// Smart (capable) model name
+    /// Smart (capable) model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub smart_model: Option<String>,
-    /// Recovery model name
+    /// Recovery model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery_model: Option<String>,
 }
 
@@ -89,12 +100,29 @@ impl ProfileConfig {
     }
 
     /// Create a readonly profile based on the default profile.
+    /// This creates a replica of the default profile with warden enabled for sandboxed execution.
     pub(crate) fn readonly_profile(default_profile: Option<&ProfileConfig>) -> Self {
-        ProfileConfig {
-            api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
-            api_key: default_profile.and_then(|p| p.api_key.clone()),
-            warden: Some(WardenConfig::readonly_profile()),
-            ..ProfileConfig::default()
+        match default_profile {
+            Some(default) => ProfileConfig {
+                // Copy all provider-related fields from default
+                api_endpoint: default.api_endpoint.clone(),
+                api_key: default.api_key.clone(),
+                provider: default.provider,
+                providers: default.providers.clone(),
+                // Copy model fields
+                model: default.model.clone(),
+                smart_model: default.smart_model.clone(),
+                eco_model: default.eco_model.clone(),
+                recovery_model: default.recovery_model.clone(),
+                // Enable warden for readonly sandboxed execution
+                warden: Some(WardenConfig::readonly_profile()),
+                // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
+                ..ProfileConfig::default()
+            },
+            None => ProfileConfig {
+                warden: Some(WardenConfig::readonly_profile()),
+                ..ProfileConfig::default()
+            },
         }
     }
 
@@ -228,6 +256,9 @@ impl ProfileConfig {
                         }
                     }
                 }
+                ProviderConfig::Bedrock { .. } => {
+                    // Bedrock has no API endpoint to clean
+                }
             }
         }
 
@@ -288,8 +319,7 @@ impl ProfileConfig {
                 .or_else(|| other.and_then(|config| config.warden.clone())),
             provider: self
                 .provider
-                .clone()
-                .or_else(|| other.and_then(|config| config.provider.clone())),
+                .or_else(|| other.and_then(|config| config.provider)),
             providers: merged_providers,
             // Legacy fields - merge for backward compatibility during transition
             openai: self
@@ -304,6 +334,12 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
+            // New unified model field
+            model: self
+                .model
+                .clone()
+                .or_else(|| other.and_then(|config| config.model.clone())),
+            // Legacy fields - merge for backward compatibility during transition
             eco_model: self
                 .eco_model
                 .clone()

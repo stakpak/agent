@@ -146,6 +146,7 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                 inline_data: None,
                 function_call: None,
                 function_response: None,
+                thought_signature: None,
             },
             ContentPart::Image { url, .. } => {
                 // Parse image data
@@ -155,12 +156,14 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                         inline_data: Some(inline_data),
                         function_call: None,
                         function_response: None,
+                        thought_signature: None,
                     },
                     Err(_) => GeminiPart {
                         text: Some(format!("[Image: {}]", url)),
                         inline_data: None,
                         function_call: None,
                         function_response: None,
+                        thought_signature: None,
                     },
                 }
             }
@@ -168,9 +171,16 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                 id,
                 name,
                 arguments,
+                metadata,
                 ..
             } => {
-                // Gemini function call
+                // Extract thought_signature from metadata to place on the Part level
+                let thought_signature = metadata.as_ref().and_then(|m| {
+                    m.get("thought_signature")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                });
+
                 GeminiPart {
                     text: None,
                     inline_data: None,
@@ -180,6 +190,7 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                         args: arguments.clone(),
                     }),
                     function_response: None,
+                    thought_signature,
                 }
             }
             ContentPart::ToolResult {
@@ -201,6 +212,14 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                     "unknown".to_string()
                 };
 
+                // Gemini requires function_response.response to be a JSON object
+                // (google.protobuf.Struct). Wrap non-object values in {"result": ...}.
+                let response = if content.is_object() {
+                    content.clone()
+                } else {
+                    json!({ "result": content })
+                };
+
                 GeminiPart {
                     text: None,
                     inline_data: None,
@@ -208,8 +227,9 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                     function_response: Some(GeminiFunctionResponse {
                         id: tool_call_id.clone(),
                         name,
-                        response: content.clone(),
+                        response,
                     }),
+                    thought_signature: None,
                 }
             }
         })
@@ -267,6 +287,13 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
             if let Some(function_call) = &part.function_call {
                 has_tool_calls = true;
 
+                // Preserve thought_signature from the Part level in metadata
+                // so it can be echoed back in subsequent requests
+                let metadata = part
+                    .thought_signature
+                    .as_ref()
+                    .map(|sig| json!({ "thought_signature": sig }));
+
                 content.push(ResponseContent::ToolCall(ToolCall {
                     id: function_call
                         .id
@@ -274,6 +301,7 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
                         .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4())),
                     name: function_call.name.clone(),
                     arguments: function_call.args.clone(),
+                    metadata,
                 }));
             }
         }
@@ -294,6 +322,8 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
             let completion_tokens = u.candidates_token_count.unwrap_or(0);
             let cached_tokens = u.cached_content_token_count.unwrap_or(0);
 
+            let reasoning_tokens = u.thoughts_token_count;
+
             Usage::with_details(
                 InputTokenDetails {
                     total: Some(prompt_tokens),
@@ -307,8 +337,8 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
                 },
                 OutputTokenDetails {
                     total: Some(completion_tokens),
-                    text: None,      // Gemini doesn't break down by type
-                    reasoning: None, // Gemini doesn't report reasoning tokens separately
+                    text: reasoning_tokens.map(|r| completion_tokens.saturating_sub(r)),
+                    reasoning: reasoning_tokens,
                 },
                 Some(serde_json::to_value(&u).unwrap_or_default()),
             )
@@ -378,6 +408,34 @@ mod tests {
     }
 
     #[test]
+    fn test_to_gemini_content_tool_result_string_wrapped() {
+        // Gemini requires function_response.response to be a JSON object (Struct).
+        // When tool result content is a string, it must be wrapped in {"result": ...}.
+        let msg = Message {
+            role: Role::Tool,
+            content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
+                tool_call_id: "call_456".to_string(),
+                content: serde_json::json!("File: README.md\n  1: # Hello"),
+                provider_options: None,
+            }]),
+            name: None,
+            provider_options: None,
+        };
+
+        let result = to_gemini_content(&msg).unwrap();
+        let part = &result.parts[0];
+        let resp = part.function_response.as_ref().unwrap();
+        assert_eq!(resp.id, "call_456");
+        // String should be wrapped in an object
+        assert!(
+            resp.response.is_object(),
+            "response must be a JSON object for Gemini, got: {:?}",
+            resp.response
+        );
+        assert_eq!(resp.response["result"], "File: README.md\n  1: # Hello");
+    }
+
+    #[test]
     fn test_from_gemini_response_tool_call() {
         let resp = GeminiResponse {
             candidates: Some(vec![GeminiCandidate {
@@ -392,6 +450,7 @@ mod tests {
                             args: serde_json::json!({"location": "London"}),
                         }),
                         function_response: None,
+                        thought_signature: None,
                     }],
                 }),
                 finish_reason: Some("STOP".to_string()),

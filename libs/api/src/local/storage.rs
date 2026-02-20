@@ -10,76 +10,100 @@ use crate::storage::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use libsql::Connection;
+use libsql::{Connection, Database};
 use std::path::Path;
 use std::str::FromStr;
-use tokio::sync::Mutex;
+use tempfile::TempDir;
 use uuid::Uuid;
 
 /// Local SQLite storage implementation
 ///
-/// Uses a `Mutex<Connection>` to ensure thread-safe access to the
-/// underlying libsql connection, which is not `Send + Sync` by default.
+/// Uses a shared `Database` handle and opens a fresh `Connection` per
+/// operation to avoid libsql connection-sharing hazards under concurrency.
 pub struct LocalStorage {
-    conn: Mutex<Connection>,
+    db: Database,
+    /// Owns temporary backing storage for in-memory mode and cleans it on drop.
+    _temp_dir: Option<TempDir>,
 }
 
 impl LocalStorage {
     /// Create a new local storage instance
     pub async fn new(db_path: &str) -> Result<Self, StorageError> {
-        // Ensure parent directory exists
-        if let Some(parent) = Path::new(db_path).parent() {
+        let (resolved_path, temp_dir) = if db_path == ":memory:" {
+            // libsql in-memory databases are connection-scoped; use a temporary
+            // directory and clean it automatically when storage is dropped.
+            let temp_dir = tempfile::tempdir().map_err(|e| {
+                StorageError::Connection(format!("Failed to create temp directory: {}", e))
+            })?;
+            (temp_dir.path().join("local-storage.db"), Some(temp_dir))
+        } else {
+            (Path::new(db_path).to_path_buf(), None)
+        };
+
+        // Ensure parent directory exists.
+        if let Some(parent) = resolved_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 StorageError::Connection(format!("Failed to create database directory: {}", e))
             })?;
         }
 
-        let db = libsql::Builder::new_local(db_path)
+        let db = libsql::Builder::new_local(&resolved_path)
             .build()
             .await
             .map_err(|e| StorageError::Connection(format!("Failed to open database: {}", e)))?;
 
-        let conn = db.connect().map_err(|e| {
-            StorageError::Connection(format!("Failed to connect to database: {}", e))
-        })?;
-
         let storage = Self {
-            conn: Mutex::new(conn),
+            db,
+            _temp_dir: temp_dir,
         };
         storage.init_schema().await?;
 
         Ok(storage)
     }
 
-    /// Create from existing connection (for use with AgentClient)
+    /// Create from an existing database + connection pair.
     ///
-    /// This will initialize the database schema if it hasn't been set up yet.
-    pub async fn from_connection(conn: Connection) -> Result<Self, StorageError> {
+    /// The provided connection is intentionally ignored; a fresh connection is
+    /// opened per operation.
+    pub async fn from_db_and_connection(
+        db: Database,
+        _conn: Connection,
+    ) -> Result<Self, StorageError> {
         let storage = Self {
-            conn: Mutex::new(conn),
+            db,
+            _temp_dir: None,
         };
         storage.init_schema().await?;
         Ok(storage)
+    }
+
+    /// Create from an existing connection.
+    ///
+    /// Deprecated because a bare `Connection` does not guarantee that its owning
+    /// `libsql::Database` outlives the connection, which can cause crashes.
+    #[deprecated(note = "use LocalStorage::new(...) or LocalStorage::from_db_and_connection(...)")]
+    pub async fn from_connection(_conn: Connection) -> Result<Self, StorageError> {
+        Err(StorageError::Connection(
+            "LocalStorage::from_connection is unsupported without the owning libsql::Database; use LocalStorage::new(...) or LocalStorage::from_db_and_connection(...)".to_string(),
+        ))
     }
 
     /// Initialize database schema by running migrations
     async fn init_schema(&self) -> Result<(), StorageError> {
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         super::migrations::run_migrations(&conn)
             .await
             .map_err(StorageError::Internal)
     }
 
-    /// Get connection reference (locked)
-    ///
-    /// Useful for direct SQL access in tests or migrations.
-    pub fn connection(&self) -> &Mutex<Connection> {
-        &self.conn
+    /// Open a fresh connection for a single storage operation.
+    pub(crate) fn connection(&self) -> Result<Connection, StorageError> {
+        self.db
+            .connect()
+            .map_err(|e| StorageError::Connection(format!("Failed to connect to database: {}", e)))
     }
 
-    /// Get the latest checkpoint for a session
-    ///
-    /// Expects the caller to already hold the connection lock.
+    /// Get the latest checkpoint for a session using a caller-provided connection.
     async fn get_latest_checkpoint_for_session_inner(
         conn: &Connection,
         session_id: Uuid,
@@ -166,7 +190,7 @@ impl SessionStorage for LocalStorage {
             limit, offset
         ));
 
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         let mut rows = if let Some(search) = &query.search {
             conn.query(&sql, [search.as_str()])
                 .await
@@ -222,7 +246,7 @@ impl SessionStorage for LocalStorage {
     }
 
     async fn get_session(&self, session_id: Uuid) -> Result<Session, StorageError> {
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(
                 "SELECT id, title, visibility, COALESCE(status, 'ACTIVE') as status, cwd, created_at, updated_at FROM sessions WHERE id = ?",
@@ -284,7 +308,7 @@ impl SessionStorage for LocalStorage {
         let session_id = Uuid::new_v4();
         let checkpoint_id = Uuid::new_v4();
 
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
 
         // Create session
         conn.execute(
@@ -341,7 +365,7 @@ impl SessionStorage for LocalStorage {
         let now = Utc::now();
 
         {
-            let conn = self.conn.lock().await;
+            let conn = self.connection()?;
 
             // Update fields individually since libsql doesn't support dynamic params easily
             if let Some(title) = &request.title {
@@ -372,7 +396,7 @@ impl SessionStorage for LocalStorage {
     async fn delete_session(&self, session_id: Uuid) -> Result<(), StorageError> {
         // Mark as deleted instead of actually deleting
         let now = Utc::now();
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         conn.execute(
             "UPDATE sessions SET status = 'DELETED', updated_at = ? WHERE id = ?",
             (now.to_rfc3339(), session_id.to_string()),
@@ -396,7 +420,7 @@ impl SessionStorage for LocalStorage {
             limit, offset
         );
 
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(&sql, [session_id.to_string()])
             .await
@@ -443,7 +467,7 @@ impl SessionStorage for LocalStorage {
     }
 
     async fn get_checkpoint(&self, checkpoint_id: Uuid) -> Result<Checkpoint, StorageError> {
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(
                 "SELECT id, session_id, parent_id, state, created_at, updated_at FROM checkpoints WHERE id = ?",
@@ -502,7 +526,7 @@ impl SessionStorage for LocalStorage {
         let state_json = serde_json::to_string(&request.state)
             .map_err(|e| StorageError::Internal(e.to_string()))?;
 
-        let conn = self.conn.lock().await;
+        let conn = self.connection()?;
 
         conn.execute(
             "INSERT INTO checkpoints (id, session_id, parent_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",

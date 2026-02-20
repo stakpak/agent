@@ -1,3 +1,4 @@
+pub mod async_manifest;
 pub mod auth;
 pub mod billing;
 pub mod error;
@@ -6,4 +7,4 @@ pub mod integrations;
 pub mod llm;
 pub mod model_pricing;
 pub mod stakai_adapter;
-pub mod subagent;
+pub mod tools;

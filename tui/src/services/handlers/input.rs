@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
+use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent, PendingUserMessage};
 use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
@@ -16,7 +16,6 @@ use crate::services::helper_block::{
 use crate::services::message::{BubbleColors, Message, MessageContent};
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::llm::LLMTokenUsage;
-use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -105,6 +104,11 @@ pub fn handle_input_submitted_event(
                     state.scroll = 0;
                     state.scroll_to_bottom = true;
                     state.stay_at_bottom = true;
+
+                    // Clear changeset and todos from previous session
+                    state.changeset = crate::services::changeset::Changeset::default();
+                    state.todos.clear();
+
                     crate::services::message::invalidate_message_lines_cache(state);
 
                     // Reset usage
@@ -498,17 +502,8 @@ fn handle_input_submitted(
             state.attached_images.len()
         );
 
-        // Show loading immediately if processing images
-        let has_images = !state.attached_images.is_empty();
-
         // Convert any pending image paths before submission
         convert_all_pending_paths(state);
-
-        // Start streaming/loading state if we have images to process
-        if has_images || !state.attached_images.is_empty() {
-            state.is_streaming = true;
-            state.loading = true;
-        }
 
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
@@ -657,14 +652,12 @@ fn handle_input_submitted(
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
-        let context_info = state
-            .llm_model
-            .as_ref()
-            .map(|model| model.context_info())
-            .unwrap_or_default();
-        let max_tokens = context_info.max_tokens as u32;
+        // Use current_model if set (from streaming), otherwise use default model
+        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let max_tokens = active_model.limit.context as u32;
 
-        let capped_tokens = state.current_message_usage.total_tokens.min(max_tokens);
+        // Use prompt_tokens for context window utilization (actual input context size)
+        let capped_tokens = state.current_message_usage.prompt_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
@@ -711,16 +704,35 @@ fn handle_input_submitted(
                 }
             }
 
-            if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
-                final_input.clone(),
-                state.shell_tool_calls.clone(),
-                image_parts,
-            )) {
-                log::warn!("Failed to send UserMessage event: {}", e);
-            }
+            let should_buffer_message =
+                state.loading_manager.is_loading() || !state.pending_user_messages.is_empty();
 
-            if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
-                log::warn!("Failed to send AddUserMessage event: {}", e);
+            if should_buffer_message {
+                // Buffer while operations are active (or if previous buffered messages are pending)
+                state
+                    .pending_user_messages
+                    .push_back(PendingUserMessage::new(
+                        final_input.clone(),
+                        state.shell_tool_calls.clone(),
+                        image_parts,
+                        user_message_text,
+                    ));
+            } else {
+                // Take pending revert index if set (will be None on normal messages)
+                let revert_index = state.pending_revert_index.take();
+
+                if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
+                    final_input.clone(),
+                    state.shell_tool_calls.clone(),
+                    image_parts,
+                    revert_index,
+                )) {
+                    log::warn!("Failed to send UserMessage event: {}", e);
+                }
+
+                if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
+                    log::warn!("Failed to send AddUserMessage event: {}", e);
+                }
             }
         } else {
             if !state.messages.is_empty() {

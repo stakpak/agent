@@ -204,7 +204,7 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         if input.trim() == "y" || input.trim().is_empty() {
-            run_auto_update().await?;
+            run_auto_update(false).await?;
         } else if input.trim() == "n" {
             println!("Update cancelled!");
             println!("Proceeding to open Stakpak Agent...")
@@ -225,7 +225,7 @@ pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
             "🔄 Updating Stakpak: {} → {} ...",
             current_version, release.tag_name
         );
-        run_auto_update().await?;
+        run_auto_update(true).await?;
         // run_auto_update calls std::process::exit(0) on success,
         // so we only reach here if something went wrong
         Ok(true)

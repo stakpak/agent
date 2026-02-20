@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use stakai::Model;
 use stakpak_shared::models::{
-    integrations::openai::{
-        AgentModel, ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall,
-    },
+    integrations::openai::{ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall},
     llm::{LLMInput, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
 };
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -268,6 +266,134 @@ pub struct CodeIndex {
     pub index: BuildCodeIndexOutput,
 }
 
+/// Unified skill type representing knowledge from any source.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Skill {
+    /// Display name / identifier
+    pub name: String,
+    /// Unique identifier — API URI for remote, file path for local
+    pub uri: String,
+    /// When to use this skill
+    pub description: String,
+    /// Where this skill comes from
+    pub source: SkillSource,
+    /// None = metadata only; Some = full content loaded
+    pub content: Option<String>,
+    /// Classification tags
+    pub tags: Vec<String>,
+    /// License name or reference to a bundled license file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Environment requirements (intended product, system packages, network access, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<String>,
+    /// Arbitrary key-value mapping for additional metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+    /// Space-delimited list of pre-approved tools the skill may use. (Experimental)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum SkillSource {
+    Local,
+    Remote { provider: RemoteProvider },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum RemoteProvider {
+    Rulebook { visibility: RuleBookVisibility },
+    Pak,
+}
+
+impl Skill {
+    pub fn is_local(&self) -> bool {
+        matches!(self.source, SkillSource::Local)
+    }
+
+    pub fn is_rulebook(&self) -> bool {
+        matches!(
+            self.source,
+            SkillSource::Remote {
+                provider: RemoteProvider::Rulebook { .. }
+            }
+        )
+    }
+
+    pub fn is_pak(&self) -> bool {
+        matches!(
+            self.source,
+            SkillSource::Remote {
+                provider: RemoteProvider::Pak
+            }
+        )
+    }
+
+    pub fn to_metadata_text(&self) -> String {
+        let source_label = match &self.source {
+            SkillSource::Local => "local",
+            SkillSource::Remote {
+                provider: RemoteProvider::Rulebook { .. },
+            } => "remote",
+            SkillSource::Remote {
+                provider: RemoteProvider::Pak,
+            } => "pak",
+        };
+        let tags_str = if self.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", self.tags.join(", "))
+        };
+        format!(
+            "<skill><label>{}</label><name>{}</name><description>{}</description><uri>{}</uri><tags>{}</tags></skill>",
+            source_label, self.name, self.description, self.uri, tags_str
+        )
+    }
+}
+
+impl From<ListRuleBook> for Skill {
+    fn from(rb: ListRuleBook) -> Self {
+        Skill {
+            name: rb.uri.clone(),
+            uri: rb.uri,
+            description: rb.description,
+            source: SkillSource::Remote {
+                provider: RemoteProvider::Rulebook {
+                    visibility: rb.visibility,
+                },
+            },
+            content: None,
+            tags: rb.tags,
+            license: None,
+            compatibility: None,
+            metadata: None,
+            allowed_tools: None,
+        }
+    }
+}
+
+impl From<RuleBook> for Skill {
+    fn from(rb: RuleBook) -> Self {
+        Skill {
+            name: rb.uri.clone(),
+            uri: rb.uri,
+            description: rb.description,
+            source: SkillSource::Remote {
+                provider: RemoteProvider::Rulebook {
+                    visibility: rb.visibility,
+                },
+            },
+            content: Some(rb.content),
+            tags: rb.tags,
+            license: None,
+            compatibility: None,
+            metadata: None,
+            allowed_tools: None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RuleBookVisibility {
@@ -424,20 +550,23 @@ pub struct SlackReadRepliesRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SlackSendMessageRequest {
     pub channel: String,
-    pub mrkdwn_text: String,
+    pub markdown_text: String,
     pub thread_ts: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AgentState {
-    pub agent_model: AgentModel,
+    /// The active model to use for inference
+    pub active_model: Model,
     pub messages: Vec<ChatMessage>,
     pub tools: Option<Vec<Tool>>,
 
     pub llm_input: Option<LLMInput>,
     pub llm_output: Option<LLMOutput>,
 
-    pub metadata: Option<HashMap<String, Value>>,
+    /// Metadata for checkpoint persistence (context trimming state, etc.)
+    /// Loaded from checkpoint on session resume and saved back after inference
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -465,7 +594,13 @@ impl From<&LLMOutput> for ChatMessage {
             let calls: Vec<ToolCall> = items
                 .iter()
                 .filter_map(|item| {
-                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                    if let LLMMessageTypedContent::ToolCall {
+                        id,
+                        name,
+                        args,
+                        metadata,
+                    } = item
+                    {
                         Some(ToolCall {
                             id: id.clone(),
                             r#type: "function".to_string(),
@@ -473,6 +608,7 @@ impl From<&LLMOutput> for ChatMessage {
                                 name: name.clone(),
                                 arguments: args.to_string(),
                             },
+                            metadata: metadata.clone(),
                         })
                     } else {
                         None
@@ -498,17 +634,18 @@ impl From<&LLMOutput> for ChatMessage {
 
 impl AgentState {
     pub fn new(
-        agent_model: AgentModel,
+        active_model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
+        metadata: Option<Value>,
     ) -> Self {
         Self {
-            agent_model,
+            active_model,
             messages,
             tools,
+            metadata,
             llm_input: None,
             llm_output: None,
-            metadata: None,
         }
     }
 
@@ -520,8 +657,8 @@ impl AgentState {
         self.tools = tools;
     }
 
-    pub fn set_agent_model(&mut self, agent_model: AgentModel) {
-        self.agent_model = agent_model;
+    pub fn set_active_model(&mut self, model: Model) {
+        self.active_model = model;
     }
 
     pub fn set_llm_input(&mut self, llm_input: Option<LLMInput>) {

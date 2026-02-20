@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub async fn get_checkpoint_messages(
     client: &dyn AgentProvider,
     checkpoint_id: &str,
-) -> Result<Vec<ChatMessage>, String> {
+) -> Result<(Vec<ChatMessage>, Option<serde_json::Value>), String> {
     let checkpoint_uuid = Uuid::parse_str(checkpoint_id).map_err(|_| {
         format!(
             "Invalid checkpoint ID '{}' - must be a valid UUID",
@@ -24,7 +24,7 @@ pub async fn get_checkpoint_messages(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(checkpoint.state.messages)
+    Ok((checkpoint.state.messages, checkpoint.state.metadata))
 }
 
 pub async fn extract_checkpoint_messages_and_tool_calls(
@@ -178,11 +178,20 @@ pub async fn resume_session_from_checkpoint(
     client: &dyn AgentProvider,
     session_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-) -> Result<(Vec<ChatMessage>, Vec<ToolCall>, Uuid), String> {
+) -> Result<
+    (
+        Vec<ChatMessage>,
+        Vec<ToolCall>,
+        Uuid,
+        Option<serde_json::Value>,
+    ),
+    String,
+> {
     let session_uuid = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
 
     match client.get_active_checkpoint(session_uuid).await {
         Ok(checkpoint) => {
+            let metadata = checkpoint.state.metadata.clone();
             let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
                 &checkpoint.id.to_string(),
                 input_tx,
@@ -190,7 +199,7 @@ pub async fn resume_session_from_checkpoint(
             )
             .await?;
 
-            Ok((chat_messages, tool_calls, checkpoint.session_id))
+            Ok((chat_messages, tool_calls, checkpoint.session_id, metadata))
         }
         Err(e) => {
             send_input_event(

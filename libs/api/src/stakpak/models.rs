@@ -12,7 +12,7 @@ use uuid::Uuid;
 // =============================================================================
 
 /// Session visibility
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 #[derive(Default)]
 pub enum SessionVisibility {
@@ -22,7 +22,7 @@ pub enum SessionVisibility {
 }
 
 /// Session status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 #[derive(Default)]
 pub enum SessionStatus {
@@ -93,6 +93,9 @@ pub struct CheckpointSummary {
 pub struct CheckpointState {
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Optional metadata for context trimming state, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 // =============================================================================
@@ -256,7 +259,7 @@ pub struct SlackReadRepliesRequest {
 #[derive(Debug, Serialize)]
 pub struct SlackSendMessageRequest {
     pub channel: String,
-    pub mrkdwn_text: String,
+    pub markdown_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
 }

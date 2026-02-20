@@ -13,8 +13,8 @@ use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_model_message, push_status_message, push_styled_message,
-    push_support_message, push_usage_message, render_system_message, welcome_messages,
+    push_memorize_message, push_status_message, push_styled_message, push_support_message,
+    push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{Message, MessageContent};
 use crate::{InputEvent, OutputEvent};
@@ -25,9 +25,8 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::integrations::openai::AgentModel;
+
 use stakpak_shared::models::llm::LLMTokenUsage;
-use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
@@ -58,6 +57,7 @@ pub enum CommandAction {
     NewSession,
     ShowUsage,
     SwitchModel,
+    PlanMode,
 }
 
 impl CommandAction {
@@ -73,6 +73,7 @@ impl CommandAction {
             CommandAction::NewSession => Some("/new"),
             CommandAction::ShowUsage => Some("/usage"),
             CommandAction::SwitchModel => Some("/model"),
+            CommandAction::PlanMode => Some("/plan"),
             // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
@@ -185,9 +186,15 @@ pub fn get_all_commands() -> Vec<Command> {
         ),
         Command::new(
             "Switch Model",
-            "Switch model (smart/eco)",
-            "/model",
+            "Switch to a different AI model",
+            "Ctrl+M",
             CommandAction::SwitchModel,
+        ),
+        Command::new(
+            "Plan Mode",
+            "Enter plan mode — research and draft before executing",
+            "/plan",
+            CommandAction::PlanMode,
         ),
     ]
 }
@@ -201,7 +208,7 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/model",
-            description: "Switch model (smart/eco)",
+            description: "Open model switcher to change AI model",
         },
         HelperCommand {
             command: "/clear",
@@ -271,6 +278,14 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
             command: "/shortcuts",
             description: "Show keyboard shortcuts",
         },
+        HelperCommand {
+            command: "/plan",
+            description: "Enter plan mode: /plan [optional prompt]",
+        },
+        HelperCommand {
+            command: "/init",
+            description: "Analyze your infrastructure setup",
+        },
     ]
 }
 
@@ -301,21 +316,16 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             ctx.state.show_helper_dropdown = false;
             Ok(())
         }
-        "/model" => match switch_model(ctx.state) {
-            Ok(()) => {
-                let _ = ctx
-                    .output_tx
-                    .try_send(OutputEvent::SwitchModel(ctx.state.agent_model.clone()));
-                push_model_message(ctx.state);
-                ctx.state.text_area.set_text("");
-                ctx.state.show_helper_dropdown = false;
-                Ok(())
-            }
-            Err(e) => {
-                push_error_message(ctx.state, &e, None);
-                Err(e)
-            }
-        },
+        "/model" => {
+            // Show model switcher popup
+            ctx.state.show_model_switcher = true;
+            ctx.state.model_switcher_selected = 0;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            // Request available models from the output handler
+            let _ = ctx.output_tx.try_send(OutputEvent::RequestAvailableModels);
+            Ok(())
+        }
         "/clear" => {
             push_clear_message(ctx.state);
             ctx.state.text_area.set_text("");
@@ -360,6 +370,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 prompt.clone(),
                 ctx.state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
+                None,       // No revert index
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -472,32 +483,83 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
+        "/plan" => {
+            // Already in plan mode? Show a message instead
+            if ctx.state.plan_mode_active {
+                crate::services::helper_block::push_styled_message(
+                    ctx.state,
+                    " Already in plan mode. Use ctrl+p to review the plan.",
+                    ratatui::style::Color::Yellow,
+                    "⚠ ",
+                    ratatui::style::Color::Yellow,
+                );
+                ctx.state.text_area.set_text("");
+                ctx.state.show_helper_dropdown = false;
+                return Ok(());
+            }
+
+            // Parse optional inline prompt: "/plan deploy auth service" → Some("deploy auth service")
+            let input = ctx.state.input().trim().to_string();
+            let inline_prompt = input
+                .strip_prefix("/plan")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+
+            // Check for existing plan — show modal if one exists
+            let session_dir = std::path::Path::new(".stakpak/session");
+            if crate::services::plan::plan_file_exists(session_dir) {
+                let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
+                ctx.state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
+                    inline_prompt,
+                    metadata: meta,
+                });
+            } else {
+                let _ = ctx
+                    .output_tx
+                    .try_send(OutputEvent::PlanModeActivated(inline_prompt));
+            }
+            Ok(())
+        }
+
+        "/init" => {
+            //  init prompt is always available (embedded at compile time)
+            let prompt = match ctx.state.init_prompt_content.as_deref() {
+                Some(p) if !p.trim().is_empty() => p.to_string(),
+                _ => {
+                    push_error_message(
+                        ctx.state,
+                        "Internal error: init prompt not available",
+                        None,
+                    );
+                    ctx.state.text_area.set_text("");
+                    ctx.state.show_helper_dropdown = false;
+                    return Ok(());
+                }
+            };
+
+            ctx.state.messages.push(Message::user(prompt.clone(), None));
+            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+                prompt,
+                ctx.state.shell_tool_calls.clone(),
+                Vec::new(), // No image parts for command
+                None,       // No revert index
+            ));
+            ctx.state.shell_tool_calls = None;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            crate::services::message::invalidate_message_lines_cache(ctx.state);
+            Ok(())
+        }
 
         _ => Err(format!("Unknown command: {}", command_id)),
     }
 }
 
 // ========== Helper Functions ==========
-
-pub fn switch_model(state: &mut AppState) -> Result<(), String> {
-    match state.agent_model {
-        AgentModel::Smart => {
-            // TODO: Check if context exceeds eco model context window size
-            state.agent_model = AgentModel::Eco;
-            Ok(())
-        }
-        AgentModel::Eco => {
-            // TODO: Check if context exceeds smart model context window size
-            state.agent_model = AgentModel::Smart;
-            Ok(())
-        }
-        AgentModel::Recovery => {
-            // TODO: Check if context exceeds recovery model context window size
-            state.agent_model = AgentModel::Smart;
-            Ok(())
-        }
-    }
-}
 
 /// Terminate any active shell command before switching sessions
 fn terminate_active_shell(state: &mut AppState) {
@@ -550,6 +612,10 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
 
+    // Clear changeset and todos from previous session
+    state.changeset = crate::services::changeset::Changeset::default();
+    state.todos.clear();
+
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
@@ -571,6 +637,22 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
+
+    // Clear plan mode state
+    state.plan_mode_active = false;
+    state.plan_metadata = None;
+    state.plan_content_hash = None;
+    state.plan_previous_status = None;
+    state.plan_review_auto_opened = false;
+    state.show_plan_review = false;
+    state.plan_review_content.clear();
+    state.plan_review_lines.clear();
+    state.plan_review_comments = None;
+    state.plan_review_resolved_anchors.clear();
+    state.plan_review_show_comment_modal = false;
+    state.plan_review_comment_input.clear();
+    state.plan_review_selected_comment = None;
+    state.plan_review_modal_kind = None;
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
@@ -589,6 +671,10 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.scroll = 0;
     state.scroll_to_bottom = true;
     state.stay_at_bottom = true;
+
+    // Clear changeset and todos from previous session
+    state.changeset = crate::services::changeset::Changeset::default();
+    state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
@@ -616,12 +702,9 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
-    let max_tokens = context_info.max_tokens as u32;
+    // Use current_model if set (from streaming), otherwise use default model
+    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
         (total_tokens as f64 / max_tokens as f64) * 100.0

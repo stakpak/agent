@@ -9,9 +9,11 @@ use crate::services::message::extract_truncated_command_arguments;
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, invalidate_message_lines_cache,
 };
+use crate::services::text_selection::SelectionState;
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::utils::strip_tool_name;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -20,7 +22,7 @@ use super::EventChannels;
 /// Update a run_command block from Pending to Running state
 /// This should be called when a run_command tool is approved and starts executing
 pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall) {
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name != "run_command" {
         return;
     }
@@ -59,7 +61,7 @@ pub fn update_pending_tool_to_first(
         state.messages.retain(|m| m.id != pending_id);
     }
 
-    let tool_name = crate::utils::strip_tool_name(&first_tool.function.name);
+    let tool_name = strip_tool_name(&first_tool.function.name);
 
     // Create the appropriate pending block based on tool type
     if tool_name == "run_command" {
@@ -93,6 +95,11 @@ pub fn handle_esc_event(
     _shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
+    // Always clear text selection on Escape (prevents stuck selections)
+    if state.selection.active {
+        state.selection = SelectionState::default();
+    }
+
     if state.show_rulebook_switcher {
         state.show_rulebook_switcher = false;
         return;
@@ -120,7 +127,7 @@ pub fn handle_esc_event(
     state.tool_call_execution_order.clear();
     // Store the latest tool call for potential retry (only for run_command)
     if let Some(tool_call) = &state.dialog_command
-        && crate::utils::strip_tool_name(&tool_call.function.name) == "run_command"
+        && strip_tool_name(&tool_call.function.name) == "run_command"
     {
         state.latest_tool_call = Some(tool_call.clone());
     }
@@ -157,6 +164,9 @@ pub fn handle_esc(
         let _ = cancel_tx.send(());
     }
 
+    let was_streaming = state.is_streaming;
+    let was_dialog_open = state.is_dialog_open;
+    let was_shell_mode = state.show_shell_mode;
     state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
@@ -169,7 +179,7 @@ pub fn handle_esc(
                 .output_tx
                 .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
 
-            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.function.name);
             if tool_name == "run_command" {
                 // For run_command, remove the pending unified block and add rejected unified block
                 // Remove pending message by tool_call_id
@@ -218,9 +228,6 @@ pub fn handle_esc(
                     is_collapsed: None,
                 });
             }
-            // Invalidate cache and scroll to bottom to show the updated block
-            crate::services::message::invalidate_message_lines_cache(state);
-            state.stay_at_bottom = true;
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -279,6 +286,12 @@ pub fn handle_esc(
             super::shell::background_shell_session(state);
         }
     } else {
+        // No dialog, no shell — if streaming was active, this is a cancellation.
+        // Mark cancel_requested so late streaming events that are already queued
+        // in the channel get dropped instead of re-creating content.
+        if was_streaming {
+            state.cancel_requested = true;
+        }
         state.text_area.set_text("");
     }
 
@@ -286,6 +299,14 @@ pub fn handle_esc(
         m.id != state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.pending_bash_message_id.unwrap_or_default()
     });
+
+    // Invalidate cache and scroll to bottom when something was actually
+    // cancelled/rejected (dialog open, shell resolved, or streaming interrupted).
+    // Skip for idle ESC (just clearing text or closing a popup/dropdown).
+    if was_streaming || was_dialog_open || was_shell_mode {
+        crate::services::message::invalidate_message_lines_cache(state);
+        state.stay_at_bottom = true;
+    }
 }
 
 /// Handle show confirmation dialog event
@@ -305,7 +326,7 @@ pub fn handle_show_confirmation_dialog(
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
     {
-        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.function.name);
         if tool_name == "run_command" {
             // Use unified block for run_command
             let command =
@@ -338,7 +359,7 @@ pub fn handle_show_confirmation_dialog(
     }
 
     state.dialog_command = Some(tool_call.clone());
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.function.name);
     if tool_name == "run_command" {
         state.latest_tool_call = Some(tool_call.clone());
     }
@@ -352,6 +373,11 @@ pub fn handle_show_confirmation_dialog(
         Uuid::new_v4()
     };
 
+    // Save the previous pending block ID before we overwrite it.
+    // This is needed so we can clean up the first tool's pending block when
+    // subsequent tools are added to the approval bar (see !was_empty branch below).
+    let previous_pending_bash_message_id = state.pending_bash_message_id;
+
     // Use unified run command block for run_command tool calls
     if tool_name == "run_command" {
         // Extract command from tool call arguments
@@ -363,6 +389,26 @@ pub fn handle_show_confirmation_dialog(
             crate::services::bash_block::RunCommandState::Pending,
             Some(message_id),
         ));
+    } else if tool_name == "resume_subagent_task" {
+        // For resume_subagent_task, use the special subagent pending block
+        // Try to get pause info from cached subagent state
+        let pause_info = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            .ok()
+            .and_then(|args| {
+                args.get("task_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+
+        state
+            .messages
+            .push(Message::render_subagent_resume_pending_block(
+                tool_call.clone(),
+                is_auto_approved,
+                pause_info,
+                Some(message_id),
+            ));
     } else {
         state.messages.push(Message::render_pending_border_block(
             tool_call.clone(),
@@ -372,6 +418,9 @@ pub fn handle_show_confirmation_dialog(
     }
     state.pending_bash_message_id = Some(message_id);
 
+    // Invalidate cache so the new message gets rendered
+    invalidate_message_lines_cache(state);
+
     state.dialog_command = Some(tool_call.clone());
     // Only set is_dialog_open if NOT using the new approval bar flow
     // When toggle_approved_message is true, we use the approval bar instead
@@ -379,6 +428,7 @@ pub fn handle_show_confirmation_dialog(
         state.is_dialog_open = true;
     }
     state.loading = false;
+    state.is_streaming = false;
     state.dialog_focused = false;
 
     // check if its skipped
@@ -467,16 +517,15 @@ pub fn handle_show_confirmation_dialog(
     if !tool_calls.is_empty() && state.toggle_approved_message {
         let was_empty = state.approval_bar.actions().is_empty();
 
-        // Only add tools that aren't already in the bar
+        // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
-            let already_in_bar = state
-                .approval_bar
-                .actions()
-                .iter()
-                .any(|a| a.tool_call.id == tc.id);
-            if !already_in_bar {
-                state.approval_bar.add_action(tc);
-            }
+            state.approval_bar.add_action(tc);
+        }
+
+        // If this is the first time showing the approval bar, scroll to show the tool call
+        if was_empty && !state.approval_bar.actions().is_empty() {
+            state.scroll_to_last_message_start = true;
+            state.stay_at_bottom = false;
         }
 
         // If we just added tools to an empty bar, the first one's pending block
@@ -486,11 +535,26 @@ pub fn handle_show_confirmation_dialog(
             // Remove the pending block we just created since it's not the selected one
             if let Some(pending_id) = state.pending_bash_message_id {
                 state.messages.retain(|m| m.id != pending_id);
-                state.pending_bash_message_id = None;
             }
-            // The bar already has a selected tool showing its pending block
-            // so we don't need to create another one
-            invalidate_message_lines_cache(state);
+            // Also remove the previous pending block (from the first tool call that
+            // was kept when the bar was initially empty). Without this, the first
+            // tool's preview block becomes orphaned and stays stuck in the messages
+            // area while the user cycles through tool calls with arrow keys.
+            if let Some(prev_id) = previous_pending_bash_message_id {
+                state.messages.retain(|m| m.id != prev_id);
+            }
+            state.pending_bash_message_id = None;
+
+            // Re-create the pending block for the currently selected tool in the bar
+            // so the user always sees a preview for the active tab.
+            super::tool::create_pending_block_for_selected_tool(state);
+
+            // Force-invalidate cache — bypass the streaming guard because the user
+            // needs to see the correct preview even if is_streaming is still true.
+            state.assembled_lines_cache = None;
+            state.visible_lines_cache = None;
+            state.message_lines_cache = None;
+            state.collapsed_message_lines_cache = None;
         }
     }
 }

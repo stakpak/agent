@@ -20,6 +20,11 @@ pub fn handle_stream_message(
     s: String,
     message_area_height: usize,
 ) {
+    // Ignore late streaming events after cancellation was requested
+    if state.cancel_requested {
+        return;
+    }
+
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
         state.is_streaming = true;
         if !state.loading {
@@ -63,7 +68,12 @@ pub fn handle_stream_message(
         state
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
-        state.text_area.set_text("");
+
+        // Invalidate cache since messages changed
+        invalidate_message_lines_cache(state);
+
+        // Note: Don't clear input here - it was already cleared when user submitted their message.
+        // Clearing here would wipe out any new input the user started typing while waiting for the response.
 
         if !was_at_bottom {
             state.content_changed_while_scrolled_up = true;
@@ -74,6 +84,7 @@ pub fn handle_stream_message(
 
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
+
         if was_at_bottom {
             state.scroll = max_scroll;
             state.scroll_to_bottom = true;
@@ -85,6 +96,9 @@ pub fn handle_stream_message(
 
 /// Handle adding user message
 pub fn handle_add_user_message(state: &mut AppState, s: String) {
+    // Increment user message count (used for tracking file edits for selective revert)
+    state.user_message_count += 1;
+
     // Add extra spacing before user message if not the first message
     if !state.messages.is_empty() {
         state.messages.push(Message::plain_text(""));
@@ -112,6 +126,8 @@ pub fn handle_has_user_message(state: &mut AppState) {
     state.message_tool_calls = None;
     state.tool_call_execution_order.clear();
     state.is_dialog_open = false;
+    // Clear any pending cancellation from a previous interaction
+    state.cancel_requested = false;
 }
 
 /// Handle stream usage event

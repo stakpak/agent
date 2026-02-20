@@ -1,19 +1,21 @@
 //! Stakpak provider implementation
 
+use super::convert::to_stakpak_request;
 use super::stream::create_stream;
-use super::types::{StakpakProviderConfig, StakpakResponse};
+use super::types::{StakpakModelsResponse, StakpakProviderConfig, StakpakResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::providers::openai::convert::to_openai_request;
 use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
-    InputTokenDetails, OutputTokenDetails, ResponseContent, ToolCall, Usage,
+    InputTokenDetails, Model, OutputTokenDetails, ResponseContent, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
 use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Stakpak provider
 ///
@@ -21,6 +23,8 @@ use serde_json::json;
 pub struct StakpakProvider {
     config: StakpakProviderConfig,
     client: Client,
+    /// In-memory cache of models fetched from the API
+    models_cache: Arc<RwLock<Option<Vec<Model>>>>,
 }
 
 impl StakpakProvider {
@@ -31,12 +35,52 @@ impl StakpakProvider {
         }
 
         let client = create_platform_tls_client()?;
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            models_cache: Arc::new(RwLock::new(None)),
+        })
     }
 
     /// Create provider from environment
     pub fn from_env() -> Result<Self> {
         Self::new(StakpakProviderConfig::default())
+    }
+
+    /// Fetch models from the Stakpak `/v1/models` API endpoint
+    async fn fetch_models(&self) -> Result<Vec<Model>> {
+        let url = format!("{}/v1/models", self.config.base_url);
+        let headers = self.build_headers(None);
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(headers.to_reqwest_headers())
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            let friendly_error = parse_stakpak_error(&error_text, status.as_u16());
+            return Err(Error::provider_error(friendly_error));
+        }
+
+        let resp: StakpakModelsResponse = response.json().await?;
+
+        // Tag all models with the stakpak provider and prefix IDs with the
+        // upstream provider for routing (e.g. "anthropic/claude-sonnet-4-…")
+        let models: Vec<Model> = resp
+            .models
+            .into_iter()
+            .map(|m| Model {
+                id: format!("{}/{}", m.provider, m.id),
+                provider: "stakpak".into(),
+                ..m
+            })
+            .collect();
+
+        Ok(models)
     }
 }
 
@@ -66,8 +110,7 @@ impl Provider for StakpakProvider {
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}/v1/chat/completions", self.config.base_url);
 
-        // Stakpak uses OpenAI-compatible API for requests
-        let openai_req = to_openai_request(&request, false);
+        let openai_req = to_stakpak_request(&request, false);
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
@@ -82,10 +125,10 @@ impl Provider for StakpakProvider {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!(
-                "Stakpak API error {}: {}",
-                status, error_text
-            )));
+
+            // Parse error for user-friendly messages
+            let friendly_error = parse_stakpak_error(&error_text, status.as_u16());
+            return Err(Error::provider_error(friendly_error));
         }
 
         let resp: StakpakResponse = response.json().await?;
@@ -95,8 +138,7 @@ impl Provider for StakpakProvider {
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}/v1/chat/completions", self.config.base_url);
 
-        // Stakpak uses OpenAI-compatible API, reuse OpenAI conversion
-        let openai_req = to_openai_request(&request, true);
+        let openai_req = to_stakpak_request(&request, true);
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
@@ -113,17 +155,24 @@ impl Provider for StakpakProvider {
         create_stream(event_source).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Stakpak supports routing to various providers
-        Ok(vec![
-            "anthropic/claude-sonnet-4-5-20250929".to_string(),
-            "anthropic/claude-haiku-4-5-20250929".to_string(),
-            "anthropic/claude-opus-4-5-20250929".to_string(),
-            "openai/gpt-5".to_string(),
-            "openai/gpt-5-mini".to_string(),
-            "google/gemini-2.5-flash".to_string(),
-            "google/gemini-2.5-pro".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Return cached models if available
+        {
+            let cache = self.models_cache.read().await;
+            if let Some(models) = cache.as_ref() {
+                return Ok(models.clone());
+            }
+        }
+
+        // Fetch from the Stakpak API and cache the result
+        let models = self.fetch_models().await?;
+
+        {
+            let mut cache = self.models_cache.write().await;
+            *cache = Some(models.clone());
+        }
+
+        Ok(models)
     }
 }
 
@@ -212,9 +261,53 @@ fn parse_stakpak_message(msg: &super::types::StakpakMessage) -> Result<Vec<Respo
                 name: tc.function.name.clone(),
                 arguments: serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| json!({})),
+                metadata: None,
             }));
         }
     }
 
     Ok(content)
+}
+
+/// Parse Stakpak API error and return user-friendly message
+pub(crate) fn parse_stakpak_error(error_text: &str, status_code: u16) -> String {
+    // Try to parse as JSON error
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text)
+        && let Some(error) = json.get("error")
+    {
+        let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
+        let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        // Check for insufficient credits
+        if message.contains("Exceeded credits") || message.contains("balance is") {
+            return format!(
+                "Insufficient credits. Please top up your Stakpak account at https://app.stakpak.dev/settings/billing. {}",
+                message
+            );
+        }
+
+        // Check for rate limit
+        if error_type == "rate_limit_error" || status_code == 429 {
+            return format!(
+                "Rate limited. Please wait a moment and try again. {}",
+                message
+            );
+        }
+
+        // Check for authentication errors
+        if error_type == "authentication_error" || status_code == 401 {
+            return format!(
+                "Authentication failed. Please check your API key. {}",
+                message
+            );
+        }
+
+        // Return the message if we have one
+        if !message.is_empty() {
+            return message.to_string();
+        }
+    }
+
+    // Fallback to raw error
+    format!("Stakpak API error {}: {}", status_code, error_text)
 }

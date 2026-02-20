@@ -7,6 +7,10 @@ license = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 
+[features]
+default = []
+bedrock = ["stakai/bedrock"]
+
 [dependencies]
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -20,6 +24,7 @@ walkdir = { workspace = true }
 thiserror = { workspace = true }
 notify = { workspace = true }
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 rcgen = { workspace = true }
 time = { workspace = true }
 regex = { workspace = true }
@@ -51,3 +56,6 @@ tower = "0.4"
 hyper = "1.0"
 tokio-test = "0.4"
 axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+
+[lints.clippy]
+string_slice = "deny"

@@ -5,6 +5,9 @@ use crate::providers::{
     stakpak::StakpakProviderConfig,
 };
 
+#[cfg(feature = "bedrock")]
+use crate::providers::bedrock::BedrockConfig;
+
 /// Configuration for the AI client
 #[derive(Debug, Clone, Default)]
 pub struct ClientConfig {
@@ -64,6 +67,8 @@ pub struct InferenceConfig {
     pub(crate) anthropic_config: Option<AnthropicConfig>,
     pub(crate) gemini_config: Option<GeminiConfig>,
     pub(crate) stakpak_config: Option<StakpakProviderConfig>,
+    #[cfg(feature = "bedrock")]
+    pub(crate) bedrock_config: Option<BedrockConfig>,
     pub(crate) client_config: ClientConfig,
 }
 
@@ -249,6 +254,60 @@ impl InferenceConfig {
     /// ```
     pub fn stakpak_config(mut self, config: StakpakProviderConfig) -> Self {
         self.stakpak_config = Some(config);
+        self
+    }
+
+    /// Configure AWS Bedrock provider with a region
+    ///
+    /// Uses the AWS credential chain for authentication (env vars, shared credentials,
+    /// SSO, ECS/EC2 instance roles). No API key needed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .bedrock("us-east-1");
+    /// ```
+    #[cfg(feature = "bedrock")]
+    pub fn bedrock(mut self, region: impl Into<String>) -> Self {
+        self.bedrock_config = Some(BedrockConfig::new(region));
+        self
+    }
+
+    /// Configure AWS Bedrock provider from environment variables
+    ///
+    /// Reads `AWS_REGION` (or `AWS_DEFAULT_REGION`) and `AWS_PROFILE` from the environment.
+    /// Falls back to `us-east-1` if no region is set.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .bedrock_from_env();
+    /// ```
+    #[cfg(feature = "bedrock")]
+    pub fn bedrock_from_env(mut self) -> Self {
+        self.bedrock_config = Some(BedrockConfig::from_env());
+        self
+    }
+
+    /// Configure AWS Bedrock provider with full BedrockConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::{InferenceConfig, providers::bedrock::BedrockConfig};
+    /// let bedrock_config = BedrockConfig::new("us-west-2")
+    ///     .with_profile_name("production");
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .bedrock_config(bedrock_config);
+    /// ```
+    #[cfg(feature = "bedrock")]
+    pub fn bedrock_config(mut self, config: BedrockConfig) -> Self {
+        self.bedrock_config = Some(config);
         self
     }
 }

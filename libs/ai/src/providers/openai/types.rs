@@ -58,9 +58,18 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+}
+
+/// Options for streaming responses
+#[derive(Debug, Serialize)]
+pub struct StreamOptions {
+    /// Include usage statistics in the streaming response
+    pub include_usage: bool,
 }
 
 /// OpenAI chat message
@@ -201,4 +210,150 @@ pub struct OpenAIFunctionCallDelta {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<String>,
+}
+
+// ============================================================================
+// Responses API Types
+// ============================================================================
+
+/// OpenAI Responses API request
+#[derive(Debug, Serialize)]
+pub struct ResponsesRequest {
+    pub model: String,
+    /// Input items - uses Value because format varies by item type
+    pub input: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_retention: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+}
+
+/// Reasoning configuration for reasoning models
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ReasoningConfig {
+    pub effort: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+/// Input content types for Responses API
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum InputContent {
+    #[serde(rename = "input_text")]
+    Text { text: String },
+    #[serde(rename = "input_image")]
+    Image { image_url: String, detail: String },
+}
+
+/// Output content types for Responses API (in assistant messages)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum AssistantOutputContent {
+    #[serde(rename = "output_text")]
+    Text {
+        text: String,
+        #[serde(default)]
+        annotations: Vec<serde_json::Value>,
+    },
+}
+
+/// Responses API non-streaming response
+#[derive(Debug, Deserialize)]
+pub struct ResponsesResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub model: String,
+    pub output: Vec<ResponsesOutputItem>,
+    pub usage: ResponsesUsage,
+    #[serde(default)]
+    pub status: String,
+}
+
+/// Output item in Responses API response
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ResponsesOutputItem {
+    #[serde(rename = "message")]
+    Message {
+        id: String,
+        role: String,
+        content: Vec<ResponsesOutputContent>,
+    },
+    #[serde(rename = "function_call")]
+    FunctionCall {
+        id: String,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    #[serde(rename = "reasoning")]
+    Reasoning {
+        id: String,
+        content: Vec<ReasoningContent>,
+    },
+}
+
+/// Output content in Responses API message
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ResponsesOutputContent {
+    #[serde(rename = "output_text")]
+    Text { text: String },
+}
+
+/// Reasoning content types
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ReasoningContent {
+    #[serde(rename = "reasoning_text")]
+    Text { text: String },
+    #[serde(rename = "reasoning.encrypted_content")]
+    Encrypted { id: String, data: String },
+}
+
+/// Usage statistics for Responses API
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ResponsesUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    #[serde(default)]
+    pub total_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens_details: Option<ResponsesInputTokensDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens_details: Option<ResponsesOutputTokensDetails>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ResponsesInputTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ResponsesOutputTokensDetails {
+    #[serde(default)]
+    pub reasoning_tokens: u32,
 }

@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+// Re-export from the shared crate — single source of truth for container layout.
+pub use stakpak_shared::container::stakpak_agent_default_mounts;
+
 /// Configuration for the Warden runtime security system.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WardenConfig {
@@ -17,17 +20,7 @@ impl WardenConfig {
     pub(crate) fn readonly_profile() -> Self {
         WardenConfig {
             enabled: true,
-            volumes: vec![
-                "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
-                "~/.stakpak/auth.toml:/home/agent/.stakpak/auth.toml:ro".to_string(),
-                "./:/agent:ro".to_string(),
-                "./.stakpak:/agent/.stakpak".to_string(),
-                "~/.aws:/home/agent/.aws:ro".to_string(),
-                "~/.config/gcloud:/home/agent/.config/gcloud:ro".to_string(),
-                "~/.digitalocean:/home/agent/.digitalocean:ro".to_string(),
-                "~/.azure:/home/agent/.azure:ro".to_string(),
-                "~/.kube:/home/agent/.kube:ro".to_string(),
-            ],
+            volumes: stakpak_agent_default_mounts(),
         }
     }
 }

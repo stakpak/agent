@@ -1,9 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyUsagePurpose, SanType,
 };
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use std::path::Path;
 use std::sync::Arc;
 use time::OffsetDateTime;
 
@@ -173,6 +175,248 @@ impl CertificateChain {
 
     pub fn get_client_key_pem(&self) -> Result<String> {
         Ok(self.client_cert.serialize_private_key_pem())
+    }
+}
+
+/// A single-sided mTLS identity: a CA that signs one leaf certificate.
+///
+/// Each side of the mTLS connection generates its own `MtlsIdentity`. Only the
+/// CA certificate (public) is shared with the peer — private keys never leave
+/// the process that generated them.
+///
+/// ```text
+/// Host (client)                         Container (server)
+/// ─────────────────                     ─────────────────────
+/// MtlsIdentity::generate_client()       MtlsIdentity::generate_server()
+///   ├─ client CA cert  ──────────────►  trusted by server (verifies client)
+///   ├─ client leaf cert (in memory)     ├─ server CA cert  ◄── output to stdout
+///   └─ client leaf key (in memory)      ├─ server leaf cert (in memory)
+///                                       └─ server leaf key (in memory)
+///
+/// host trusts server CA cert ◄──────── parsed from stdout
+/// ```
+pub struct MtlsIdentity {
+    ca_cert: rcgen::Certificate,
+    leaf_cert: rcgen::Certificate,
+}
+
+impl std::fmt::Debug for MtlsIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MtlsIdentity")
+            .field("ca_cert", &"<certificate>")
+            .field("leaf_cert", &"<certificate>")
+            .finish()
+    }
+}
+
+impl MtlsIdentity {
+    /// Generate a CA + leaf certificate for a given role.
+    fn generate_leaf(common_name: &str, san: Vec<SanType>) -> Result<Self> {
+        // CA certificate
+        let mut ca_params = CertificateParams::default();
+        ca_params.distinguished_name = DistinguishedName::new();
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, format!("{common_name} CA"));
+        ca_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Stakpak");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![
+            KeyUsagePurpose::KeyCertSign,
+            KeyUsagePurpose::CrlSign,
+            KeyUsagePurpose::DigitalSignature,
+        ];
+        ca_params.not_before = OffsetDateTime::now_utc() - time::Duration::seconds(60);
+        ca_params.not_after = OffsetDateTime::now_utc() + time::Duration::days(365);
+        let ca_cert = rcgen::Certificate::from_params(ca_params)?;
+
+        // Leaf certificate
+        let mut leaf_params = CertificateParams::default();
+        leaf_params.distinguished_name = DistinguishedName::new();
+        leaf_params
+            .distinguished_name
+            .push(DnType::CommonName, common_name);
+        leaf_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Stakpak");
+        leaf_params.subject_alt_names = san;
+        leaf_params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        leaf_params.not_before = OffsetDateTime::now_utc() - time::Duration::seconds(60);
+        leaf_params.not_after = OffsetDateTime::now_utc() + time::Duration::days(365);
+        let leaf_cert = rcgen::Certificate::from_params(leaf_params)?;
+
+        Ok(Self { ca_cert, leaf_cert })
+    }
+
+    /// Generate a client identity (CA + client leaf cert).
+    pub fn generate_client() -> Result<Self> {
+        Self::generate_leaf("Stakpak MCP Client", vec![])
+    }
+
+    /// Generate a server identity (CA + server leaf cert with localhost SANs).
+    pub fn generate_server() -> Result<Self> {
+        Self::generate_leaf(
+            "Stakpak MCP Server",
+            vec![
+                SanType::DnsName("localhost".to_string()),
+                SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))),
+                SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            ],
+        )
+    }
+
+    /// Get the CA certificate PEM (public, safe to share with the peer).
+    pub fn ca_cert_pem(&self) -> Result<String> {
+        Ok(self.ca_cert.serialize_pem()?)
+    }
+
+    /// Build a `rustls::ServerConfig` that serves with this identity's leaf
+    /// cert and trusts the given client CA PEM for client authentication.
+    pub fn create_server_config(&self, trusted_client_ca_pem: &str) -> Result<ServerConfig> {
+        let leaf_cert_der = self.leaf_cert.serialize_der_with_signer(&self.ca_cert)?;
+        let leaf_key_der = self.leaf_cert.serialize_private_key_der();
+
+        let cert_chain = vec![CertificateDer::from(leaf_cert_der)];
+        let private_key = PrivateKeyDer::try_from(leaf_key_der)
+            .map_err(|e| anyhow::anyhow!("Failed to convert server private key: {:?}", e))?;
+
+        let mut root_store = RootCertStore::empty();
+        for cert in CertificateDer::pem_slice_iter(trusted_client_ca_pem.as_bytes()) {
+            let cert = cert.context("Failed to parse trusted client CA PEM")?;
+            root_store
+                .add(cert)
+                .context("Failed to add trusted client CA to root store")?;
+        }
+
+        let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(root_store))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build client cert verifier: {}", e))?;
+
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(cert_chain, private_key)?;
+
+        Ok(config)
+    }
+
+    /// Build a `rustls::ClientConfig` that authenticates with this identity's
+    /// leaf cert and trusts the given server CA PEM.
+    pub fn create_client_config(&self, trusted_server_ca_pem: &str) -> Result<ClientConfig> {
+        let leaf_cert_der = self.leaf_cert.serialize_der_with_signer(&self.ca_cert)?;
+        let leaf_key_der = self.leaf_cert.serialize_private_key_der();
+
+        let cert_chain = vec![CertificateDer::from(leaf_cert_der)];
+        let private_key = PrivateKeyDer::try_from(leaf_key_der)
+            .map_err(|e| anyhow::anyhow!("Failed to convert client private key: {:?}", e))?;
+
+        let mut root_store = RootCertStore::empty();
+        for cert in CertificateDer::pem_slice_iter(trusted_server_ca_pem.as_bytes()) {
+            let cert = cert.context("Failed to parse trusted server CA PEM")?;
+            root_store
+                .add(cert)
+                .context("Failed to add trusted server CA to root store")?;
+        }
+
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(cert_chain, private_key)?;
+
+        Ok(config)
+    }
+}
+
+/// A certificate chain loaded from PEM files on disk.
+///
+/// Expects a directory containing:
+/// - `ca.pem` — CA certificate (PEM)
+/// - `server.pem` — Server certificate (PEM)
+/// - `server-key.pem` — Server private key (PEM)
+/// - `client.pem` — Client certificate (PEM)
+/// - `client-key.pem` — Client private key (PEM)
+pub struct LoadedCertificateChain {
+    pub ca_cert_pem: String,
+    pub server_cert_pem: String,
+    pub server_key_pem: String,
+    pub client_cert_pem: String,
+    pub client_key_pem: String,
+}
+
+impl LoadedCertificateChain {
+    pub fn load_from_dir(dir: &Path) -> Result<Self> {
+        let ca_cert_pem = std::fs::read_to_string(dir.join("ca.pem"))
+            .with_context(|| format!("Failed to read ca.pem from {}", dir.display()))?;
+        let server_cert_pem = std::fs::read_to_string(dir.join("server.pem"))
+            .with_context(|| format!("Failed to read server.pem from {}", dir.display()))?;
+        let server_key_pem = std::fs::read_to_string(dir.join("server-key.pem"))
+            .with_context(|| format!("Failed to read server-key.pem from {}", dir.display()))?;
+        let client_cert_pem = std::fs::read_to_string(dir.join("client.pem"))
+            .with_context(|| format!("Failed to read client.pem from {}", dir.display()))?;
+        let client_key_pem = std::fs::read_to_string(dir.join("client-key.pem"))
+            .with_context(|| format!("Failed to read client-key.pem from {}", dir.display()))?;
+
+        Ok(Self {
+            ca_cert_pem,
+            server_cert_pem,
+            server_key_pem,
+            client_cert_pem,
+            client_key_pem,
+        })
+    }
+
+    fn parse_root_cert_store(&self) -> Result<RootCertStore> {
+        let mut root_cert_store = RootCertStore::empty();
+        for cert in CertificateDer::pem_slice_iter(self.ca_cert_pem.as_bytes()) {
+            let cert = cert.context("Failed to parse CA certificate PEM")?;
+            root_cert_store
+                .add(cert)
+                .context("Failed to add CA certificate to root store")?;
+        }
+        Ok(root_cert_store)
+    }
+
+    pub fn create_server_config(&self) -> Result<ServerConfig> {
+        let server_certs: Vec<CertificateDer<'static>> =
+            CertificateDer::pem_slice_iter(self.server_cert_pem.as_bytes())
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to parse server certificate PEM")?;
+
+        let server_key = PrivateKeyDer::from_pem_slice(self.server_key_pem.as_bytes())
+            .context("Failed to parse server private key PEM")?;
+
+        let root_cert_store = self.parse_root_cert_store()?;
+
+        let client_cert_verifier =
+            rustls::server::WebPkiClientVerifier::builder(Arc::new(root_cert_store))
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build client cert verifier: {}", e))?;
+
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(client_cert_verifier)
+            .with_single_cert(server_certs, server_key)?;
+
+        Ok(config)
+    }
+
+    pub fn create_client_config(&self) -> Result<ClientConfig> {
+        let client_certs: Vec<CertificateDer<'static>> =
+            CertificateDer::pem_slice_iter(self.client_cert_pem.as_bytes())
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to parse client certificate PEM")?;
+
+        let client_key = PrivateKeyDer::from_pem_slice(self.client_key_pem.as_bytes())
+            .context("Failed to parse client private key PEM")?;
+
+        let root_cert_store = self.parse_root_cert_store()?;
+
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_client_auth_cert(client_certs, client_key)?;
+
+        Ok(config)
     }
 }
 

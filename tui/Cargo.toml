@@ -8,6 +8,7 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
+stakai = { workspace = true }
 stakpak-shared = { workspace = true }
 stakpak-api = { workspace = true }
 regex = { workspace = true }
@@ -37,10 +38,11 @@ url = "2"
 base64 = "0.22"
 vt100 = "0.15.2"
 dirs = "5.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
+[lints]
+workspace = true
 
 
 [target.'cfg(any(unix, windows))'.dependencies]

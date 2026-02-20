@@ -825,6 +825,8 @@ pub fn handle_shell_completed(
         // Hide shell popup on completion
         state.shell_popup_visible = false;
         state.shell_popup_expanded = false;
+        // Request terminal clear to remove any leaked output (e.g., sudo password prompts)
+        state.needs_terminal_clear = true;
         // Invalidate cache to restore normal message display
         invalidate_message_lines_cache(state);
         state.show_shell_mode = false;
@@ -1016,6 +1018,7 @@ pub fn shell_command_to_tool_call_result(
             name,
             arguments: args,
         },
+        metadata: None,
     };
     ToolCallResult {
         call,

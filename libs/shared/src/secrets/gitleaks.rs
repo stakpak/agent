@@ -486,6 +486,9 @@ fn is_allowed_by_allowlist(
     false
 }
 
+/// All internal indices from rfind/find of ASCII chars ('\n', '=') on same string.
+/// start_pos/end_pos are validated as char boundaries before use.
+#[allow(clippy::string_slice)]
 pub fn is_allowed_by_rule_allowlist(
     input: &str,
     path: Option<&str>,
@@ -495,6 +498,15 @@ pub fn is_allowed_by_rule_allowlist(
     allowlist: &RuleAllowlist,
 ) -> bool {
     let mut checks = Vec::new();
+
+    // Validate caller-provided indices are valid char boundaries
+    if start_pos > input.len()
+        || end_pos > input.len()
+        || !input.is_char_boundary(start_pos)
+        || !input.is_char_boundary(end_pos)
+    {
+        return false;
+    }
 
     // Determine the target text based on regex_target
     let target_text = match allowlist.regex_target.as_deref() {

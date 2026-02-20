@@ -92,6 +92,11 @@ pub struct GeminiPart {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_response: Option<GeminiFunctionResponse>,
+
+    /// Opaque thought signature for Gemini thinking mode.
+    /// Must be preserved and echoed back on the Part level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 /// Gemini function call
@@ -273,6 +278,7 @@ pub enum GeminiHarmBlockThreshold {
 
 /// Gemini response
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiResponse {
     pub candidates: Option<Vec<GeminiCandidate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,6 +291,7 @@ pub struct GeminiResponse {
 
 /// Gemini candidate
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiCandidate {
     pub content: Option<GeminiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,6 +336,10 @@ pub struct GeminiUsageMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_token_count: Option<u32>,
+
+    /// Token count for model thinking/reasoning (when thinking mode is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thoughts_token_count: Option<u32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_tokens_details: Option<Vec<GeminiTokenDetail>>,

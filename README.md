@@ -7,10 +7,10 @@
   </picture>
 </p>
 
-<h3 align="center">Secure Open source AI Agent in Your Terminal</h3>
+<h3 align="center">Ship your code, on autopilot.</h3>
 
 <p align="center">
-Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy, and run infra from the terminal.
+An open source agent that lives on your machines 24/7, keeps your apps running, and only pings when it needs a human. All the upside of a PaaS, none of the lock-in.
 </p>
 
 <br />
@@ -38,6 +38,14 @@ Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy,
 
 </p>
 
+### Try Stakpak Now
+```bash
+curl -sSL https://stakpak.dev/install.sh | sh # install Stakpak
+stakpak init # understand your apps and tech stack
+stakpak autopilot up # start the autonomous agent, running 24/7 in the background
+```
+[For more installation options...](https://github.com/stakpak/agent#installation)
+
 You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
 Stakpak is built different:
 - **Secret Substitution** - The LLM works with your credentials without ever seeing them
@@ -46,11 +54,24 @@ Stakpak is built different:
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
-### Try Stakpak Now
+### 🤖 Autopilot (24/7 Autonomous Runtime)
+
+Use the new lifecycle aliases for one-command setup/start/stop:
+
 ```bash
-curl -sSL https://stakpak.dev/install.sh | sh
+stakpak up        # alias for: stakpak autopilot up
+stakpak down      # alias for: stakpak autopilot down
 ```
-[For more installation options...](https://github.com/stakpak/agent#installation)
+
+You can also use the canonical subcommands:
+
+```bash
+stakpak autopilot up
+stakpak autopilot status
+stakpak autopilot logs
+stakpak autopilot down
+stakpak autopilot doctor
+```
 
 ## 🔒 Security Hardened
 
@@ -120,16 +141,16 @@ stakpak
 >
 > Copy your new key from the browser paste it in your terminal
 
-#### You could also set the environment variable `STAKPAK_API_KEY`
+#### Non-interactive setup (CI/scripts)
+
+```bash
+stakpak auth login --api-key $STAKPAK_API_KEY
+```
+
+#### Or set the environment variable
 
 ```bash
 export STAKPAK_API_KEY=<mykey>
-```
-
-#### Or save your API key to `~/.stakpak/config.toml`
-
-```bash
-stakpak login --api-key $STAKPAK_API_KEY
 ```
 
 #### View current account (Optional)
@@ -139,6 +160,21 @@ stakpak account
 ```
 
 ### Option B: Running Without a Stakpak API Key
+
+#### Non-interactive setup (CI/scripts)
+
+```bash
+# Anthropic
+stakpak auth login --provider anthropic --api-key $ANTHROPIC_API_KEY
+
+# OpenAI
+stakpak auth login --provider openai --api-key $OPENAI_API_KEY
+
+# Gemini
+stakpak auth login --provider gemini --api-key $GEMINI_API_KEY
+```
+
+#### Manual configuration
 
 Create `~/.stakpak/config.toml` with one of these configurations:
 

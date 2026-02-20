@@ -21,6 +21,7 @@ rand = { workspace = true }
 axum = "0.8.4"
 chrono = { version = "0.4", features = ["serde"] }
 axum-server = { workspace = true }
+rustls = { workspace = true }
 reqwest = { workspace = true }
 url = "2.5.0"
 fast_html2md = "=0.0.48"
@@ -37,6 +38,5 @@ globset = { workspace = true }
 [dev-dependencies]
 tempfile = "3.8"
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
+[lints]
+workspace = true

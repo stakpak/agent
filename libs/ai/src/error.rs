@@ -52,6 +52,10 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
+    /// Network error (fetch failed, timeout, etc.)
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
     /// Generic error
     #[error("{0}")]
     Other(String),

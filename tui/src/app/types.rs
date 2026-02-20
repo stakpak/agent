@@ -5,6 +5,7 @@
 
 use crate::services::message::Message;
 use ratatui::text::Line;
+use stakpak_shared::models::integrations::openai::{ContentPart, ToolCallResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,6 +121,66 @@ pub struct AttachedImage {
     pub end_pos: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingUserMessage {
+    pub final_input: String,
+    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub image_parts: Vec<ContentPart>,
+    pub user_message_text: String,
+}
+
+impl PendingUserMessage {
+    pub fn new(
+        final_input: String,
+        shell_tool_calls: Option<Vec<ToolCallResult>>,
+        image_parts: Vec<ContentPart>,
+        user_message_text: String,
+    ) -> Self {
+        Self {
+            final_input,
+            shell_tool_calls,
+            image_parts,
+            user_message_text,
+        }
+    }
+
+    pub fn merge_from(&mut self, other: PendingUserMessage) {
+        fn append_with_separator(target: &mut String, value: &str) {
+            if value.is_empty() {
+                return;
+            }
+            if !target.is_empty() {
+                target.push_str("\n\n");
+            }
+            target.push_str(value);
+        }
+
+        append_with_separator(&mut self.final_input, &other.final_input);
+        append_with_separator(&mut self.user_message_text, &other.user_message_text);
+
+        self.image_parts.extend(other.image_parts);
+
+        match (&mut self.shell_tool_calls, other.shell_tool_calls) {
+            (Some(existing), Some(mut incoming)) => existing.append(&mut incoming),
+            (None, Some(incoming)) => self.shell_tool_calls = Some(incoming),
+            _ => {}
+        }
+    }
+}
+
+/// Stashed state for the "existing plan found" modal.
+///
+/// When plan mode is requested and `.stakpak/session/plan.md` already exists,
+/// the inline prompt is stashed here while the user decides whether to resume
+/// or start fresh.
+#[derive(Debug, Clone)]
+pub struct ExistingPlanPrompt {
+    /// The inline prompt from `/plan <prompt>` (or `None` for bare `/plan`).
+    pub inline_prompt: Option<String>,
+    /// Metadata parsed from the existing plan file (for display in the modal).
+    pub metadata: Option<crate::services::plan::PlanMetadata>,
+}
+
 #[derive(Debug)]
 pub struct SessionInfo {
     pub title: String,
@@ -161,6 +222,14 @@ pub enum ShortcutsPopupMode {
     Commands,
     Shortcuts,
     Sessions,
+}
+
+/// Mode for the model switcher popup filter tabs
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ModelSwitcherMode {
+    #[default]
+    All, // Show all models grouped by provider
+    Reasoning, // Show only models with reasoning support
 }
 
 #[derive(Debug)]
@@ -206,5 +275,114 @@ impl LoadingStateManager {
 
     pub fn clear_all(&mut self) {
         self.active_operations.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stakpak_shared::models::integrations::openai::{
+        FunctionCall, ToolCall, ToolCallResultStatus,
+    };
+
+    fn tool_result(id: &str) -> ToolCallResult {
+        ToolCallResult {
+            call: ToolCall {
+                id: id.to_string(),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "run_command".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                metadata: None,
+            },
+            result: format!("result-{id}"),
+            status: ToolCallResultStatus::Success,
+        }
+    }
+
+    #[test]
+    fn pending_user_message_merge_combines_all_parts() {
+        let mut first = PendingUserMessage::new(
+            "first".to_string(),
+            Some(vec![tool_result("t1")]),
+            vec![ContentPart {
+                r#type: "text".to_string(),
+                text: Some("img-1".to_string()),
+                image_url: None,
+            }],
+            "first".to_string(),
+        );
+
+        let second = PendingUserMessage::new(
+            "second".to_string(),
+            Some(vec![tool_result("t2")]),
+            vec![ContentPart {
+                r#type: "text".to_string(),
+                text: Some("img-2".to_string()),
+                image_url: None,
+            }],
+            "second".to_string(),
+        );
+
+        first.merge_from(second);
+
+        assert_eq!(first.final_input, "first\n\nsecond");
+        assert_eq!(first.user_message_text, "first\n\nsecond");
+        assert_eq!(first.image_parts.len(), 2);
+        assert_eq!(
+            first
+                .shell_tool_calls
+                .as_ref()
+                .map(std::vec::Vec::len)
+                .unwrap_or_default(),
+            2
+        );
+    }
+
+    #[test]
+    fn pending_user_message_merge_skips_empty_text_with_no_extra_separator() {
+        let mut first = PendingUserMessage::new("".to_string(), None, Vec::new(), "".to_string());
+
+        let second = PendingUserMessage::new(
+            "second".to_string(),
+            None,
+            vec![ContentPart {
+                r#type: "text".to_string(),
+                text: Some("img-2".to_string()),
+                image_url: None,
+            }],
+            "second".to_string(),
+        );
+
+        first.merge_from(second);
+
+        assert_eq!(first.final_input, "second");
+        assert_eq!(first.user_message_text, "second");
+        assert_eq!(first.image_parts.len(), 1);
+    }
+
+    #[test]
+    fn pending_user_message_merge_adopts_incoming_tool_calls_when_initially_none() {
+        let mut first =
+            PendingUserMessage::new("first".to_string(), None, Vec::new(), "first".to_string());
+
+        let second = PendingUserMessage::new(
+            "second".to_string(),
+            Some(vec![tool_result("t2")]),
+            Vec::new(),
+            "second".to_string(),
+        );
+
+        first.merge_from(second);
+
+        assert_eq!(
+            first
+                .shell_tool_calls
+                .as_ref()
+                .map(std::vec::Vec::len)
+                .unwrap_or_default(),
+            1
+        );
     }
 }

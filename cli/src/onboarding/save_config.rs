@@ -47,6 +47,10 @@ pub fn save_to_profile(
         .profiles
         .insert(profile_name.to_string(), profile);
 
+    // Update readonly profile to match the current default profile
+    // This ensures readonly always mirrors default's provider settings
+    config_file.update_readonly();
+
     // Ensure config directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)

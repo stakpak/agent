@@ -51,7 +51,7 @@ use serde::{Deserialize, Serialize};
 /// 2. **Request level**: Override via `GenerateOptions::with_cache_strategy()`
 ///
 /// Request-level configuration takes precedence over provider defaults.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CacheStrategy {
     /// Automatic caching optimized for the provider (default)
@@ -59,6 +59,7 @@ pub enum CacheStrategy {
     /// - **Anthropic**: Caches last tool + last system + last 2 messages
     /// - **OpenAI**: Uses session_id as prompt_cache_key if provided
     /// - **Google**: No-op (implicit caching)
+    #[default]
     Auto,
 
     /// Custom Anthropic-style caching configuration
@@ -69,12 +70,6 @@ pub enum CacheStrategy {
     /// Note: For OpenAI, caching cannot be fully disabled - it's always on.
     /// This just means we don't set `prompt_cache_key`.
     None,
-}
-
-impl Default for CacheStrategy {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Anthropic-specific cache configuration

@@ -638,6 +638,7 @@ mod tests {
                         })
                         .to_string(),
                     },
+                    metadata: None,
                 }]),
                 tool_call_id: None,
                 name: None,
@@ -658,6 +659,7 @@ mod tests {
                         })
                         .to_string(),
                     },
+                    metadata: None,
                 }]),
                 tool_call_id: None,
                 name: None,
@@ -789,6 +791,7 @@ mod tests {
                         })
                         .to_string(),
                     },
+                    metadata: None,
                 }]),
                 tool_call_id: None,
                 name: None,
@@ -811,6 +814,7 @@ mod tests {
                         })
                         .to_string(),
                     },
+                    metadata: None,
                 }]),
                 tool_call_id: None,
                 name: None,

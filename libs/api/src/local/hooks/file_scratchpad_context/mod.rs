@@ -1,7 +1,6 @@
 use crate::local::context_managers::file_scratchpad_context_manager::{
     FileScratchpadContextManager, FileScratchpadContextManagerOptions,
 };
-use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
 use stakpak_shared::define_hook;
 use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleEvent};
@@ -13,12 +12,10 @@ const SCRATCHPAD_FILE: &str = ".stakpak/session/scratchpad.md";
 const TODO_FILE: &str = ".stakpak/session/todo.md";
 
 pub struct FileScratchpadContextHook {
-    pub model_set: ModelSet,
     pub context_manager: FileScratchpadContextManager,
 }
 
 pub struct FileScratchpadContextHookOptions {
-    pub model_options: ModelOptions,
     pub scratchpad_path: Option<String>,
     pub todo_path: Option<String>,
     pub history_action_message_size_limit: Option<usize>,
@@ -29,7 +26,6 @@ pub struct FileScratchpadContextHookOptions {
 
 impl FileScratchpadContextHook {
     pub fn new(options: FileScratchpadContextHookOptions) -> Self {
-        let model_set: ModelSet = options.model_options.into();
         let context_manager =
             FileScratchpadContextManager::new(FileScratchpadContextManagerOptions {
                 scratchpad_file_path: options
@@ -49,10 +45,7 @@ impl FileScratchpadContextHook {
                 overwrite_if_different: options.overwrite_if_different.unwrap_or(true),
             });
 
-        Self {
-            model_set,
-            context_manager,
-        }
+        Self { context_manager }
     }
 }
 
@@ -64,7 +57,7 @@ define_hook!(
             return Ok(HookAction::Continue);
         }
 
-        let model = self.model_set.get_model(&ctx.state.agent_model);
+        let model = ctx.state.active_model.clone();
 
         let tools = ctx
             .state

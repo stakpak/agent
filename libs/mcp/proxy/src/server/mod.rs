@@ -53,6 +53,8 @@ fn service_error_to_error_data(e: ServiceError, context: &str) -> ErrorData {
 /// the *replacement text* without re-scanning it, a secret whose value happens
 /// to contain another `[REDACTED_SECRET:...]` token will **not** trigger a
 /// chain replacement.
+/// All indices from find() of ASCII tokens (PREFIX, ']') on same string
+#[allow(clippy::string_slice)]
 fn restore_secrets_single_pass(s: &str, redaction_map: &HashMap<String, String>) -> String {
     const PREFIX: &str = "[REDACTED_SECRET:";
 
@@ -356,6 +358,7 @@ impl ProxyServer {
                 url,
                 headers,
                 certificate_chain,
+                client_tls_config,
             } => {
                 // Validate TLS usage
                 if !url.starts_with("https://") {
@@ -377,7 +380,10 @@ impl ProxyServer {
                 // Configure TLS: use mTLS cert chain if provided, otherwise use
                 // platform-verified TLS so the OS CA store is trusted (needed for
                 // warden container where a custom CA is installed).
-                if let Some(cert_chain) = certificate_chain.as_ref() {
+                if let Some(tls_config) = client_tls_config {
+                    client_builder =
+                        client_builder.use_preconfigured_tls(tls_config.as_ref().clone());
+                } else if let Some(cert_chain) = certificate_chain.as_ref() {
                     match cert_chain.create_client_config() {
                         Ok(tls_config) => {
                             client_builder = client_builder.use_preconfigured_tls(tls_config);
@@ -580,6 +586,28 @@ impl ServerHandler for ProxyServer {
         })?;
 
         result.content = self.redact_content(result.content);
+
+        // generate_password returns a bare password string without keyword context
+        // (e.g. no "password=" prefix), so gitleaks regex detection won't catch it.
+        // Force-redact the entire content as a password so the LLM never sees the
+        // raw value and subsequent tool calls can use the placeholder.
+        if tool_name == "generate_password" {
+            result.content = result
+                .content
+                .into_iter()
+                .map(|item| {
+                    if let Some(text_content) = item.raw.as_text() {
+                        let redacted = self
+                            .secret_manager
+                            .redact_and_store_password(&text_content.text, &text_content.text);
+                        Content::text(&redacted)
+                    } else {
+                        item
+                    }
+                })
+                .collect();
+        }
+
         Ok(result)
     }
 
@@ -1254,5 +1282,72 @@ mod tests {
         let mut value = json!([]);
         restore_secrets_in_json_value(&mut value, &redaction_map);
         assert_eq!(value, json!([]));
+    }
+
+    // ---------------------------------------------------------------
+    // generate_password force-redaction
+    //
+    // Bare passwords lack keyword context so gitleaks won't detect them.
+    // The proxy force-redacts generate_password output via
+    // redact_and_store_password. These tests verify that path.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_generate_password_force_redaction() {
+        let server = ProxyServer::new(ClientPoolConfig::default(), true, false);
+        let password = "K9x!mP2#nQ8rT4v";
+        let content = vec![Content::text(password)];
+
+        // Simulate the force-redaction path from call_tool
+        let redacted: Vec<Content> = content
+            .into_iter()
+            .map(|item| {
+                if let Some(text_content) = item.raw.as_text() {
+                    let redacted = server
+                        .secret_manager
+                        .redact_and_store_password(&text_content.text, &text_content.text);
+                    Content::text(&redacted)
+                } else {
+                    item
+                }
+            })
+            .collect();
+
+        let redacted_text = redacted[0]
+            .raw
+            .as_text()
+            .expect("should be text")
+            .text
+            .clone();
+        assert!(
+            redacted_text.contains("[REDACTED_SECRET:password:"),
+            "password should be redacted, got: {}",
+            redacted_text
+        );
+        assert!(
+            !redacted_text.contains(password),
+            "raw password should not appear in redacted output"
+        );
+
+        // The redaction map should allow restoring the password
+        let redaction_map = server.secret_manager.load_session_redaction_map();
+        assert_eq!(redaction_map.len(), 1);
+        let restored_password = redaction_map
+            .values()
+            .next()
+            .expect("should have one entry");
+        assert_eq!(restored_password, password);
+    }
+
+    #[test]
+    fn test_generate_password_redaction_disabled() {
+        let server = ProxyServer::new(ClientPoolConfig::default(), false, false);
+        let password = "K9x!mP2#nQ8rT4v";
+
+        // When redaction is disabled, redact_and_store_password returns content unchanged
+        let result = server
+            .secret_manager
+            .redact_and_store_password(password, password);
+        assert_eq!(result, password);
     }
 }

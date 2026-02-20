@@ -241,6 +241,9 @@ pub struct CheckpointSummary {
 pub struct CheckpointState {
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Optional metadata for context trimming state, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 // =============================================================================
@@ -262,7 +265,10 @@ impl CreateSessionRequest {
             title: title.into(),
             visibility: SessionVisibility::Private,
             cwd: None,
-            initial_state: CheckpointState { messages },
+            initial_state: CheckpointState {
+                messages,
+                metadata: None,
+            },
         }
     }
 
@@ -310,13 +316,21 @@ pub struct CreateCheckpointRequest {
 impl CreateCheckpointRequest {
     pub fn new(messages: Vec<ChatMessage>) -> Self {
         Self {
-            state: CheckpointState { messages },
+            state: CheckpointState {
+                messages,
+                metadata: None,
+            },
             parent_id: None,
         }
     }
 
     pub fn with_parent(mut self, parent_id: Uuid) -> Self {
         self.parent_id = Some(parent_id);
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.state.metadata = Some(metadata);
         self
     }
 }

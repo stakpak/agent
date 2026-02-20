@@ -9,7 +9,7 @@
 
 use futures::StreamExt;
 use serde_json::json;
-use stakai::{ContentPart, GenerateRequest, Inference, Message, StreamEvent, Tool};
+use stakai::{ContentPart, GenerateRequest, Inference, Message, Model, StreamEvent, Tool};
 use std::collections::HashMap;
 
 #[tokio::main]
@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Create initial request
     let mut request = GenerateRequest::new(
-        "gpt-4o-mini",
+        Model::custom("gpt-4o-mini", "openai"),
         vec![Message::new(
             stakai::Role::User,
             "What's the weather and time in Paris?",
@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 id,
                 name,
                 arguments,
+                ..
             } => {
                 println!("\n✅ Tool call completed:");
                 println!("  ID: {}", id);
@@ -171,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
 
-        let mut follow_up = GenerateRequest::new("gpt-4o-mini", messages);
+        let mut follow_up = GenerateRequest::new(Model::custom("gpt-4o-mini", "openai"), messages);
         follow_up.options = follow_up.options.add_tool(weather_tool).add_tool(time_tool);
 
         // 7. Get final response

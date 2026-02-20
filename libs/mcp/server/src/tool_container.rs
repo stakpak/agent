@@ -1,51 +1,45 @@
-use super::EnabledToolsConfig;
+use super::{EnabledToolsConfig, SubagentConfig};
 use rmcp::tool_handler;
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
     service::RequestContext, tool_router,
 };
 use stakpak_api::AgentProvider;
-use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
-use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ToolContainer {
     pub client: Option<Arc<dyn AgentProvider>>,
-    pub secret_manager: SecretManager,
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
-    pub subagent_configs: Option<SubagentConfigs>,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
+    pub skill_directories: Vec<PathBuf>,
+    pub subagent_config: SubagentConfig,
 }
 
 #[tool_router]
 impl ToolContainer {
     pub fn new(
         client: Option<Arc<dyn AgentProvider>>,
-        redact_secrets: bool,
-        privacy_mode: bool,
         enabled_tools: EnabledToolsConfig,
         task_manager: Arc<TaskManagerHandle>,
-        subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
+        skill_directories: Vec<PathBuf>,
+        subagent_config: SubagentConfig,
     ) -> Result<Self, String> {
         Ok(Self {
             client,
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             task_manager,
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
-            subagent_configs,
             enabled_tools,
             tool_router,
+            skill_directories,
+            subagent_config,
         })
-    }
-
-    pub fn get_secret_manager(&self) -> &SecretManager {
-        &self.secret_manager
     }
 
     pub fn get_client(&self) -> Option<&Arc<dyn AgentProvider>> {
@@ -58,10 +52,6 @@ impl ToolContainer {
 
     pub fn get_remote_connection_manager(&self) -> &Arc<RemoteConnectionManager> {
         &self.remote_connection_manager
-    }
-
-    pub fn get_subagent_configs(&self) -> &Option<SubagentConfigs> {
-        &self.subagent_configs
     }
 
     pub fn get_session_id(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {

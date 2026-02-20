@@ -15,8 +15,9 @@ use serde_json::Value;
 #[cfg(test)]
 use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultStatus,
+    ToolCall, ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
 };
+use stakpak_shared::utils::strip_tool_name;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -70,6 +71,35 @@ pub enum MessageContent {
     /// View file block - compact display showing file path, line count, and optional grep/glob
     /// (file_path: String, total_lines: usize, grep: Option<String>, glob: Option<String>)
     RenderViewFileBlock(String, usize, Option<String>, Option<String>),
+    /// Task wait block - shows progress of background tasks being waited on
+    /// (task_updates: Vec<TaskUpdate>, overall_progress: f64, target_task_ids: Vec<String>)
+    RenderTaskWaitBlock(
+        Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        f64,
+        Vec<String>,
+    ),
+    /// Subagent resume pending block - shows what the subagent wants to do
+    /// (tool_call: ToolCall, is_auto_approved: bool, pause_info: Option<TaskPauseInfo>)
+    RenderSubagentResumePendingBlock(
+        ToolCall,
+        bool,
+        Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    ),
+    /// Tool call streaming preview - shows tools being generated with token counters
+    /// (tool_infos: Vec<ToolCallStreamInfo>)
+    RenderToolCallStreamBlock(Vec<ToolCallStreamInfo>),
+    /// Ask user inline block - renders questions and options inline in the message area
+    RenderAskUserBlock {
+        questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+        answers: std::collections::HashMap<
+            String,
+            stakpak_shared::models::integrations::openai::AskUserAnswer,
+        >,
+        current_tab: usize,
+        selected_option: usize,
+        custom_input: String,
+        focused: bool,
+    },
 }
 
 /// Compute a hash of the MessageContent for cache invalidation.
@@ -205,6 +235,66 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
             18u8.hash(&mut hasher);
             text.hash(&mut hasher);
         }
+        MessageContent::RenderTaskWaitBlock(task_updates, progress, target_ids) => {
+            19u8.hash(&mut hasher);
+            task_updates.len().hash(&mut hasher);
+            // Hash progress as integer to avoid float hashing issues
+            (*progress as u64).hash(&mut hasher);
+            target_ids.hash(&mut hasher);
+            // Hash task statuses and durations for change detection
+            for task in task_updates {
+                task.task_id.hash(&mut hasher);
+                task.status.hash(&mut hasher);
+                // Hash duration as integer seconds for change detection
+                if let Some(d) = task.duration_secs {
+                    (d as u64).hash(&mut hasher);
+                }
+            }
+        }
+        MessageContent::RenderSubagentResumePendingBlock(tool_call, is_auto, pause_info) => {
+            20u8.hash(&mut hasher);
+            tool_call.id.hash(&mut hasher);
+            is_auto.hash(&mut hasher);
+            if let Some(pi) = pause_info {
+                if let Some(msg) = &pi.agent_message {
+                    msg.hash(&mut hasher);
+                }
+                if let Some(calls) = &pi.pending_tool_calls {
+                    calls.len().hash(&mut hasher);
+                }
+            }
+        }
+        MessageContent::RenderToolCallStreamBlock(infos) => {
+            21u8.hash(&mut hasher);
+            infos.len().hash(&mut hasher);
+            for info in infos {
+                info.name.hash(&mut hasher);
+                info.args_tokens.hash(&mut hasher);
+            }
+        }
+        MessageContent::RenderAskUserBlock {
+            questions,
+            answers,
+            current_tab,
+            selected_option,
+            custom_input,
+            focused,
+        } => {
+            22u8.hash(&mut hasher);
+            questions.len().hash(&mut hasher);
+            current_tab.hash(&mut hasher);
+            selected_option.hash(&mut hasher);
+            custom_input.hash(&mut hasher);
+            focused.hash(&mut hasher);
+            answers.len().hash(&mut hasher);
+            for q in questions {
+                q.label.hash(&mut hasher);
+            }
+            for (k, v) in answers {
+                k.hash(&mut hasher);
+                v.answer.hash(&mut hasher);
+            }
+        }
     }
 
     hasher.finish()
@@ -279,7 +369,13 @@ pub struct Message {
 }
 
 /// Tags to strip from user message display
-const HIDDEN_XML_TAGS: &[&str] = &["local_context", "rulebooks", "agent_mode", "agents_md"];
+const HIDDEN_XML_TAGS: &[&str] = &[
+    "local_context",
+    "rulebooks",
+    "agent_mode",
+    "agents_md",
+    "apps_md",
+];
 
 /// Strip XML-style blocks from text (e.g., <tag>...</tag>)
 fn strip_xml_block(text: &mut String, tag: &str) {
@@ -505,6 +601,32 @@ impl Message {
         }
     }
 
+    pub fn render_ask_user_block(
+        questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+        answers: std::collections::HashMap<
+            String,
+            stakpak_shared::models::integrations::openai::AskUserAnswer,
+        >,
+        current_tab: usize,
+        selected_option: usize,
+        custom_input: String,
+        focused: bool,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderAskUserBlock {
+                questions,
+                answers,
+                current_tab,
+                selected_option,
+                custom_input,
+                focused,
+            },
+            is_collapsed: None,
+        }
+    }
+
     /// Create a view file block message
     /// Shows a compact display with file icon, \"View\", file path, line count, and optional grep/glob
     pub fn render_view_file_block(
@@ -533,6 +655,53 @@ impl Message {
             content: MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob),
             // is_collapsed: Some(true) means it shows in full screen popup only
             is_collapsed: Some(true),
+        }
+    }
+
+    /// Create a task wait block message
+    /// Shows progress of background tasks being waited on with status indicators
+    pub fn render_task_wait_block(
+        task_updates: Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        progress: f64,
+        target_task_ids: Vec<String>,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids),
+            is_collapsed: None,
+        }
+    }
+
+    /// Create a subagent resume pending block message
+    /// Shows what the subagent wants to do (pending tool calls)
+    pub fn render_subagent_resume_pending_block(
+        tool_call: ToolCall,
+        is_auto_approved: bool,
+        pause_info: Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderSubagentResumePendingBlock(
+                tool_call,
+                is_auto_approved,
+                pause_info,
+            ),
+            is_collapsed: None,
+        }
+    }
+
+    /// Create a tool call streaming preview block
+    /// Shows tools being generated by the LLM with token counters
+    pub fn render_tool_call_stream_block(
+        infos: Vec<ToolCallStreamInfo>,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderToolCallStreamBlock(infos),
+            is_collapsed: None,
         }
     }
 }
@@ -750,18 +919,48 @@ pub fn get_wrapped_message_lines(
     get_wrapped_message_lines_internal(messages, width, false)
 }
 
+/// Compute a cache key that uniquely identifies the current message state.
+/// This key changes when:
+/// - Width changes
+/// - Shell popup visibility changes  
+/// - Side panel visibility changes
+/// - Messages are added, removed, or resumed (via message count and last message ID)
+fn compute_cache_key(state: &AppState, width: usize) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    // Include width
+    width.hash(&mut hasher);
+
+    // Include visibility states
+    state.shell_popup_visible.hash(&mut hasher);
+    state.show_side_panel.hash(&mut hasher);
+
+    // Include message count (filters out collapsed messages)
+    let visible_messages: Vec<&Message> = state
+        .messages
+        .iter()
+        .filter(|m| m.is_collapsed.is_none())
+        .collect();
+    visible_messages.len().hash(&mut hasher);
+
+    // Include last message ID to detect content changes at the end (streaming)
+    if let Some(last_msg) = visible_messages.last() {
+        last_msg.id.hash(&mut hasher);
+    }
+
+    // Include first message ID to detect changes at the beginning (resume)
+    if let Some(first_msg) = visible_messages.first() {
+        first_msg.id.hash(&mut hasher);
+    }
+
+    hasher.finish()
+}
+
 /// Get the total number of cached lines without cloning.
 /// This is useful for scroll calculations where we only need the count.
 #[allow(dead_code)]
 pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
-    // Use consistent cache key calculation with get_wrapped_message_lines_cached
-    let mut cache_key = width;
-    if state.shell_popup_visible {
-        cache_key += 100000;
-    }
-    if state.show_side_panel {
-        cache_key += 200000;
-    }
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
         && cached_key == cache_key
@@ -861,11 +1060,7 @@ pub fn get_visible_lines_owned(
 /// This is more efficient when you just need to ensure the cache exists.
 #[allow(dead_code)]
 fn ensure_cache_populated(state: &mut AppState, width: usize) {
-    let cache_key = if state.shell_popup_visible {
-        width + 100000
-    } else {
-        width
-    };
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, _, _)) = &state.assembled_lines_cache
         && *cached_key == cache_key
@@ -888,19 +1083,10 @@ fn ensure_cache_populated(state: &mut AppState, width: usize) {
 /// NOTE: Prefer using `get_visible_lines_cached` when you only need a slice,
 /// as it avoids cloning the entire vector.
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
-    // FAST PATH: If assembled cache exists and width matches, return it immediately.
-    // The cache is explicitly invalidated when messages change, so if it exists, it's valid.
-    // We encode visibility states in the cache key to ensure cache invalidation when they change:
-    // - shell_popup_visible: adds 100000
-    // - show_side_panel: adds 200000
-    // This ensures the cache is invalidated when these visibility states change.
-    let mut cache_key = width;
-    if state.shell_popup_visible {
-        cache_key += 100000;
-    }
-    if state.show_side_panel {
-        cache_key += 200000;
-    }
+    // FAST PATH: If assembled cache exists and key matches, return it immediately.
+    // The cache key is a hash that includes width, visibility states, message count,
+    // and first/last message IDs to detect changes from resume, streaming, etc.
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, cached_lines, _)) = &state.assembled_lines_cache
         && *cached_key == cache_key
@@ -934,9 +1120,24 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     let estimated_lines = message_refs.len() * 10; // Rough estimate of 10 lines per message
     let mut all_processed_lines: Vec<Line<'static>> = Vec::with_capacity(estimated_lines);
 
+    // Build line-to-message mapping for click detection
+    // Format: (start_line, end_line, message_id, is_user_message, message_text, user_message_index)
+    let mut line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)> = Vec::new();
+    let mut user_message_counter: usize = 0;
+
     // Process each message, using cache when available
     for msg in &message_refs {
         let content_hash = hash_message_content(&msg.content);
+        let start_line = all_processed_lines.len();
+
+        // Check if this is a user message and extract text
+        let (is_user_message, message_text) = match &msg.content {
+            MessageContent::UserMessage(text) => {
+                user_message_counter += 1;
+                (true, text.clone())
+            }
+            _ => (false, String::new()),
+        };
 
         // Check if we have a valid cached render for this message
         if let Some(cached) = state.per_message_cache.get(&msg.id)
@@ -946,43 +1147,88 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             // Cache hit! Reuse rendered lines
             cache_hits += 1;
             all_processed_lines.extend(cached.rendered_lines.iter().cloned());
-            continue;
+        } else {
+            // Cache miss - render this single message
+            cache_misses += 1;
+            let rendered_lines = render_single_message(msg, width);
+
+            // Store in per-message cache
+            state.per_message_cache.insert(
+                msg.id,
+                RenderedMessageCache {
+                    content_hash,
+                    rendered_lines: Arc::new(rendered_lines.clone()),
+                    width,
+                },
+            );
+
+            all_processed_lines.extend(rendered_lines);
         }
 
-        // Cache miss - render this single message
-        cache_misses += 1;
-        let rendered_lines = render_single_message(msg, width);
+        let end_line = all_processed_lines.len();
 
-        // Store in per-message cache
-        state.per_message_cache.insert(
-            msg.id,
-            RenderedMessageCache {
-                content_hash,
-                rendered_lines: Arc::new(rendered_lines.clone()),
-                width,
-            },
-        );
-
-        all_processed_lines.extend(rendered_lines);
+        // Only track user messages in the map (for efficiency)
+        if is_user_message && end_line > start_line {
+            line_to_message_map.push((
+                start_line,
+                end_line,
+                msg.id,
+                true,
+                message_text,
+                user_message_counter,
+            ));
+        }
     }
 
     // Collapse consecutive empty lines (max 2 consecutive empty lines)
+    // Also build a mapping from old line index to new line index
     let mut collapsed_lines: Vec<Line<'static>> = Vec::with_capacity(all_processed_lines.len());
+    let mut old_to_new_index: Vec<Option<usize>> = Vec::with_capacity(all_processed_lines.len());
     let mut consecutive_empty = 0;
+
     for line in all_processed_lines {
         let is_empty = line.spans.is_empty()
             || (line.spans.len() == 1 && line.spans[0].content.trim().is_empty());
         if is_empty {
             consecutive_empty += 1;
             if consecutive_empty <= 2 {
+                old_to_new_index.push(Some(collapsed_lines.len()));
                 collapsed_lines.push(line);
+            } else {
+                old_to_new_index.push(None); // This line was removed
             }
         } else {
             consecutive_empty = 0;
+            old_to_new_index.push(Some(collapsed_lines.len()));
             collapsed_lines.push(line);
         }
     }
     let mut all_processed_lines = collapsed_lines;
+
+    // Adjust line_to_message_map indices based on collapsed lines
+    let adjusted_line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)> =
+        line_to_message_map
+            .into_iter()
+            .filter_map(|(start, end, id, is_user, text, user_idx)| {
+                // Find the new start index (first non-None mapping at or after old start)
+                let new_start =
+                    (start..end).find_map(|i| old_to_new_index.get(i).and_then(|&idx| idx))?;
+
+                // Find the new end index (last non-None mapping before old end, +1)
+                let new_end = (start..end)
+                    .rev()
+                    .find_map(|i| old_to_new_index.get(i).and_then(|&idx| idx))
+                    .map(|i| i + 1)?;
+
+                if new_end > new_start {
+                    Some((new_start, new_end, id, is_user, text, user_idx))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+    let line_to_message_map = adjusted_line_to_message_map;
 
     // Add trailing empty lines if we have content
     if !all_processed_lines.is_empty() {
@@ -1000,6 +1246,9 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     // Invalidate visible lines cache since source changed
     state.visible_lines_cache = None;
     state.last_render_width = width;
+
+    // Update line-to-message map for click detection
+    state.line_to_message_map = line_to_message_map.clone();
 
     // Record performance metrics
     let render_time_us = render_start.elapsed().as_micros() as u64;
@@ -1151,7 +1400,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
         }
         MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
             let full_command = extract_full_command_arguments(tool_call);
-            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.function.name);
             let rendered = if (tool_name == "str_replace" || tool_name == "create")
                 && !render_file_diff(tool_call, width).is_empty()
             {
@@ -1199,9 +1448,9 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             lines.extend(convert_to_owned_lines(borrowed));
         }
         MessageContent::RenderCollapsedMessage(tool_call) => {
-            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.function.name);
             if (tool_name == "str_replace" || tool_name == "create")
-                && let Some(rendered) = render_file_diff_full(tool_call, width, Some(true))
+                && let Some(rendered) = render_file_diff_full(tool_call, width, Some(true), None)
                 && !rendered.is_empty()
             {
                 let borrowed = get_wrapped_styled_block_lines(&rendered, width);
@@ -1232,48 +1481,68 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             lines.extend(convert_to_owned_lines(borrowed));
         }
         MessageContent::RenderFullContentMessage(tool_call_result) => {
-            let title = get_command_type_name(&tool_call_result.call);
-            let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
-            let result = &tool_call_result.result;
+            let tool_name =
+                stakpak_shared::utils::strip_tool_name(&tool_call_result.call.function.name);
 
-            let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
-            lines.push((spacing_marker.clone(), Style::default()));
-
-            let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                Color::LightGreen
+            // For str_replace/create, use the diff view with proper line numbers
+            if (tool_name == "str_replace" || tool_name == "create")
+                && let Some(rendered) = render_file_diff_full(
+                    &tool_call_result.call,
+                    width,
+                    Some(true),
+                    Some(&tool_call_result.result),
+                )
+                && !rendered.is_empty()
+            {
+                let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+                lines.extend(convert_to_owned_lines(borrowed));
             } else {
-                Color::Red
-            };
+                // For other tools, show the raw result
+                let title = get_command_type_name(&tool_call_result.call);
+                let command_args =
+                    extract_truncated_command_arguments(&tool_call_result.call, None);
+                let result = &tool_call_result.result;
 
-            let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                AdaptiveColors::text()
-            } else {
-                Color::Red
-            };
+                let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+                lines.push((spacing_marker.clone(), Style::default()));
 
-            let header_lines = crate::services::bash_block::render_styled_header_with_dot_public(
-                &title,
-                &command_args,
-                Some(crate::services::bash_block::LinesColors {
-                    dot: dot_color,
-                    title: Color::White,
-                    command: AdaptiveColors::text(),
-                    message: message_color,
-                }),
-                Some(width),
-            );
-            for line in header_lines {
-                lines.push((convert_line_to_owned(line), Style::default()));
+                let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                    Color::LightGreen
+                } else {
+                    Color::Red
+                };
+
+                let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                    AdaptiveColors::text()
+                } else {
+                    Color::Red
+                };
+
+                let header_lines =
+                    crate::services::bash_block::render_styled_header_with_dot_public(
+                        &title,
+                        &command_args,
+                        Some(crate::services::bash_block::LinesColors {
+                            dot: dot_color,
+                            title: Color::White,
+                            command: AdaptiveColors::text(),
+                            message: message_color,
+                        }),
+                        Some(width),
+                    );
+                for line in header_lines {
+                    lines.push((convert_line_to_owned(line), Style::default()));
+                }
+
+                lines.push((spacing_marker.clone(), Style::default()));
+
+                let content_lines = format_text_content(result, width);
+                for line in content_lines {
+                    lines.push((line, Style::default()));
+                }
+
+                lines.push((spacing_marker, Style::default()));
             }
-
-            lines.push((spacing_marker.clone(), Style::default()));
-
-            let content_lines = format_text_content(result, width);
-            for line in content_lines {
-                lines.push((line, Style::default()));
-            }
-
-            lines.push((spacing_marker, Style::default()));
         }
         MessageContent::RenderEscapedTextBlock(content) => {
             let rendered = format_text_content(content, width);
@@ -1291,7 +1560,29 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
         MessageContent::UserMessage(text) => {
             // Render user message with cyan bar prefix and proper word wrapping
             let rendered = render_user_message_lines(text, width);
-            lines.extend(rendered);
+            let total_lines = rendered.len();
+            const MAX_PREVIEW_LINES: usize = 15;
+
+            if total_lines > MAX_PREVIEW_LINES {
+                lines.extend(rendered.into_iter().take(MAX_PREVIEW_LINES));
+                // Add collapsed hint line
+                let hidden = total_lines - MAX_PREVIEW_LINES;
+                let accent_color = Color::DarkGray;
+                lines.push((
+                    Line::from(vec![
+                        Span::styled("┃ ".to_string(), Style::default().fg(accent_color)),
+                        Span::styled(
+                            format!("... {} more lines (ctrl+t to expand)", hidden),
+                            Style::default()
+                                .fg(accent_color)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ]),
+                    Style::default(),
+                ));
+            } else {
+                lines.extend(rendered);
+            }
         }
         MessageContent::BashBubble {
             title,
@@ -1352,6 +1643,63 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             };
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids) => {
+            let rendered = crate::services::bash_block::render_task_wait_block(
+                task_updates,
+                *progress,
+                target_task_ids,
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderSubagentResumePendingBlock(
+            tool_call,
+            is_auto_approved,
+            pause_info,
+        ) => {
+            let rendered = crate::services::bash_block::render_subagent_resume_pending_block(
+                tool_call,
+                *is_auto_approved,
+                pause_info.as_ref(),
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderToolCallStreamBlock(infos) => {
+            let rendered = crate::services::bash_block::render_tool_call_stream_block(infos, width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderAskUserBlock {
+            questions,
+            answers,
+            current_tab,
+            selected_option,
+            custom_input,
+            focused,
+        } => {
+            let rendered = crate::services::bash_block::render_ask_user_block(
+                questions,
+                answers,
+                *current_tab,
+                *selected_option,
+                custom_input,
+                width,
+                *focused,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
+            lines.extend(convert_to_owned_lines(borrowed));
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
         }
     }
 
@@ -1745,7 +2093,7 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
-                let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+                let tool_name = strip_tool_name(&tool_call.function.name);
                 let rendered_lines = if (tool_name == "str_replace" || tool_name == "create")
                     && !render_file_diff(tool_call, width).is_empty()
                 {
@@ -1799,10 +2147,10 @@ fn get_wrapped_message_lines_internal(
             }
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
-                let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+                let tool_name = strip_tool_name(&tool_call.function.name);
                 if (tool_name == "str_replace" || tool_name == "create")
                     && let Some(rendered_lines) =
-                        render_file_diff_full(tool_call, width, Some(true))
+                        render_file_diff_full(tool_call, width, Some(true), None)
                     && !rendered_lines.is_empty()
                 {
                     let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
@@ -1841,53 +2189,73 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::RenderFullContentMessage(tool_call_result) => {
-                // Full content view for popup - shows complete result without truncation
-                let title = crate::services::message::get_command_type_name(&tool_call_result.call);
-                let command_args =
-                    extract_truncated_command_arguments(&tool_call_result.call, None);
-                let result = &tool_call_result.result;
+                let tool_name =
+                    stakpak_shared::utils::strip_tool_name(&tool_call_result.call.function.name);
 
-                // Render header with dot
-                let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
-                all_lines.push((spacing_marker.clone(), Style::default()));
-
-                let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                    Color::LightGreen
+                // For str_replace/create, use the diff view with proper line numbers
+                if (tool_name == "str_replace" || tool_name == "create")
+                    && let Some(rendered_lines) = render_file_diff_full(
+                        &tool_call_result.call,
+                        width,
+                        Some(true),
+                        Some(&tool_call_result.result),
+                    )
+                    && !rendered_lines.is_empty()
+                {
+                    let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
                 } else {
-                    Color::Red
-                };
+                    // Full content view for popup - shows complete result without truncation
+                    let title =
+                        crate::services::message::get_command_type_name(&tool_call_result.call);
+                    let command_args =
+                        extract_truncated_command_arguments(&tool_call_result.call, None);
+                    let result = &tool_call_result.result;
 
-                let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                    crate::services::detect_term::AdaptiveColors::text()
-                } else {
-                    Color::Red
-                };
+                    // Render header with dot
+                    let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+                    all_lines.push((spacing_marker.clone(), Style::default()));
 
-                let header_lines =
-                    crate::services::bash_block::render_styled_header_with_dot_public(
-                        &title,
-                        &command_args,
-                        Some(crate::services::bash_block::LinesColors {
-                            dot: dot_color,
-                            title: Color::White,
-                            command: crate::services::detect_term::AdaptiveColors::text(),
-                            message: message_color,
-                        }),
-                        Some(width),
-                    );
-                for line in header_lines {
-                    all_lines.push((convert_line_to_owned(line), Style::default()));
+                    let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                        Color::LightGreen
+                    } else {
+                        Color::Red
+                    };
+
+                    let message_color = if tool_call_result.status == ToolCallResultStatus::Success
+                    {
+                        crate::services::detect_term::AdaptiveColors::text()
+                    } else {
+                        Color::Red
+                    };
+
+                    let header_lines =
+                        crate::services::bash_block::render_styled_header_with_dot_public(
+                            &title,
+                            &command_args,
+                            Some(crate::services::bash_block::LinesColors {
+                                dot: dot_color,
+                                title: Color::White,
+                                command: crate::services::detect_term::AdaptiveColors::text(),
+                                message: message_color,
+                            }),
+                            Some(width),
+                        );
+                    for line in header_lines {
+                        all_lines.push((convert_line_to_owned(line), Style::default()));
+                    }
+
+                    all_lines.push((spacing_marker.clone(), Style::default()));
+
+                    // Render full content
+                    let content_lines = format_text_content(result, width);
+                    for line in content_lines {
+                        all_lines.push((line, Style::default()));
+                    }
+
+                    all_lines.push((spacing_marker, Style::default()));
                 }
-
-                all_lines.push((spacing_marker.clone(), Style::default()));
-
-                // Render full content
-                let content_lines = format_text_content(result, width);
-                for line in content_lines {
-                    all_lines.push((line, Style::default()));
-                }
-
-                all_lines.push((spacing_marker, Style::default()));
             }
             MessageContent::RenderEscapedTextBlock(content) => {
                 let rendered_lines = format_text_content(content, width);
@@ -1965,6 +2333,61 @@ fn get_wrapped_message_lines_internal(
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }
+            MessageContent::RenderTaskWaitBlock(task_updates, progress, target_task_ids) => {
+                let rendered_lines = crate::services::bash_block::render_task_wait_block(
+                    task_updates,
+                    *progress,
+                    target_task_ids,
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderSubagentResumePendingBlock(
+                tool_call,
+                is_auto_approved,
+                pause_info,
+            ) => {
+                let rendered_lines =
+                    crate::services::bash_block::render_subagent_resume_pending_block(
+                        tool_call,
+                        *is_auto_approved,
+                        pause_info.as_ref(),
+                        width,
+                    );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderToolCallStreamBlock(infos) => {
+                let rendered_lines =
+                    crate::services::bash_block::render_tool_call_stream_block(infos, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderAskUserBlock {
+                questions,
+                answers,
+                current_tab,
+                selected_option,
+                custom_input,
+                focused,
+            } => {
+                let rendered_lines = crate::services::bash_block::render_ask_user_block(
+                    questions,
+                    answers,
+                    *current_tab,
+                    *selected_option,
+                    custom_input,
+                    width,
+                    *focused,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
         };
         agent_mode_removed = false;
         checkpoint_id_removed = false;
@@ -1978,6 +2401,42 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<String>) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
+
+    // For subagent tasks, show description + tools summary instead of raw args
+    let tool_name = strip_tool_name(&tool_call.function.name);
+    if tool_name == "dynamic_subagent_task"
+        && let Ok(ref args) = arguments
+    {
+        let desc = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("subagent");
+        let tools_count = args
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let is_sandbox = args
+            .get("enable_sandbox")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let sandbox_tag = if is_sandbox { " [sandboxed]" } else { "" };
+        return format!("{}{} ({} tools)", desc, sandbox_tag, tools_count);
+    }
+
+    // For ask_user, show question labels
+    if tool_name == "ask_user"
+        && let Ok(request) = serde_json::from_str::<
+            stakpak_shared::models::integrations::openai::AskUserRequest,
+        >(&tool_call.function.arguments)
+    {
+        let labels: Vec<&str> = request.questions.iter().map(|q| q.label.as_str()).collect();
+        if !labels.is_empty() {
+            return format!("questions: {}", labels.join(", "));
+        }
+        return format!("{} question(s)", request.questions.len());
+    }
+
     const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
 
     if let Ok(arguments) = arguments {
@@ -2240,7 +2699,7 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
 
 // Helper function to get command name for the outside title
 pub fn get_command_type_name(tool_call: &ToolCall) -> String {
-    match crate::utils::strip_tool_name(&tool_call.function.name) {
+    match strip_tool_name(&tool_call.function.name) {
         "create_file" => "Create file".to_string(),
         "create" => "Create".to_string(),
         "edit_file" => "Edit file".to_string(),
@@ -2250,9 +2709,27 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
         "delete_file" => "Delete file".to_string(),
         "list_directory" => "List directory".to_string(),
         "search_files" => "Search files".to_string(),
+        "dynamic_subagent_task" => {
+            let args =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let desc = args
+                .as_ref()
+                .and_then(|a| a.get("description").and_then(|v| v.as_str()))
+                .unwrap_or("Subagent");
+            let is_sandbox = args
+                .as_ref()
+                .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if is_sandbox {
+                format!("Subagent [sandboxed]: {}", desc)
+            } else {
+                format!("Subagent: {}", desc)
+            }
+        }
+        "ask_user" => "Ask User".to_string(),
         _ => {
             // Convert function name to title case
-            crate::utils::strip_tool_name(&tool_call.function.name)
+            strip_tool_name(&tool_call.function.name)
                 .replace("_", " ")
                 .split_whitespace()
                 .map(|word| {
@@ -2295,6 +2772,7 @@ mod tests {
                     name: "test".to_string(),
                     arguments: input.to_string(),
                 },
+                metadata: None,
             };
 
             let result = extract_full_command_arguments(&tool_call);

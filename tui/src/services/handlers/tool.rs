@@ -7,8 +7,10 @@ use crate::services::commands::{CommandAction, CommandContext, execute_command, 
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
+    ProgressType, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
+    ToolCallStreamInfo,
 };
+use stakpak_shared::utils::strip_tool_name;
 use tokio::sync::mpsc::Sender;
 
 use super::shell::extract_command_from_tool_call;
@@ -23,6 +25,11 @@ pub fn handle_stream_tool_result(
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
+        return None;
+    }
+
+    // Ignore late streaming events after cancellation was requested
+    if state.cancel_requested {
         return None;
     }
 
@@ -75,6 +82,11 @@ pub fn handle_stream_tool_result(
         return None; // Don't add this marker to the streaming buffer
     }
 
+    // Handle TaskWait progress type specially - use replace mode instead of append
+    if matches!(progress.progress_type, Some(ProgressType::TaskWait)) {
+        return handle_task_wait_progress(state, progress);
+    }
+
     // Ensure loading state is true during streaming tool results
     // Only set it if it's not already true to avoid unnecessary state changes
     if !state.loading {
@@ -82,7 +94,7 @@ pub fn handle_stream_tool_result(
     }
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
-    // 1. Update the buffer for this tool_call_id
+    // 1. Update the buffer for this tool_call_id (append mode for command output)
     state
         .streaming_tool_results
         .entry(tool_call_id)
@@ -93,7 +105,7 @@ pub fn handle_stream_tool_result(
     let is_run_command = state
         .dialog_command
         .as_ref()
-        .map(|tc| crate::utils::strip_tool_name(&tc.function.name) == "run_command")
+        .map(|tc| strip_tool_name(&tc.function.name) == "run_command")
         .unwrap_or(false);
 
     let command_str = if is_run_command {
@@ -148,8 +160,91 @@ pub fn handle_stream_tool_result(
     None
 }
 
+/// Handle TaskWait progress type with replace mode and dedicated UI
+fn handle_task_wait_progress(
+    state: &mut AppState,
+    progress: ToolCallResultProgress,
+) -> Option<String> {
+    let tool_call_id = progress.id;
+
+    // Ensure loading state is true
+    if !state.loading {
+        state.loading = true;
+    }
+    state.is_streaming = true;
+    state.streaming_tool_result_id = Some(tool_call_id);
+
+    // Remove the pending message if exists
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+    // Remove any old message with this id (replace mode)
+    state.messages.retain(|m| m.id != tool_call_id);
+
+    // Use structured task updates if available, otherwise fall back to message
+    if let Some(task_updates) = progress.task_updates {
+        // Extract target task IDs from task updates
+        let target_task_ids: Vec<String> = task_updates
+            .iter()
+            .filter(|t| t.is_target)
+            .map(|t| t.task_id.clone())
+            .collect();
+
+        // Cache pause info for paused subagent tasks (for approval bar display)
+        for task in &task_updates {
+            if task.status == "Paused"
+                && let Some(pause_info) = &task.pause_info
+            {
+                state
+                    .subagent_pause_info
+                    .insert(task.task_id.clone(), pause_info.clone());
+            }
+        }
+
+        let overall_progress = progress.progress.unwrap_or(0.0);
+
+        // Use dedicated task wait block
+        state.messages.push(Message::render_task_wait_block(
+            task_updates,
+            overall_progress,
+            target_task_ids,
+            Some(tool_call_id),
+        ));
+    } else {
+        // Fallback: use generic streaming block with replace mode
+        // Store message directly (not appending)
+        state
+            .streaming_tool_results
+            .insert(tool_call_id, progress.message.clone());
+
+        state.messages.push(Message::render_streaming_border_block(
+            &progress.message,
+            "Wait for Tasks",
+            "Progress",
+            None,
+            "TaskWait",
+            Some(tool_call_id),
+        ));
+    }
+
+    invalidate_message_lines_cache(state);
+
+    // If content changed while user is scrolled up, mark it
+    if !state.stay_at_bottom {
+        state.content_changed_while_scrolled_up = true;
+    }
+
+    None
+}
+
 /// Handle message tool calls event
 pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>) {
+    // Clear the streaming preview block now that tool calls are finalized
+    if let Some(preview_id) = state.tool_call_stream_preview_id.take() {
+        state.messages.retain(|m| m.id != preview_id);
+        invalidate_message_lines_cache(state);
+    }
+
     // exclude any tool call that is already executed
     let rest_tool_calls = tool_calls
         .into_iter()
@@ -173,6 +268,35 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
     // During retry, we want to preserve the original sequence for ShellCompleted
     if !state.show_shell_mode || state.dialog_command.is_none() {
         state.last_message_tool_calls = prompt_tool_calls.clone();
+    }
+}
+
+/// Handle streaming tool call progress (tool calls being generated by the LLM)
+/// Uses replace-mode: removes old preview and inserts updated one each time.
+pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCallStreamInfo>) {
+    let preview_id = *state
+        .tool_call_stream_preview_id
+        .get_or_insert_with(uuid::Uuid::new_v4);
+
+    // Ensure loading state
+    if !state.loading {
+        state.loading = true;
+    }
+    state.is_streaming = true;
+
+    // Remove old preview message (replace mode)
+    state.messages.retain(|m| m.id != preview_id);
+
+    // Add updated preview
+    state.messages.push(Message::render_tool_call_stream_block(
+        infos,
+        Some(preview_id),
+    ));
+
+    invalidate_message_lines_cache(state);
+
+    if !state.stay_at_bottom {
+        state.content_changed_while_scrolled_up = true;
     }
 }
 
@@ -266,11 +390,17 @@ pub fn handle_toggle_approval_status(state: &mut AppState) {
 /// Handle approval bar next tab event
 pub fn handle_approval_popup_next_tab(state: &mut AppState) {
     state.approval_bar.select_next();
+    // Scroll to show the beginning of the tool call block
+    state.scroll_to_last_message_start = true;
+    state.stay_at_bottom = false;
 }
 
 /// Handle approval bar prev tab event
 pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
     state.approval_bar.select_prev();
+    // Scroll to show the beginning of the tool call block
+    state.scroll_to_last_message_start = true;
+    state.stay_at_bottom = false;
 }
 
 /// Handle approval bar toggle approval event
@@ -391,7 +521,10 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
     };
 
     // Normalize/Strip tool name for checking
-    let tool_name_stripped = crate::utils::strip_tool_name(function_name);
+    let tool_name_stripped = strip_tool_name(function_name);
+
+    // Get current user message index for tracking (used for selective revert)
+    let user_msg_index = state.user_message_count;
 
     match tool_name_stripped {
         "write_to_file" | "create" | "create_file" => {
@@ -430,7 +563,8 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
 
                 let edit = FileEdit::new(summary.to_string())
                     .with_stats(line_count, 0)
-                    .with_tool_call(result.call.clone());
+                    .with_tool_call(result.call.clone())
+                    .with_user_message_index(user_msg_index);
 
                 state.changeset.track_file(path, edit);
 
@@ -457,6 +591,43 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     return;
                 }
 
+                // Backup original file content before first modification (for reliable revert)
+                let is_first_edit = !state.changeset.files.contains_key(path);
+                if is_first_edit
+                    && std::path::Path::new(path).exists()
+                    && let Some(backup_path) = backup_original_file(path, &state.session_id)
+                {
+                    // Store backup path on the tracked file (will be created by track_file)
+                    // We need to track first, then set the backup path
+                    let (added, removed) = parse_diff_stats(&result.result);
+                    let summary = if tool_name_stripped == "replace_file_content"
+                        || tool_name_stripped == "str_replace"
+                    {
+                        "Edited file"
+                    } else {
+                        "Multi-edit file"
+                    };
+                    let diff_preview = extract_diff_preview(&result.result);
+
+                    let mut edit = FileEdit::new(summary.to_string())
+                        .with_stats(added, removed)
+                        .with_tool_call(result.call.clone())
+                        .with_user_message_index(user_msg_index);
+
+                    if let Some(preview) = diff_preview {
+                        edit = edit.with_diff_preview(preview);
+                    }
+
+                    state.changeset.track_file(path, edit);
+                    state.changeset.set_original_backup(path, backup_path);
+
+                    // If file does not exist, mark it as Deleted immediately
+                    if !std::path::Path::new(path).exists() {
+                        state.changeset.mark_removed(path, None);
+                    }
+                    return;
+                }
+
                 // Parse diff from the result message
                 let (added, removed) = parse_diff_stats(&result.result);
 
@@ -473,7 +644,8 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
 
                 let mut edit = FileEdit::new(summary.to_string())
                     .with_stats(added, removed)
-                    .with_tool_call(result.call.clone());
+                    .with_tool_call(result.call.clone())
+                    .with_user_message_index(user_msg_index);
 
                 if let Some(preview) = diff_preview {
                     edit = edit.with_diff_preview(preview);
@@ -502,6 +674,56 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
         }
         _ => {}
     }
+}
+
+/// Backup original file content before first modification
+/// Returns the backup path on success
+fn backup_original_file(path: &str, session_id: &str) -> Option<String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // Get home directory
+    let home_dir = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            log::warn!("Could not determine home directory for backup");
+            return None;
+        }
+    };
+
+    // Create backup directory
+    let backup_dir = home_dir
+        .join(".stakpak")
+        .join("sessions")
+        .join(session_id)
+        .join("original_backups");
+
+    if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+        log::warn!("Failed to create backup directory: {}", e);
+        return None;
+    }
+
+    // Create a hash of the path for the backup filename (to avoid path conflicts)
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    let path_hash = hasher.finish();
+
+    // Also include the filename for readability
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let backup_filename = format!("{}_{:x}", file_name, path_hash);
+    let backup_path = backup_dir.join(&backup_filename);
+
+    // Copy the original file to backup
+    if let Err(e) = std::fs::copy(path, &backup_path) {
+        log::warn!("Failed to backup original file {}: {}", path, e);
+        return None;
+    }
+
+    Some(backup_path.to_string_lossy().to_string())
 }
 
 /// Extract backup path from the XML output
@@ -673,10 +895,29 @@ fn update_pending_tool_display(state: &mut AppState) {
         state.messages.retain(|m| m.id != pending_id);
     }
 
+    // Create a new pending block for the currently selected tool
+    create_pending_block_for_selected_tool(state);
+
+    // Force-invalidate cache — bypass the streaming guard in invalidate_message_lines_cache
+    // because the user is actively cycling through tool call tabs and needs to see the
+    // updated preview immediately, even if is_streaming is still true from the LLM stream.
+    state.assembled_lines_cache = None;
+    state.visible_lines_cache = None;
+    state.message_lines_cache = None;
+    state.collapsed_message_lines_cache = None;
+
+    // Don't auto-scroll - let user control scroll position
+    state.stay_at_bottom = false;
+}
+
+/// Create a pending block in messages for the currently selected tool in the approval bar.
+/// Sets `pending_bash_message_id` and `dialog_command` to match the selected tool.
+/// Does NOT remove any existing pending block — caller is responsible for cleanup.
+pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
     // Get the currently selected tool call
     if let Some(action) = state.approval_bar.selected_action() {
         let tool_call = &action.tool_call;
-        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.function.name);
 
         // Determine the approval state for display
         let auto_approve = action.status == crate::services::approval_bar::ApprovalStatus::Approved;
@@ -698,6 +939,26 @@ fn update_pending_tool_display(state: &mut AppState) {
             let msg = Message::render_run_command_block(command, None, run_state, None);
             state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
+        } else if tool_name == "resume_subagent_task" {
+            // For resume_subagent_task, use the special subagent pending block
+            let pause_info =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+                    .ok()
+                    .and_then(|args| {
+                        args.get("task_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+
+            let msg = Message::render_subagent_resume_pending_block(
+                tool_call.clone(),
+                auto_approve,
+                pause_info,
+                None,
+            );
+            state.pending_bash_message_id = Some(msg.id);
+            state.messages.push(msg);
         } else {
             // For other tools, use the standard pending block
             let msg = Message::render_pending_border_block(tool_call.clone(), auto_approve, None);
@@ -708,10 +969,4 @@ fn update_pending_tool_display(state: &mut AppState) {
         // Update dialog_command to the selected tool
         state.dialog_command = Some(tool_call.clone());
     }
-
-    // Invalidate cache so the new pending message is rendered
-    invalidate_message_lines_cache(state);
-
-    // Don't auto-scroll - let user control scroll position
-    state.stay_at_bottom = false;
 }

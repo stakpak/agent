@@ -12,6 +12,7 @@
 //! - `openai` - OpenAI API
 //! - `anthropic` - Anthropic API (supports OAuth via `access_token`)
 //! - `gemini` - Google Gemini API
+//! - `bedrock` - AWS Bedrock (uses AWS credential chain, no API key)
 //!
 //! For built-in providers, you can use the model name directly without a prefix:
 //! - `claude-sonnet-4-5` → auto-detected as Anthropic
@@ -50,13 +51,9 @@
 //! api_endpoint = "http://localhost:11434/v1"
 //! ```
 
-use crate::models::{
-    integrations::{anthropic::AnthropicModel, gemini::GeminiModel, openai::OpenAIModel},
-    model_pricing::{ContextAware, ModelContextInfo},
-};
 use serde::{Deserialize, Serialize};
+use stakai::Model;
 use std::collections::HashMap;
-use std::fmt::Display;
 
 // =============================================================================
 // Provider Configuration
@@ -164,6 +161,29 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
     },
+    /// AWS Bedrock provider configuration
+    ///
+    /// Uses AWS credential chain for authentication (no API key needed).
+    /// Supports env vars, shared credentials, SSO, and instance roles.
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.amazon-bedrock]
+    /// type = "amazon-bedrock"
+    /// region = "us-east-1"
+    /// profile_name = "my-aws-profile"  # optional
+    ///
+    /// # Then use models as (friendly aliases work):
+    /// model = "amazon-bedrock/claude-sonnet-4-5"
+    /// ```
+    #[serde(rename = "amazon-bedrock")]
+    Bedrock {
+        /// AWS region (e.g., "us-east-1")
+        region: String,
+        /// Optional AWS named profile (from ~/.aws/config)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        profile_name: Option<String>,
+    },
 }
 
 impl ProviderConfig {
@@ -175,6 +195,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { .. } => "gemini",
             ProviderConfig::Custom { .. } => "custom",
             ProviderConfig::Stakpak { .. } => "stakpak",
+            ProviderConfig::Bedrock { .. } => "amazon-bedrock",
         }
     }
 
@@ -186,6 +207,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => Some(api_key.as_str()),
+            ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
         }
     }
 
@@ -197,6 +219,28 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
+            ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
+        }
+    }
+
+    /// Set the API endpoint for providers that support it.
+    ///
+    /// For `Custom`, `None` is ignored because custom providers require an endpoint.
+    /// For `Bedrock`, this is a no-op.
+    pub fn set_api_endpoint(&mut self, endpoint: Option<String>) {
+        match self {
+            ProviderConfig::OpenAI { api_endpoint, .. }
+            | ProviderConfig::Anthropic { api_endpoint, .. }
+            | ProviderConfig::Gemini { api_endpoint, .. }
+            | ProviderConfig::Stakpak { api_endpoint, .. } => {
+                *api_endpoint = endpoint;
+            }
+            ProviderConfig::Custom { api_endpoint, .. } => {
+                if let Some(custom_endpoint) = endpoint {
+                    *api_endpoint = custom_endpoint;
+                }
+            }
+            ProviderConfig::Bedrock { .. } => {}
         }
     }
 
@@ -248,54 +292,28 @@ impl ProviderConfig {
             api_endpoint,
         }
     }
-}
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub enum LLMModel {
-    Anthropic(AnthropicModel),
-    Gemini(GeminiModel),
-    OpenAI(OpenAIModel),
-    /// Custom provider with explicit provider name and model.
-    ///
-    /// Used for custom OpenAI-compatible providers like LiteLLM, Ollama, etc.
-    /// The provider name matches the key in the `providers` HashMap config.
-    ///
-    /// # Examples
-    /// - `litellm/claude-opus` → `provider: "litellm"`, `model: "claude-opus"`
-    /// - `litellm/anthropic/claude-opus` → `provider: "litellm"`, `model: "anthropic/claude-opus"`
-    /// - `ollama/llama3` → `provider: "ollama"`, `model: "llama3"`
-    Custom {
-        /// Provider name matching the key in providers config (e.g., "litellm", "ollama")
-        provider: String,
-        /// Model name/path to pass to the provider API (can include nested prefixes)
-        model: String,
-        /// Optional display name for the model (shown in UI instead of provider/model)
-        name: Option<String>,
-    },
-}
-
-impl ContextAware for LLMModel {
-    fn context_info(&self) -> ModelContextInfo {
-        match self {
-            LLMModel::Anthropic(model) => model.context_info(),
-            LLMModel::Gemini(model) => model.context_info(),
-            LLMModel::OpenAI(model) => model.context_info(),
-            LLMModel::Custom { .. } => ModelContextInfo::default(),
+    /// Create a Bedrock provider config
+    pub fn bedrock(region: String, profile_name: Option<String>) -> Self {
+        ProviderConfig::Bedrock {
+            region,
+            profile_name,
         }
     }
 
-    fn model_name(&self) -> String {
+    /// Get the AWS region (Bedrock only)
+    pub fn region(&self) -> Option<&str> {
         match self {
-            LLMModel::Anthropic(model) => model.model_name(),
-            LLMModel::Gemini(model) => model.model_name(),
-            LLMModel::OpenAI(model) => model.model_name(),
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => name
-                .clone()
-                .unwrap_or_else(|| format!("{}/{}", provider, model)),
+            ProviderConfig::Bedrock { region, .. } => Some(region.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Get the AWS profile name (Bedrock only)
+    pub fn profile_name(&self) -> Option<&str> {
+        match self {
+            ProviderConfig::Bedrock { profile_name, .. } => profile_name.as_deref(),
+            _ => None,
         }
     }
 }
@@ -330,143 +348,6 @@ impl LLMProviderConfig {
     /// Check if any providers are configured
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty()
-    }
-}
-
-impl From<String> for LLMModel {
-    /// Parse a model string into an LLMModel.
-    ///
-    /// # Format
-    /// - `provider/model` - Explicit provider prefix
-    /// - `provider/nested/model` - Provider with nested model path (e.g., for LiteLLM)
-    /// - `model-name` - Auto-detect provider from model name
-    ///
-    /// # Examples
-    /// - `"litellm/anthropic/claude-opus"` → Custom { provider: "litellm", model: "anthropic/claude-opus" }
-    /// - `"anthropic/claude-opus-4-5"` → Anthropic(Claude45Opus) (built-in provider)
-    /// - `"claude-opus-4-5"` → Anthropic(Claude45Opus) (auto-detected)
-    /// - `"ollama/llama3"` → Custom { provider: "ollama", model: "llama3" }
-    fn from(value: String) -> Self {
-        // Check for explicit provider/model format (e.g., "litellm/anthropic/claude-opus")
-        // split_once takes only the first segment as provider, rest is the model path
-        if let Some((provider, model)) = value.split_once('/') {
-            // Check if it's a known built-in provider with explicit prefix
-            match provider {
-                "anthropic" => return Self::from_model_name(model),
-                "openai" => return Self::from_model_name(model),
-                "google" | "gemini" => return Self::from_model_name(model),
-                // Unknown provider = custom provider (model can contain additional slashes)
-                _ => {
-                    // Extract display name from the last segment (e.g., "anthropic/claude-opus" -> "claude-opus")
-                    let display_name = model.rsplit('/').next().unwrap_or(model).to_string();
-                    return LLMModel::Custom {
-                        provider: provider.to_string(),
-                        model: model.to_string(), // Preserves nested paths like "anthropic/claude-opus"
-                        name: Some(display_name),
-                    };
-                }
-            }
-        }
-
-        // Fall back to auto-detection by model name prefix
-        Self::from_model_name(&value)
-    }
-}
-
-impl LLMModel {
-    /// Parse model name without provider prefix
-    fn from_model_name(model: &str) -> Self {
-        if model.starts_with("claude-haiku-4-5") {
-            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-        } else if model.starts_with("claude-sonnet-4-5") {
-            LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)
-        } else if model.starts_with("claude-opus-4-5") {
-            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
-        } else if model == "gemini-2.5-flash-lite" {
-            LLMModel::Gemini(GeminiModel::Gemini25FlashLite)
-        } else if model.starts_with("gemini-2.5-flash") {
-            LLMModel::Gemini(GeminiModel::Gemini25Flash)
-        } else if model.starts_with("gemini-2.5-pro") {
-            LLMModel::Gemini(GeminiModel::Gemini25Pro)
-        } else if model.starts_with("gemini-3-pro-preview") {
-            LLMModel::Gemini(GeminiModel::Gemini3Pro)
-        } else if model.starts_with("gemini-3-flash-preview") {
-            LLMModel::Gemini(GeminiModel::Gemini3Flash)
-        } else if model.starts_with("gpt-5-mini") {
-            LLMModel::OpenAI(OpenAIModel::GPT5Mini)
-        } else if model.starts_with("gpt-5") {
-            LLMModel::OpenAI(OpenAIModel::GPT5)
-        } else {
-            // Unknown model without provider prefix - treat as custom with "custom" provider
-            LLMModel::Custom {
-                provider: "custom".to_string(),
-                model: model.to_string(),
-                name: Some(model.to_string()), // Use model name as display name
-            }
-        }
-    }
-
-    /// Get the provider name for this model
-    pub fn provider_name(&self) -> &str {
-        match self {
-            LLMModel::Anthropic(_) => "anthropic",
-            LLMModel::Gemini(_) => "google",
-            LLMModel::OpenAI(_) => "openai",
-            LLMModel::Custom { provider, .. } => provider,
-        }
-    }
-
-    /// Get just the model name without provider prefix
-    pub fn model_id(&self) -> String {
-        match self {
-            LLMModel::Anthropic(m) => m.to_string(),
-            LLMModel::Gemini(m) => m.to_string(),
-            LLMModel::OpenAI(m) => m.to_string(),
-            LLMModel::Custom { model, .. } => model.clone(),
-        }
-    }
-
-    /// Set a display name for a custom model
-    pub fn with_name(self, name: impl Into<String>) -> Self {
-        match self {
-            LLMModel::Custom {
-                provider, model, ..
-            } => LLMModel::Custom {
-                provider,
-                model,
-                name: Some(name.into()),
-            },
-            other => other, // Built-in models don't support custom names
-        }
-    }
-
-    /// Get the display name if set (for custom models only)
-    pub fn display_name(&self) -> Option<&str> {
-        match self {
-            LLMModel::Custom { name, .. } => name.as_deref(),
-            _ => None,
-        }
-    }
-}
-
-impl Display for LLMModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LLMModel::Anthropic(model) => write!(f, "{}", model),
-            LLMModel::Gemini(model) => write!(f, "{}", model),
-            LLMModel::OpenAI(model) => write!(f, "{}", model),
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => {
-                if let Some(name) = name {
-                    write!(f, "{}", name)
-                } else {
-                    write!(f, "{}/{}", provider, model)
-                }
-            }
-        }
     }
 }
 
@@ -527,7 +408,7 @@ pub struct LLMGoogleOptions {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LLMInput {
-    pub model: LLMModel,
+    pub model: Model,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub tools: Option<Vec<LLMTool>>,
@@ -540,7 +421,7 @@ pub struct LLMInput {
 
 #[derive(Debug)]
 pub struct LLMStreamInput {
-    pub model: LLMModel,
+    pub model: Model,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
@@ -630,6 +511,18 @@ impl Default for LLMMessageContent {
     }
 }
 
+impl LLMMessageContent {
+    /// Convert into a Vec of typed content parts.
+    /// A `String` variant is returned as a single `Text` part (empty strings yield an empty vec).
+    pub fn into_parts(self) -> Vec<LLMMessageTypedContent> {
+        match self {
+            LLMMessageContent::List(parts) => parts,
+            LLMMessageContent::String(s) if s.is_empty() => vec![],
+            LLMMessageContent::String(s) => vec![LLMMessageTypedContent::Text { text: s }],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum LLMMessageTypedContent {
@@ -641,6 +534,9 @@ pub enum LLMMessageTypedContent {
         name: String,
         #[serde(alias = "input")]
         args: serde_json::Value,
+        /// Opaque provider-specific metadata (e.g., Gemini thought_signature).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
     #[serde(rename = "tool_result")]
     ToolResult {
@@ -815,214 +711,14 @@ pub struct GenerationDeltaToolUse {
     pub name: Option<String>,
     pub input: Option<String>,
     pub index: usize,
+    /// Opaque provider-specific metadata (e.g., Gemini thought_signature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_llm_model_from_known_anthropic_model() {
-        let model = LLMModel::from("claude-opus-4-5-20251101".to_string());
-        assert!(matches!(
-            model,
-            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
-        ));
-    }
-
-    #[test]
-    fn test_llm_model_from_known_openai_model() {
-        let model = LLMModel::from("gpt-5".to_string());
-        assert!(matches!(model, LLMModel::OpenAI(OpenAIModel::GPT5)));
-    }
-
-    #[test]
-    fn test_llm_model_from_known_gemini_model() {
-        let model = LLMModel::from("gemini-2.5-flash".to_string());
-        assert!(matches!(
-            model,
-            LLMModel::Gemini(GeminiModel::Gemini25Flash)
-        ));
-    }
-
-    #[test]
-    fn test_llm_model_from_custom_provider_with_slash() {
-        let model = LLMModel::from("litellm/claude-opus-4-5".to_string());
-        match model {
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => {
-                assert_eq!(provider, "litellm");
-                assert_eq!(model, "claude-opus-4-5");
-                // Display name is automatically extracted from last segment
-                assert_eq!(name, Some("claude-opus-4-5".to_string()));
-            }
-            _ => panic!("Expected Custom model"),
-        }
-    }
-
-    #[test]
-    fn test_llm_model_from_ollama_provider() {
-        let model = LLMModel::from("ollama/llama3".to_string());
-        match model {
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => {
-                assert_eq!(provider, "ollama");
-                assert_eq!(model, "llama3");
-                // Display name is automatically extracted from last segment
-                assert_eq!(name, Some("llama3".to_string()));
-            }
-            _ => panic!("Expected Custom model"),
-        }
-    }
-
-    #[test]
-    fn test_llm_model_from_nested_provider() {
-        // Test nested path like stakpak/anthropic/claude-sonnet-4-5
-        let model = LLMModel::from("stakpak/anthropic/claude-sonnet-4-5".to_string());
-        match model {
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => {
-                assert_eq!(provider, "stakpak");
-                assert_eq!(model, "anthropic/claude-sonnet-4-5");
-                // Display name is the last segment only
-                assert_eq!(name, Some("claude-sonnet-4-5".to_string()));
-            }
-            _ => panic!("Expected Custom model"),
-        }
-    }
-
-    #[test]
-    fn test_llm_model_explicit_anthropic_prefix() {
-        // Explicit anthropic/ prefix should still parse to Anthropic variant
-        let model = LLMModel::from("anthropic/claude-opus-4-5".to_string());
-        assert!(matches!(
-            model,
-            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
-        ));
-    }
-
-    #[test]
-    fn test_llm_model_explicit_openai_prefix() {
-        let model = LLMModel::from("openai/gpt-5".to_string());
-        assert!(matches!(model, LLMModel::OpenAI(OpenAIModel::GPT5)));
-    }
-
-    #[test]
-    fn test_llm_model_explicit_google_prefix() {
-        let model = LLMModel::from("google/gemini-2.5-flash".to_string());
-        assert!(matches!(
-            model,
-            LLMModel::Gemini(GeminiModel::Gemini25Flash)
-        ));
-    }
-
-    #[test]
-    fn test_llm_model_explicit_gemini_prefix() {
-        // gemini/ alias should also work
-        let model = LLMModel::from("gemini/gemini-2.5-flash".to_string());
-        assert!(matches!(
-            model,
-            LLMModel::Gemini(GeminiModel::Gemini25Flash)
-        ));
-    }
-
-    #[test]
-    fn test_llm_model_unknown_model_becomes_custom() {
-        let model = LLMModel::from("some-random-model".to_string());
-        match model {
-            LLMModel::Custom {
-                provider,
-                model,
-                name,
-            } => {
-                assert_eq!(provider, "custom");
-                assert_eq!(model, "some-random-model");
-                // Display name is the model name itself
-                assert_eq!(name, Some("some-random-model".to_string()));
-            }
-            _ => panic!("Expected Custom model"),
-        }
-    }
-
-    #[test]
-    fn test_llm_model_display_anthropic() {
-        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
-        let s = model.to_string();
-        assert!(s.contains("claude"));
-    }
-
-    #[test]
-    fn test_llm_model_display_custom() {
-        let model = LLMModel::Custom {
-            provider: "litellm".to_string(),
-            model: "claude-opus".to_string(),
-            name: None,
-        };
-        assert_eq!(model.to_string(), "litellm/claude-opus");
-    }
-
-    #[test]
-    fn test_llm_model_display_custom_with_name() {
-        let model = LLMModel::Custom {
-            provider: "litellm".to_string(),
-            model: "claude-opus".to_string(),
-            name: Some("My Custom Model".to_string()),
-        };
-        assert_eq!(model.to_string(), "My Custom Model");
-    }
-
-    #[test]
-    fn test_llm_model_with_name() {
-        let model = LLMModel::from("ollama/llama3".to_string()).with_name("Local Llama");
-        assert_eq!(model.to_string(), "Local Llama");
-        assert_eq!(model.display_name(), Some("Local Llama"));
-        // model_id should still return the original model
-        assert_eq!(model.model_id(), "llama3");
-    }
-
-    #[test]
-    fn test_llm_model_provider_name() {
-        assert_eq!(
-            LLMModel::Anthropic(AnthropicModel::Claude45Sonnet).provider_name(),
-            "anthropic"
-        );
-        assert_eq!(
-            LLMModel::OpenAI(OpenAIModel::GPT5).provider_name(),
-            "openai"
-        );
-        assert_eq!(
-            LLMModel::Gemini(GeminiModel::Gemini25Flash).provider_name(),
-            "google"
-        );
-        assert_eq!(
-            LLMModel::Custom {
-                provider: "litellm".to_string(),
-                model: "test".to_string(),
-                name: None,
-            }
-            .provider_name(),
-            "litellm"
-        );
-    }
-
-    #[test]
-    fn test_llm_model_model_id() {
-        let model = LLMModel::Custom {
-            provider: "litellm".to_string(),
-            model: "claude-opus-4-5".to_string(),
-            name: None,
-        };
-        assert_eq!(model.model_id(), "claude-opus-4-5");
-    }
 
     // =========================================================================
     // ProviderConfig Tests
@@ -1156,6 +852,17 @@ mod tests {
     }
 
     #[test]
+    fn test_set_api_endpoint_updates_supported_providers() {
+        let mut openai = ProviderConfig::openai(Some("sk-openai".to_string()));
+        openai.set_api_endpoint(Some("https://proxy.example.com/v1".to_string()));
+        assert_eq!(openai.api_endpoint(), Some("https://proxy.example.com/v1"));
+
+        let mut bedrock = ProviderConfig::bedrock("us-east-1".to_string(), None);
+        bedrock.set_api_endpoint(Some("https://ignored.example.com".to_string()));
+        assert_eq!(bedrock.api_endpoint(), None);
+    }
+
+    #[test]
     fn test_llm_provider_config_new() {
         let config = LLMProviderConfig::new();
         assert!(config.is_empty());
@@ -1203,5 +910,133 @@ mod tests {
             providers.get("litellm"),
             Some(ProviderConfig::Custom { .. })
         ));
+    }
+
+    // =========================================================================
+    // Bedrock ProviderConfig Tests
+    // =========================================================================
+
+    #[test]
+    fn test_provider_config_bedrock_serialization() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-east-1".to_string(),
+            profile_name: Some("my-profile".to_string()),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"type\":\"amazon-bedrock\""));
+        assert!(json.contains("\"region\":\"us-east-1\""));
+        assert!(json.contains("\"profile_name\":\"my-profile\""));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_serialization_without_profile() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-west-2".to_string(),
+            profile_name: None,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"type\":\"amazon-bedrock\""));
+        assert!(json.contains("\"region\":\"us-west-2\""));
+        assert!(!json.contains("profile_name")); // Should be skipped when None
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_deserialization() {
+        let json = r#"{"type":"amazon-bedrock","region":"us-east-1","profile_name":"prod"}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert!(matches!(config, ProviderConfig::Bedrock { .. }));
+        assert_eq!(config.region(), Some("us-east-1"));
+        assert_eq!(config.profile_name(), Some("prod"));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_deserialization_minimal() {
+        let json = r#"{"type":"amazon-bedrock","region":"eu-west-1"}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert!(matches!(config, ProviderConfig::Bedrock { .. }));
+        assert_eq!(config.region(), Some("eu-west-1"));
+        assert_eq!(config.profile_name(), None);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_no_api_key() {
+        let config = ProviderConfig::bedrock("us-east-1".to_string(), None);
+        assert_eq!(config.api_key(), None); // Bedrock uses AWS credential chain
+        assert_eq!(config.api_endpoint(), None); // No custom endpoint
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_helper_methods() {
+        let bedrock = ProviderConfig::bedrock("us-east-1".to_string(), Some("prod".to_string()));
+        assert_eq!(bedrock.provider_type(), "amazon-bedrock");
+        assert_eq!(bedrock.region(), Some("us-east-1"));
+        assert_eq!(bedrock.profile_name(), Some("prod"));
+        assert_eq!(bedrock.api_key(), None);
+        assert_eq!(bedrock.api_endpoint(), None);
+        assert_eq!(bedrock.access_token(), None);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_toml_roundtrip() {
+        let config = ProviderConfig::Bedrock {
+            region: "us-east-1".to_string(),
+            profile_name: Some("my-profile".to_string()),
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: ProviderConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_toml_parsing() {
+        let toml_str = r#"
+            type = "amazon-bedrock"
+            region = "us-east-1"
+            profile_name = "production"
+        "#;
+        let config: ProviderConfig = toml::from_str(toml_str).unwrap();
+        assert!(matches!(
+            config,
+            ProviderConfig::Bedrock {
+                ref region,
+                ref profile_name,
+            } if region == "us-east-1" && profile_name.as_deref() == Some("production")
+        ));
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_missing_region_fails() {
+        let json = r#"{"type":"amazon-bedrock"}"#;
+        let result: Result<ProviderConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err()); // region is required
+    }
+
+    #[test]
+    fn test_provider_config_bedrock_in_providers_map() {
+        let json = r#"{
+            "anthropic": {"type": "anthropic", "api_key": "sk-ant"},
+            "amazon-bedrock": {"type": "amazon-bedrock", "region": "us-east-1"}
+        }"#;
+        let providers: HashMap<String, ProviderConfig> = serde_json::from_str(json).unwrap();
+        assert_eq!(providers.len(), 2);
+        assert!(matches!(
+            providers.get("amazon-bedrock"),
+            Some(ProviderConfig::Bedrock { .. })
+        ));
+    }
+
+    #[test]
+    fn test_region_returns_none_for_non_bedrock() {
+        let openai = ProviderConfig::openai(Some("key".to_string()));
+        assert_eq!(openai.region(), None);
+
+        let anthropic = ProviderConfig::anthropic(Some("key".to_string()), None);
+        assert_eq!(anthropic.region(), None);
+    }
+
+    #[test]
+    fn test_profile_name_returns_none_for_non_bedrock() {
+        let openai = ProviderConfig::openai(Some("key".to_string()));
+        assert_eq!(openai.profile_name(), None);
     }
 }

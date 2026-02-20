@@ -11,10 +11,13 @@ use crate::commands::agent::run::helpers::convert_tools_with_filter;
 use crate::commands::get_client;
 use crate::config::AppConfig;
 use crate::utils::network;
+use stakpak_api::local::skills::default_skill_directories;
 use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{
+    EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server,
+};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::collections::HashMap;
@@ -26,23 +29,35 @@ use tokio::sync::mpsc::Sender;
 /// Configuration options for MCP initialization
 #[allow(dead_code)]
 pub struct McpInitConfig {
-    /// Whether to redact secrets in tool responses
-    pub redact_secrets: bool,
-    /// Whether to enable privacy mode (redact IPs, account IDs, etc.)
-    pub privacy_mode: bool,
+    // --- server config ---
     /// Configuration for which tools are enabled
     pub enabled_tools: EnabledToolsConfig,
     /// Whether to enable mTLS for secure communication
     pub enable_mtls: bool,
+    /// Whether to enable subagent tools
+    pub enable_subagents: bool,
+    /// Optional list of allowed tool names (filters tools if specified)
+    pub allowed_tools: Option<Vec<String>>,
+    /// Configuration inherited by subagents (profile, config path)
+    pub subagent_config: SubagentConfig,
+
+    // --- proxy config (secret redaction is handled exclusively by the proxy) ---
+    /// Whether to redact secrets in tool responses
+    pub redact_secrets: bool,
+    /// Whether to enable privacy mode (redact IPs, account IDs, etc.)
+    pub privacy_mode: bool,
 }
 
 impl Default for McpInitConfig {
     fn default() -> Self {
         Self {
-            redact_secrets: true,
-            privacy_mode: false,
             enabled_tools: EnabledToolsConfig { slack: false },
             enable_mtls: true,
+            enable_subagents: true,
+            allowed_tools: None,
+            subagent_config: SubagentConfig::default(),
+            redact_secrets: true,
+            privacy_mode: false,
         }
     }
 }
@@ -123,20 +138,21 @@ async fn start_mcp_server(
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
     let bind_address = binding.address.clone();
-    let redact_secrets = mcp_config.redact_secrets;
-    let privacy_mode = mcp_config.privacy_mode;
     let enabled_tools = mcp_config.enabled_tools.clone();
+    let enable_subagents = mcp_config.enable_subagents;
+    let subagent_config = mcp_config.subagent_config.clone();
 
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
             client: Some(api_client),
             bind_address,
-            redact_secrets,
-            privacy_mode,
             enabled_tools,
             tool_mode: ToolMode::Combined,
-            subagent_configs: None,
+            enable_subagents,
             certificate_chain: cert_chain,
+            skill_directories: default_skill_directories(),
+            subagent_config,
+            server_tls_config: None,
         };
 
         // Signal that we're about to start
@@ -174,6 +190,7 @@ fn build_proxy_config(
             url: local_server_url,
             headers: None,
             certificate_chain: server_cert_chain,
+            client_tls_config: None,
         },
     );
 
@@ -184,6 +201,7 @@ fn build_proxy_config(
             url: "https://apiv2.stakpak.dev/v1/paks/mcp".to_string(),
             headers: None,
             certificate_chain: Arc::new(None),
+            client_tls_config: None,
         },
     );
 
@@ -323,7 +341,12 @@ pub async fn initialize_mcp_server_and_tools(
         .await
         .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-    let tools = convert_tools_with_filter(&mcp_tools, app_config.allowed_tools.as_ref());
+    // Use allowed_tools from mcp_config if provided, otherwise fall back to app_config
+    let allowed_tools_ref = mcp_config
+        .allowed_tools
+        .as_ref()
+        .or(app_config.allowed_tools.as_ref());
+    let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_ref);
 
     Ok(McpInitResult {
         client: mcp_client,

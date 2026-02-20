@@ -14,7 +14,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -45,8 +45,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Calculate the required height for the input area based on content
-    let input_area_width = main_area.width.saturating_sub(4) as usize;
-    let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
+    // Subtract 2 for borders (matching render_multiline_input's content_area.width)
+    let input_area_width = main_area.width.saturating_sub(2) as usize;
+    let input_lines = calculate_input_lines(state, input_area_width);
     let input_height = (input_lines + 2) as u16;
     let margin_height = 1;
     let dropdown_showing = state.show_helper_dropdown
@@ -83,26 +84,31 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate shell popup height (goes above input)
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
-    // Calculate approval bar height
-    let approval_bar_height = state.approval_bar.calculate_height();
+    // Calculate approval bar height (needs terminal width for wrapping calculation)
+    let approval_bar_height = state.approval_bar.calculate_height(main_area.width);
     let approval_bar_visible = state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let effective_input_height =
-        if (state.shell_popup_visible && state.shell_popup_expanded) || approval_bar_visible {
-            0
-        } else {
-            input_height
-        };
+    let ask_user_visible = state.show_ask_user_popup && !state.ask_user_questions.is_empty();
+    let input_visible =
+        !(approval_bar_visible || state.shell_popup_visible && state.shell_popup_expanded);
+    let effective_input_height = if input_visible { input_height } else { 0 };
+    let queue_count = state.pending_user_messages.len();
+    let queue_preview_height = if input_visible && queue_count > 0 {
+        // Cap at 1/4 of the screen to avoid starving the message area
+        (queue_count as u16).min(main_area.height / 4).max(1)
+    } else {
+        0
+    };
 
-    // Hide dropdown when approval bar is visible
-    let effective_dropdown_height = if approval_bar_visible {
+    // Hide dropdown when approval bar is visible or ask_user popup is visible
+    let effective_dropdown_height = if approval_bar_visible || ask_user_visible {
         0
     } else {
         dropdown_height
     };
 
-    // Layout: [messages][loading_line][shell_popup][approval_bar][input][dropdown][hint]
+    // Layout: [messages][loading_line][shell_popup][approval_bar][queue][input][dropdown][hint]
     let effective_approval_bar_height = if approval_bar_visible {
         approval_bar_height
     } else {
@@ -114,6 +120,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
         Constraint::Length(shell_popup_height), // shell popup (0 if hidden)
         Constraint::Length(effective_approval_bar_height), // approval bar (0 if hidden)
+        Constraint::Length(queue_preview_height), // queued messages preview (0 if hidden)
         Constraint::Length(effective_input_height), // input (0 when approval bar visible)
         Constraint::Length(effective_dropdown_height), // dropdown (0 when approval bar visible)
         Constraint::Length(hint_height), // hint
@@ -127,9 +134,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let loading_area = chunks[1]; // Reserved line for loading indicator
     let shell_popup_area = chunks[2];
     let approval_bar_area = chunks[3];
-    let input_area = chunks[4];
-    let dropdown_area = chunks[5];
-    let hint_area = chunks[6];
+    let queue_preview_area = chunks[4];
+    let input_area = chunks[5];
+    let dropdown_area = chunks[6];
+    let hint_area = chunks[7];
 
     // Create padded message area for content rendering
     let padded_message_area = Rect {
@@ -141,6 +149,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
+
+    // Store message area geometry for click/selection coordinate mapping
+    // These values are used by event handlers to convert mouse coordinates to line indices
+    state.message_area_y = message_area.y;
+    state.message_area_x = padded_message_area.x;
+    state.message_area_height = message_area.height;
 
     render_messages(
         f,
@@ -180,6 +194,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     };
     render_loading_indicator(f, state, padded_loading_area);
 
+    if queue_preview_height > 0 {
+        let padded_queue_area = Rect {
+            x: queue_preview_area.x + 1,
+            y: queue_preview_area.y,
+            width: queue_preview_area.width.saturating_sub(2),
+            height: queue_preview_area.height,
+        };
+        render_queue_preview_line(f, state, padded_queue_area);
+    }
+
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.is_dialog_open {
@@ -192,7 +216,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_file_search_dropdown(f, state, dropdown_area);
     }
     // Render hint/shortcuts if not hiding for dropdown, not showing collapsed messages, and not showing approval bar
-    if !state.show_helper_dropdown && !state.show_collapsed_messages && !approval_bar_visible {
+    if !state.show_helper_dropdown
+        && !state.show_collapsed_messages
+        && !approval_bar_visible
+        && !ask_user_visible
+    {
         let padded_hint_area = Rect {
             x: hint_area.x + 1,
             y: hint_area.y,
@@ -223,10 +251,162 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
+    // Render message action popup
+    if state.show_message_action_popup {
+        crate::services::message_action_popup::render_message_action_popup(f, state);
+    }
+
+    // Render model switcher
+    if state.show_model_switcher {
+        crate::services::model_switcher::render_model_switcher_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render toast notification (highest z-index, always on top)
+    render_toast(f, state);
+
+    // Render "existing plan found" modal
+    if state.existing_plan_prompt.is_some() {
+        render_existing_plan_modal(f, state);
+    }
+
+    // Render plan review overlay (full-screen, on top of everything)
+    if state.show_plan_review {
+        crate::services::plan_review::render_plan_review(f, state, f.area());
+    }
+}
+
+/// Render toast notification in top-right corner
+fn render_toast(f: &mut Frame, state: &mut AppState) {
+    // Check and clear expired toast
+    if let Some(toast) = &state.toast
+        && toast.is_expired()
+    {
+        state.toast = None;
+        return;
+    }
+
+    let Some(_toast) = &state.toast else {
+        return;
+    };
+
+    let text = "Copied to clipboard";
+    let padding_x = 1;
+    let text_width = text.len() + (padding_x * 2);
+    let screen = f.area();
+
+    // Box dimensions (add 2 for border on each side)
+    let box_width = (text_width + 2) as u16;
+    let box_height = 3u16; // border + text + border
+
+    // Position in top-right corner with some margin
+    let x = screen.width.saturating_sub(box_width + 2);
+    let y = 1;
+
+    let area = Rect::new(x, y, box_width, box_height);
+
+    // Clear background
+    f.render_widget(ratatui::widgets::Clear, area);
+
+    // Create block with cyan border (matching our popups)
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    // Centered text
+    let text_line = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+        text,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )]);
+
+    let paragraph = Paragraph::new(text_line)
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
+
+    f.render_widget(paragraph, area);
+}
+
+fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
+    use ratatui::style::Modifier;
+    use ratatui::widgets::{Clear, Wrap};
+
+    let area = f.area();
+
+    let (title_text, status_text) = state
+        .existing_plan_prompt
+        .as_ref()
+        .and_then(|p| p.metadata.as_ref())
+        .map(|m| {
+            let truncated = if m.title.len() > 40 {
+                format!("{}…", &m.title[..39])
+            } else {
+                m.title.clone()
+            };
+            (truncated, format!("{}  v{}", m.status, m.version))
+        })
+        .unwrap_or_else(|| ("(unknown)".to_string(), String::new()));
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Plan: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                title_text,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
+    if !status_text.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Status: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(status_text, Style::default().fg(Color::Yellow)),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  u", Style::default().fg(Color::Cyan)),
+        Span::styled(" use existing  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("n", Style::default().fg(Color::Green)),
+        Span::styled(" start new  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(Color::Red)),
+        Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    let modal_width = 52u16.min(area.width.saturating_sub(4));
+    let content_lines = lines.len() as u16;
+    let modal_height = (content_lines + 2)
+        .min(area.height.saturating_sub(4))
+        .max(4);
+
+    let x = area.x + (area.width - modal_width) / 2;
+    let y = area.y + (area.height - modal_height) / 2;
+    let modal_area = Rect::new(x, y, modal_width, modal_height);
+
+    f.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            " Existing Plan Found ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(modal_area);
+    f.render_widget(block, modal_area);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, inner);
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -259,11 +439,16 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Calculate scroll position - ensure it doesn't exceed max_scroll
+    // IMPORTANT: Write the computed scroll back to state so that event handlers
+    // (hover highlighting, text selection, click detection) use the same scroll
+    // value that was used for rendering. Without this, stay_at_bottom causes
+    // state.scroll to diverge from the actual rendered scroll.
     let scroll = if state.stay_at_bottom {
         max_scroll
     } else {
         state.scroll.min(max_scroll)
     };
+    state.scroll = scroll;
 
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
@@ -277,7 +462,72 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         }
     }
 
-    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    // Apply hover highlighting for user messages
+    let visible_lines =
+        if let Some(hover_row) = state.hover_row {
+            let row_in_message_area =
+                (hover_row as usize).saturating_sub(state.message_area_y as usize);
+
+            // Check if hover is within message area
+            if row_in_message_area < height {
+                let absolute_line = scroll + row_in_message_area;
+
+                // Check if this line is a user message
+                let is_user_message = state.line_to_message_map.iter().any(
+                    |(start, end, _, is_user, _, _user_idx)| {
+                        *is_user && absolute_line >= *start && absolute_line < *end
+                    },
+                );
+
+                if is_user_message {
+                    // Highlight this line with subtle dark background
+                    visible_lines
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, line)| {
+                            if i == row_in_message_area {
+                                Line::from(
+                                    line.spans
+                                        .into_iter()
+                                        .map(|span| {
+                                            ratatui::text::Span::styled(
+                                                span.content,
+                                                span.style.bg(Color::Indexed(240)).fg(Color::White),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            } else {
+                                line
+                            }
+                        })
+                        .collect()
+                } else {
+                    visible_lines
+                }
+            } else {
+                visible_lines
+            }
+        } else {
+            visible_lines
+        };
+
+    // Apply selection highlighting if active
+    let visible_lines = if state.selection.active {
+        crate::services::text_selection::apply_selection_highlight(
+            visible_lines,
+            &state.selection,
+            scroll,
+        )
+    } else {
+        visible_lines
+    };
+
+    // NOTE: Don't use Paragraph::wrap() here - lines are already pre-wrapped to the correct width
+    // in get_wrapped_message_lines_cached(). Using wrap() would cause ratatui to potentially
+    // re-wrap lines, creating a mismatch between the cached line count and rendered line count,
+    // which breaks text selection coordinate mapping.
+    let message_widget = Paragraph::new(visible_lines);
     f.render_widget(message_widget, area);
 }
 
@@ -371,7 +621,8 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
         }
     }
 
-    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    // NOTE: Don't use Paragraph::wrap() - lines are already pre-wrapped
+    let message_widget = Paragraph::new(visible_lines);
     f.render_widget(message_widget, area);
 }
 
@@ -385,13 +636,18 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
             Style::default().fg(Color::DarkGray)
         });
 
-    // Create content area inside the block
+    // Create content area inside the block (border takes 1 char on each side)
+    // The TextArea internally accounts for prefix width when wrapping,
+    // so we only subtract 2 for the borders here.
     let content_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
-        width: area.width.saturating_sub(4),
+        width: area.width.saturating_sub(2),
         height: area.height.saturating_sub(2),
     };
+
+    // Store the content area for mouse click handling
+    state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);
@@ -413,4 +669,77 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Loading spinner is now shown in the hint area below input
     // This area is kept for potential future use (e.g., token count display)
     let _ = (f, state, area);
+}
+
+fn truncate_to(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        flat
+    } else {
+        let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn render_queue_preview_line(f: &mut Frame, state: &AppState, area: Rect) {
+    if area.width == 0 || area.height == 0 || state.pending_user_messages.is_empty() {
+        return;
+    }
+
+    let max_chars = (area.width as usize).saturating_sub(4); // room for "  > "
+    let mut lines: Vec<Line> = Vec::with_capacity(state.pending_user_messages.len());
+
+    for msg in state.pending_user_messages.iter() {
+        let text = if !msg.user_message_text.trim().is_empty() {
+            &msg.user_message_text
+        } else if !msg.final_input.trim().is_empty() {
+            &msg.final_input
+        } else if !msg.image_parts.is_empty() {
+            "[image]"
+        } else {
+            "(empty)"
+        };
+        let preview = truncate_to(text, max_chars);
+        lines.push(Line::from(Span::styled(
+            format!("  > {preview}"),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let widget = Paragraph::new(lines);
+    f.render_widget(widget, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_to_short_string_unchanged() {
+        assert_eq!(truncate_to("hello world", 20), "hello world");
+    }
+
+    #[test]
+    fn truncate_to_long_string_ellipsis() {
+        let out = truncate_to("this is a very long message that should be cut", 16);
+        assert!(out.ends_with('…'));
+        assert!(out.chars().count() <= 16);
+    }
+
+    #[test]
+    fn truncate_to_collapses_whitespace() {
+        assert_eq!(
+            truncate_to("hello   world\nnewline", 30),
+            "hello world newline"
+        );
+    }
+
+    #[test]
+    fn truncate_to_zero_max_returns_empty() {
+        assert_eq!(truncate_to("hello", 0), "");
+    }
 }

@@ -1,17 +1,21 @@
+// TUI crate performs heavy string slicing for text rendering, markdown parsing,
+// cursor positioning, and layout. All indices come from find()/rfind()/char_indices()
+// on the same strings. Allowing at crate level to avoid 120+ individual annotations.
+#![allow(clippy::string_slice)]
+
 mod app;
 mod constants;
 mod event;
 mod event_loop;
 mod terminal;
 mod view;
-
-pub mod utils;
-
-pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
+pub use app::{
+    AppState, ExistingPlanPrompt, InputEvent, LoadingOperation, OutputEvent, SessionInfo,
+};
 pub use event_loop::{RulebookConfig, run_tui};
 pub use ratatui::style::Color;
 
-mod services;
+pub mod services;
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
