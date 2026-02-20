@@ -14,7 +14,6 @@ use uuid::Uuid;
 /// Session visibility
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
-#[derive(Default)]
 pub enum SessionVisibility {
     #[default]
     Private,
@@ -24,7 +23,6 @@ pub enum SessionVisibility {
 /// Session status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
-#[derive(Default)]
 pub enum SessionStatus {
     #[default]
     Active,
