@@ -64,6 +64,7 @@ pub struct ScheduleRun {
     pub check_stderr: Option<String>,
     pub check_timed_out: bool,
     pub agent_woken: bool,
+    pub interactive_delegated: bool,
     pub agent_session_id: Option<String>,
     pub agent_last_checkpoint_id: Option<String>,
     pub agent_stdout: Option<String>,
@@ -92,6 +93,9 @@ pub struct ListRunsFilter {
 
 /// Well-known sentinel name used to request in-process schedule config reload.
 pub const RELOAD_SENTINEL: &str = "__config_reload__";
+
+/// Informational note stored on runs delegated to gateway interactive sessions.
+pub const INTERACTIVE_DELEGATED_NOTE: &str = "Delegated to interactive gateway session";
 
 /// A pending schedule request (for manual schedule fires).
 #[derive(Debug, Clone)]
@@ -136,9 +140,25 @@ impl ScheduleDb {
             .map_err(|e| DbError::Connection(format!("Failed to open database: {}", e)))?;
 
         let storage = Self { db };
+        storage.configure_pragmas().await?;
         storage.init_schema().await?;
 
         Ok(storage)
+    }
+
+    async fn configure_pragmas(&self) -> Result<(), DbError> {
+        let conn = self.connection()?;
+        // journal_mode returns a result row, so use query() instead of execute()
+        conn.query("PRAGMA journal_mode = WAL", ())
+            .await
+            .map_err(|e| DbError::Query(format!("Failed to set journal_mode: {}", e)))?;
+        conn.query("PRAGMA busy_timeout = 5000", ())
+            .await
+            .map_err(|e| DbError::Query(format!("Failed to set busy_timeout: {}", e)))?;
+        conn.query("PRAGMA synchronous = NORMAL", ())
+            .await
+            .map_err(|e| DbError::Query(format!("Failed to set synchronous: {}", e)))?;
+        Ok(())
     }
 
     fn connection(&self) -> Result<Connection, DbError> {
@@ -163,6 +183,7 @@ impl ScheduleDb {
                 check_stderr TEXT,
                 check_timed_out INTEGER DEFAULT 0,
                 agent_woken INTEGER NOT NULL DEFAULT 0,
+                interactive_delegated INTEGER NOT NULL DEFAULT 0,
                 agent_session_id TEXT,
                 agent_last_checkpoint_id TEXT,
                 agent_stdout TEXT,
@@ -182,6 +203,12 @@ impl ScheduleDb {
             .await;
         let _ = conn
             .execute("ALTER TABLE trigger_runs ADD COLUMN agent_stderr TEXT", ())
+            .await;
+        let _ = conn
+            .execute(
+                "ALTER TABLE trigger_runs ADD COLUMN interactive_delegated INTEGER NOT NULL DEFAULT 0",
+                (),
+            )
             .await;
 
         // Create autopilot_state table (singleton)
@@ -314,8 +341,27 @@ impl ScheduleDb {
         let conn = self.connection()?;
 
         conn.execute(
-            "UPDATE trigger_runs SET agent_woken = 1, agent_session_id = ? WHERE id = ?",
+            "UPDATE trigger_runs SET agent_woken = 1, interactive_delegated = 0, agent_session_id = ? WHERE id = ?",
             (session_id, run_id),
+        )
+        .await
+        .map_err(|e| DbError::Query(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Mark run as delegated to gateway interactive session while keeping status=running.
+    pub async fn update_run_interactive_started(
+        &self,
+        run_id: i64,
+        session_id: &str,
+        note: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.connection()?;
+
+        conn.execute(
+            "UPDATE trigger_runs SET agent_woken = 1, interactive_delegated = 1, agent_session_id = ?, error_message = ? WHERE id = ?",
+            (session_id, note, run_id),
         )
         .await
         .map_err(|e| DbError::Query(e.to_string()))?;
@@ -371,7 +417,7 @@ impl ScheduleDb {
         let mut rows = conn
             .query(
                 "SELECT id, trigger_name, started_at, finished_at, check_exit_code, check_stdout,
-                        check_stderr, check_timed_out, agent_woken, agent_session_id,
+                        check_stderr, check_timed_out, agent_woken, interactive_delegated, agent_session_id,
                         agent_last_checkpoint_id, agent_stdout, agent_stderr, status, error_message, created_at
                  FROM trigger_runs WHERE id = ?",
                 [run_id],
@@ -392,7 +438,7 @@ impl ScheduleDb {
 
         let mut sql =
             "SELECT id, trigger_name, started_at, finished_at, check_exit_code, check_stdout,
-                              check_stderr, check_timed_out, agent_woken, agent_session_id,
+                              check_stderr, check_timed_out, agent_woken, interactive_delegated, agent_session_id,
                               agent_last_checkpoint_id, agent_stdout, agent_stderr, status, error_message, created_at
                        FROM trigger_runs WHERE 1=1"
                 .to_string();
@@ -641,13 +687,14 @@ fn parse_schedule_run(row: &libsql::Row) -> Result<ScheduleRun, DbError> {
     let check_stderr: Option<String> = row.get(6).ok();
     let check_timed_out: i32 = row.get(7).unwrap_or(0);
     let agent_woken: i32 = row.get(8).unwrap_or(0);
-    let agent_session_id: Option<String> = row.get(9).ok();
-    let agent_last_checkpoint_id: Option<String> = row.get(10).ok();
-    let agent_stdout: Option<String> = row.get(11).ok();
-    let agent_stderr: Option<String> = row.get(12).ok();
-    let status: String = row.get(13).map_err(|e| DbError::Query(e.to_string()))?;
-    let error_message: Option<String> = row.get(14).ok();
-    let created_at: String = row.get(15).map_err(|e| DbError::Query(e.to_string()))?;
+    let interactive_delegated: i32 = row.get(9).unwrap_or(0);
+    let agent_session_id: Option<String> = row.get(10).ok();
+    let agent_last_checkpoint_id: Option<String> = row.get(11).ok();
+    let agent_stdout: Option<String> = row.get(12).ok();
+    let agent_stderr: Option<String> = row.get(13).ok();
+    let status: String = row.get(14).map_err(|e| DbError::Query(e.to_string()))?;
+    let error_message: Option<String> = row.get(15).ok();
+    let created_at: String = row.get(16).map_err(|e| DbError::Query(e.to_string()))?;
 
     Ok(ScheduleRun {
         id,
@@ -659,6 +706,7 @@ fn parse_schedule_run(row: &libsql::Row) -> Result<ScheduleRun, DbError> {
         check_stderr,
         check_timed_out: check_timed_out != 0,
         agent_woken: agent_woken != 0,
+        interactive_delegated: interactive_delegated != 0,
         agent_session_id,
         agent_last_checkpoint_id,
         agent_stdout,

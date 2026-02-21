@@ -199,6 +199,14 @@ pub enum NotifyOn {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionMode {
+    Silent,
+    #[default]
+    Interactive,
+}
+
 impl NotificationConfig {
     pub fn should_notify(&self, schedule: &Schedule, success: bool) -> bool {
         let mode = schedule
@@ -287,6 +295,10 @@ pub struct Schedule {
 
     /// Notification chat target override.
     pub notify_chat_id: Option<String>,
+
+    /// Interactive execution mode.
+    #[serde(default)]
+    pub interaction: InteractionMode,
 
     /// Whether this schedule is active.
     #[serde(default = "default_schedule_enabled")]
@@ -960,5 +972,35 @@ trigger_on = "invalid"
         let result = ScheduleConfig::parse(config_str);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::ParseError(_)));
+    }
+
+    #[test]
+    fn test_interaction_defaults_to_interactive() {
+        let config_str = r#"
+[[schedules]]
+name = "default-interaction"
+cron = "0 * * * *"
+prompt = "Test"
+"#;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        assert_eq!(
+            config.schedules[0].interaction,
+            InteractionMode::Interactive
+        );
+    }
+
+    #[test]
+    fn test_interaction_can_be_silent() {
+        let config_str = r#"
+[[schedules]]
+name = "silent"
+cron = "0 * * * *"
+prompt = "Test"
+interaction = "silent"
+"#;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        assert_eq!(config.schedules[0].interaction, InteractionMode::Silent);
     }
 }

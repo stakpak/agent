@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    channels::{Channel, ChannelTestResult},
+    channels::{Channel, ChannelTestResult, DeliveryReceipt},
     chunking::chunk_text,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
@@ -93,7 +93,12 @@ impl SlackChannel {
         }
     }
 
-    async fn post_message(&self, channel: &str, text: &str, thread_ts: Option<&str>) -> Result<()> {
+    async fn post_message(
+        &self,
+        channel: &str,
+        text: &str,
+        thread_ts: Option<&str>,
+    ) -> Result<String> {
         let payload = ChatPostMessage {
             channel: channel.to_string(),
             text: text.to_string(),
@@ -121,13 +126,15 @@ impl SlackChannel {
                 continue;
             }
 
-            let payload: SlackApiResponse = response
+            let payload: ChatPostMessageResponse = response
                 .json()
                 .await
                 .context("slack chat.postMessage decode failed")?;
 
             if payload.ok {
-                return Ok(());
+                return payload
+                    .ts
+                    .ok_or_else(|| anyhow!("slack chat.postMessage missing message timestamp"));
             }
 
             return Err(anyhow!(
@@ -328,7 +335,7 @@ impl SlackChannel {
 
                 let inbound = InboundMessage {
                     channel: self.id.clone(),
-                    peer_id: PeerId(user),
+                    peer_id: PeerId(user.clone()),
                     chat_type,
                     text: cleaned_text,
                     media: Vec::new(),
@@ -338,6 +345,7 @@ impl SlackChannel {
                         "thread_ts": effective_thread_ts,
                         "channel_type": channel_type,
                         "mentioned": mentioned,
+                        "user_id": user,
                     }),
                     timestamp: parse_slack_ts_to_datetime(event.ts.as_deref()),
                 };
@@ -482,6 +490,10 @@ impl Channel for SlackChannel {
     }
 
     async fn send(&self, reply: OutboundReply) -> Result<()> {
+        self.send_with_receipt(reply).await.map(|_| ())
+    }
+
+    async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
         let channel = reply
             .metadata
             .get("channel")
@@ -496,7 +508,11 @@ impl Channel for SlackChannel {
             .metadata
             .get("channel_type")
             .and_then(value_as_string)
-            .unwrap_or_else(|| "channel".to_string());
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| match reply.chat_type {
+                ChatType::Direct => "im".to_string(),
+                _ => "channel".to_string(),
+            });
 
         let thread_ts = reply
             .metadata
@@ -512,12 +528,28 @@ impl Channel for SlackChannel {
             .filter(|value| !value.is_empty());
 
         let chunks = chunk_text(&reply.text, SLACK_TEXT_LIMIT);
+        let mut first_message_ts: Option<String> = None;
         for chunk in chunks {
-            self.post_message(&channel, &chunk, thread_ts.as_deref())
+            let ts = self
+                .post_message(&channel, &chunk, thread_ts.as_deref())
                 .await?;
+            if first_message_ts.is_none() {
+                first_message_ts = Some(ts);
+            }
         }
 
-        Ok(())
+        let effective_thread_id = thread_ts.or_else(|| first_message_ts.clone());
+
+        if channel_type != "im"
+            && let Some(thread_id) = effective_thread_id.as_deref()
+        {
+            self.activate_thread(&channel, thread_id);
+        }
+
+        Ok(DeliveryReceipt {
+            message_id: first_message_ts,
+            thread_id: effective_thread_id,
+        })
     }
 
     async fn test(&self) -> Result<ChannelTestResult> {
@@ -613,6 +645,15 @@ struct SlackApiResponse {
     ok: bool,
     #[serde(default)]
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatPostMessageResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    ts: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

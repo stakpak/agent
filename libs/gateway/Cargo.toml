@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 stakai = { workspace = true }
 stakpak-agent-core = { workspace = true }
+stakpak-shared = { workspace = true }
 axum = { workspace = true }
 tracing = { workspace = true }
 bytes = "1"

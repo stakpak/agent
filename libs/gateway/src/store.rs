@@ -37,6 +37,7 @@ impl GatewayStore {
             db,
             _temp_dir: None,
         };
+        store.configure_pragmas().await?;
         store.run_migrations().await?;
         Ok(store)
     }
@@ -54,8 +55,24 @@ impl GatewayStore {
             db,
             _temp_dir: Some(temp_dir),
         };
+        store.configure_pragmas().await?;
         store.run_migrations().await?;
         Ok(store)
+    }
+
+    async fn configure_pragmas(&self) -> Result<()> {
+        let conn = self.connection()?;
+        // journal_mode returns a result row, so use query() instead of execute()
+        conn.query("PRAGMA journal_mode = WAL", ())
+            .await
+            .context("failed to set journal_mode")?;
+        conn.query("PRAGMA busy_timeout = 5000", ())
+            .await
+            .context("failed to set busy_timeout")?;
+        conn.query("PRAGMA synchronous = NORMAL", ())
+            .await
+            .context("failed to set synchronous")?;
+        Ok(())
     }
 
     fn connection(&self) -> Result<Connection> {

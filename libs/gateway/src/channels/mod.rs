@@ -9,6 +9,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::types::{ChannelId, InboundMessage, OutboundReply};
 
+#[derive(Debug, Clone, Default)]
+pub struct DeliveryReceipt {
+    pub message_id: Option<String>,
+    pub thread_id: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChannelTestResult {
     pub channel: String,
@@ -29,6 +35,11 @@ pub trait Channel: Send + Sync + 'static {
     ) -> Result<()>;
 
     async fn send(&self, reply: OutboundReply) -> Result<()>;
+
+    async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
+        self.send(reply).await?;
+        Ok(DeliveryReceipt::default())
+    }
 
     async fn test(&self) -> Result<ChannelTestResult>;
 }

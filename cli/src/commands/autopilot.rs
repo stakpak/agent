@@ -14,7 +14,10 @@ use stakpak_api::AgentProvider;
 use crate::{
     config::AppConfig,
     onboarding::{OnboardingMode, run_onboarding},
+    utils::server_context::{load_remote_skills_context, startup_project_dir},
 };
+
+const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../prompts/system_prompt.v1.md");
 
 #[derive(Args, PartialEq, Debug, Clone)]
 pub struct StartArgs {
@@ -1023,6 +1026,23 @@ async fn start_foreground_runtime(
         })
         .collect();
 
+    // Pre-load remote skills context (fetched from rulebooks API) and capture
+    // startup project directory for gateway/channel sessions.
+    let startup_project_dir = startup_project_dir();
+    let startup_remote_skills = match load_remote_skills_context(&runtime_client).await {
+        Ok(context_files) => {
+            tracing::info!(
+                count = context_files.len(),
+                "Loaded remote skills context for session bootstrap"
+            );
+            context_files
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "Failed to load remote skills context; sessions will start without it");
+            Vec::new()
+        }
+    };
+
     let app_state = stakpak_server::AppState::new(
         storage,
         events,
@@ -1032,6 +1052,9 @@ async fn start_foreground_runtime(
         default_model,
         tool_approval_policy,
     )
+    .with_base_system_prompt(Some(DEFAULT_SYSTEM_PROMPT.trim().to_string()))
+    .with_project_dir(startup_project_dir)
+    .with_skills(startup_remote_skills)
     .with_mcp(
         mcp_init_result.client,
         mcp_tools,
@@ -1099,6 +1122,7 @@ async fn start_foreground_runtime(
 
     // --- Build HTTP app ---
     let refresh_state = app_state.clone();
+    let refresh_client = runtime_client.clone();
     let (refresh_shutdown_tx, mut refresh_shutdown_rx) = tokio::sync::watch::channel(false);
     let refresh_task = tokio::spawn(async move {
         loop {
@@ -1106,6 +1130,15 @@ async fn start_foreground_runtime(
                 _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
                     if let Err(error) = refresh_state.refresh_mcp_tools().await {
                         eprintln!("[mcp-refresh] {}", error);
+                    }
+
+                    match load_remote_skills_context(&refresh_client).await {
+                        Ok(context_files) => {
+                            refresh_state.replace_skills(context_files).await;
+                        }
+                        Err(error) => {
+                            eprintln!("[context-refresh] {}", error);
+                        }
                     }
                 }
                 changed = refresh_shutdown_rx.changed() => {

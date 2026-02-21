@@ -1,6 +1,7 @@
 pub mod async_manifest;
 pub mod auth;
 pub mod billing;
+pub mod context;
 pub mod error;
 pub mod indexing;
 pub mod integrations;

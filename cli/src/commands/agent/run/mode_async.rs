@@ -1,7 +1,7 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::helpers::{
-    add_agents_md, add_apps_md, add_local_context, add_skills, build_plan_mode_instructions,
-    build_resume_command, tool_result, user_message,
+    build_plan_mode_instructions, build_resume_command, is_first_non_system_message, tool_result,
+    user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::pause::{
@@ -10,10 +10,7 @@ use crate::commands::agent::run::pause::{
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
-use crate::utils::agents_md::AgentsMdInfo;
-use crate::utils::apps_md::AppsMdInfo;
-use crate::utils::local_context::LocalContext;
-use stakpak_api::models::Skill;
+use crate::utils::agent_context::AgentContext;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionStorage};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
@@ -29,12 +26,11 @@ pub struct RunAsyncConfig {
     pub prompt: String,
     pub checkpoint_id: Option<String>,
     pub session_id: Option<String>,
-    pub local_context: Option<LocalContext>,
+    pub agent_context: Option<AgentContext>,
     pub verbose: bool,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub enable_subagents: bool,
-    pub skills: Option<Vec<Skill>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -42,8 +38,6 @@ pub struct RunAsyncConfig {
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: Model,
-    pub agents_md: Option<AgentsMdInfo>,
-    pub apps_md: Option<AppsMdInfo>,
     #[allow(dead_code)] // consumed in Phase 11: Async Mode Plan Support
     pub plan_mode: bool,
     /// Auto-approve the plan when status becomes 'reviewing'
@@ -83,9 +77,10 @@ impl AsyncAutoApproveConfig {
         let mut tools = HashMap::new();
 
         // Normalize profile auto-approve tools (mapping legacy names)
-        let normalized_profile_tools: Option<Vec<String>> = auto_approve_tools.map(|pt| {
-            pt.iter()
-                .map(|s| backward_compatibility_mapping(s).to_string())
+        let normalized_profile_tools: Option<Vec<String>> = auto_approve_tools.map(|profile| {
+            profile
+                .iter()
+                .map(|name| backward_compatibility_mapping(name).to_string())
                 .collect()
         });
 
@@ -139,11 +134,12 @@ impl AsyncAutoApproveConfig {
                 // Don't override profile-specified tools
                 if normalized_profile_tools
                     .as_ref()
-                    .map(|pt| pt.iter().any(|s| s == mapped_name))
+                    .map(|profile| profile.iter().any(|value| value == mapped_name))
                     .unwrap_or(false)
                 {
                     continue;
                 }
+
                 let policy = match policy_val.as_str() {
                     Some("Auto") => AsyncApprovePolicy::Auto,
                     Some("Never") => AsyncApprovePolicy::Never,
@@ -161,8 +157,10 @@ impl AsyncAutoApproveConfig {
     }
 
     fn get_policy(&self, tool_name: &str) -> &AsyncApprovePolicy {
-        let stripped = strip_tool_name(tool_name);
-        self.tools.get(stripped).unwrap_or(&self.default_policy)
+        // strip_tool_name handles MCP prefix stripping, "()" removal, and
+        // backward compatibility mapping (e.g., read_rulebook → load_skill).
+        let canonical = strip_tool_name(tool_name);
+        self.tools.get(canonical).unwrap_or(&self.default_policy)
     }
 
     fn should_auto_approve(&self, tool_name: &str) -> bool {
@@ -417,35 +415,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
     };
 
     if should_add_prompt && !config.prompt.is_empty() {
-        let (user_input, _local_context) =
-            add_local_context(&chat_messages, &config.prompt, &config.local_context, false)
-                .await
-                .map_err(|e| e.to_string())?;
-
-        let (user_input, _skills_text) = if chat_messages.is_empty()
-            && let Some(skills) = &config.skills
-        {
-            add_skills(&user_input, skills)
+        let user_input = if let Some(ref agent_context) = config.agent_context {
+            let is_first = is_first_non_system_message(&chat_messages);
+            agent_context.enrich_prompt(&config.prompt, is_first, false)
         } else {
-            (user_input, None)
-        };
-
-        let user_input = if chat_messages.is_empty()
-            && let Some(agents_md) = &config.agents_md
-        {
-            let (user_input, _agents_md_text) = add_agents_md(&user_input, agents_md);
-            user_input
-        } else {
-            user_input
-        };
-
-        let user_input = if chat_messages.is_empty()
-            && let Some(apps_md) = &config.apps_md
-        {
-            let (user_input, _apps_md_text) = add_apps_md(&user_input, apps_md);
-            user_input
-        } else {
-            user_input
+            config.prompt.clone()
         };
 
         chat_messages.push(user_message(user_input));
@@ -1021,5 +995,27 @@ mod tests {
     fn build_resume_command_returns_none_when_no_ids() {
         let resume_command = build_resume_command(None, None);
         assert_eq!(resume_command, None);
+    }
+
+    #[test]
+    fn auto_approve_canonicalizes_legacy_tool_names() {
+        let config = AsyncAutoApproveConfig::new(None);
+        assert!(
+            config.should_auto_approve("stakpak__read_rulebook"),
+            "legacy read_rulebook should map to load_skill"
+        );
+        assert!(
+            config.should_auto_approve("read_rulebooks()"),
+            "plural legacy alias with () should map to load_skill"
+        );
+    }
+
+    #[test]
+    fn auto_approve_canonicalizes_prefixed_prompt_tool_names() {
+        let config = AsyncAutoApproveConfig::new(None);
+        assert!(
+            !config.should_auto_approve("stakpak__run_command()"),
+            "run_command remains prompt-only after canonicalization"
+        );
     }
 }

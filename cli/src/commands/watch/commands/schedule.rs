@@ -1,7 +1,8 @@
 //! Autopilot schedule command - inspect or manually fire a schedule.
 
 use crate::commands::watch::{
-    RunStatus, ScheduleConfig, ScheduleDb, assemble_prompt, is_process_running, run_check_script,
+    RunStatus, ScheduleConfig, ScheduleDb, assemble_prompt, build_schedule_caller_context,
+    is_process_running, run_check_script,
 };
 
 /// Show detailed information about a schedule.
@@ -179,13 +180,26 @@ pub async fn fire_schedule(name: &str, dry_run: bool) -> Result<(), String> {
             None
         };
 
-        // Assemble prompt
+        // Assemble user prompt + structured caller context preview
         let prompt = assemble_prompt(schedule, check_result.as_ref());
+        let caller_context = build_schedule_caller_context(schedule, check_result.as_ref());
 
         println!("\nAssembled prompt:");
         println!("---");
         println!("{}", prompt);
         println!("---");
+
+        println!("\nStructured caller context:");
+        for entry in caller_context {
+            println!("- name: {}", entry.name);
+            if let Some(priority) = entry.priority {
+                println!("  priority: {}", priority);
+            }
+            println!("  content:");
+            for line in entry.content.lines() {
+                println!("    {}", line);
+            }
+        }
 
         println!("\n\x1b[33m[Dry run - schedule not queued, nothing recorded]\x1b[0m");
         return Ok(());
