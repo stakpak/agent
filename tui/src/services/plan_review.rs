@@ -11,8 +11,6 @@ use crate::services::detect_term::ThemeColors;
 use crate::services::plan_comments::{
     AnchorType, CommentAnchor, CommentAuthor, MatchQuality, PlanComments,
 };
-#[cfg(test)]
-use ratatui::style::Color;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -1471,7 +1469,10 @@ Build login and refresh endpoints.
     fn test_style_plan_line_fence_delimiter() {
         let style = md_style();
         let spans = style_plan_line("```rust", "```rust", false, &style);
-        assert_eq!(spans[0].style, Style::default().fg(Color::DarkGray));
+        assert_eq!(
+            spans[0].style,
+            Style::default().fg(ThemeColors::dark_gray())
+        );
     }
 
     #[test]
