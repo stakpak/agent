@@ -1,19 +1,11 @@
-use crate::{app::AppState, services::detect_term::AdaptiveColors};
+use crate::{app::AppState, services::detect_term::ThemeColors};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState},
 };
-
-fn term_color(color: Color) -> Color {
-    if crate::services::detect_term::should_use_rgb_colors() {
-        color
-    } else {
-        Color::Reset
-    }
-}
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
     let input = state.input().trim();
@@ -68,6 +60,11 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             .max()
             .unwrap_or(0);
 
+        // Dropdown colors - use explicit background for visibility
+        let dropdown_bg = ThemeColors::dropdown_bg();
+        let dropdown_text = ThemeColors::dropdown_text();
+        let dropdown_muted = ThemeColors::dropdown_muted();
+
         // Create visible lines with scroll indicators
         let mut visible_lines = Vec::new();
 
@@ -76,7 +73,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
         if has_content_above {
             visible_lines.push(Line::from(vec![Span::styled(
                 " ▲",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(dropdown_muted).bg(dropdown_bg),
             )]));
         }
 
@@ -90,22 +87,32 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 let is_selected = line_index == state.helper_selected;
 
                 let command_style = if is_selected {
-                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                    Style::default()
+                        .fg(ThemeColors::highlight_fg())
+                        .bg(ThemeColors::highlight_bg())
                 } else {
-                    Style::default().fg(Color::Cyan)
+                    Style::default().fg(ThemeColors::cyan()).bg(dropdown_bg)
                 };
 
                 let description_style = if is_selected {
                     Style::default()
-                        .fg(term_color(Color::Black))
-                        .bg(AdaptiveColors::text())
+                        .fg(ThemeColors::highlight_fg())
+                        .bg(ThemeColors::highlight_bg())
                 } else {
-                    Style::default().fg(AdaptiveColors::text())
+                    Style::default().fg(dropdown_text).bg(dropdown_bg)
+                };
+
+                let padding_style = if is_selected {
+                    Style::default()
+                        .fg(ThemeColors::highlight_fg())
+                        .bg(ThemeColors::highlight_bg())
+                } else {
+                    Style::default().fg(dropdown_muted).bg(dropdown_bg)
                 };
 
                 let spans = vec![
                     Span::styled(format!("  {}  ", command.command), command_style),
-                    Span::styled(padding, Style::default().fg(Color::DarkGray)),
+                    Span::styled(padding, padding_style),
                     Span::styled(format!(" – {}", command.description), description_style),
                 ];
 
@@ -119,7 +126,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
         if has_content_below {
             visible_lines.push(Line::from(vec![Span::styled(
                 " ▼",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(dropdown_muted).bg(dropdown_bg),
             )]));
         }
 
@@ -133,7 +140,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             // Show current position counter
             indicator_spans.push(Span::styled(
                 format!(" ({}/{})", current_position, total_commands),
-                Style::default().fg(Color::Reset),
+                Style::default().fg(dropdown_muted).bg(dropdown_bg),
             ));
         }
 
@@ -147,7 +154,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
 
         let list = List::new(items)
             .block(Block::default())
-            .style(Style::default().bg(Color::Reset).fg(Color::White));
+            .style(Style::default().bg(dropdown_bg).fg(dropdown_text));
 
         f.render_widget(list, compact_area);
     }
@@ -172,9 +179,9 @@ fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
 
     // Set title and styling based on trigger
     let (title, title_color) = match state.file_search.trigger_char {
-        Some('@') => ("📁 Files (@)", Color::Cyan),
-        None => ("📁 Files (Tab)", Color::Blue),
-        _ => ("📁 Files", Color::Gray),
+        Some('@') => ("📁 Files (@)", ThemeColors::cyan()),
+        None => ("📁 Files (Tab)", ThemeColors::accent_secondary()),
+        _ => ("📁 Files", ThemeColors::dark_gray()),
     };
     let items: Vec<ListItem> = files
         .iter()
@@ -182,11 +189,11 @@ fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|(i, item)| {
             let style = if i == state.helper_selected {
                 Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
+                    .bg(ThemeColors::highlight_bg())
+                    .fg(ThemeColors::highlight_fg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(AdaptiveColors::text())
+                Style::default().fg(ThemeColors::text())
             };
 
             let display_text = format!("{} {}", get_file_icon(item), item);

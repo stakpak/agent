@@ -4,6 +4,7 @@
 
 use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::services::bash_block::render_bash_block_rejected;
+use crate::services::detect_term::ThemeColors;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::extract_truncated_command_arguments;
 use crate::services::message::{
@@ -196,7 +197,7 @@ pub fn handle_esc(
                         .unwrap_or_else(|_| "unknown command".to_string());
 
                 // Determine state: Skipped (yellow) or Rejected (red)
-                let run_state = if color == Some(Color::Yellow) {
+                let run_state = if color == Some(ThemeColors::yellow()) {
                     crate::services::bash_block::RunCommandState::Skipped
                 } else {
                     crate::services::bash_block::RunCommandState::Rejected
@@ -457,7 +458,7 @@ pub fn handle_show_confirmation_dialog(
         };
 
         let color = if is_skipped {
-            Some(Color::Yellow)
+            Some(ThemeColors::yellow())
         } else {
             None
         };
@@ -571,9 +572,9 @@ pub fn handle_toggle_dialog_focus(state: &mut AppState) {
         push_styled_message(
             state,
             &format!("🎯 {}", focus_message),
-            Color::DarkGray,
+            ThemeColors::dark_gray(),
             "",
-            Color::Cyan,
+            ThemeColors::cyan(),
         );
     }
 }

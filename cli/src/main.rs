@@ -172,6 +172,10 @@ struct Cli {
     #[arg(long = "ignore-apps-md", default_value_t = false)]
     ignore_apps_md: bool,
 
+    /// Color theme: auto, dark, or light (default: auto)
+    #[arg(long = "theme", default_value = "auto")]
+    theme: String,
+
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
@@ -290,6 +294,15 @@ async fn main() {
 
             // Run interactive/async agent when no subcommand or Init; otherwise run the subcommand
             if matches!(cli.command, None | Some(Commands::Init)) {
+                // Initialize theme detection early, before any color code runs (e.g. onboarding).
+                // This ensures --theme flag takes effect for CLI colors too.
+                let theme_override = match cli.theme.to_lowercase().as_str() {
+                    "light" => Some(stakpak_shared::terminal_theme::Theme::Light),
+                    "dark" => Some(stakpak_shared::terminal_theme::Theme::Dark),
+                    _ => None,
+                };
+                stakpak_shared::terminal_theme::init_theme(theme_override);
+
                 // Run onboarding if no credentials are configured at all
                 // Check both Stakpak API key AND local provider keys
                 let has_stakpak_key = config.get_stakpak_api_key().is_some();
@@ -572,6 +585,13 @@ async fn main() {
 
                     // Interactive mode: run in TUI
                     false => {
+                        // Parse theme override
+                        let theme = match cli.theme.to_lowercase().as_str() {
+                            "light" => Some(stakpak_tui::services::detect_term::Theme::Light),
+                            "dark" => Some(stakpak_tui::services::detect_term::Theme::Dark),
+                            _ => None, // "auto" or anything else = auto-detect
+                        };
+
                         agent::run::run_interactive(
                             config,
                             RunInteractiveConfig {
@@ -597,6 +617,7 @@ async fn main() {
                                 agents_md,
                                 apps_md,
                                 send_init_prompt_on_start,
+                                theme,
                             },
                         )
                         .await

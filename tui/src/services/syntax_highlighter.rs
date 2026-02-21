@@ -5,14 +5,14 @@ use syntect::highlighting::{Color as SyntectColor, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-use crate::services::detect_term::should_use_rgb_colors;
+use crate::services::detect_term::{ThemeColors, is_light_mode, should_use_rgb_colors};
 
 fn syntect_color_to_ratatui_color(syntect_color: SyntectColor) -> Color {
     if should_use_rgb_colors() {
         Color::Rgb(syntect_color.r, syntect_color.g, syntect_color.b)
     } else {
-        // For non-RGB terminals, use a simple cyan color
-        Color::Cyan
+        // For non-RGB terminals, use a theme-aware cyan color
+        ThemeColors::cyan()
     }
 }
 
@@ -21,8 +21,15 @@ pub fn apply_syntax_highlighting(text: &str, extension: Option<&str>) -> Vec<Lin
     let syntax_set = SyntaxSet::load_defaults_newlines();
     let theme_set = ThemeSet::load_defaults();
 
-    // Use a better default theme for code highlighting
-    let theme = &theme_set.themes["base16-ocean.dark"];
+    // Select theme based on terminal background color
+    // base16-ocean.light has darker colors suitable for light backgrounds
+    // base16-ocean.dark has lighter colors suitable for dark backgrounds
+    let theme_name = if is_light_mode() {
+        "base16-ocean.light"
+    } else {
+        "base16-ocean.dark"
+    };
+    let theme = &theme_set.themes[theme_name];
 
     // add default extensions if none
     let extension = extension.or(Some("js"));

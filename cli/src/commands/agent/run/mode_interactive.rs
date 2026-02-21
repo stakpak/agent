@@ -18,6 +18,7 @@ use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::apps_md::AppsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
+use crate::utils::cli_colors::CliColors;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
 use stakpak_api::local::skills::{default_skill_directories, discover_skills};
@@ -152,6 +153,8 @@ pub struct RunInteractiveConfig {
     pub apps_md: Option<AppsMdInfo>,
     /// When true, send init_prompt_content as first user message on session start (stakpak init)
     pub send_init_prompt_on_start: bool,
+    /// Theme override: None = auto-detect, Some(theme) = use specified theme
+    pub theme: Option<stakpak_tui::services::detect_term::Theme>,
 }
 
 #[allow(unused_assignments)] // plan_mode_active: written in PlanModeActivated, read in later phases
@@ -159,6 +162,9 @@ pub async fn run_interactive(
     mut ctx: AppConfig,
     mut config: RunInteractiveConfig,
 ) -> Result<(), String> {
+    // Initialize theme detection before starting TUI
+    stakpak_tui::services::detect_term::init_theme(config.theme);
+
     // Outer loop for profile switching
     'profile_switch_loop: loop {
         let mut model = config.model.clone();
@@ -1652,7 +1658,13 @@ https://stakpak.dev/{}/agent-sessions/{}",
 
         println!();
         println!(
-            "\x1b[35mFeedback or bug report?\x1b[0m \x1b[38;5;214mJoin our Discord:\x1b[0m \x1b[38;5;214mhttps://discord.gg/c4HUkDD45d\x1b[0m"
+            "{}Feedback or bug report?{} {}Join our Discord:{} {}https://discord.gg/c4HUkDD45d{}",
+            CliColors::magenta(),
+            CliColors::reset(),
+            CliColors::orange(),
+            CliColors::reset(),
+            CliColors::orange(),
+            CliColors::reset()
         );
         println!();
 

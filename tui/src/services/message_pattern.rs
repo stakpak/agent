@@ -1,8 +1,9 @@
-use ratatui::{
-    prelude::{Line, Span, Style},
-    style::Color,
-};
+use crate::services::detect_term::ThemeColors;
+use ratatui::prelude::{Line, Span, Style};
 use regex::Regex;
+
+#[cfg(test)]
+use ratatui::style::Color;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -125,7 +126,7 @@ pub fn process_checkpoint_patterns(
             checkpoint_text,
             "-".repeat(dash_right)
         );
-        (line, Style::default().fg(Color::DarkGray))
+        (line, Style::default().fg(ThemeColors::dark_gray()))
     };
     process_lines_with_pattern(
         lines,
@@ -140,7 +141,7 @@ pub fn _process_agent_mode_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'stati
         let static_text = "[Agent Mode]:";
         let dynamic = content[..1].to_uppercase() + &content[1..].to_lowercase();
         let formatted = format!("{icon} {static_text} {dynamic}");
-        (formatted, Style::default().fg(Color::Cyan))
+        (formatted, Style::default().fg(ThemeColors::cyan()))
     };
     process_lines_with_pattern(
         lines,
@@ -159,7 +160,7 @@ pub fn _process_section_title_patterns(
         (
             title.clone(),
             Style::default()
-                .fg(Color::LightMagenta)
+                .fg(ThemeColors::magenta())
                 .add_modifier(ratatui::style::Modifier::BOLD),
         )
     };
@@ -359,7 +360,10 @@ mod tests {
             processed[0].0.spans[1].content,
             "-----------------------------------------checkpoint test123-----------------------------------------"
         );
-        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
+        assert_eq!(
+            processed[0].0.spans[1].style.fg,
+            Some(ThemeColors::dark_gray())
+        );
 
         // Second line should be unchanged
         assert_eq!(processed[1].0.spans.len(), 1);
@@ -387,7 +391,10 @@ mod tests {
             processed[0].0.spans[1].content,
             "-------------------------------------------checkpoint abc-------------------------------------------"
         );
-        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
+        assert_eq!(
+            processed[0].0.spans[1].style.fg,
+            Some(ThemeColors::dark_gray())
+        );
         assert_eq!(processed[0].0.spans[2].content, " message");
 
         // Second line should be unchanged (only 1 span)
@@ -421,6 +428,9 @@ mod tests {
             processed[0].0.spans[1].content,
             "-------------------------------------------checkpoint abc-------------------------------------------"
         );
-        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
+        assert_eq!(
+            processed[0].0.spans[1].style.fg,
+            Some(ThemeColors::dark_gray())
+        );
     }
 }

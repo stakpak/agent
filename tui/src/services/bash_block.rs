@@ -1,5 +1,5 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::{AdaptiveColors, ThemeColors};
 use crate::services::file_diff::{render_file_diff_block, render_file_diff_block_from_args};
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{BubbleColors, extract_command_purpose, get_command_type_name};
@@ -27,6 +27,16 @@ fn term_color(color: Color) -> Color {
     } else {
         Color::Reset
     }
+}
+
+/// Get theme-aware border color for tool call boxes
+fn tool_border_color() -> Color {
+    ThemeColors::accent()
+}
+
+/// Get theme-aware muted color (for secondary text, inactive elements)
+fn tool_muted_color() -> Color {
+    ThemeColors::muted()
 }
 
 pub fn strip_all_ansi(text: &str) -> String {
@@ -295,7 +305,11 @@ pub fn render_styled_block_ansi_to_tui(
     let (border_color, _title_color, content_color) = if let Some(ref c) = colors {
         (c.border_color, c.title_color, c.content_color)
     } else {
-        (Color::Cyan, Color::Cyan, Color::Cyan)
+        (
+            tool_border_color(),
+            tool_border_color(),
+            tool_border_color(),
+        )
     };
 
     // Create colored borders
@@ -575,33 +589,33 @@ pub fn extract_bash_block_info(
     let bubble_title = extract_command_purpose(&command, &outside_title);
     let colors = match strip_tool_name(&tool_call.function.name) {
         "create_file" => BubbleColors {
-            border_color: Color::Green,
-            title_color: term_color(Color::Gray),
-            content_color: Color::LightGreen,
+            border_color: ThemeColors::success(),
+            title_color: tool_muted_color(),
+            content_color: ThemeColors::text(),
             tool_type: "Create File".to_string(),
         },
         "edit_file" => BubbleColors {
-            border_color: Color::Yellow,
-            title_color: term_color(Color::Gray),
-            content_color: Color::LightYellow,
+            border_color: ThemeColors::warning(),
+            title_color: tool_muted_color(),
+            content_color: ThemeColors::text(),
             tool_type: "Edit File".to_string(),
         },
         "run_command" => BubbleColors {
-            border_color: Color::Cyan,
-            title_color: Color::Yellow,
-            content_color: term_color(Color::Gray),
+            border_color: tool_border_color(),
+            title_color: ThemeColors::warning(),
+            content_color: ThemeColors::text(),
             tool_type: "Run Command".to_string(),
         },
         "read_file" => BubbleColors {
-            border_color: Color::Magenta,
-            title_color: term_color(Color::Gray),
-            content_color: Color::LightMagenta,
+            border_color: ThemeColors::magenta(),
+            title_color: tool_muted_color(),
+            content_color: ThemeColors::text(),
             tool_type: "Read File".to_string(),
         },
         "delete_file" => BubbleColors {
-            border_color: Color::Red,
-            title_color: term_color(Color::Gray),
-            content_color: Color::LightRed,
+            border_color: ThemeColors::danger(),
+            title_color: tool_muted_color(),
+            content_color: ThemeColors::text(),
             tool_type: "Delete File".to_string(),
         },
         "dynamic_subagent_task" => {
@@ -612,24 +626,24 @@ pub fn extract_bash_block_info(
                     .unwrap_or(false);
             if is_sandbox {
                 BubbleColors {
-                    border_color: Color::Green,
-                    title_color: Color::Green,
-                    content_color: term_color(Color::Gray),
+                    border_color: ThemeColors::success(),
+                    title_color: ThemeColors::success(),
+                    content_color: ThemeColors::text(),
                     tool_type: "Subagent [sandboxed]".to_string(),
                 }
             } else {
                 BubbleColors {
-                    border_color: Color::Magenta,
-                    title_color: Color::Magenta,
-                    content_color: term_color(Color::Gray),
+                    border_color: ThemeColors::magenta(),
+                    title_color: ThemeColors::magenta(),
+                    content_color: ThemeColors::text(),
                     tool_type: "Subagent".to_string(),
                 }
             }
         }
         _ => BubbleColors {
-            border_color: Color::Cyan,
-            title_color: term_color(Color::White),
-            content_color: term_color(Color::Gray),
+            border_color: tool_border_color(),
+            title_color: ThemeColors::text(),
+            content_color: ThemeColors::text(),
             tool_type: "unknown".to_string(),
         },
     };
@@ -657,7 +671,7 @@ pub fn render_streaming_block_compact(
     let (border_color, _title_color, content_color) = if let Some(ref c) = colors {
         (c.border_color, c.title_color, c.content_color)
     } else {
-        (Color::DarkGray, Color::DarkGray, Color::DarkGray)
+        (tool_muted_color(), tool_muted_color(), tool_muted_color())
     };
 
     // Create colored borders
@@ -826,7 +840,9 @@ pub fn render_styled_header_and_borders(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    let border_color = colors.map(|c| c.border_color).unwrap_or(Color::Cyan);
+    let border_color = colors
+        .map(|c| c.border_color)
+        .unwrap_or(tool_border_color());
 
     // Create title border
     let stripped_title = strip_ansi_codes(title);
@@ -953,10 +969,10 @@ pub fn render_file_diff_full(
         &title,
         "", // Hide path here - it's shown in the diff content below
         Some(LinesColors {
-            dot: Color::LightGreen,
-            title: Color::White,
-            command: AdaptiveColors::text(),
-            message: Color::LightGreen,
+            dot: ThemeColors::dot_success(),
+            title: ThemeColors::title_primary(),
+            command: ThemeColors::text(),
+            message: ThemeColors::success(),
         }),
         Some(terminal_width),
     ));
@@ -988,9 +1004,9 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
 
         let formatted_title = format!(" {} ", title);
         let colors = Some(BubbleColors {
-            border_color: Color::DarkGray,
-            title_color: term_color(Color::Reset),
-            content_color: Color::Reset,
+            border_color: tool_muted_color(),
+            title_color: ThemeColors::text(),
+            content_color: ThemeColors::text(),
             tool_type: title,
         });
 
@@ -1042,10 +1058,10 @@ pub fn render_markdown_block(
         &title,
         &command_args,
         Some(LinesColors {
-            dot: Color::LightGreen,
-            title: Color::White,
-            command: AdaptiveColors::text(),
-            message: Color::LightGreen,
+            dot: ThemeColors::dot_success(),
+            title: ThemeColors::title_primary(),
+            command: ThemeColors::text(),
+            message: ThemeColors::success(),
         }),
         None, // No width available here
     ));
@@ -1171,14 +1187,14 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     // Calculate available width for the title and arguments
     let available_width = inner_width - 2; // Account for borders and spacing
     let dot_color = if is_collapsed {
-        Color::Magenta
+        ThemeColors::magenta()
     } else {
-        Color::LightGreen
+        ThemeColors::dot_success()
     };
     let title_color = if is_collapsed {
-        Color::Yellow
+        ThemeColors::title()
     } else {
-        term_color(Color::White)
+        ThemeColors::title_primary()
     };
     // Check if the title with arguments fits on one line
     // Also check for embedded newlines - if present, always use multi-line rendering
@@ -1321,11 +1337,9 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
 
         // Close the parentheses on the last line
         if let Some(last_line) = lines.last_mut()
-            && let Some(last_content_span) = last_line
-                .spans
-                .iter_mut()
-                .rev()
-                .find(|span| span.style.fg == Some(Color::White) && !span.content.contains("│"))
+            && let Some(last_content_span) = last_line.spans.iter_mut().rev().find(|span| {
+                span.style.fg == Some(ThemeColors::title_primary()) && !span.content.contains("│")
+            })
         {
             last_content_span.content = format!("{}", last_content_span.content).into();
         }
@@ -1385,11 +1399,11 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                 line_spans.push(Span::from(line_indent));
             }
 
-            // Apply Rgb(180,180,180) color to result text
+            // Apply theme-aware text color to result text
             for span in &text_line.spans {
                 line_spans.push(Span::styled(
                     span.content.clone(),
-                    Style::default().fg(term_color(Color::White)),
+                    Style::default().fg(ThemeColors::text()),
                 ));
             }
             line_spans.push(Span::from(padding));
@@ -1488,8 +1502,8 @@ pub fn render_bash_block_rejected(
 ) -> Vec<Line<'static>> {
     let colors = color.map(|c| LinesColors {
         dot: c,
-        title: term_color(Color::White),
-        command: AdaptiveColors::text(),
+        title: ThemeColors::title_primary(),
+        command: ThemeColors::text(),
         message: c,
     });
     render_styled_lines(command_name, title, message, colors, None)
@@ -1520,10 +1534,10 @@ fn render_styled_header_with_dot(
     terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
-        dot: Color::LightRed,
-        title: term_color(Color::White),
-        command: AdaptiveColors::text(),
-        message: Color::LightRed,
+        dot: ThemeColors::dot_error(),
+        title: ThemeColors::title_primary(),
+        command: ThemeColors::text(),
+        message: ThemeColors::danger(),
     });
 
     // Use actual terminal width if provided, otherwise fall back to 100
@@ -1626,10 +1640,10 @@ pub fn render_styled_lines_with_content(
     terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
-        dot: Color::LightRed,
-        title: term_color(Color::White),
-        command: AdaptiveColors::text(),
-        message: Color::LightRed,
+        dot: ThemeColors::dot_error(),
+        title: ThemeColors::title_primary(),
+        command: ThemeColors::text(),
+        message: ThemeColors::danger(),
     });
 
     let mut lines = Vec::new();
@@ -1653,7 +1667,10 @@ pub fn render_styled_lines_with_content(
             styled_spans.push(Span::styled("  ", Style::default())); // 3-space indent
             for span in content_line.spans.into_iter() {
                 let trimmed = span.content.trim_start().to_string();
-                styled_spans.push(Span::styled(trimmed, Style::default().fg(Color::DarkGray)));
+                styled_spans.push(Span::styled(
+                    trimmed,
+                    Style::default().fg(ThemeColors::dark_gray()),
+                ));
             }
             lines.push(Line::from(styled_spans));
         }
@@ -1718,10 +1735,10 @@ pub fn render_collapsed_command_message(
 
     let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
     let colors = LinesColors {
-        dot: Color::LightGreen,
-        title: term_color(Color::White),
-        command: AdaptiveColors::text(),
-        message: AdaptiveColors::text(),
+        dot: ThemeColors::dot_success(),
+        title: ThemeColors::title_primary(),
+        command: ThemeColors::text(),
+        message: ThemeColors::text(),
     };
 
     // if lines are more than 3 lines get the last 3 lines
@@ -1757,7 +1774,7 @@ pub fn render_view_file_block(
     };
     let inner_width = content_width;
 
-    let border_color = Color::DarkGray;
+    let border_color = tool_muted_color();
     let icon = "";
 
     // Determine title based on operation type
@@ -1812,22 +1829,25 @@ pub fn render_view_file_block(
     let mut spans = vec![
         Span::styled("│", Style::default().fg(border_color)),
         Span::from(" "),
-        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled(icon.to_string(), Style::default().fg(tool_muted_color())),
         Span::from(" "),
         Span::styled(
             title.to_string(),
             Style::default()
-                .fg(Color::White)
+                .fg(ThemeColors::text())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::from(" "),
-        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::styled(display_path, Style::default().fg(ThemeColors::text())),
         Span::from(" "),
-        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+        Span::styled(lines_text, Style::default().fg(tool_muted_color())),
     ];
 
     if !suffix.is_empty() {
-        spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled(
+            suffix,
+            Style::default().fg(tool_border_color()),
+        ));
     }
 
     spans.push(Span::from(" ".repeat(padding)));
@@ -1911,22 +1931,25 @@ pub fn render_view_file_block_no_border(
     };
 
     let mut spans = vec![
-        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled(icon.to_string(), Style::default().fg(tool_muted_color())),
         Span::from(" "),
         Span::styled(
             title.to_string(),
             Style::default()
-                .fg(Color::White)
+                .fg(ThemeColors::text())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::from(" "),
-        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::styled(display_path, Style::default().fg(ThemeColors::text())),
         Span::from(" "),
-        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+        Span::styled(lines_text, Style::default().fg(tool_muted_color())),
     ];
 
     if !suffix.is_empty() {
-        spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled(
+            suffix,
+            Style::default().fg(tool_border_color()),
+        ));
     }
 
     let content_line = Line::from(spans);
@@ -2019,47 +2042,55 @@ pub fn render_run_command_block(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Border color: Cyan for pending (preview), DarkGray for error/cancelled/rejected/skipped, Gray otherwise
+    // Border color: accent for pending (preview), muted for error/cancelled/rejected/skipped, muted otherwise
     let border_color = match state {
-        RunCommandState::Pending => Color::Cyan,
+        RunCommandState::Pending => tool_border_color(),
         RunCommandState::Error
         | RunCommandState::Cancelled
         | RunCommandState::Rejected
-        | RunCommandState::Skipped => Color::DarkGray,
-        _ => term_color(Color::Gray),
+        | RunCommandState::Skipped => tool_muted_color(),
+        _ => tool_muted_color(),
     };
 
     // Dot color and title suffix based on state
-    // For error states, both dot and suffix text are LightRed
-    // For running/skipped, both dot and suffix text are Yellow
+    // For error states, both dot and suffix text are danger color
+    // For running/skipped, both dot and suffix text are warning color
     let (dot_color, title_suffix, suffix_color) = match &state {
-        RunCommandState::Pending => (term_color(Color::Reset), "".to_string(), None),
+        RunCommandState::Pending => (ThemeColors::text(), "".to_string(), None),
         RunCommandState::Running => (
-            Color::Yellow,
+            ThemeColors::warning(),
             " - Running...".to_string(),
-            Some(Color::Yellow),
+            Some(ThemeColors::warning()),
         ),
         RunCommandState::RunningWithStallWarning(msg) => {
             // Show the stall warning message in the title
-            (Color::Yellow, format!(" - {}", msg), Some(Color::Yellow))
+            (
+                ThemeColors::warning(),
+                format!(" - {}", msg),
+                Some(ThemeColors::warning()),
+            )
         }
-        RunCommandState::Completed => (Color::LightGreen, "".to_string(), None),
+        RunCommandState::Completed => (ThemeColors::success(), "".to_string(), None),
         RunCommandState::Error => (
-            Color::LightRed,
+            ThemeColors::danger(),
             " - Errored".to_string(),
-            Some(Color::LightRed),
+            Some(ThemeColors::danger()),
         ),
         RunCommandState::Cancelled => (
-            Color::LightRed,
+            ThemeColors::danger(),
             " - Cancelled".to_string(),
-            Some(Color::LightRed),
+            Some(ThemeColors::danger()),
         ),
         RunCommandState::Rejected => (
-            Color::LightRed,
+            ThemeColors::danger(),
             " - Rejected".to_string(),
-            Some(Color::LightRed),
+            Some(ThemeColors::danger()),
         ),
-        RunCommandState::Skipped => (Color::Yellow, " - Skipped".to_string(), Some(Color::Yellow)),
+        RunCommandState::Skipped => (
+            ThemeColors::warning(),
+            " - Skipped".to_string(),
+            Some(ThemeColors::warning()),
+        ),
     };
 
     // Title structure: "╭─" + "●" + " Run Command" + suffix + " " + dashes + "╮"
@@ -2085,7 +2116,7 @@ pub fn render_run_command_block(
             Span::styled(
                 format!(" {} ", base_title),
                 Style::default()
-                    .fg(term_color(Color::White))
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(format!("{} ", title_suffix.trim_start()), suffix_style),
@@ -2105,7 +2136,7 @@ pub fn render_run_command_block(
             Span::styled(
                 format!(" {} ", title_text),
                 Style::default()
-                    .fg(term_color(Color::White))
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -2146,12 +2177,12 @@ pub fn render_run_command_block(
                 Span::styled(
                     "$ ".to_string(),
                     Style::default()
-                        .fg(Color::Magenta)
+                        .fg(ThemeColors::magenta())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     cmd_part.to_string(),
-                    Style::default().fg(AdaptiveColors::text()),
+                    Style::default().fg(ThemeColors::text()),
                 ),
                 Span::from(" ".repeat(padding_needed)),
                 Span::styled(" │", Style::default().fg(border_color)),
@@ -2163,7 +2194,7 @@ pub fn render_run_command_block(
                 Span::from(" "),
                 Span::styled(
                     wrapped_line.clone(),
-                    Style::default().fg(AdaptiveColors::text()),
+                    Style::default().fg(ThemeColors::text()),
                 ),
                 Span::from(" ".repeat(padding_needed)),
                 Span::styled(" │", Style::default().fg(border_color)),
@@ -2194,8 +2225,8 @@ pub fn render_run_command_block(
 
         // Message color for error states
         let error_message_color = match state {
-            RunCommandState::Skipped => Color::Yellow,
-            _ => Color::LightRed,
+            RunCommandState::Skipped => ThemeColors::warning(),
+            _ => ThemeColors::danger(),
         };
 
         // Empty line separator
@@ -2219,7 +2250,7 @@ pub fn render_run_command_block(
                 Span::styled(
                     result_label.to_string(),
                     Style::default()
-                        .fg(term_color(Color::White))
+                        .fg(ThemeColors::title_primary())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::from(" ".repeat(label_padding)),
@@ -2235,7 +2266,7 @@ pub fn render_run_command_block(
         let text_color = if is_error_state {
             error_message_color
         } else {
-            AdaptiveColors::text()
+            ThemeColors::text()
         };
 
         // Process each line from the preprocessed result
@@ -2304,8 +2335,8 @@ pub fn render_ask_user_block(
     };
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
-    let border_color = Color::Cyan;
-    let dot_color = Color::Cyan;
+    let border_color = ThemeColors::cyan();
+    let dot_color = ThemeColors::cyan();
 
     // Title
     let base_title = "Ask User";
@@ -2321,7 +2352,7 @@ pub fn render_ask_user_block(
         Span::styled(
             format!(" {} ", base_title),
             Style::default()
-                .fg(term_color(Color::White))
+                .fg(ThemeColors::title_primary())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -2344,18 +2375,21 @@ pub fn render_ask_user_block(
     // --- Tab bar ---
     {
         let mut tab_spans = Vec::new();
-        tab_spans.push(Span::styled(" ← ", Style::default().fg(Color::DarkGray)));
+        tab_spans.push(Span::styled(
+            " ← ",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ));
 
         for (i, q) in questions.iter().enumerate() {
             let is_current = i == current_tab;
             let is_answered = answers.contains_key(&q.label);
             let checkbox = if is_answered { "✓ " } else { "□ " };
             let style = if is_current {
-                Style::default().bg(Color::Cyan).fg(Color::Black)
+                Style::default().bg(ThemeColors::cyan()).fg(Color::Black)
             } else if is_answered {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(ThemeColors::cyan())
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(ThemeColors::dark_gray())
             };
             let label = if q.label.chars().count() > 15 {
                 format!("{}...", q.label.chars().take(12).collect::<String>())
@@ -2367,12 +2401,15 @@ pub fn render_ask_user_block(
         }
 
         let submit_style = if is_submit_tab {
-            Style::default().bg(Color::Cyan).fg(Color::Black)
+            Style::default().bg(ThemeColors::cyan()).fg(Color::Black)
         } else {
-            Style::default().fg(Color::Green)
+            Style::default().fg(ThemeColors::green())
         };
         tab_spans.push(Span::styled("Review", submit_style));
-        tab_spans.push(Span::styled(" →", Style::default().fg(Color::DarkGray)));
+        tab_spans.push(Span::styled(
+            " →",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ));
 
         let tab_text: String = tab_spans.iter().map(|s| s.content.as_ref()).collect();
         let tab_display_width = calculate_display_width(&tab_text);
@@ -2416,7 +2453,7 @@ pub fn render_ask_user_block(
                 Span::styled(
                     q.label.clone(),
                     Style::default()
-                        .fg(term_color(Color::White))
+                        .fg(ThemeColors::title_primary())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::from(" ".repeat(label_padding)),
@@ -2475,11 +2512,11 @@ pub fn render_ask_user_block(
                         Span::styled(
                             "[✓]",
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(ThemeColors::green())
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw(" "),
-                        Span::styled(display, Style::default().fg(Color::Cyan)),
+                        Span::styled(display, Style::default().fg(ThemeColors::cyan())),
                         Span::from(" ".repeat(answer_padding)),
                         Span::styled(" │", Style::default().fg(border_color)),
                     ]));
@@ -2491,8 +2528,8 @@ pub fn render_ask_user_block(
                 formatted_lines.push(Line::from(vec![
                     Span::styled("│", Style::default().fg(border_color)),
                     Span::from(" "),
-                    Span::styled("  — ", Style::default().fg(Color::DarkGray)),
-                    Span::styled("skipped", Style::default().fg(Color::DarkGray)),
+                    Span::styled("  — ", Style::default().fg(ThemeColors::dark_gray())),
+                    Span::styled("skipped", Style::default().fg(ThemeColors::dark_gray())),
                     Span::from(" ".repeat(text_padding)),
                     Span::styled(" │", Style::default().fg(border_color)),
                 ]));
@@ -2528,7 +2565,7 @@ pub fn render_ask_user_block(
                 Span::styled(
                     line.clone(),
                     Style::default()
-                        .fg(term_color(Color::White))
+                        .fg(ThemeColors::title_primary())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::from(" ".repeat(padding)),
@@ -2585,34 +2622,34 @@ pub fn render_ask_user_block(
 
             let bracket_style = if is_cursor && is_checked {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(ThemeColors::green())
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::UNDERLINED)
             } else if is_checked {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(ThemeColors::green())
                     .add_modifier(Modifier::BOLD)
             } else if is_cursor {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::cyan())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(ThemeColors::dark_gray())
             };
 
             let label_style = if is_cursor && is_checked {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::accent())
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::UNDERLINED)
             } else if is_checked {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(ThemeColors::accent())
             } else if is_cursor {
                 Style::default()
-                    .fg(term_color(Color::White))
+                    .fg(ThemeColors::title_primary())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(ThemeColors::muted())
             };
 
             let opt_text = format!("{} {}", bracket, opt.label);
@@ -2630,9 +2667,9 @@ pub fn render_ask_user_block(
 
             if let Some(desc) = &opt.description {
                 let desc_style = if is_cursor || is_checked {
-                    Style::default().fg(Color::Gray)
+                    Style::default().fg(ThemeColors::muted())
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(ThemeColors::dark_gray())
                 };
                 let desc_text = format!("       {}", desc);
                 let desc_width = calculate_display_width(&desc_text);
@@ -2657,20 +2694,20 @@ pub fn render_ask_user_block(
                 (
                     "[✓]".to_string(),
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(ThemeColors::green())
                         .add_modifier(Modifier::BOLD),
                 )
             } else if is_selected {
                 (
                     "[›]".to_string(),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(ThemeColors::cyan())
                         .add_modifier(Modifier::BOLD),
                 )
             } else {
                 (
                     format!("[{}]", custom_idx + 1),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::dark_gray()),
                 )
             };
 
@@ -2684,8 +2721,11 @@ pub fn render_ask_user_block(
                         Span::from(" "),
                         Span::styled(bracket, bracket_style),
                         Span::raw(" "),
-                        Span::styled("│", Style::default().fg(Color::Cyan)),
-                        Span::styled("Type your answer...", Style::default().fg(Color::DarkGray)),
+                        Span::styled("│", Style::default().fg(ThemeColors::cyan())),
+                        Span::styled(
+                            "Type your answer...",
+                            Style::default().fg(ThemeColors::dark_gray()),
+                        ),
                         Span::from(" ".repeat(text_padding)),
                         Span::styled(" │", Style::default().fg(border_color)),
                     ]));
@@ -2701,10 +2741,10 @@ pub fn render_ask_user_block(
                         Span::styled(
                             custom_input.to_string(),
                             Style::default()
-                                .fg(term_color(Color::White))
+                                .fg(ThemeColors::title_primary())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled("│", Style::default().fg(Color::Cyan)),
+                        Span::styled("│", Style::default().fg(ThemeColors::accent())),
                         Span::from(" ".repeat(text_padding)),
                         Span::styled(" │", Style::default().fg(border_color)),
                     ]));
@@ -2718,7 +2758,10 @@ pub fn render_ask_user_block(
                     Span::from(" "),
                     Span::styled(bracket, bracket_style),
                     Span::raw(" "),
-                    Span::styled(answer.answer.clone(), Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        answer.answer.clone(),
+                        Style::default().fg(ThemeColors::accent()),
+                    ),
                     Span::from(" ".repeat(text_padding)),
                     Span::styled(" │", Style::default().fg(border_color)),
                 ]));
@@ -2731,7 +2774,7 @@ pub fn render_ask_user_block(
                     Span::from(" "),
                     Span::styled(bracket, bracket_style),
                     Span::raw(" "),
-                    Span::styled("Other...", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Other...", Style::default().fg(ThemeColors::dark_gray())),
                     Span::from(" ".repeat(text_padding)),
                     Span::styled(" │", Style::default().fg(border_color)),
                 ]));
@@ -2760,14 +2803,14 @@ pub fn render_ask_user_block(
     {
         let help_spans = if is_submit_tab {
             vec![
-                Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-                Span::styled(" submit", Style::default().fg(Color::Green)),
+                Span::styled("Enter", Style::default().fg(ThemeColors::dark_gray())),
+                Span::styled(" submit", Style::default().fg(ThemeColors::green())),
                 Span::raw(" · "),
-                Span::styled("←/→", Style::default().fg(Color::DarkGray)),
-                Span::styled(" questions", Style::default().fg(Color::Cyan)),
+                Span::styled("←/→", Style::default().fg(ThemeColors::dark_gray())),
+                Span::styled(" questions", Style::default().fg(ThemeColors::cyan())),
                 Span::raw(" · "),
-                Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+                Span::styled("Esc", Style::default().fg(ThemeColors::dark_gray())),
+                Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
             ]
         } else {
             let is_custom_selected = questions
@@ -2777,14 +2820,14 @@ pub fn render_ask_user_block(
 
             if is_custom_selected {
                 vec![
-                    Span::styled("Type", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" your answer", Style::default().fg(Color::Cyan)),
+                    Span::styled("Type", Style::default().fg(ThemeColors::dark_gray())),
+                    Span::styled(" your answer", Style::default().fg(ThemeColors::cyan())),
                     Span::raw(" · "),
-                    Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" confirm", Style::default().fg(Color::Cyan)),
+                    Span::styled("Enter", Style::default().fg(ThemeColors::dark_gray())),
+                    Span::styled(" confirm", Style::default().fg(ThemeColors::cyan())),
                     Span::raw(" · "),
-                    Span::styled("↑", Style::default().fg(Color::DarkGray)),
-                    Span::styled(" back", Style::default().fg(Color::Cyan)),
+                    Span::styled("↑", Style::default().fg(ThemeColors::dark_gray())),
+                    Span::styled(" back", Style::default().fg(ThemeColors::cyan())),
                 ]
             } else {
                 let is_multi = questions
@@ -2794,37 +2837,37 @@ pub fn render_ask_user_block(
 
                 if is_multi {
                     vec![
-                        Span::styled("Space", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
+                        Span::styled("Space", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" toggle", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" next", Style::default().fg(Color::Cyan)),
+                        Span::styled("Enter", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" next", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" options", Style::default().fg(Color::Cyan)),
+                        Span::styled("↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" options", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("←/→", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" questions", Style::default().fg(Color::Cyan)),
+                        Span::styled("←/→", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" questions", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+                        Span::styled("Esc", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
                     ]
                 } else {
                     vec![
-                        Span::styled("Space", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" select", Style::default().fg(Color::Cyan)),
+                        Span::styled("Space", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" select", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" next", Style::default().fg(Color::Cyan)),
+                        Span::styled("Enter", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" next", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" options", Style::default().fg(Color::Cyan)),
+                        Span::styled("↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" options", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("←/→", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" questions", Style::default().fg(Color::Cyan)),
+                        Span::styled("←/→", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" questions", Style::default().fg(ThemeColors::cyan())),
                         Span::raw(" · "),
-                        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+                        Span::styled("Esc", Style::default().fg(ThemeColors::dark_gray())),
+                        Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
                     ]
                 }
             }
@@ -2884,7 +2927,7 @@ pub fn render_task_wait_block(
 
     // Dot color and title suffix based on progress
     let (dot_color, title_suffix, suffix_color) = if all_completed {
-        (Color::LightGreen, "".to_string(), None)
+        (ThemeColors::dot_success(), "".to_string(), None)
     } else {
         let completed_count = task_updates
             .iter()
@@ -2898,9 +2941,9 @@ pub fn render_task_wait_block(
             .count();
         let total_count = target_task_ids.len();
         (
-            Color::Yellow,
+            ThemeColors::warning(),
             format!(" - Waiting ({}/{})", completed_count, total_count),
-            Some(Color::Yellow),
+            Some(ThemeColors::warning()),
         )
     };
 
@@ -2921,7 +2964,7 @@ pub fn render_task_wait_block(
             Span::styled(
                 format!(" {} ", base_title),
                 Style::default()
-                    .fg(term_color(Color::White))
+                    .fg(ThemeColors::title_primary())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -2943,7 +2986,7 @@ pub fn render_task_wait_block(
             Span::styled(
                 format!(" {} ", title_text),
                 Style::default()
-                    .fg(term_color(Color::White))
+                    .fg(ThemeColors::title_primary())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -2978,14 +3021,14 @@ pub fn render_task_wait_block(
     // Render each task
     for task in &target_tasks {
         let (status_icon, status_color) = match task.status.as_str() {
-            "Running" => ("◐", Color::Yellow),
-            "Pending" => ("○", Color::DarkGray),
-            "Paused" => ("⏸", Color::Magenta),
-            "Completed" => ("✓", Color::LightGreen),
-            "Failed" => ("✗", Color::LightRed),
-            "Cancelled" => ("⊘", Color::LightRed),
-            "TimedOut" => ("⏱", Color::LightRed),
-            _ => ("?", Color::DarkGray),
+            "Running" => ("◐", ThemeColors::warning()),
+            "Pending" => ("○", ThemeColors::muted()),
+            "Paused" => ("⏸", ThemeColors::magenta()),
+            "Completed" => ("✓", ThemeColors::dot_success()),
+            "Failed" => ("✗", ThemeColors::dot_error()),
+            "Cancelled" => ("⊘", ThemeColors::dot_error()),
+            "TimedOut" => ("⏱", ThemeColors::dot_error()),
+            _ => ("?", ThemeColors::muted()),
         };
 
         // Format duration
@@ -3053,13 +3096,13 @@ pub fn render_task_wait_block(
         if is_sandboxed {
             line_spans.push(Span::styled(
                 " [sandboxed]",
-                Style::default().fg(Color::Green),
+                Style::default().fg(ThemeColors::green()),
             ));
         }
         line_spans.extend([
             Span::styled(
                 format!(" [{}]", duration_str),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             ),
             Span::styled(
                 format!(" {}", task.status),
@@ -3094,7 +3137,7 @@ pub fn render_task_wait_block(
                         Span::styled(
                             display_msg,
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(ThemeColors::dark_gray())
                                 .add_modifier(Modifier::ITALIC),
                         ),
                         Span::from(" ".repeat(msg_padding)),
@@ -3137,11 +3180,11 @@ pub fn render_task_wait_block(
                     formatted_lines.push(Line::from(vec![
                         Span::styled("│", Style::default().fg(border_color)),
                         Span::from("     "),
-                        Span::styled("→ ", Style::default().fg(Color::Magenta)),
+                        Span::styled("→ ", Style::default().fg(ThemeColors::magenta())),
                         Span::styled(
                             tc.name.clone(),
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(ThemeColors::cyan())
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
@@ -3150,7 +3193,7 @@ pub fn render_task_wait_block(
                             } else {
                                 format!("({})", args_preview)
                             },
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(ThemeColors::dark_gray()),
                         ),
                         Span::from(" ".repeat(tool_padding)),
                         Span::styled("│", Style::default().fg(border_color)),
@@ -3167,7 +3210,10 @@ pub fn render_task_wait_block(
         formatted_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(border_color)),
             Span::from(" "),
-            Span::styled(msg.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                msg.to_string(),
+                Style::default().fg(ThemeColors::dark_gray()),
+            ),
             Span::from(" ".repeat(padding)),
             Span::styled(" │", Style::default().fg(border_color)),
         ]));
@@ -3191,9 +3237,9 @@ pub fn render_subagent_resume_pending_block<'a>(
     let mut formatted_lines: Vec<Line<'a>> = Vec::new();
 
     let border_color = if is_auto_approved {
-        Color::Green
+        ThemeColors::green()
     } else {
-        Color::Cyan
+        ThemeColors::cyan()
     };
     let inner_width = width.saturating_sub(4);
 
@@ -3227,7 +3273,7 @@ pub fn render_subagent_resume_pending_block<'a>(
         Span::styled(
             title,
             Style::default()
-                .fg(Color::Magenta)
+                .fg(ThemeColors::magenta())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -3246,7 +3292,7 @@ pub fn render_subagent_resume_pending_block<'a>(
             Span::styled(
                 header.to_string(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::yellow())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::from(" ".repeat(header_padding)),
@@ -3268,7 +3314,7 @@ pub fn render_subagent_resume_pending_block<'a>(
             formatted_lines.push(Line::from(vec![
                 Span::styled("│ ", Style::default().fg(border_color)),
                 Span::styled("  ", Style::default()),
-                Span::styled(line, Style::default().fg(Color::White)),
+                Span::styled(line, Style::default().fg(ThemeColors::text())),
                 Span::from(" ".repeat(line_padding)),
                 Span::styled(" │", Style::default().fg(border_color)),
             ]));
@@ -3291,7 +3337,7 @@ pub fn render_subagent_resume_pending_block<'a>(
                 Span::styled(
                     header.to_string(),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(ThemeColors::yellow())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::from(" ".repeat(header_padding)),
@@ -3315,11 +3361,11 @@ pub fn render_subagent_resume_pending_block<'a>(
 
                     formatted_lines.push(Line::from(vec![
                         Span::styled("│ ", Style::default().fg(border_color)),
-                        Span::styled("  → ", Style::default().fg(Color::Magenta)),
+                        Span::styled("  → ", Style::default().fg(ThemeColors::magenta())),
                         Span::styled(
                             tc.name.clone(),
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(ThemeColors::cyan())
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::from(" ".repeat(tool_header_padding)),
@@ -3337,7 +3383,10 @@ pub fn render_subagent_resume_pending_block<'a>(
                             formatted_lines.push(Line::from(vec![
                                 Span::styled("│ ", Style::default().fg(border_color)),
                                 Span::from("    "),
-                                Span::styled(arg_line, Style::default().fg(Color::DarkGray)),
+                                Span::styled(
+                                    arg_line,
+                                    Style::default().fg(ThemeColors::dark_gray()),
+                                ),
                                 Span::from(" ".repeat(arg_padding)),
                                 Span::styled(" │", Style::default().fg(border_color)),
                             ]));
@@ -3358,7 +3407,7 @@ pub fn render_subagent_resume_pending_block<'a>(
             let msg_padding = inner_width.saturating_sub(calculate_display_width(msg));
             formatted_lines.push(Line::from(vec![
                 Span::styled("│ ", Style::default().fg(border_color)),
-                Span::styled(msg.to_string(), Style::default().fg(Color::Yellow)),
+                Span::styled(msg.to_string(), Style::default().fg(ThemeColors::yellow())),
                 Span::from(" ".repeat(msg_padding)),
                 Span::styled(" │", Style::default().fg(border_color)),
             ]));
@@ -3376,7 +3425,10 @@ pub fn render_subagent_resume_pending_block<'a>(
         let msg_padding = inner_width.saturating_sub(calculate_display_width(msg));
         formatted_lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(border_color)),
-            Span::styled(msg.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                msg.to_string(),
+                Style::default().fg(ThemeColors::dark_gray()),
+            ),
             Span::from(" ".repeat(msg_padding)),
             Span::styled(" │", Style::default().fg(border_color)),
         ]));
@@ -3509,7 +3561,7 @@ pub fn render_tool_call_stream_block(
     infos: &[ToolCallStreamInfo],
     width: usize,
 ) -> Vec<Line<'static>> {
-    let border_color = Color::DarkGray;
+    let border_color = ThemeColors::dark_gray();
     // inner_width = usable content width between the border+padding chars
     // Each line is: "│ " + content(inner_width) + " │" = inner_width + 4
     let inner_width = if width > 4 { width - 4 } else { 40 };
@@ -3532,7 +3584,7 @@ pub fn render_tool_call_stream_block(
         Span::styled(
             title,
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -3598,11 +3650,11 @@ pub fn render_tool_call_stream_block(
         lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(border_color)),
             Span::raw("  "),
-            Span::styled(number, Style::default().fg(AdaptiveColors::orange())),
+            Span::styled(number, Style::default().fg(ThemeColors::orange())),
             Span::raw(" "),
-            Span::styled(name, Style::default().fg(Color::White)),
+            Span::styled(name, Style::default().fg(ThemeColors::title_primary())),
             Span::raw(" ".repeat(padding)),
-            Span::styled(tokens, Style::default().fg(Color::DarkGray)),
+            Span::styled(tokens, Style::default().fg(ThemeColors::muted())),
             Span::styled(" │", Style::default().fg(border_color)),
         ]));
     }
@@ -3629,7 +3681,7 @@ pub fn render_tool_call_stream_block(
 
         lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(border_color)),
-            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+            Span::styled(summary, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" ".repeat(padding)),
             Span::styled(" │", Style::default().fg(border_color)),
         ]));
@@ -3644,7 +3696,7 @@ pub fn render_tool_call_stream_block(
 
         lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(border_color)),
-            Span::styled(total_text, Style::default().fg(Color::DarkGray)),
+            Span::styled(total_text, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" ".repeat(padding)),
             Span::styled(" │", Style::default().fg(border_color)),
         ]));

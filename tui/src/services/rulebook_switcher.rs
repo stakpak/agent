@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -18,7 +19,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     // Create the main block with border
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     // Split area for title, content and help text inside the block
     let inner_area = Rect {
@@ -41,7 +42,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     // Render title
     let title = " Select Rulebooks";
     let title_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(ThemeColors::yellow())
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
@@ -55,24 +56,24 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     let search_spans = if state.rulebook_search_input.is_empty() {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" "), // Small space after
         ]
     } else {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 &state.rulebook_search_input,
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
             Span::raw(" "), // Small space after
         ]
     };
@@ -108,10 +109,10 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             let checkbox = if is_checked { "[✓] " } else { "[ ] " };
             let checkbox_style = if is_checked {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::cyan())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray) // Unchecked rulebooks in DarkGray
+                Style::default().fg(ThemeColors::dark_gray()) // Unchecked rulebooks in DarkGray
             };
 
             // Calculate available width for URI (accounting for checkbox and padding)
@@ -133,7 +134,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
                         .fg(Color::Reset) // Use Reset for checked items
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::DarkGray) // Use DarkGray for unchecked items
+                    Style::default().fg(ThemeColors::dark_gray()) // Use DarkGray for unchecked items
                 };
                 first_line_spans.push(Span::styled(first_uri_line.to_string(), uri_style));
             }
@@ -146,7 +147,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
                         .fg(Color::Reset) // Use Reset for checked items
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::DarkGray) // Use DarkGray for unchecked items
+                    Style::default().fg(ThemeColors::dark_gray()) // Use DarkGray for unchecked items
                 };
                 lines.push(Line::from(Span::styled(format!("    {}", line), uri_style)));
             }
@@ -157,7 +158,11 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Create list for left column with padding
     let list = List::new(list_items)
-        .highlight_style(Style::default().bg(Color::Cyan).fg(Color::Black))
+        .highlight_style(
+            Style::default()
+                .bg(ThemeColors::highlight_bg())
+                .fg(ThemeColors::highlight_fg()),
+        )
         .block(Block::default().borders(Borders::NONE));
 
     // Create list state for highlighting
@@ -177,7 +182,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     // Vertical separator line with Cyan color
     let separator = Block::default()
         .borders(Borders::LEFT)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
     f.render_widget(separator, content_chunks[1]);
 
     // Right column: Rulebook details
@@ -202,7 +207,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         detail_lines.push(Line::from(vec![Span::styled(
             "Description:",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         )]));
 
@@ -214,7 +219,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         for line in wrapped_desc {
             detail_lines.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(Color::White),
+                Style::default().fg(ThemeColors::text()),
             )]));
         }
 
@@ -225,7 +230,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             detail_lines.push(Line::from(vec![Span::styled(
                 "Tags:",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::yellow())
                     .add_modifier(Modifier::BOLD),
             )]));
             let tags_text = selected_rulebook.tags.join(", ");
@@ -234,7 +239,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             for line in wrapped_tags {
                 detail_lines.push(Line::from(vec![Span::styled(
                     format!("  {}", line),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(ThemeColors::cyan()),
                 )]));
             }
             detail_lines.push(Line::from("")); // Empty line
@@ -244,7 +249,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         detail_lines.push(Line::from(vec![Span::styled(
             "URI:",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         )]));
         let wrapped_uri = textwrap::wrap(
@@ -254,7 +259,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         for line in wrapped_uri {
             detail_lines.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )]));
         }
 
@@ -263,7 +268,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         detail_lines.push(Line::from(vec![Span::styled(
             "Visibility:",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         )]));
         let visibility_text = match selected_rulebook.visibility {
@@ -272,7 +277,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         };
         detail_lines.push(Line::from(vec![Span::styled(
             format!("  {}", visibility_text),
-            Style::default().fg(Color::Green),
+            Style::default().fg(ThemeColors::green()),
         )]));
 
         // Updated dates if available
@@ -280,12 +285,12 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             detail_lines.push(Line::from(vec![Span::styled(
                 "Updated:",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::yellow())
                     .add_modifier(Modifier::BOLD),
             )]));
             detail_lines.push(Line::from(vec![Span::styled(
                 format!("  {}", updated_at.format("%Y-%m-%d %H:%M")),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )]));
         }
 
@@ -297,23 +302,23 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::styled("↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("space", Style::default().fg(Color::DarkGray)),
-        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
+        Span::styled("space", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" toggle", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("ctrl+s", Style::default().fg(Color::DarkGray)),
-        Span::styled(" select all", Style::default().fg(Color::Cyan)),
+        Span::styled("ctrl+s", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" select all", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("ctrl+d", Style::default().fg(Color::DarkGray)),
-        Span::styled(" deselect all", Style::default().fg(Color::Cyan)),
+        Span::styled("ctrl+d", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" deselect all", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("↵", Style::default().fg(Color::DarkGray)),
-        Span::styled(" confirm", Style::default().fg(Color::Cyan)),
+        Span::styled("↵", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" confirm", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     let help_area = Rect {

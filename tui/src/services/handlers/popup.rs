@@ -4,13 +4,13 @@
 
 use crate::app::{AppState, InputEvent, OutputEvent};
 use crate::services::changeset::Changeset;
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::ThemeColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines_cached, invalidate_message_lines_cache,
 };
 use crate::services::text_selection::SelectionState;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use tokio::sync::mpsc::Sender;
@@ -186,7 +186,7 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     // Show success and welcome messages
     state.messages.push(Message::info(
         format!("✅ Successfully switched to profile: {}", profile),
-        Some(Style::default().fg(AdaptiveColors::green())),
+        Some(Style::default().fg(ThemeColors::success())),
     ));
 
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
@@ -204,7 +204,7 @@ pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
 
     state.messages.push(Message::info(
         format!("❌ Profile switch failed: {}", error),
-        Some(Style::default().fg(AdaptiveColors::red())),
+        Some(Style::default().fg(ThemeColors::danger())),
     ));
     state.messages.push(Message::info(
         "Staying in current profile. Press ctrl+p to try again.",
@@ -290,7 +290,7 @@ pub fn handle_rulebook_switcher_confirm(state: &mut AppState, output_tx: &Sender
                 "Selected {} rulebook(s). They will be applied to your next message.",
                 count
             ),
-            Some(Style::default().fg(AdaptiveColors::green())),
+            Some(Style::default().fg(ThemeColors::success())),
         ));
     }
 }
@@ -684,7 +684,13 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
                 }
 
                 // Push success message
-                push_styled_message(state, &message, Color::Green, " ✓ ", Color::Green);
+                push_styled_message(
+                    state,
+                    &message,
+                    ThemeColors::green(),
+                    " ✓ ",
+                    ThemeColors::green(),
+                );
 
                 // Close popup if no more non-reverted files
                 if state.changeset.file_count() == 0 {
@@ -757,7 +763,13 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
         } else {
             format!("Reverted {} files", reverted_count)
         };
-        push_styled_message(state, &message, Color::Green, " ✓ ", Color::Green);
+        push_styled_message(
+            state,
+            &message,
+            ThemeColors::green(),
+            " ✓ ",
+            ThemeColors::green(),
+        );
     } else if failed_count > 0 {
         push_error_message(
             state,
