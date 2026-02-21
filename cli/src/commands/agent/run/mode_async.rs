@@ -721,13 +721,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                 {
                     Ok(result) => result?,
                     Err(_) => {
-                        print!(
-                            "{}",
-                            renderer.render_error(&format!(
-                                "Tool '{}' timed out after 60 minutes",
-                                tool_call.function.name
-                            ))
+                        let error_msg = format!(
+                            "Tool '{}' timed out after 60 minutes",
+                            tool_call.function.name
                         );
+                        print!("{}", renderer.render_error(&error_msg));
+                        chat_messages.push(tool_result(tool_call.id.clone(), error_msg));
                         continue;
                     }
                 };

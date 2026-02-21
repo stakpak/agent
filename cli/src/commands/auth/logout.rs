@@ -1,59 +1,12 @@
 //! Logout command - remove provider credentials
 
+use super::{CredentialSource, collect_all_credentials};
 use crate::config::AppConfig;
 use crate::onboarding::menu::select_option_no_header;
 use crate::onboarding::navigation::NavResult;
 use stakpak_shared::auth_manager::AuthManager;
-use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::oauth::ProviderRegistry;
-use std::collections::HashMap;
 use std::path::Path;
-
-/// Collect all credentials from both config.toml and auth.toml
-fn collect_all_credentials(
-    config_dir: &Path,
-) -> HashMap<String, HashMap<String, (ProviderAuth, CredentialSource)>> {
-    let mut all_credentials: HashMap<String, HashMap<String, (ProviderAuth, CredentialSource)>> =
-        HashMap::new();
-
-    // 1. Read from config.toml (new format)
-    let config_path = config_dir.join("config.toml");
-    if let Ok(config_file) = AppConfig::load_config_file(&config_path) {
-        for (profile_name, profile_config) in &config_file.profiles {
-            for (provider_name, provider_config) in &profile_config.providers {
-                if let Some(auth) = provider_config.get_auth() {
-                    all_credentials
-                        .entry(profile_name.clone())
-                        .or_default()
-                        .insert(provider_name.clone(), (auth, CredentialSource::ConfigToml));
-                }
-            }
-        }
-    }
-
-    // 2. Read from auth.toml (legacy)
-    if let Ok(auth_manager) = AuthManager::new(config_dir) {
-        for (profile_name, providers) in auth_manager.list() {
-            for (provider_name, auth) in providers {
-                let profile_creds = all_credentials.entry(profile_name.clone()).or_default();
-                if !profile_creds.contains_key(provider_name.as_str()) {
-                    profile_creds.insert(
-                        provider_name.clone(),
-                        (auth.clone(), CredentialSource::AuthToml),
-                    );
-                }
-            }
-        }
-    }
-
-    all_credentials
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum CredentialSource {
-    ConfigToml,
-    AuthToml,
-}
 
 /// Handle the logout command
 pub fn handle_logout(

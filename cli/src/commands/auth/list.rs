@@ -1,10 +1,7 @@
 //! List credentials command
 
-use crate::config::AppConfig;
-use stakpak_shared::auth_manager::AuthManager;
-use stakpak_shared::models::auth::ProviderAuth;
+use super::collect_all_credentials;
 use stakpak_shared::oauth::ProviderRegistry;
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Handle the list credentials command
@@ -12,35 +9,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
     let registry = ProviderRegistry::new();
 
     // Collect credentials from both config.toml and auth.toml (legacy)
-    let mut all_credentials: HashMap<String, HashMap<String, ProviderAuth>> = HashMap::new();
-
-    // 1. Read from config.toml (new format)
-    let config_path = config_dir.join("config.toml");
-    if let Ok(config_file) = AppConfig::load_config_file(&config_path) {
-        for (profile_name, profile_config) in &config_file.profiles {
-            for (provider_name, provider_config) in &profile_config.providers {
-                if let Some(auth) = provider_config.get_auth() {
-                    all_credentials
-                        .entry(profile_name.clone())
-                        .or_default()
-                        .insert(provider_name.clone(), auth);
-                }
-            }
-        }
-    }
-
-    // 2. Read from auth.toml (legacy, for users who haven't migrated)
-    if let Ok(auth_manager) = AuthManager::new(config_dir) {
-        for (profile_name, providers) in auth_manager.list() {
-            for (provider_name, auth) in providers {
-                // Only add if not already in config.toml
-                let profile_creds = all_credentials.entry(profile_name.clone()).or_default();
-                if !profile_creds.contains_key(provider_name.as_str()) {
-                    profile_creds.insert(provider_name.clone(), auth.clone());
-                }
-            }
-        }
-    }
+    let all_credentials = collect_all_credentials(config_dir);
 
     if all_credentials.is_empty() {
         println!("No credentials configured.");
@@ -96,7 +65,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
         provider_ids.sort();
 
         for provider_id in provider_ids {
-            let Some(auth) = providers.get(provider_id) else {
+            let Some((auth, _source)) = providers.get(provider_id) else {
                 continue;
             };
 

@@ -302,7 +302,7 @@ impl ProfileConfig {
 
     /// Migrate legacy model fields (smart_model, eco_model, recovery_model) to unified 'model' field.
     ///
-    /// Priority: smart_model > eco_model > recovery_model > default (claude-opus-4-5)
+    /// Priority: smart_model > eco_model > recovery_model
     ///
     /// After migration, legacy fields are cleared so they won't be serialized.
     /// Returns true if migration was performed.
@@ -316,11 +316,9 @@ impl ProfileConfig {
         let eco = self.eco_model.take();
         let recovery = self.recovery_model.take();
 
-        // Priority: smart > eco > recovery > default
-        self.model = smart
-            .or(eco)
-            .or(recovery)
-            .or_else(|| Some("claude-opus-4-5".to_string()));
+        // Priority: smart > eco > recovery
+        // (At least one is Some due to needs_model_migration() guard)
+        self.model = smart.or(eco).or(recovery);
 
         true
     }

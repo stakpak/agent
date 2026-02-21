@@ -145,7 +145,7 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
                 let category_style = Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD);
-                let category_width = width.unwrap_or(40) - (category_name.len() + 5);
+                let category_width = width.unwrap_or(40).saturating_sub(category_name.len() + 5);
                 all_lines.push(Line::from(vec![
                     Span::styled(format!(" {} ", category_name), category_style),
                     Span::styled(
@@ -391,7 +391,7 @@ fn render_commands_section(
             let name_formatted = format!(
                 " {:<width$}",
                 command.name,
-                width = available_width - command.shortcut.len() - 2
+                width = available_width.saturating_sub(command.shortcut.len() + 2)
             );
             let shortcut_formatted = format!("{} ", command.shortcut);
 

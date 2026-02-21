@@ -878,24 +878,25 @@ pub fn ensure_custom_models_in_available(state: &mut AppState) {
     // Get the default provider from the configured model
     let default_provider = state.model.provider.clone();
 
-    for recent_id in state.recent_models.clone() {
-        // Check if this model is already in available_models
-        let exists = state.available_models.iter().any(|m| m.id == recent_id);
-        if !exists {
+    // Collect models to add first, then extend (avoids cloning recent_models)
+    let to_add: Vec<Model> = state
+        .recent_models
+        .iter()
+        .filter(|recent_id| !state.available_models.iter().any(|m| &m.id == *recent_id))
+        .map(|recent_id| {
             // Try to infer provider from model ID prefix (e.g., "litellm/glm-4.6" -> "litellm")
-            // Only use the prefix if it's non-empty (handles edge case like "/model")
-            let provider = if let Some(slash_pos) = recent_id.find('/')
-                && slash_pos > 0
-            {
-                recent_id[..slash_pos].to_string()
-            } else {
-                // Use the configured default provider
-                default_provider.clone()
-            };
-            let custom_model = Model::custom(recent_id.clone(), provider);
-            state.available_models.push(custom_model);
-        }
-    }
+            // split('/').next() is safe for UTF-8; find('/') + slice would also work since '/' is ASCII
+            let provider = recent_id
+                .split('/')
+                .next()
+                .filter(|prefix| !prefix.is_empty() && *prefix != recent_id)
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| default_provider.clone());
+            Model::custom(recent_id.clone(), provider)
+        })
+        .collect();
+
+    state.available_models.extend(to_add);
 }
 
 /// Handle available models loaded event
@@ -932,8 +933,13 @@ pub fn handle_available_models_loaded(
         // Try to find matching model in available_models first (for correct ID format)
         let default_model_id = &state.model.id;
         if let Some(matched) = state.available_models.iter().find(|m| {
-            // Match by ID or by ID suffix (for Stakpak routing: "anthropic/claude-..." matches "claude-...")
-            m.id == *default_model_id || m.id.ends_with(&format!("/{}", default_model_id))
+            // Match by ID or by final segment after "/" (for Stakpak routing:
+            // "anthropic/claude-..." matches "claude-...")
+            m.id == *default_model_id
+                || m.id
+                    .split('/')
+                    .next_back()
+                    .is_some_and(|last| last == default_model_id.as_str())
         }) {
             Some(matched.id.clone())
         } else if !default_model_id.is_empty() {

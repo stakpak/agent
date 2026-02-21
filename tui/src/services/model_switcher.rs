@@ -244,7 +244,6 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
 /// Render a single model line
 fn render_model_line(
     model: &Model,
-    model_idx: usize,
     is_selected: bool,
     is_current: bool,
     list_width: u16,
@@ -317,9 +316,6 @@ fn render_model_line(
         }
     }
 
-    // Suppress unused variable warning - model_idx is part of the API for future use
-    let _ = model_idx;
-
     Line::from(spans)
 }
 
@@ -383,7 +379,6 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
             lines.push(render_model_line(
                 model,
-                model_idx,
                 is_selected,
                 is_current,
                 list_area.width,
@@ -441,7 +436,6 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
             lines.push(render_model_line(
                 model,
-                model_idx,
                 is_selected,
                 is_current,
                 list_area.width,

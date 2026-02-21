@@ -152,7 +152,7 @@ async fn handle_oauth_login(
     method_id: &str,
     profile: &str,
 ) -> Result<(), String> {
-    use crate::config::ConfigFile;
+    use crate::config::AppConfig;
     use stakpak_shared::models::llm::ProviderConfig;
 
     let oauth_config = provider
@@ -201,16 +201,10 @@ async fn handle_oauth_login(
         .await
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
-    // Save credentials to config.toml provider config
+    // Load config using the standard pipeline (handles migrations, old formats, etc.)
     let config_path = config_dir.join("config.toml");
-    let mut config_file = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str::<ConfigFile>(&content)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?
-    } else {
-        ConfigFile::default()
-    };
+    let mut config_file = AppConfig::load_config_file(&config_path)
+        .map_err(|e| format!("Failed to load config file: {}", e))?;
 
     // Get or create profile
     let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
@@ -220,18 +214,21 @@ async fn handle_oauth_login(
         .providers
         .entry(provider.id().to_string())
         .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or({
-                ProviderConfig::Anthropic {
-                    api_key: None,
-                    api_endpoint: None,
-                    access_token: None,
-                    auth: None,
-                }
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::Anthropic {
+                api_key: None,
+                api_endpoint: None,
+                access_token: None,
+                auth: None,
             })
         });
 
     // Set auth on provider config
     provider_config.set_auth(auth);
+
+    // Keep readonly profile in sync when modifying the default profile
+    if profile == "default" {
+        config_file.update_readonly();
+    }
 
     // Save config file
     config_file
@@ -449,7 +446,7 @@ async fn handle_api_key_login(
     provider: &dyn OAuthProvider,
     profile: &str,
 ) -> Result<(), String> {
-    use crate::config::ConfigFile;
+    use crate::config::AppConfig;
     use stakpak_shared::models::llm::ProviderConfig;
 
     println!();
@@ -468,16 +465,10 @@ async fn handle_api_key_login(
 
     let auth = ProviderAuth::api_key(key);
 
-    // Save credentials to config.toml provider config
+    // Load config using the standard pipeline (handles migrations, old formats, etc.)
     let config_path = config_dir.join("config.toml");
-    let mut config_file = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str::<ConfigFile>(&content)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?
-    } else {
-        ConfigFile::default()
-    };
+    let mut config_file = AppConfig::load_config_file(&config_path)
+        .map_err(|e| format!("Failed to load config file: {}", e))?;
 
     // Get or create profile
     let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
@@ -487,17 +478,20 @@ async fn handle_api_key_login(
         .providers
         .entry(provider.id().to_string())
         .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or({
-                ProviderConfig::OpenAI {
-                    api_key: None,
-                    api_endpoint: None,
-                    auth: None,
-                }
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::OpenAI {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
             })
         });
 
     // Set auth on provider config
     provider_config.set_auth(auth);
+
+    // Keep readonly profile in sync when modifying the default profile
+    if profile == "default" {
+        config_file.update_readonly();
+    }
 
     // Save config file
     config_file

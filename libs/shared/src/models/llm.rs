@@ -288,11 +288,16 @@ impl ProviderConfig {
                 access_token,
                 ..
             } => {
-                // Prefer api_key, then access_token
+                // Prefer api_key, then access_token (as OAuth bearer token, not API key)
                 if let Some(key) = api_key {
                     Some(ProviderAuth::api_key(key))
                 } else {
-                    access_token.as_ref().map(ProviderAuth::api_key)
+                    // Legacy access_token is an OAuth bearer token — wrap it as OAuth
+                    // with empty refresh token and zero expiry so it will be treated as
+                    // expired and trigger a re-auth rather than silently failing.
+                    access_token
+                        .as_ref()
+                        .map(|token| ProviderAuth::oauth(token, "", 0))
                 }
             }
             ProviderConfig::Bedrock { .. } => None,
@@ -300,24 +305,43 @@ impl ProviderConfig {
     }
 
     /// Set authentication credentials on this provider config.
+    ///
+    /// Also clears any legacy credential fields (`api_key`, `access_token`)
+    /// so they don't shadow the new `auth` field on future reads.
     pub fn set_auth(&mut self, auth: ProviderAuth) {
         match self {
             ProviderConfig::OpenAI {
-                auth: auth_field, ..
-            }
-            | ProviderConfig::Anthropic {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Gemini {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Custom {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Stakpak {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             } => {
                 *auth_field = Some(auth);
+                *api_key = None;
+            }
+            ProviderConfig::Anthropic {
+                auth: auth_field,
+                api_key,
+                access_token,
+                ..
+            } => {
+                *auth_field = Some(auth);
+                *api_key = None;
+                *access_token = None;
             }
             ProviderConfig::Bedrock { .. } => {
                 // Bedrock uses AWS credential chain, no auth field
@@ -326,24 +350,43 @@ impl ProviderConfig {
     }
 
     /// Clear authentication credentials from this provider config.
+    ///
+    /// Clears both the `auth` field and any legacy credential fields
+    /// (`api_key`, `access_token`) to ensure credentials are fully removed.
     pub fn clear_auth(&mut self) {
         match self {
             ProviderConfig::OpenAI {
-                auth: auth_field, ..
-            }
-            | ProviderConfig::Anthropic {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Gemini {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Custom {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             }
             | ProviderConfig::Stakpak {
-                auth: auth_field, ..
+                auth: auth_field,
+                api_key,
+                ..
             } => {
                 *auth_field = None;
+                *api_key = None;
+            }
+            ProviderConfig::Anthropic {
+                auth: auth_field,
+                api_key,
+                access_token,
+                ..
+            } => {
+                *auth_field = None;
+                *api_key = None;
+                *access_token = None;
             }
             ProviderConfig::Bedrock { .. } => {
                 // Bedrock uses AWS credential chain, no auth field

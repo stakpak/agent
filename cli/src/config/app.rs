@@ -328,13 +328,18 @@ impl AppConfig {
             }
         }
 
-        // Backup auth.toml
+        // Backup auth.toml — credentials are now in config.toml
         let backup_path = auth_path.with_extension("toml.bak");
         if let Err(e) = std::fs::rename(&auth_path, &backup_path) {
             // Log warning but don't fail migration
             eprintln!(
                 "Warning: Failed to backup auth.toml to auth.toml.bak: {}",
                 e
+            );
+        } else {
+            eprintln!(
+                "Migrated credentials from auth.toml to config.toml. \
+                 Backup saved to auth.toml.bak — you can safely delete it."
             );
         }
 
@@ -939,7 +944,7 @@ impl From<AppConfig> for ProfileConfig {
             auto_approve: config.auto_approve,
             rulebooks: config.rulebooks,
             warden: config.warden,
-            provider: None,
+            provider: Some(config.provider),
             providers: config.providers,
             model: config.model,
             recent_models: config.recent_models,
