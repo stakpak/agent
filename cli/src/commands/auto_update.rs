@@ -1,4 +1,8 @@
-use crate::utils::check_update::get_latest_cli_version;
+use crate::commands::autopilot::{
+    autopilot_service_installed, is_autopilot_running, start_autopilot_service,
+    stop_autopilot_service,
+};
+use crate::utils::check_update::{get_latest_cli_version, is_newer_version};
 use crate::utils::plugins::{PluginConfig, extract_tar_gz, extract_zip, get_download_info};
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::env;
@@ -26,12 +30,41 @@ macro_rules! update_info {
 /// the JSON-RPC protocol stream.
 #[allow(clippy::needless_return)]
 pub async fn run_auto_update(silent: bool) -> Result<(), String> {
-    // 1. Check OS
+    // 0. Check if an update is actually needed
+    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let latest_version = get_latest_cli_version()
+        .await
+        .map_err(|e| format!("Failed to fetch latest version: {}", e))?;
+
+    if !is_newer_version(&current_version, &latest_version) {
+        update_info!(silent, "✓ Already up to date ({})", current_version);
+        return Ok(());
+    }
+
+    update_info!(silent, "Updating {} → {}", current_version, latest_version);
+
+    // 1. Detect if autopilot is running before we replace the binary
+    let autopilot_was_running = autopilot_service_installed() && (is_autopilot_running().is_some());
+
+    if autopilot_was_running {
+        update_info!(silent, "Stopping autopilot service before update...");
+        if let Err(e) = stop_autopilot_service() {
+            update_info!(silent, "⚠ Failed to stop autopilot service: {}", e);
+            // Continue with update anyway — the service will pick up the new
+            // binary on its next restart.
+        } else {
+            // Give the service a moment to fully stop
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            update_info!(silent, "✓ Autopilot service stopped");
+        }
+    }
+
+    // 2. Check OS
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
-    // 2. Check if current path is a binary or a directory
-    if is_homebrew_installed()
+    // 3. Perform the update
+    let update_result = if is_homebrew_installed()
         && is_stakpak_homebrew_install()
         && is_current_binary_homebrew_managed()?
     {
@@ -39,17 +72,36 @@ pub async fn run_auto_update(silent: bool) -> Result<(), String> {
             silent,
             "Detected current binary is managed by Homebrew. Updating via Homebrew..."
         );
-        update_via_brew(silent)?;
-        Ok(())
+        update_via_brew(silent, autopilot_was_running)
     } else {
         update_info!(
             silent,
             "Detected direct binary installation. Updating binary..."
         );
-        let version = get_latest_cli_version().await.unwrap_or_default();
-        update_binary_atomic(os, arch, Some(version), silent).await?;
-        Ok(())
+        update_binary_atomic(
+            os,
+            arch,
+            Some(latest_version),
+            silent,
+            autopilot_was_running,
+        )
+        .await
+    };
+
+    // If the update failed and autopilot was running, restart it with the old binary
+    if update_result.is_err() && autopilot_was_running {
+        update_info!(
+            silent,
+            "Restarting autopilot service with previous binary..."
+        );
+        if let Err(e) = start_autopilot_service() {
+            update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
+        } else {
+            update_info!(silent, "✓ Autopilot service restarted");
+        }
     }
+
+    update_result
 }
 
 fn is_homebrew_installed() -> bool {
@@ -71,7 +123,7 @@ fn is_stakpak_homebrew_install() -> bool {
     }
 }
 
-fn update_via_brew(silent: bool) -> Result<(), String> {
+fn update_via_brew(silent: bool, autopilot_was_running: bool) -> Result<(), String> {
     // update brew
     let update_status = Command::new("brew")
         .arg("update")
@@ -87,6 +139,15 @@ fn update_via_brew(silent: bool) -> Result<(), String> {
         .status()
         .map_err(|e| format!("Failed to run brew upgrade: {}", e))?;
     if upgrade_status.success() {
+        // Restart autopilot with the new binary before exiting
+        if autopilot_was_running {
+            update_info!(silent, "Restarting autopilot service with new binary...");
+            if let Err(e) = start_autopilot_service() {
+                update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
+            } else {
+                update_info!(silent, "✓ Autopilot service restarted");
+            }
+        }
         update_info!(
             silent,
             "Update complete! Please restart the CLI to use the new version."
@@ -268,6 +329,7 @@ async fn update_binary_atomic(
     arch: &str,
     version: Option<String>,
     silent: bool,
+    autopilot_was_running: bool,
 ) -> Result<(), String> {
     update_info!(silent, "Starting atomic binary update for {} {}", os, arch);
 
@@ -411,6 +473,16 @@ async fn update_binary_atomic(
                 "🎉 Update complete! Restarting with version {}...",
                 version
             );
+
+            // Restart autopilot service with the new binary before re-exec
+            if autopilot_was_running {
+                update_info!(silent, "Restarting autopilot service with new binary...");
+                if let Err(e) = start_autopilot_service() {
+                    update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
+                } else {
+                    update_info!(silent, "✓ Autopilot service restarted");
+                }
+            }
 
             // Re-exec the new binary with the same arguments
             // This replaces the current process with the updated binary
