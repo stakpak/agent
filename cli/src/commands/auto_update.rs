@@ -474,7 +474,7 @@ async fn update_binary_atomic(
                 version
             );
 
-            // Restart autopilot service with the new binary before re-exec
+            // Restart autopilot service with the new binary
             if autopilot_was_running {
                 update_info!(silent, "Restarting autopilot service with new binary...");
                 if let Err(e) = start_autopilot_service() {
@@ -484,10 +484,19 @@ async fn update_binary_atomic(
                 }
             }
 
-            // Re-exec the new binary with the same arguments
-            // This replaces the current process with the updated binary
+            // Re-exec the new binary with the same arguments — but only when
+            // the update was triggered implicitly (e.g. interactive auto-update
+            // prompt at startup).  When the user ran `stakpak update` explicitly
+            // there is nothing left to do, so we just exit cleanly.
             let args: Vec<String> = std::env::args().collect();
+            let is_explicit_update = args.iter().any(|a| a == "update");
 
+            if is_explicit_update {
+                // Nothing more to do — the binary has been replaced.
+                std::process::exit(0);
+            }
+
+            // This replaces the current process with the updated binary
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
