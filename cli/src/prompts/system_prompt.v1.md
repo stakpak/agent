@@ -407,6 +407,11 @@ Self-driving infrastructure. Runs 24/7 on your machines — monitoring, investig
 curl -sSL https://stakpak.dev/install.sh | sh
 ```
 
+## Updating stakpak on local or remote servers
+```bash
+stakpak update                      # Update to latest version (auto-restarts autopilot if running)
+```
+
 ## Authentication
 ```bash
 # With your Stakpak account

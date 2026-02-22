@@ -14,7 +14,7 @@ fn parse_version(version_str: &str) -> Option<Version> {
 }
 
 /// Check if remote version is newer than current version using semver
-fn is_newer_version(current: &str, remote: &str) -> bool {
+pub(crate) fn is_newer_version(current: &str, remote: &str) -> bool {
     match (parse_version(current), parse_version(remote)) {
         (Some(current_ver), Some(remote_ver)) => remote_ver > current_ver,
         // If parsing fails, fall back to string comparison (shouldn't happen with valid versions)

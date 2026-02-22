@@ -2737,13 +2737,13 @@ fn autopilot_service_path() -> PathBuf {
     }
 }
 
-fn autopilot_service_installed() -> bool {
+pub(crate) fn autopilot_service_installed() -> bool {
     let path = autopilot_service_path();
     !path.as_os_str().is_empty() && path.exists()
 }
 
 /// Check if the autopilot process is currently running via PID file + process check.
-fn is_autopilot_running() -> Option<u32> {
+pub(crate) fn is_autopilot_running() -> Option<u32> {
     let config = crate::commands::watch::ScheduleConfig::load_default().ok()?;
     let pid_file = config
         .db_path()
@@ -2779,7 +2779,7 @@ fn uninstall_autopilot_service() -> Result<(), String> {
     }
 }
 
-fn start_autopilot_service() -> Result<(), String> {
+pub(crate) fn start_autopilot_service() -> Result<(), String> {
     match detect_platform() {
         Platform::Linux => {
             run_command(
@@ -2818,7 +2818,7 @@ fn start_autopilot_service() -> Result<(), String> {
     }
 }
 
-fn stop_autopilot_service() -> Result<(), String> {
+pub(crate) fn stop_autopilot_service() -> Result<(), String> {
     match detect_platform() {
         Platform::Linux => run_command(
             "systemctl",
@@ -2850,7 +2850,7 @@ fn stop_autopilot_service() -> Result<(), String> {
     }
 }
 
-fn autopilot_service_active() -> bool {
+pub(crate) fn autopilot_service_active() -> bool {
     match detect_platform() {
         Platform::Linux => std::process::Command::new("systemctl")
             .args(["--user", "is-active", "--quiet", AUTOPILOT_SYSTEMD_SERVICE])
