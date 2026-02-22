@@ -201,8 +201,8 @@ pub fn render_profile_name(profile_name: &str) {
 pub fn render_default_model(model: &str) {
     print!(
         "{}Default model: {}{}\r\n",
-        Colors::GRAY,
-        Colors::WHITE,
+        Colors::gray(),
+        Colors::white(),
         model
     );
     print!("\r\n");
