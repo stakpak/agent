@@ -5,6 +5,7 @@
 //! - Shortcuts section: Read-only keyboard shortcuts grouped by category
 //! - Sessions section: List of previous sessions to resume
 
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -143,14 +144,14 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
             if let Some(category_shortcuts) = categories.get(category_name) {
                 // Add category header
                 let category_style = Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::cyan())
                     .add_modifier(Modifier::BOLD);
                 let category_width = width.unwrap_or(40).saturating_sub(category_name.len() + 5);
                 all_lines.push(Line::from(vec![
                     Span::styled(format!(" {} ", category_name), category_style),
                     Span::styled(
                         "─".repeat(category_width).to_string(),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(ThemeColors::dark_gray()),
                     ), // Fixed width to avoid recalculation
                 ]));
 
@@ -164,10 +165,13 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
                         Span::styled(
                             key_formatted,
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(ThemeColors::green())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(description_formatted, Style::default().fg(Color::Reset)),
+                        Span::styled(
+                            description_formatted,
+                            Style::default().fg(ThemeColors::text()),
+                        ),
                     ];
 
                     all_lines.push(Line::from(spans));
@@ -196,7 +200,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     // Create the main block with border and background
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     // Split area for title, tabs, and content - layout differs by mode
     let inner_area = Rect {
@@ -209,7 +213,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     // Render title inside the popup
     let title = " Command Palette";
     let title_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(ThemeColors::title())
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
@@ -223,10 +227,10 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     };
     let tabs = Tabs::new(tab_titles)
         .select(selected_tab)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(ThemeColors::muted()))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ThemeColors::accent())
                 .add_modifier(Modifier::BOLD),
         )
         .divider(" | ");
@@ -316,24 +320,24 @@ fn render_commands_section(
     let search_spans = if state.command_palette_search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" "), // Small space after
         ]
     } else {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 &state.command_palette_search,
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
             Span::raw(" "), // Small space after
         ]
     };
@@ -377,14 +381,14 @@ fn render_commands_section(
             let available_width = area.width as usize - 2; // Account for borders
             let is_selected = line_index == state.command_palette_selected;
             let bg_color = if is_selected {
-                Color::Cyan
+                ThemeColors::highlight_bg()
             } else {
                 Color::Reset
             };
             let text_color = if is_selected {
-                Color::Black
+                ThemeColors::highlight_fg()
             } else {
-                Color::Reset
+                ThemeColors::text()
             };
 
             // Create a single line with name on left and shortcut on right
@@ -401,9 +405,9 @@ fn render_commands_section(
                     shortcut_formatted,
                     Style::default()
                         .fg(if is_selected {
-                            Color::Black
+                            ThemeColors::highlight_fg()
                         } else {
-                            Color::DarkGray
+                            ThemeColors::dark_gray()
                         })
                         .bg(bg_color),
                 ),
@@ -418,7 +422,7 @@ fn render_commands_section(
     // Render content
     let content_paragraph = Paragraph::new(visible_lines)
         .wrap(ratatui::widgets::Wrap { trim: false })
-        .style(Style::default().bg(Color::Reset).fg(Color::White));
+        .style(Style::default().bg(Color::Reset).fg(ThemeColors::text()));
 
     f.render_widget(content_paragraph, content_area);
 
@@ -436,7 +440,10 @@ fn render_commands_section(
         ));
 
         if has_content_below {
-            indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+            indicator_spans.push(Span::styled(
+                " ▼",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ));
         }
 
         let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
@@ -448,17 +455,17 @@ fn render_commands_section(
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::styled(" ↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("enter", Style::default().fg(Color::DarkGray)),
-        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::styled("enter", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" select", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("tab", Style::default().fg(Color::DarkGray)),
-        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::styled("tab", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" switch", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" close", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" close", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     f.render_widget(help, help_area);
@@ -482,25 +489,25 @@ fn render_shortcuts_section(
     let search_spans = if search_term.is_empty() {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" "), // Small space after
         ]
     } else {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::raw(search_term),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(search_term, Style::default().fg(ThemeColors::text())),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
         ]
     };
 
     f.render_widget(
         Paragraph::new(Line::from(search_spans))
-            .block(Block::default().border_style(Style::default().fg(Color::DarkGray))),
+            .block(Block::default().border_style(Style::default().fg(ThemeColors::dark_gray()))),
         search_area,
     );
 
@@ -544,7 +551,7 @@ fn render_shortcuts_section(
             if let Some(category_shortcuts) = categories.get(category_name) {
                 // Add category header
                 let category_style = Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::cyan())
                     .add_modifier(Modifier::BOLD);
                 let category_width =
                     area.width.saturating_sub(category_name.len() as u16 + 5) as usize;
@@ -552,7 +559,7 @@ fn render_shortcuts_section(
                     Span::styled(format!(" {} ", category_name), category_style),
                     Span::styled(
                         "─".repeat(category_width).to_string(),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(ThemeColors::dark_gray()),
                     ),
                 ]));
 
@@ -564,10 +571,13 @@ fn render_shortcuts_section(
                         Span::styled(
                             key_formatted,
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(ThemeColors::green())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(description_formatted, Style::default().fg(Color::Reset)),
+                        Span::styled(
+                            description_formatted,
+                            Style::default().fg(ThemeColors::text()),
+                        ),
                     ]));
                 }
                 lines.push(Line::from(""));
@@ -585,7 +595,7 @@ fn render_shortcuts_section(
         let mut count = 0;
         for line in &all_lines {
             for span in &line.spans {
-                if span.style.fg == Some(Color::Green) {
+                if span.style.fg == Some(ThemeColors::green()) {
                     count += 1;
                     break;
                 }
@@ -623,7 +633,7 @@ fn render_shortcuts_section(
     // Render as paragraph with static lines
     let content_paragraph = Paragraph::new(visible_lines)
         .wrap(ratatui::widgets::Wrap { trim: false })
-        .style(Style::default().bg(Color::Reset).fg(Color::White));
+        .style(Style::default().bg(Color::Reset).fg(ThemeColors::text()));
 
     f.render_widget(content_paragraph, content_area);
 
@@ -636,7 +646,7 @@ fn render_shortcuts_section(
             let line = &all_lines[line_index];
             // Check if this line contains a shortcut (green text)
             for span in &line.spans {
-                if span.style.fg == Some(Color::Green)
+                if span.style.fg == Some(ThemeColors::green())
                     && span.style.add_modifier.contains(Modifier::BOLD)
                 {
                     cumulative_shortcuts_count += 1;
@@ -660,7 +670,10 @@ fn render_shortcuts_section(
         ));
 
         if has_content_below {
-            indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+            indicator_spans.push(Span::styled(
+                " ▼",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ));
         }
 
         let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
@@ -672,14 +685,14 @@ fn render_shortcuts_section(
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+        Span::styled(" ↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" scroll", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("tab", Style::default().fg(Color::DarkGray)),
-        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::styled("tab", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" switch", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" close", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" close", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     f.render_widget(help, help_area);
@@ -702,23 +715,23 @@ fn render_sessions_section(
     let search_spans = if search_term.is_empty() {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
         ]
     } else {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 search_term.clone(),
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
         ]
     };
 
@@ -745,7 +758,7 @@ fn render_sessions_section(
         };
         let empty_widget = Paragraph::new(Line::from(vec![Span::styled(
             empty_message,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )]));
         f.render_widget(empty_widget, content_area);
         f.render_widget(Paragraph::new(""), scroll_area);
@@ -774,7 +787,7 @@ fn render_sessions_section(
         if has_content_above {
             visible_lines.push(Line::from(vec![Span::styled(
                 " ▲",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )]));
         }
 
@@ -800,9 +813,9 @@ fn render_sessions_section(
             let is_selected = *original_idx == state.session_selected;
 
             let (fg, bg) = if is_selected {
-                (Color::Black, Color::Cyan)
+                (ThemeColors::highlight_fg(), ThemeColors::highlight_bg())
             } else {
-                (Color::Reset, Color::Reset)
+                (ThemeColors::text(), Color::Reset)
             };
 
             let style = if is_selected {
@@ -830,7 +843,10 @@ fn render_sessions_section(
             ));
 
             if has_content_below {
-                indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+                indicator_spans.push(Span::styled(
+                    " ▼",
+                    Style::default().fg(ThemeColors::dark_gray()),
+                ));
             }
 
             let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
@@ -840,17 +856,17 @@ fn render_sessions_section(
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::styled(" ↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("enter", Style::default().fg(Color::DarkGray)),
-        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::styled("enter", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" select", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("tab", Style::default().fg(Color::DarkGray)),
-        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::styled("tab", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" switch", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" close", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" close", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     f.render_widget(help, help_area);

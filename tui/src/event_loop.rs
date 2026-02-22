@@ -3,6 +3,7 @@
 //! Contains the main TUI event loop and related helper functions.
 
 use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
+use crate::services::detect_term::ThemeColors;
 use crate::services::handlers::tool::{
     clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
 };
@@ -430,17 +431,17 @@ pub async fn run_tui(
                                    // Show error message
                                    state.messages.push(Message::info(
                                        format!("Failed to open editor: {}", error),
-                                       Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
-                                   ));
-                               }
-                           }
+                                        Some(ratatui::style::Style::default().fg(ThemeColors::red())),
+                                    ));
+                                }
+                            }
 
-                           // Restore mouse capture if it was enabled before
-                           if was_mouse_capture_enabled {
-                               let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                               state.mouse_capture_enabled = true;
-                           }
-                       }
+                            // Restore mouse capture if it was enabled before
+                            if was_mouse_capture_enabled {
+                                let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                state.mouse_capture_enabled = true;
+                            }
+                        }
                    }
                }
                event = internal_rx.recv() => {
@@ -573,7 +574,7 @@ pub async fn run_tui(
                                      // Show error message
                                      state.messages.push(Message::info(
                                          format!("Failed to open editor: {}", error),
-                                         Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
+                                          Some(ratatui::style::Style::default().fg(ThemeColors::red())),
                                      ));
                                  }
                              }
@@ -617,9 +618,9 @@ pub async fn run_tui(
                                    crate::services::helper_block::push_styled_message(
                                        &mut state,
                                        " Plan ready for review. Opening reviewer... (ctrl+p to toggle)",
-                                       ratatui::style::Color::Cyan,
-                                       ">> ",
-                                       ratatui::style::Color::Cyan,
+                                        ThemeColors::cyan(),
+                                        ">> ",
+                                        ThemeColors::cyan(),
                                    );
                                }
                            }

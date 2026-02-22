@@ -141,7 +141,10 @@ TOOL SELECTION (least-privilege):
 
 SANDBOX MODE (enable_sandbox=true):
 - Runs subagent in isolated Docker container via warden
-- Read-only access to working directory and cloud credentials
+- The host working directory is bind-mounted read-only at /agent inside the container
+  (the subagent's CWD will be /agent, not the original host path — use relative paths or /agent/...)
+- Cloud credentials (~/.aws, ~/.kube, ~/.ssh, etc.) are mounted under /home/agent/
+- .stakpak session data is mounted writable at /agent/.stakpak
 - Recommended when using run_command tool for untrusted operations
 - Adds ~5-10s startup overhead for container initialization
 - IMPORTANT: Sandbox subagents run AUTONOMOUSLY to completion without pausing for tool approval

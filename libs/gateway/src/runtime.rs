@@ -36,7 +36,7 @@ impl Gateway {
         let client = StakpakClient::new(config.server.url.clone(), config.server.token.clone());
 
         let dispatcher = Arc::new(Dispatcher::new(
-            client,
+            client.clone(),
             channels.clone(),
             store.clone(),
             config.router_config(),
@@ -56,7 +56,18 @@ impl Gateway {
             } else {
                 Some(config.server.token.clone())
             },
+            client: client.clone(),
+            dispatcher: dispatcher.clone(),
+            router_config: config.router_config(),
+            title_template: config.gateway.title_template.clone(),
+            inbound_tx: Arc::new(tokio::sync::RwLock::new(None)),
         });
+
+        if api_state.auth_token.is_none() {
+            warn!(
+                "gateway API auth token is not configured; /v1/gateway/send interactive requests will be rejected"
+            );
+        }
 
         Ok(Self {
             config,
@@ -77,6 +88,11 @@ impl Gateway {
 
     pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
         let (inbound_tx, inbound_rx) = mpsc::channel(512);
+
+        {
+            let mut guard = self.api_state.inbound_tx.write().await;
+            *guard = Some(inbound_tx.clone());
+        }
 
         let runtime_cancel = CancellationToken::new();
 
@@ -123,6 +139,11 @@ impl Gateway {
 
         cancel.cancelled().await;
         runtime_cancel.cancel();
+
+        {
+            let mut guard = self.api_state.inbound_tx.write().await;
+            *guard = None;
+        }
 
         for task in channel_tasks {
             let _ = task.await;

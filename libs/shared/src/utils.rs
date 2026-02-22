@@ -223,6 +223,19 @@ pub fn sanitize_text_output(text: &str) -> String {
         .collect()
 }
 
+/// Truncate a string by character count and append `...` when truncated.
+///
+/// Uses char iteration (not byte slicing) so it is UTF-8 safe.
+pub fn truncate_chars_with_ellipsis(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let mut truncated: String = text.chars().take(max_chars).collect();
+    truncated.push_str("...");
+    truncated
+}
+
 /// Handle large output: if the output has >= `max_lines`, save the full content to session
 /// storage and return a string showing only the first or last `max_lines` lines with a pointer
 /// to the saved file. Returns `Ok(final_string)` or `Err(error_string)` on failure.
@@ -329,6 +342,25 @@ mod password_tests {
 
         // Very unlikely to generate the same password twice
         assert_ne!(password1, password2);
+    }
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    use super::*;
+
+    #[test]
+    fn truncate_chars_with_ellipsis_exact_boundary_keeps_value() {
+        let value = "a".repeat(20);
+        let truncated = truncate_chars_with_ellipsis(&value, 20);
+        assert_eq!(truncated, value);
+    }
+
+    #[test]
+    fn truncate_chars_with_ellipsis_appends_suffix_when_truncated() {
+        let value = "é".repeat(10);
+        let truncated = truncate_chars_with_ellipsis(&value, 5);
+        assert_eq!(truncated, "ééééé...");
     }
 }
 

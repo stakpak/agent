@@ -6,6 +6,10 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stakpak_agent_core::ProposedToolCall;
+pub use stakpak_shared::models::context::{
+    CallerContextInput, MAX_CALLER_CONTEXT_CONTENT_CHARS, MAX_CALLER_CONTEXT_ITEMS,
+    MAX_CALLER_CONTEXT_NAME_CHARS, validate_caller_context,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -70,6 +74,7 @@ pub struct SendMessageOptions {
     pub message_type: MessageType,
     pub run_id: Option<Uuid>,
     pub sandbox: Option<bool>,
+    pub context: Vec<CallerContextInput>,
 }
 
 impl Default for SendMessageOptions {
@@ -79,6 +84,7 @@ impl Default for SendMessageOptions {
             message_type: MessageType::Message,
             run_id: None,
             sandbox: None,
+            context: Vec::new(),
         }
     }
 }
@@ -246,12 +252,23 @@ impl StakpakClient {
             ));
         };
 
+        let SendMessageOptions {
+            model,
+            message_type,
+            run_id,
+            sandbox,
+            context,
+        } = opts;
+
+        validate_context_inputs(&context)?;
+
         let payload = serde_json::json!({
             "message": message,
-            "type": opts.message_type,
-            "run_id": opts.run_id,
-            "model": opts.model,
-            "sandbox": opts.sandbox,
+            "type": message_type,
+            "run_id": run_id,
+            "model": model,
+            "sandbox": sandbox,
+            "context": if context.is_empty() { None::<Vec<CallerContextInput>> } else { Some(context) },
         });
 
         self.request_json(
@@ -588,9 +605,13 @@ fn map_error_status(status: StatusCode, body: String) -> Result<(), ClientError>
     }
 }
 
+fn validate_context_inputs(inputs: &[CallerContextInput]) -> Result<(), ClientError> {
+    validate_caller_context(inputs).map_err(ClientError::InvalidRequest)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_sse_block;
+    use super::*;
 
     #[test]
     fn parse_sse_event_block() {
@@ -604,5 +625,66 @@ mod tests {
         assert_eq!(event.event_type, "text_delta");
         assert_eq!(event.data, "{\"id\":1}");
         assert_eq!(event.event_id_u64, Some(1));
+    }
+
+    #[test]
+    fn validate_context_inputs_accepts_exact_limits() {
+        let input = CallerContextInput {
+            name: "n".repeat(MAX_CALLER_CONTEXT_NAME_CHARS),
+            content: "x".repeat(MAX_CALLER_CONTEXT_CONTENT_CHARS),
+            priority: Some("high".to_string()),
+        };
+
+        assert!(validate_context_inputs(&[input]).is_ok());
+    }
+
+    #[test]
+    fn validate_context_inputs_rejects_oversized_content() {
+        let input = CallerContextInput {
+            name: "valid".to_string(),
+            content: "x".repeat(MAX_CALLER_CONTEXT_CONTENT_CHARS + 1),
+            priority: None,
+        };
+
+        assert!(validate_context_inputs(&[input]).is_err());
+    }
+
+    #[test]
+    fn validate_context_inputs_rejects_oversized_whitespace_only_name() {
+        let input = CallerContextInput {
+            name: " ".repeat(MAX_CALLER_CONTEXT_NAME_CHARS + 1),
+            content: "ok".to_string(),
+            priority: None,
+        };
+
+        assert!(
+            validate_context_inputs(&[input]).is_err(),
+            "raw name length must be enforced even when trimmed name is empty"
+        );
+    }
+
+    #[test]
+    fn validate_context_inputs_rejects_oversized_trimmed_name() {
+        let input = CallerContextInput {
+            name: "n".repeat(MAX_CALLER_CONTEXT_NAME_CHARS + 1),
+            content: "ok".to_string(),
+            priority: None,
+        };
+
+        assert!(validate_context_inputs(&[input]).is_err());
+    }
+
+    #[test]
+    fn validate_context_inputs_rejects_oversized_whitespace_only_content() {
+        let input = CallerContextInput {
+            name: "ctx".to_string(),
+            content: " ".repeat(MAX_CALLER_CONTEXT_CONTENT_CHARS + 1),
+            priority: None,
+        };
+
+        assert!(
+            validate_context_inputs(&[input]).is_err(),
+            "raw content length must be enforced even when trimmed content is empty"
+        );
     }
 }

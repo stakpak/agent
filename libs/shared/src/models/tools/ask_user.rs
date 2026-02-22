@@ -33,10 +33,6 @@ pub struct AskUserQuestion {
     #[serde(default = "default_true")]
     #[schemars(description = "Whether to allow custom text input (default: true)")]
     pub allow_custom: bool,
-    /// Whether this question must be answered (default: true)
-    #[serde(default = "default_true")]
-    #[schemars(description = "Whether this question must be answered (default: true)")]
-    pub required: bool,
     /// When true, user can select multiple options (checkbox list). Default: false (single-select).
     #[serde(default)]
     #[schemars(
@@ -131,7 +127,6 @@ mod tests {
                 },
             ],
             allow_custom: true,
-            required: true,
             multi_select: false,
         };
 
@@ -154,7 +149,6 @@ mod tests {
         let question: AskUserQuestion = serde_json::from_str(json).unwrap();
         assert_eq!(question.label, "Test");
         assert!(question.allow_custom, "allow_custom should default to true");
-        assert!(question.required, "required should default to true");
     }
 
     #[test]
@@ -163,13 +157,11 @@ mod tests {
             "label": "Test",
             "question": "Is this a test?",
             "options": [],
-            "allow_custom": false,
-            "required": false
+            "allow_custom": false
         }"#;
 
         let question: AskUserQuestion = serde_json::from_str(json).unwrap();
         assert!(!question.allow_custom);
-        assert!(!question.required);
     }
 
     #[test]
@@ -298,7 +290,6 @@ mod tests {
                 },
             ],
             allow_custom: true,
-            required: true,
             multi_select: false,
         };
 
@@ -318,7 +309,6 @@ mod tests {
             question: "Question?".to_string(),
             options: vec![],
             allow_custom: true,
-            required: true,
             multi_select: false,
         };
 
@@ -358,7 +348,6 @@ mod tests {
                     selected: false,
                 }],
                 allow_custom: false,
-                required: true,
                 multi_select: false,
             }],
         };
@@ -414,7 +403,6 @@ mod tests {
                 },
             ],
             allow_custom: false,
-            required: true,
             multi_select: true,
         };
 

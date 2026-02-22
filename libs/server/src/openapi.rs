@@ -187,12 +187,21 @@ pub struct StakaiMessageDoc {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CallerContextInputDoc {
+    pub name: String,
+    pub content: String,
+    pub priority: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SessionMessageRequestDoc {
     pub message: StakaiMessageDoc,
     #[serde(rename = "type")]
     pub message_type: Option<SessionMessageTypeDoc>,
     pub run_id: Option<Uuid>,
     pub model: Option<String>,
+    pub sandbox: Option<bool>,
+    pub context: Option<Vec<CallerContextInputDoc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

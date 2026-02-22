@@ -1,4 +1,5 @@
 use crate::{
+    context::{ContextFile, EnvironmentContext, ProjectContext, SessionContextBuilder},
     message_bridge,
     sandbox::{SandboxConfig, SandboxedMcpServer},
     state::AppState,
@@ -10,16 +11,16 @@ use rmcp::model::{
     CancelledNotificationParam, ServerResult,
 };
 use serde_json::json;
-use stakai::Message;
+use stakai::{ContentPart, Message, MessageContent, Role};
 use stakpak_agent_core::{
-    AgentCommand, AgentConfig, AgentEvent, AgentHook, AgentRunContext, CheckpointEnvelopeV1,
-    CompactionConfig, ContextConfig, PassthroughCompactionEngine, ProposedToolCall, RetryConfig,
-    ToolExecutionResult, ToolExecutor, run_agent,
+    AgentCommand, AgentConfig, AgentEvent, AgentHook, AgentRunContext, BudgetAwareContextReducer,
+    CheckpointEnvelopeV1, CompactionConfig, PassthroughCompactionEngine, ProposedToolCall,
+    RetryConfig, ToolExecutionResult, ToolExecutor, run_agent,
 };
 use stakpak_api::CreateCheckpointRequest;
 use stakpak_mcp_client::McpClient;
 use stakpak_shared::utils::sanitize_text_output;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -46,6 +47,7 @@ pub fn spawn_session_actor(
     run_id: Uuid,
     model: stakai::Model,
     user_message: Message,
+    caller_context: Vec<ContextFile>,
     sandbox_config: Option<SandboxConfig>,
 ) -> Result<SessionHandle, String> {
     let (command_tx, command_rx) = mpsc::channel(128);
@@ -61,6 +63,7 @@ pub fn spawn_session_actor(
             run_id,
             model,
             user_message,
+            caller_context,
             command_rx,
             cancel,
             sandbox_config,
@@ -83,7 +86,8 @@ async fn run_session_actor(
     session_id: Uuid,
     run_id: Uuid,
     model: stakai::Model,
-    user_message: Message,
+    mut user_message: Message,
+    caller_context: Vec<ContextFile>,
     command_rx: mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
     sandbox_config: Option<SandboxConfig>,
@@ -95,15 +99,84 @@ async fn run_session_actor(
         .ok();
     let parent_checkpoint_id = active_checkpoint.as_ref().map(|checkpoint| checkpoint.id);
 
-    let initial_messages = match state.checkpoint_store.load_latest(session_id).await {
-        Ok(Some(envelope)) => envelope.messages,
-        Ok(None) => active_checkpoint
-            .map(|checkpoint| message_bridge::chat_to_stakai(checkpoint.state.messages))
-            .unwrap_or_default(),
-        Err(error) => {
-            return Err(format!("Failed to load checkpoint envelope: {error}"));
-        }
+    let (initial_messages, mut initial_metadata) =
+        match state.checkpoint_store.load_latest(session_id).await {
+            Ok(Some(envelope)) => (envelope.messages, envelope.metadata),
+            Ok(None) => {
+                let messages = active_checkpoint
+                    .as_ref()
+                    .map(|checkpoint| {
+                        message_bridge::chat_to_stakai(checkpoint.state.messages.clone())
+                    })
+                    .unwrap_or_default();
+                let metadata = active_checkpoint
+                    .as_ref()
+                    .and_then(|checkpoint| checkpoint.state.metadata.clone())
+                    .unwrap_or_else(|| json!({}));
+                (messages, metadata)
+            }
+            Err(error) => {
+                return Err(format!("Failed to load checkpoint envelope: {error}"));
+            }
+        };
+
+    // If sandbox is requested, spawn a sandboxed MCP server for this session.
+    // Otherwise, use the shared in-process MCP client.
+    let sandbox = if let Some(sandbox_config) = sandbox_config {
+        tracing::info!(session_id = %session_id, image = %sandbox_config.image, "Spawning sandbox container for session");
+        Some(
+            SandboxedMcpServer::spawn(&sandbox_config)
+                .await
+                .map_err(|e| format!("Failed to start sandbox for session {session_id}: {e}"))?,
+        )
+    } else {
+        None
     };
+
+    let (run_tools, tool_executor): (Vec<stakai::Tool>, Box<dyn ToolExecutor + Send + Sync>) =
+        if let Some(ref sandbox) = sandbox {
+            (
+                sandbox.tools.clone(),
+                Box::new(SandboxedToolExecutor {
+                    mcp_client: sandbox.client.clone(),
+                }),
+            )
+        } else {
+            (
+                state.current_mcp_tools().await,
+                Box::new(ServerToolExecutor {
+                    state: state.clone(),
+                }),
+            )
+        };
+
+    let is_new_session = is_new_session_history(&initial_messages);
+    let session_cwd = resolve_session_cwd(&state, session_id).await;
+    let environment = EnvironmentContext::snapshot(&session_cwd).await;
+
+    // Combine caller context with pre-loaded remote skills context from AppState.
+    // Explicit caller context should force per-turn injection, even on resumed
+    // sessions, while startup remote skills remain baseline context.
+    let has_runtime_caller_context = !caller_context.is_empty();
+    let mut all_caller_context = caller_context;
+    all_caller_context.extend(state.current_skills().await);
+
+    let project =
+        ProjectContext::discover(Path::new(&session_cwd)).with_caller_context(all_caller_context);
+
+    let session_context = SessionContextBuilder::new()
+        .base_system_prompt(state.base_system_prompt.clone().unwrap_or_default())
+        .environment(environment)
+        .project(project)
+        .tools(&run_tools)
+        .budget(state.context_budget.clone())
+        .build();
+
+    if (is_new_session || has_runtime_caller_context)
+        && let Some(context_block) = session_context.user_context_block.as_deref()
+    {
+        user_message = prepend_context_to_user_message(user_message, context_block);
+    }
 
     let mut baseline_messages = initial_messages.clone();
     baseline_messages.push(user_message.clone());
@@ -115,6 +188,7 @@ async fn run_session_actor(
         model.clone(),
         parent_checkpoint_id,
         baseline_messages,
+        initial_metadata.clone(),
     ));
 
     checkpoint_runtime
@@ -148,44 +222,17 @@ async fn run_session_actor(
         }
     });
 
-    // If sandbox is requested, spawn a sandboxed MCP server for this session.
-    // Otherwise, use the shared in-process MCP client.
-    let sandbox = if let Some(sandbox_config) = sandbox_config {
-        tracing::info!(session_id = %session_id, image = %sandbox_config.image, "Spawning sandbox container for session");
-        Some(
-            SandboxedMcpServer::spawn(&sandbox_config)
-                .await
-                .map_err(|e| format!("Failed to start sandbox for session {session_id}: {e}"))?,
-        )
-    } else {
-        None
-    };
-
-    let (run_tools, tool_executor): (Vec<stakai::Tool>, Box<dyn ToolExecutor + Send + Sync>) =
-        if let Some(ref sandbox) = sandbox {
-            (
-                sandbox.tools.clone(),
-                Box::new(SandboxedToolExecutor {
-                    mcp_client: sandbox.client.clone(),
-                }),
-            )
-        } else {
-            (
-                state.current_mcp_tools().await,
-                Box::new(ServerToolExecutor {
-                    state: state.clone(),
-                }),
-            )
-        };
-
+    // Use the model's maximum output capacity as the output budget for context
+    // window calculations. This is conservative — the actual response may be shorter,
+    // but reserving the full limit avoids mid-response context truncation.
+    let max_output_tokens = model.limit.output as u32;
     let agent_config = AgentConfig {
         model,
-        system_prompt: String::new(),
+        system_prompt: session_context.system_prompt,
         max_turns: MAX_TURNS,
-        max_output_tokens: 0,
+        max_output_tokens,
         provider_options: None,
         tool_approval: state.tool_approval_policy.clone(),
-        context: ContextConfig::default(),
         retry: RetryConfig::default(),
         compaction: CompactionConfig::default(),
         tools: run_tools,
@@ -196,6 +243,7 @@ async fn run_session_actor(
     })];
 
     let compactor = PassthroughCompactionEngine;
+    let context_reducer = BudgetAwareContextReducer::new(5, 0.8);
     let run_context = build_run_context(session_id, run_id);
 
     let run_result = run_agent(
@@ -203,6 +251,7 @@ async fn run_session_actor(
         state.inference.as_ref(),
         &agent_config,
         initial_messages,
+        &mut initial_metadata,
         user_message,
         tool_executor.as_ref(),
         &hooks,
@@ -210,6 +259,7 @@ async fn run_session_actor(
         command_rx,
         cancel,
         &compactor,
+        &context_reducer,
     )
     .await;
 
@@ -226,12 +276,14 @@ async fn run_session_actor(
     match &run_result {
         Ok(result) => {
             checkpoint_runtime.update_messages(&result.messages).await;
+            checkpoint_runtime.update_metadata(&result.metadata).await;
             checkpoint_runtime
                 .persist_snapshot()
                 .await
                 .map_err(|error| format!("Failed to persist terminal checkpoint: {error}"))?;
         }
         Err(_) => {
+            checkpoint_runtime.update_metadata(&initial_metadata).await;
             let _ = checkpoint_runtime.persist_snapshot().await;
         }
     }
@@ -241,6 +293,58 @@ async fn run_session_actor(
     run_result
         .map(|_| ())
         .map_err(|error| format!("Agent run failed: {error}"))
+}
+
+fn is_new_session_history(messages: &[Message]) -> bool {
+    !messages
+        .iter()
+        .any(|message| matches!(message.role, Role::User | Role::Assistant | Role::Tool))
+}
+
+async fn resolve_session_cwd(state: &AppState, session_id: Uuid) -> String {
+    // 1. Session-specific cwd (set by API caller)
+    if let Ok(session) = state.session_store.get_session(session_id).await
+        && let Some(cwd) = session.cwd
+        && !cwd.trim().is_empty()
+    {
+        return cwd;
+    }
+
+    // 2. Configured project directory (set at server startup, e.g. from `stakpak up`)
+    if let Some(project_dir) = &state.project_dir {
+        return project_dir.clone();
+    }
+
+    // 3. Process working directory
+    std::env::current_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string())
+}
+
+fn prepend_context_to_user_message(mut message: Message, context_block: &str) -> Message {
+    if context_block.trim().is_empty() {
+        return message;
+    }
+
+    match &mut message.content {
+        MessageContent::Text(text) => {
+            let existing = std::mem::take(text);
+            *text = if existing.trim().is_empty() {
+                context_block.to_string()
+            } else {
+                format!("{context_block}\n\n{existing}")
+            };
+        }
+        MessageContent::Parts(parts) => {
+            let mut prefixed = Vec::with_capacity(parts.len() + 1);
+            prefixed.push(ContentPart::text(context_block));
+            prefixed.append(parts);
+            *parts = prefixed;
+        }
+    }
+
+    message
 }
 
 async fn handle_core_event(state: &AppState, session_id: Uuid, run_id: Uuid, event: AgentEvent) {
@@ -314,6 +418,7 @@ struct CheckpointRuntime {
 struct CheckpointRuntimeInner {
     parent_checkpoint_id: Option<Uuid>,
     latest_messages: Vec<Message>,
+    latest_metadata: serde_json::Value,
     last_persisted_signature: Option<String>,
     dirty: bool,
 }
@@ -326,6 +431,7 @@ impl CheckpointRuntime {
         active_model: stakai::Model,
         parent_checkpoint_id: Option<Uuid>,
         latest_messages: Vec<Message>,
+        latest_metadata: serde_json::Value,
     ) -> Self {
         Self {
             state,
@@ -335,6 +441,7 @@ impl CheckpointRuntime {
             inner: Mutex::new(CheckpointRuntimeInner {
                 parent_checkpoint_id,
                 latest_messages,
+                latest_metadata,
                 last_persisted_signature: None,
                 dirty: true,
             }),
@@ -344,6 +451,12 @@ impl CheckpointRuntime {
     async fn update_messages(&self, messages: &[Message]) {
         let mut guard = self.inner.lock().await;
         guard.latest_messages = messages.to_vec();
+        guard.dirty = true;
+    }
+
+    async fn update_metadata(&self, metadata: &serde_json::Value) {
+        let mut guard = self.inner.lock().await;
+        guard.latest_metadata = metadata.clone();
         guard.dirty = true;
     }
 
@@ -359,7 +472,7 @@ impl CheckpointRuntime {
             return Ok(checkpoint_id);
         }
 
-        let signature = checkpoint_signature(&guard.latest_messages)?;
+        let signature = checkpoint_signature(&guard.latest_messages, &guard.latest_metadata)?;
         let changed = guard.last_persisted_signature.as_deref() != Some(signature.as_str());
         let should_persist = guard.parent_checkpoint_id.is_none() || (guard.dirty && changed);
 
@@ -377,6 +490,7 @@ impl CheckpointRuntime {
             &self.active_model,
             guard.parent_checkpoint_id,
             &guard.latest_messages,
+            &guard.latest_metadata,
         )
         .await?;
 
@@ -560,8 +674,11 @@ fn render_call_tool_result(result: &rmcp::model::CallToolResult) -> String {
     "<non-text tool result omitted for safety>".to_string()
 }
 
-fn checkpoint_signature(messages: &[Message]) -> Result<String, String> {
-    serde_json::to_string(messages)
+fn checkpoint_signature(
+    messages: &[Message],
+    metadata: &serde_json::Value,
+) -> Result<String, String> {
+    serde_json::to_string(&(messages, metadata))
         .map_err(|error| format!("Failed to serialize checkpoint messages: {error}"))
 }
 
@@ -572,10 +689,12 @@ async fn persist_checkpoint(
     active_model: &stakai::Model,
     parent_id: Option<Uuid>,
     messages: &[Message],
+    metadata: &serde_json::Value,
 ) -> Result<Uuid, String> {
     // TODO(ahmed): Migrate server/session checkpoint storage to `Vec<stakai::Message>` directly
     // and remove the ChatMessage adapter conversion (`message_bridge::stakai_to_chat`).
-    let mut request = CreateCheckpointRequest::new(message_bridge::stakai_to_chat(messages));
+    let mut request = CreateCheckpointRequest::new(message_bridge::stakai_to_chat(messages))
+        .with_metadata(metadata.clone());
 
     if let Some(parent_id) = parent_id {
         request = request.with_parent(parent_id);
@@ -587,15 +706,28 @@ async fn persist_checkpoint(
         .await
         .map_err(|error| error.to_string())?;
 
-    let envelope = build_checkpoint_envelope(
-        run_id,
-        messages.to_vec(),
-        json!({
-            "session_id": session_id.to_string(),
-            "checkpoint_id": checkpoint.id.to_string(),
-            (ACTIVE_MODEL_METADATA_KEY): format!("{}/{}", active_model.provider, active_model.id),
-        }),
-    );
+    let mut envelope_metadata = if metadata.is_object() {
+        metadata.clone()
+    } else {
+        json!({})
+    };
+
+    if let Some(obj) = envelope_metadata.as_object_mut() {
+        obj.insert(
+            "session_id".to_string(),
+            serde_json::Value::String(session_id.to_string()),
+        );
+        obj.insert(
+            "checkpoint_id".to_string(),
+            serde_json::Value::String(checkpoint.id.to_string()),
+        );
+        obj.insert(
+            ACTIVE_MODEL_METADATA_KEY.to_string(),
+            serde_json::Value::String(format!("{}/{}", active_model.provider, active_model.id)),
+        );
+    }
+
+    let envelope = build_checkpoint_envelope(run_id, messages.to_vec(), envelope_metadata);
 
     state
         .checkpoint_store
@@ -616,7 +748,7 @@ mod tests {
     use super::*;
     use rmcp::model::{CallToolResult, Content};
     use serde_json::json;
-    use stakai::{Message, Role};
+    use stakai::{ContentPart, Message, MessageContent, Role};
 
     #[test]
     fn run_id_is_not_regenerated_when_building_run_context() {
@@ -666,11 +798,110 @@ mod tests {
             Message::new(Role::Assistant, "hi"),
         ];
 
-        let sig_a = checkpoint_signature(&messages_a)
+        let sig_a = checkpoint_signature(&messages_a, &json!({}))
             .unwrap_or_else(|error| panic!("signature failed: {error}"));
-        let sig_b = checkpoint_signature(&messages_b)
+        let sig_b = checkpoint_signature(&messages_b, &json!({}))
             .unwrap_or_else(|error| panic!("signature failed: {error}"));
 
         assert_ne!(sig_a, sig_b);
+    }
+
+    #[test]
+    fn checkpoint_signature_changes_when_metadata_changes() {
+        let messages = vec![Message::new(Role::User, "hello")];
+
+        let sig_a = checkpoint_signature(&messages, &json!({}))
+            .unwrap_or_else(|error| panic!("signature failed: {error}"));
+        let sig_b = checkpoint_signature(&messages, &json!({"trimmed_up_to_message_index": 5}))
+            .unwrap_or_else(|error| panic!("signature failed: {error}"));
+
+        assert_ne!(sig_a, sig_b);
+    }
+
+    #[test]
+    fn is_new_session_empty_history() {
+        assert!(is_new_session_history(&[]));
+    }
+
+    #[test]
+    fn is_new_session_system_only() {
+        let messages = vec![Message::new(Role::System, "you are an agent")];
+        assert!(is_new_session_history(&messages));
+    }
+
+    #[test]
+    fn is_not_new_session_with_user_message() {
+        let messages = vec![Message::new(Role::User, "hello")];
+        assert!(!is_new_session_history(&messages));
+    }
+
+    #[test]
+    fn is_not_new_session_with_system_and_user() {
+        let messages = vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::User, "hello"),
+        ];
+        assert!(!is_new_session_history(&messages));
+    }
+
+    #[test]
+    fn is_not_new_session_with_assistant() {
+        let messages = vec![Message::new(Role::Assistant, "hi there")];
+        assert!(!is_new_session_history(&messages));
+    }
+
+    #[test]
+    fn prepend_context_to_text_message() {
+        let msg = Message::new(Role::User, "how do I deploy?");
+        let result = prepend_context_to_user_message(msg, "<context>env info</context>");
+
+        let text = result.text().unwrap_or_default();
+        assert!(
+            text.starts_with("<context>env info</context>"),
+            "context should be prepended"
+        );
+        assert!(
+            text.contains("how do I deploy?"),
+            "original text should be preserved"
+        );
+    }
+
+    #[test]
+    fn prepend_context_to_empty_text_message() {
+        let msg = Message::new(Role::User, "  ");
+        let result = prepend_context_to_user_message(msg, "<context>env info</context>");
+
+        let text = result.text().unwrap_or_default();
+        assert_eq!(text, "<context>env info</context>");
+    }
+
+    #[test]
+    fn prepend_context_to_parts_message() {
+        let msg = Message {
+            role: Role::User,
+            content: MessageContent::Parts(vec![ContentPart::text("original text")]),
+            name: None,
+            provider_options: None,
+        };
+        let result = prepend_context_to_user_message(msg, "<context>env info</context>");
+
+        if let MessageContent::Parts(parts) = &result.content {
+            assert_eq!(parts.len(), 2, "should have context part + original part");
+            if let ContentPart::Text { text, .. } = &parts[0] {
+                assert_eq!(text, "<context>env info</context>");
+            } else {
+                panic!("first part should be text");
+            }
+        } else {
+            panic!("expected Parts content");
+        }
+    }
+
+    #[test]
+    fn prepend_empty_context_is_noop() {
+        let msg = Message::new(Role::User, "hello");
+        let result = prepend_context_to_user_message(msg, "   ");
+
+        assert_eq!(result.text().unwrap_or_default(), "hello");
     }
 }

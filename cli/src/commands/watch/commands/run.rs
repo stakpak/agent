@@ -13,16 +13,18 @@ use crate::commands::watch::reconciler::{
     RegisteredSchedule, ScheduleSnapshot, reconcile_schedules,
 };
 use crate::commands::watch::{
-    AgentServerConnection, RunStatus, ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig,
-    assemble_prompt, is_process_running, run_check_script, spawn_agent,
+    AgentServerConnection, INTERACTIVE_DELEGATED_NOTE, InteractionMode, ListRunsFilter, RunStatus,
+    ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig, assemble_prompt,
+    build_schedule_caller_context, is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};
 use croner::Cron;
+use serde::Deserialize;
 use stakpak_shared::utils::sanitize_text_output;
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 use tokio::signal;
 use tokio::sync::{Mutex, RwLock, mpsc};
@@ -30,6 +32,12 @@ use tracing::{error, info, warn};
 
 const HEARTBEAT_STALE_SECONDS: i64 = 120;
 const HEARTBEAT_UPDATE_INTERVAL_SECONDS: u64 = 30;
+const INTERACTIVE_STATUS_POLL_INTERVAL_SECONDS: u64 = 15;
+const INTERACTIVE_MAX_RUN_AGE_HOURS: i64 = 24;
+const INTERACTIVE_RUN_MAX_AGE_GRACE_SECONDS: i64 = 60 * 60;
+const MAX_GATEWAY_CHECK_OUTPUT_CHARS: usize = 4_000;
+
+static WATCH_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 /// Run the autopilot service in foreground mode.
 ///
@@ -314,6 +322,28 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
         }
     });
 
+    // Spawn interactive session status poller.
+    let db_clone3 = Arc::clone(&db);
+    let config_clone3 = Arc::clone(&config_state);
+    let interactive_status_poller = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            INTERACTIVE_STATUS_POLL_INTERVAL_SECONDS,
+        ));
+
+        loop {
+            interval.tick().await;
+
+            let config = {
+                let cfg = config_clone3.read().await;
+                Arc::clone(&cfg)
+            };
+
+            if let Err(error) = reconcile_interactive_runs(&db_clone3, config.as_ref()).await {
+                warn!(error = %error, "Failed to reconcile interactive watch runs");
+            }
+        }
+    });
+
     info!("Autopilot running. Press Ctrl+C to stop.");
 
     // Main loop: schedule events + shutdown.
@@ -359,6 +389,7 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
 
     heartbeat_updater.abort();
     pending_poller.abort();
+    interactive_status_poller.abort();
 
     // Clear autopilot state
     if let Err(e) = db.clear_autopilot_state().await {
@@ -636,8 +667,40 @@ async fn handle_schedule_event(
         None
     };
 
-    // Assemble prompt
+    // Assemble prompt + structured caller context
     let prompt = assemble_prompt(schedule, check_result.as_ref());
+    let caller_context = build_schedule_caller_context(schedule, check_result.as_ref());
+
+    if schedule.interaction == InteractionMode::Interactive {
+        match try_start_interactive_session(config, schedule, check_result.as_ref(), &prompt).await
+        {
+            Ok(Some(session_id)) => {
+                db.update_run_interactive_started(run_id, &session_id, INTERACTIVE_DELEGATED_NOTE)
+                    .await
+                    .map_err(|e| format!("Failed to persist interactive session id: {}", e))?;
+
+                print_event(
+                    "done",
+                    &schedule.name,
+                    &format!("Interactive session started ({})", session_id),
+                );
+                return Ok(());
+            }
+            Ok(None) => {
+                info!(
+                    schedule = %schedule.name,
+                    "Interactive mode skipped (missing gateway notifications config); falling back to silent mode"
+                );
+            }
+            Err(error) => {
+                warn!(
+                    schedule = %schedule.name,
+                    error = %error,
+                    "Interactive mode failed; falling back to silent mode"
+                );
+            }
+        }
+    }
 
     info!(schedule = %schedule.name, "Waking agent");
     print_event("agent", &schedule.name, "Spawning agent...");
@@ -652,6 +715,7 @@ async fn handle_schedule_event(
         enable_subagents: schedule.effective_enable_subagents(&config.defaults),
         pause_on_approval: schedule.effective_pause_on_approval(&config.defaults),
         sandbox: schedule.effective_sandbox(&config.defaults),
+        caller_context,
         server: server.clone(),
     };
 
@@ -773,6 +837,345 @@ async fn handle_schedule_event(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct GatewaySendResponse {
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GatewaySessionStatusResponse {
+    active: bool,
+}
+
+async fn try_start_interactive_session(
+    config: &ScheduleConfig,
+    schedule: &crate::commands::watch::Schedule,
+    check_result: Option<&crate::commands::watch::CheckResult>,
+    prompt: &str,
+) -> Result<Option<String>, String> {
+    let Some(notifications) = &config.notifications else {
+        return Ok(None);
+    };
+
+    let Some(delivery) = schedule.effective_delivery(notifications) else {
+        return Ok(None);
+    };
+
+    let caller_context = build_interactive_caller_context(schedule, check_result);
+    let check_output = normalized_check_output(check_result);
+    let payload = serde_json::json!({
+        "channel": delivery.channel,
+        "target": build_gateway_target(&delivery),
+        "text": format!("⚙️ [{}] Schedule fired", schedule.name),
+        "context": {
+            "schedule": schedule.name,
+            "check_output": check_output,
+            "status": "triggered"
+        },
+        "interactive": {
+            "prompt": prompt,
+            "caller_context": caller_context,
+            "sandbox": schedule.effective_sandbox(&config.defaults),
+            "timeout": schedule.effective_timeout(&config.defaults).as_secs(),
+            "title": schedule.name,
+        }
+    });
+
+    match post_gateway_send(notifications, &payload).await {
+        Ok(response) => Ok(response.session_id),
+        Err(error) => Err(error),
+    }
+}
+
+fn build_interactive_caller_context(
+    schedule: &crate::commands::watch::Schedule,
+    check_result: Option<&crate::commands::watch::CheckResult>,
+) -> Vec<serde_json::Value> {
+    let mut items = vec![serde_json::json!({
+        "name": "schedule",
+        "priority": "high",
+        "content": format!("Schedule '{}' fired", schedule.name),
+    })];
+
+    if let Some(check_result) = check_result {
+        items.push(serde_json::json!({
+            "name": "check_exit_code",
+            "priority": "high",
+            "content": check_result.exit_code.unwrap_or(-1).to_string(),
+        }));
+
+        if let Some(check_output) = normalized_check_output(Some(check_result)) {
+            items.push(serde_json::json!({
+                "name": "check_output",
+                "priority": "high",
+                "content": check_output,
+            }));
+        }
+    }
+
+    items
+}
+
+fn normalized_check_output(
+    check_result: Option<&crate::commands::watch::CheckResult>,
+) -> Option<String> {
+    check_result
+        .map(|value| sanitize_text_output(value.stdout.trim()))
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_string(&value, MAX_GATEWAY_CHECK_OUTPUT_CHARS))
+}
+
+fn watch_http_client() -> Result<&'static reqwest::Client, String> {
+    if let Some(client) = WATCH_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("failed to create gateway HTTP client: {}", error))?;
+
+    let _ = WATCH_HTTP_CLIENT.set(client);
+
+    WATCH_HTTP_CLIENT
+        .get()
+        .ok_or_else(|| "failed to initialize watch HTTP client".to_string())
+}
+
+async fn post_gateway_send(
+    notifications: &crate::commands::watch::config::NotificationConfig,
+    payload: &serde_json::Value,
+) -> Result<GatewaySendResponse, String> {
+    let client = watch_http_client()?;
+
+    let mut request = client.post(format!("{}/v1/gateway/send", notifications.gateway_url));
+
+    if let Some(token) = notifications.gateway_token.as_deref()
+        && !token.is_empty()
+    {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .json(payload)
+        .send()
+        .await
+        .map_err(|error| format!("gateway send request failed: {}", error))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "gateway send request returned {}: {}",
+            status, body
+        ));
+    }
+
+    response
+        .json::<GatewaySendResponse>()
+        .await
+        .map_err(|error| format!("failed to decode gateway response: {}", error))
+}
+
+async fn get_gateway_session_status(
+    notifications: &crate::commands::watch::config::NotificationConfig,
+    session_id: &str,
+) -> Result<Option<GatewaySessionStatusResponse>, String> {
+    let client = watch_http_client()?;
+    let mut request = client.get(format!(
+        "{}/v1/gateway/sessions/{}",
+        notifications.gateway_url, session_id
+    ));
+
+    if let Some(token) = notifications.gateway_token.as_deref()
+        && !token.is_empty()
+    {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("gateway session status request failed: {}", error))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "gateway session status request returned {}: {}",
+            status, body
+        ));
+    }
+
+    response
+        .json::<GatewaySessionStatusResponse>()
+        .await
+        .map(Some)
+        .map_err(|error| {
+            format!(
+                "failed to decode gateway session status response: {}",
+                error
+            )
+        })
+}
+
+async fn reconcile_interactive_runs(
+    db: &ScheduleDb,
+    config: &ScheduleConfig,
+) -> Result<(), String> {
+    let Some(notifications) = &config.notifications else {
+        return Ok(());
+    };
+
+    let page_limit: u32 = 200;
+    let mut offset: u32 = 0;
+    let mut runs = Vec::new();
+
+    loop {
+        let filter = ListRunsFilter {
+            status: Some(RunStatus::Running),
+            limit: Some(page_limit),
+            offset: Some(offset),
+            ..Default::default()
+        };
+
+        let page = db
+            .list_runs(&filter)
+            .await
+            .map_err(|error| format!("failed to list running runs: {}", error))?;
+
+        if page.is_empty() {
+            break;
+        }
+
+        let page_count = page.len();
+        runs.extend(page);
+
+        if page_count < page_limit as usize {
+            break;
+        }
+
+        offset = offset.saturating_add(page_limit);
+    }
+
+    for run in runs {
+        if !run.interactive_delegated {
+            continue;
+        }
+
+        let Some(session_id) = run.agent_session_id.as_deref() else {
+            continue;
+        };
+
+        let run_age = Utc::now().signed_duration_since(run.started_at);
+        let run_expired = run_age > interactive_run_max_age(config, &run.schedule_name);
+
+        match get_gateway_session_status(notifications, session_id).await {
+            Ok(Some(status)) if status.active && !run_expired => {}
+            Ok(Some(status)) if status.active && run_expired => {
+                warn!(
+                    run_id = run.id,
+                    session_id = %session_id,
+                    age_hours = run_age.num_hours(),
+                    "Interactive run exceeded max age while still active; marking failed"
+                );
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::TimedOut,
+                    Some("Interactive gateway session exceeded max age"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| {
+                    format!("failed to finalize expired interactive run: {}", error)
+                })?;
+            }
+            Ok(Some(_status)) => {
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::Completed,
+                    Some("Interactive gateway session completed"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| format!("failed to finalize interactive run: {}", error))?;
+            }
+            Ok(None) => {
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::Failed,
+                    Some("Interactive gateway session not found"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| {
+                    format!("failed to finalize missing interactive run: {}", error)
+                })?;
+            }
+            Err(error) if run_expired => {
+                warn!(
+                    run_id = run.id,
+                    session_id = %session_id,
+                    age_hours = run_age.num_hours(),
+                    error = %error,
+                    "Failed to fetch interactive status for expired run; marking timed out"
+                );
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::TimedOut,
+                    Some("Interactive gateway session status unavailable beyond max age"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|db_error| {
+                    format!(
+                        "failed to finalize expired interactive run after status errors: {}",
+                        db_error
+                    )
+                })?;
+            }
+            Err(error) => {
+                warn!(
+                    run_id = run.id,
+                    session_id = %session_id,
+                    error = %error,
+                    "Failed to fetch interactive gateway session status"
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn interactive_run_max_age(config: &ScheduleConfig, schedule_name: &str) -> chrono::Duration {
+    let fallback_seconds = INTERACTIVE_MAX_RUN_AGE_HOURS.saturating_mul(60 * 60);
+
+    let schedule_timeout_seconds = config
+        .schedules
+        .iter()
+        .find(|schedule| schedule.name == schedule_name)
+        .map(|schedule| schedule.effective_timeout(&config.defaults).as_secs())
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .unwrap_or(fallback_seconds);
+
+    let timeout_with_grace =
+        schedule_timeout_seconds.saturating_add(INTERACTIVE_RUN_MAX_AGE_GRACE_SECONDS);
+    let max_age_seconds = timeout_with_grace.max(fallback_seconds);
+
+    chrono::Duration::seconds(max_age_seconds)
+}
+
 async fn maybe_send_notification(
     config: &ScheduleConfig,
     schedule: &crate::commands::watch::Schedule,
@@ -795,12 +1198,11 @@ async fn maybe_send_notification(
     };
 
     let text = format_notification(schedule, result, check_result, error_override);
+    let check_output = normalized_check_output(check_result);
     let context = serde_json::json!({
         "schedule": schedule.name,
         "summary": extract_summary(result, error_override),
-        "check_output": check_result
-            .map(|value| sanitize_text_output(value.stdout.trim()))
-            .filter(|value| !value.is_empty()),
+        "check_output": check_output,
         "status": if success { "completed" } else { "failed" },
     });
 
@@ -811,49 +1213,12 @@ async fn maybe_send_notification(
         "context": context,
     });
 
-    let client = match reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            warn!(
-                schedule = %schedule.name,
-                error = %error,
-                "Failed to create notification HTTP client"
-            );
-            return;
-        }
-    };
-    let mut request = client.post(format!("{}/v1/gateway/send", notifications.gateway_url));
-
-    if let Some(token) = notifications.gateway_token.as_deref()
-        && !token.is_empty()
-    {
-        request = request.bearer_auth(token);
-    }
-
-    match request.json(&payload).send().await {
-        Ok(response) => {
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                warn!(
-                    schedule = %schedule.name,
-                    status = %status,
-                    body = %body,
-                    "Gateway notification request failed"
-                );
-            }
-        }
-        Err(error) => {
-            warn!(
-                schedule = %schedule.name,
-                error = %error,
-                "Failed to send watch notification"
-            );
-        }
+    if let Err(error) = post_gateway_send(notifications, &payload).await {
+        warn!(
+            schedule = %schedule.name,
+            error = %error,
+            "Failed to send watch notification"
+        );
     }
 }
 
@@ -1117,14 +1482,21 @@ fn print_event(event_type: &str, trigger_name: &str, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{trigger_config_reload_with_loader, validate_prior_scheduler_state};
+    use super::{
+        MAX_GATEWAY_CHECK_OUTPUT_CHARS, build_interactive_caller_context, interactive_run_max_age,
+        normalized_check_output, trigger_config_reload_with_loader, validate_prior_scheduler_state,
+    };
+    use crate::commands::watch::config::{ScheduleDefaults, ScheduleSettings};
     use crate::commands::watch::db::{RELOAD_SENTINEL, SchedulerState};
     use crate::commands::watch::reconciler::{RegisteredSchedule, ScheduleSnapshot};
-    use crate::commands::watch::{ScheduleConfig, ScheduleDb, Scheduler};
+    use crate::commands::watch::{
+        CheckResult, InteractionMode, Schedule, ScheduleConfig, ScheduleDb, Scheduler,
+    };
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::time::Duration as StdDuration;
     use tempfile::tempdir;
     use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc};
 
@@ -1516,5 +1888,89 @@ mod tests {
             .shutdown()
             .await
             .expect("failed to shutdown scheduler");
+    }
+
+    fn sample_schedule_for_context(name: &str) -> Schedule {
+        Schedule {
+            name: name.to_string(),
+            cron: "0 * * * *".to_string(),
+            check: None,
+            check_timeout: None,
+            trigger_on: None,
+            prompt: "test prompt".to_string(),
+            profile: None,
+            board_id: None,
+            timeout: None,
+            enable_slack_tools: None,
+            enable_subagents: None,
+            pause_on_approval: None,
+            sandbox: None,
+            notify_on: None,
+            notify_channel: None,
+            notify_chat_id: None,
+            interaction: InteractionMode::Interactive,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn test_interactive_caller_context_includes_schedule_and_check_output() {
+        let schedule = sample_schedule_for_context("disk-cleanup");
+        let check = CheckResult {
+            exit_code: Some(1),
+            stdout: "disk usage 91%".to_string(),
+            stderr: String::new(),
+            timed_out: false,
+        };
+
+        let context = build_interactive_caller_context(&schedule, Some(&check));
+        assert_eq!(context.len(), 3);
+        assert_eq!(context[0]["name"], "schedule");
+        assert_eq!(context[1]["name"], "check_exit_code");
+        assert_eq!(context[2]["name"], "check_output");
+    }
+
+    #[test]
+    fn test_normalized_check_output_truncates_large_stdout() {
+        let large = "x".repeat(MAX_GATEWAY_CHECK_OUTPUT_CHARS + 100);
+        let check = CheckResult {
+            exit_code: Some(1),
+            stdout: large,
+            stderr: String::new(),
+            timed_out: false,
+        };
+
+        let normalized = normalized_check_output(Some(&check)).expect("output should exist");
+        assert!(normalized.contains("truncated"));
+        assert!(normalized.chars().count() > MAX_GATEWAY_CHECK_OUTPUT_CHARS);
+    }
+
+    #[test]
+    fn test_interactive_run_max_age_uses_schedule_timeout_when_larger_than_default() {
+        let config = ScheduleConfig {
+            watch: ScheduleSettings::default(),
+            defaults: ScheduleDefaults::default(),
+            notifications: None,
+            schedules: vec![Schedule {
+                timeout: Some(StdDuration::from_secs(48 * 60 * 60)),
+                ..sample_schedule_for_context("long-run")
+            }],
+        };
+
+        let max_age = interactive_run_max_age(&config, "long-run");
+        assert!(max_age.num_hours() >= 49);
+    }
+
+    #[test]
+    fn test_interactive_run_max_age_uses_default_floor_for_unknown_schedule() {
+        let config = ScheduleConfig {
+            watch: ScheduleSettings::default(),
+            defaults: ScheduleDefaults::default(),
+            notifications: None,
+            schedules: Vec::new(),
+        };
+        let max_age = interactive_run_max_age(&config, "missing");
+
+        assert!(max_age.num_hours() >= 24);
     }
 }

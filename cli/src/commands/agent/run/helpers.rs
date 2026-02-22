@@ -1,7 +1,3 @@
-use crate::utils::agents_md::{AgentsMdInfo, format_agents_md_for_context};
-use crate::utils::apps_md::{AppsMdInfo, format_apps_md_for_context};
-use crate::utils::local_context::LocalContext;
-use stakpak_api::models::Skill;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
@@ -29,6 +25,13 @@ pub fn extract_last_checkpoint_id(messages: &[ChatMessage]) -> Option<Uuid> {
                 .as_ref()
                 .and_then(MessageContent::extract_checkpoint_id)
         })
+}
+
+/// Returns true when there are no user/assistant/tool turns yet.
+///
+/// System messages (e.g. injected prompts) do not count as conversation turns.
+pub fn is_first_non_system_message(messages: &[ChatMessage]) -> bool {
+    messages.iter().all(|message| message.role == Role::System)
 }
 
 pub fn convert_tools_with_filter(
@@ -96,56 +99,6 @@ pub fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
     }
 }
 
-pub async fn add_local_context<'a>(
-    messages: &'a [ChatMessage],
-    user_input: &'a str,
-    local_context: &'a Option<LocalContext>,
-    force_add: bool,
-) -> Result<(String, Option<&'a LocalContext>), Box<dyn std::error::Error>> {
-    if let Some(local_context) = local_context {
-        // Add local context if this is the first message OR if force_add is true
-        let is_first_message = messages
-            .iter()
-            .filter(|m: &&ChatMessage| m.role != Role::System)
-            .count()
-            == 0;
-
-        if is_first_message || force_add {
-            let context_display = local_context.format_display().await?;
-            let formatted_input = format!(
-                "{}\n<local_context>\n{}\n</local_context>",
-                user_input, context_display
-            );
-            Ok((formatted_input, Some(local_context)))
-        } else {
-            Ok((user_input.to_string(), None))
-        }
-    } else {
-        Ok((user_input.to_string(), None))
-    }
-}
-
-pub fn add_skills(user_input: &str, skills: &[Skill]) -> (String, Option<String>) {
-    let skills_text = if !skills.is_empty() {
-        format!(
-            "\n\n# Available Skills:\n\n{}",
-            skills
-                .iter()
-                .map(|skill| format!("  - {}", skill.to_metadata_text()))
-                .collect::<Vec<String>>()
-                .join("\n")
-        )
-    } else {
-        "# No Skills Available".to_string()
-    };
-
-    let formatted_input = format!(
-        "{}\n<available_skills>\n{}\n</available_skills>",
-        user_input, skills_text
-    );
-    (formatted_input, Some(skills_text))
-}
-
 pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String> {
     if tool_calls.is_empty() {
         return None;
@@ -176,12 +129,6 @@ pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String>
     Some(format!("Here's my shell history:\n{}", history))
 }
 
-pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, String) {
-    let agents_text = format_agents_md_for_context(agents_md);
-    let formatted_input = format!("{}\n<agents_md>\n{}\n</agents_md>", user_input, agents_text);
-    (formatted_input, agents_text)
-}
-
 /// Returns the plan mode instruction text that gets prepended to the user's
 /// first message when the session is in Planning phase.
 ///
@@ -192,12 +139,6 @@ pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, Str
 /// - Use existing tools (create, str_replace, view) for plan management
 pub fn build_plan_mode_instructions() -> &'static str {
     include_str!("prompts/plan_mode_activated.txt")
-}
-
-pub fn add_apps_md(user_input: &str, apps_md: &AppsMdInfo) -> (String, String) {
-    let apps_text = format_apps_md_for_context(apps_md);
-    let formatted_input = format!("{}\n<apps_md>\n{}\n</apps_md>", user_input, apps_text);
-    (formatted_input, apps_text)
 }
 
 /// Refresh billing info and send it to the TUI.

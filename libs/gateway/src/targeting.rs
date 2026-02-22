@@ -151,6 +151,39 @@ impl ChannelTarget {
             }),
         }
     }
+
+    pub fn with_thread_id(&self, thread_id: Option<String>) -> Self {
+        match self {
+            Self::Telegram { chat_id, .. } => Self::Telegram {
+                chat_id: chat_id.clone(),
+                thread_id,
+            },
+            Self::Discord {
+                channel_id,
+                message_id,
+                ..
+            } => Self::Discord {
+                channel_id: channel_id.clone(),
+                thread_id,
+                message_id: message_id.clone(),
+            },
+            Self::Slack { channel, .. } => Self::Slack {
+                channel: channel.clone(),
+                thread_ts: thread_id,
+            },
+        }
+    }
+
+    pub fn thread_id(&self) -> Option<String> {
+        match self {
+            Self::Telegram { thread_id, .. }
+            | Self::Discord { thread_id, .. }
+            | Self::Slack {
+                thread_ts: thread_id,
+                ..
+            } => thread_id.clone(),
+        }
+    }
 }
 
 pub fn target_key_from_inbound(message: &InboundMessage) -> String {
@@ -249,6 +282,31 @@ pub fn target_key_from_channel_chat(
     }
 }
 
+pub fn render_title_template(
+    template: &str,
+    channel: &str,
+    peer_id: &str,
+    chat_type: &ChatType,
+) -> String {
+    let chat_type_name = match chat_type {
+        ChatType::Direct => "dm".to_string(),
+        ChatType::Group { .. } => "group".to_string(),
+        ChatType::Thread { .. } => "thread".to_string(),
+    };
+
+    let chat_id = match chat_type {
+        ChatType::Direct => peer_id.to_string(),
+        ChatType::Group { id } => id.clone(),
+        ChatType::Thread { group_id, .. } => group_id.clone(),
+    };
+
+    template
+        .replace("{channel}", channel)
+        .replace("{peer}", peer_id)
+        .replace("{chat_type}", &chat_type_name)
+        .replace("{chat_id}", &chat_id)
+}
+
 fn fallback_group_id(chat_type: &ChatType) -> Option<String> {
     match chat_type {
         ChatType::Group { id } => Some(id.clone()),
@@ -262,5 +320,48 @@ fn value_as_string(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::String(text) => Some(text.clone()),
         serde_json::Value::Number(number) => Some(number.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChannelTarget, render_title_template};
+    use crate::types::ChatType;
+
+    #[test]
+    fn with_thread_id_sets_slack_thread() {
+        let target = ChannelTarget::Slack {
+            channel: "C123".to_string(),
+            thread_ts: None,
+        };
+
+        let updated = target.with_thread_id(Some("1700.1".to_string()));
+        assert_eq!(updated.thread_id().as_deref(), Some("1700.1"));
+    }
+
+    #[test]
+    fn thread_id_none_for_group_target() {
+        let target = ChannelTarget::Discord {
+            channel_id: "chan-1".to_string(),
+            thread_id: None,
+            message_id: None,
+        };
+
+        assert!(target.thread_id().is_none());
+    }
+
+    #[test]
+    fn render_title_template_formats_chat_placeholders() {
+        let title = render_title_template(
+            "{channel}:{peer}:{chat_type}:{chat_id}",
+            "slack",
+            "U123",
+            &ChatType::Thread {
+                group_id: "C456".to_string(),
+                thread_id: "1700.1".to_string(),
+            },
+        );
+
+        assert_eq!(title, "slack:U123:thread:C456");
     }
 }

@@ -4,12 +4,12 @@
 //! Supports expand/shrink modes and proper cursor handling.
 
 use crate::app::AppState;
-
+use crate::services::detect_term::ThemeColors;
 use crate::services::handlers::shell::{capture_styled_screen, trim_shell_lines};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
@@ -92,15 +92,15 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
         if state.active_shell_command.is_some() {
             // Check if command has been executed yet (initializing vs active)
             if !state.shell_pending_command_executed && state.is_tool_call_shell_command {
-                (Color::Yellow, "[Initializing...]")
+                (ThemeColors::yellow(), "[Initializing...]")
             } else {
-                (Color::Cyan, "[Active] . Option + ↑/↓ to scroll")
+                (ThemeColors::cyan(), "[Active] . Option + ↑/↓ to scroll")
             }
         } else {
-            (Color::Green, "[Completed]")
+            (ThemeColors::green(), "[Completed]")
         }
     } else {
-        (Color::DarkGray, "[Background] '$' to expand")
+        (ThemeColors::dark_gray(), "[Background] '$' to expand")
     };
 
     // Build title with truncated command (max 50 chars)
@@ -162,7 +162,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
         let hidden_count = total_lines.saturating_sub(2);
         lines.push(Line::from(Span::styled(
             format!(" + {} hidden lines", hidden_count),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )));
         // Add last 2 lines
         let start = total_lines.saturating_sub(2);

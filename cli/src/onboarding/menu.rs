@@ -37,9 +37,9 @@ fn select_option_internal<T: Clone>(
         // Render search line
         print!(
             "  {}Search: {}{}\r\n",
-            Colors::GRAY,
+            Colors::gray(),
             search_input,
-            Colors::RESET
+            Colors::reset()
         );
         current_height += 1;
 
@@ -61,7 +61,7 @@ fn select_option_internal<T: Clone>(
             // Render options
             for (idx, (_, name, is_recommended)) in filtered.iter().enumerate() {
                 let display_name = if *name == "Anthropic" && idx == selected {
-                    format!("{} {}(Claude Pro/Max or API key)", name, Colors::GRAY)
+                    format!("{} {}(Claude Pro/Max or API key)", name, Colors::gray())
                 } else {
                     name.to_string()
                 };
@@ -69,7 +69,11 @@ fn select_option_internal<T: Clone>(
                 current_height += 1;
             }
         } else {
-            print!("  {}No matches found{}\r\n", Colors::GRAY, Colors::RESET);
+            print!(
+                "  {}No matches found{}\r\n",
+                Colors::gray(),
+                Colors::reset()
+            );
             current_height += 1;
         }
 
@@ -210,15 +214,19 @@ pub fn prompt_profile_name(config_path: Option<&str>) -> NavResult<Option<String
     loop {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
-        print!("{}◆ {}Enter profile name: ", Colors::YELLOW, Colors::CYAN);
+        print!(
+            "{}◆ {}Enter profile name: ",
+            Colors::yellow(),
+            Colors::cyan()
+        );
 
         // Show error if any
         if let Some(ref error) = error_message {
-            print!("{}({}){} ", Colors::YELLOW, error, Colors::RESET);
+            print!("{}({}){} ", Colors::yellow(), error, Colors::reset());
         }
 
         // Show current input (RESET color to match question)
-        print!("{}{}", Colors::RESET, input);
+        print!("{}{}", Colors::reset(), input);
         let _ = io::stdout().flush();
 
         match event::read() {
@@ -303,14 +311,14 @@ pub fn prompt_text(prompt: &str, required: bool) -> NavResult<Option<String>> {
     loop {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
-        print!("{}◆ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
+        print!("{}◆ {}{}: ", Colors::yellow(), Colors::cyan(), prompt);
 
         if show_required && required {
-            print!("{}(Required){} ", Colors::YELLOW, Colors::RESET);
+            print!("{}(Required){} ", Colors::yellow(), Colors::reset());
         }
 
         // Show current input
-        print!("{}{}", Colors::CYAN, input);
+        print!("{}{}", Colors::cyan(), input);
         let _ = io::stdout().flush();
 
         match event::read() {
@@ -408,17 +416,17 @@ pub fn prompt_password(prompt: &str, required: bool) -> NavResult<Option<String>
         print!("\r\x1b[K"); // Clear current line
 
         // Render prompt
-        print!("{}◆ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
+        print!("{}◆ {}{}: ", Colors::yellow(), Colors::cyan(), prompt);
         if show_required && required {
-            print!("{}(Required){} ", Colors::YELLOW, Colors::RESET);
+            print!("{}(Required){} ", Colors::yellow(), Colors::reset());
         }
 
         // Show asterisks
-        print!("{}", Colors::CYAN);
+        print!("{}", Colors::cyan());
         for _ in 0..stars_to_show {
             print!("*");
         }
-        print!("{}", Colors::RESET);
+        print!("{}", Colors::reset());
 
         let _ = io::stdout().flush();
 
@@ -542,12 +550,12 @@ pub fn prompt_yes_no(prompt: &str, default: bool) -> NavResult<Option<bool>> {
         print!("\r\x1b[K"); // Clear current line
         print!(
             "{}◆ {}{} ({}): ",
-            Colors::YELLOW,
-            Colors::CYAN,
+            Colors::yellow(),
+            Colors::cyan(),
             prompt,
             default_text
         );
-        print!("{}{}", Colors::CYAN, input);
+        print!("{}{}", Colors::cyan(), input);
         let _ = io::stdout().flush();
 
         if let Ok(Event::Key(KeyEvent {
@@ -657,9 +665,9 @@ async fn select_profile_with_scrolling(
         // Render search line
         print!(
             "  {}Search: {}{}\r\n",
-            Colors::GRAY,
+            Colors::gray(),
             search_input,
-            Colors::RESET
+            Colors::reset()
         );
         current_height += 1;
 
@@ -698,9 +706,9 @@ async fn select_profile_with_scrolling(
                 let hidden_above = visible_start;
                 print!(
                     "  {}◆ {} more above{}\r\n",
-                    Colors::YELLOW,
+                    Colors::yellow(),
                     hidden_above,
-                    Colors::RESET
+                    Colors::reset()
                 );
                 current_height += 1;
             }
@@ -714,22 +722,22 @@ async fn select_profile_with_scrolling(
                     // Selected: green filled circle + white text
                     print!(
                         "  {}●{} {}{}\r\n",
-                        Colors::GREEN,
-                        Colors::RESET,
-                        Colors::WHITE,
+                        Colors::green(),
+                        Colors::reset(),
+                        Colors::white(),
                         name
                     );
-                    print!("{}", Colors::RESET);
+                    print!("{}", Colors::reset());
                 } else {
                     // Unselected: gray circle border + gray text
                     print!(
                         "  {}○{} {}{}\r\n",
-                        Colors::GRAY,
-                        Colors::RESET,
-                        Colors::GRAY,
+                        Colors::gray(),
+                        Colors::reset(),
+                        Colors::gray(),
                         name
                     );
-                    print!("{}", Colors::RESET);
+                    print!("{}", Colors::reset());
                 }
                 current_height += 1;
             }
@@ -739,14 +747,18 @@ async fn select_profile_with_scrolling(
                 let hidden_below = total - visible_end;
                 print!(
                     "  {}▼ {} more below{}\r\n",
-                    Colors::GRAY,
+                    Colors::gray(),
                     hidden_below,
-                    Colors::RESET
+                    Colors::reset()
                 );
                 current_height += 1;
             }
         } else {
-            print!("  {}No matches found{}\r\n", Colors::GRAY, Colors::RESET);
+            print!(
+                "  {}No matches found{}\r\n",
+                Colors::gray(),
+                Colors::reset()
+            );
             current_height += 1;
         }
 

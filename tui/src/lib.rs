@@ -25,6 +25,7 @@ use std::io;
 pub use terminal::TerminalGuard;
 pub use view::view;
 
+use crate::services::detect_term::ThemeColors;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
@@ -43,9 +44,9 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     };
 
     let color = if state.mouse_capture_enabled {
-        Color::LightGreen
+        ThemeColors::green()
     } else {
-        Color::LightRed
+        ThemeColors::red()
     };
     state.messages.push(Message::info("SPACING_MARKER", None));
     state.messages.push(Message::info(

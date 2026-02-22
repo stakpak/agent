@@ -51,6 +51,7 @@ use commands::{
 };
 use config::{AppConfig, ModelsCache};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utils::agent_context::AgentContext;
 use utils::agents_md::discover_agents_md;
 use utils::apps_md::discover_apps_md;
 use utils::check_update::{auto_update, check_update};
@@ -172,6 +173,10 @@ struct Cli {
     #[arg(long = "ignore-apps-md", default_value_t = false)]
     ignore_apps_md: bool,
 
+    /// Color theme: auto, dark, or light (default: auto)
+    #[arg(long = "theme", default_value = "auto")]
+    theme: String,
+
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
@@ -290,6 +295,15 @@ async fn main() {
 
             // Run interactive/async agent when no subcommand or Init; otherwise run the subcommand
             if matches!(cli.command, None | Some(Commands::Init)) {
+                // Initialize theme detection early, before any color code runs (e.g. onboarding).
+                // This ensures --theme flag takes effect for CLI colors too.
+                let theme_override = match cli.theme.to_lowercase().as_str() {
+                    "light" => Some(stakpak_shared::terminal_theme::Theme::Light),
+                    "dark" => Some(stakpak_shared::terminal_theme::Theme::Dark),
+                    _ => None,
+                };
+                stakpak_shared::terminal_theme::init_theme(theme_override);
+
                 // Run onboarding if no credentials are configured at all
                 // Check both Stakpak API key AND local provider keys
                 let has_stakpak_key = config.get_stakpak_api_key().is_some();
@@ -393,7 +407,6 @@ async fn main() {
                 let _ = update_result;
                 let rulebooks = rulebooks_result;
 
-                let enable_subagents = !cli.disable_subagents;
                 let skills: Option<Vec<Skill>> = {
                     let mut merged: Vec<Skill> = rulebooks
                         .iter()
@@ -412,6 +425,11 @@ async fn main() {
                         Some(merged)
                     }
                 };
+
+                let agent_context =
+                    AgentContext::from_parts(local_context, skills, agents_md, apps_md).await;
+
+                let enable_subagents = !cli.disable_subagents;
 
                 // match get_or_build_local_code_index(&config, None, cli.index_big_project)
                 //     .await
@@ -504,11 +522,10 @@ async fn main() {
                                 verbose: cli.verbose,
                                 checkpoint_id: checkpoint_id.clone(),
                                 session_id: session_id.clone(),
-                                local_context,
+                                agent_context: Some(agent_context.clone()),
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 enable_subagents,
-                                skills,
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
@@ -518,8 +535,6 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: default_model.clone(),
-                                agents_md: agents_md.clone(),
-                                apps_md: apps_md.clone(),
                                 plan_mode: cli.plan,
                                 plan_approved: cli.plan_approved,
                                 plan_feedback: cli.plan_feedback.clone(),
@@ -567,17 +582,22 @@ async fn main() {
 
                     // Interactive mode: run in TUI
                     false => {
+                        // Parse theme override
+                        let theme = match cli.theme.to_lowercase().as_str() {
+                            "light" => Some(stakpak_tui::services::detect_term::Theme::Light),
+                            "dark" => Some(stakpak_tui::services::detect_term::Theme::Dark),
+                            _ => None, // "auto" or anything else = auto-detect
+                        };
+
                         agent::run::run_interactive(
                             config,
                             RunInteractiveConfig {
                                 checkpoint_id,
                                 session_id,
-                                local_context,
-                                rulebooks,
+                                agent_context: Some(agent_context),
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 enable_subagents,
-                                skills,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
                                 study_mode: cli.study_mode,
@@ -589,9 +609,8 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: default_model,
-                                agents_md,
-                                apps_md,
                                 send_init_prompt_on_start,
+                                theme,
                             },
                         )
                         .await

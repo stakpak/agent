@@ -11,6 +11,7 @@
 use crate::app::{AppState, HelperCommand};
 use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
+use crate::services::detect_term::ThemeColors;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
     push_memorize_message, push_status_message, push_styled_message, push_support_message,
@@ -364,7 +365,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             ctx.state.messages.push(Message::info("".to_string(), None));
             ctx.state.messages.push(Message::info(
                 "Requesting session summary (summary.md)...",
-                Some(Style::default().fg(Color::Cyan)),
+                Some(Style::default().fg(ThemeColors::cyan())),
             ));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
@@ -489,9 +490,9 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 crate::services::helper_block::push_styled_message(
                     ctx.state,
                     " Already in plan mode. Use ctrl+p to review the plan.",
-                    ratatui::style::Color::Yellow,
+                    ThemeColors::yellow(),
                     "⚠ ",
-                    ratatui::style::Color::Yellow,
+                    ThemeColors::yellow(),
                 );
                 ctx.state.text_area.set_text("");
                 ctx.state.show_helper_dropdown = false;
@@ -797,7 +798,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         } else {
             "No tools are currently set to auto-approve."
         };
-        push_styled_message(state, message, Color::Cyan, "", Color::Cyan);
+        push_styled_message(state, message, ThemeColors::cyan(), "", ThemeColors::cyan());
     } else {
         let tool_list = auto_approved_tools
             .iter()
@@ -809,9 +810,9 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         push_styled_message(
             state,
             &format!("Tools currently set to auto-approve: {}", tool_list),
-            Color::Yellow,
+            ThemeColors::yellow(),
             "",
-            Color::Yellow,
+            ThemeColors::yellow(),
         );
     }
 }
@@ -830,7 +831,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     // Create the main block with border and background
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     // Split area for title, search, content, scroll indicators, and help text
     let inner_area = Rect {
@@ -854,7 +855,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     // Render title
     let title = " Command Palette ";
     let title_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(ThemeColors::yellow())
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
@@ -869,24 +870,24 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let search_spans = if state.command_palette_search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" "), // Small space after
         ]
     } else {
         vec![
             Span::raw(" "), // Small space before
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 &state.command_palette_search,
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
             Span::raw(" "), // Small space after
         ]
     };
@@ -931,12 +932,12 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
             let available_width = area.width as usize - 2; // Account for borders
             let is_selected = line_index == state.command_palette_selected;
             let bg_color = if is_selected {
-                Color::Cyan
+                ThemeColors::highlight_bg()
             } else {
                 Color::Reset
             };
             let text_color = if is_selected {
-                Color::Black
+                ThemeColors::highlight_fg()
             } else {
                 Color::Reset
             };
@@ -955,9 +956,9 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
                     shortcut_formatted,
                     Style::default()
                         .fg(if is_selected {
-                            Color::Black
+                            ThemeColors::highlight_fg()
                         } else {
-                            Color::DarkGray
+                            ThemeColors::dark_gray()
                         })
                         .bg(bg_color),
                 ),
@@ -972,7 +973,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     // Render content
     let content_paragraph = Paragraph::new(visible_lines)
         .wrap(ratatui::widgets::Wrap { trim: false })
-        .style(Style::default().bg(Color::Reset).fg(Color::White));
+        .style(Style::default().bg(Color::Reset).fg(ThemeColors::text()));
 
     f.render_widget(content_paragraph, chunks[2]);
 
@@ -997,7 +998,10 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
         ));
 
         if has_content_below {
-            indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+            indicator_spans.push(Span::styled(
+                " ▼",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ));
         }
 
         let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
@@ -1009,14 +1013,14 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::styled(" ↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("enter", Style::default().fg(Color::DarkGray)),
-        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::styled("enter", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" select", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" close", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" close", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     f.render_widget(help, chunks[4]);

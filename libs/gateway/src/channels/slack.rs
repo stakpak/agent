@@ -12,12 +12,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    channels::{Channel, ChannelTestResult},
-    chunking::chunk_text,
+    channels::{Channel, ChannelTestResult, DeliveryReceipt},
+    slack_blocks::markdown_to_slack_messages,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
 
-const SLACK_TEXT_LIMIT: usize = 40_000;
 const RECEIVED_REACTION: &str = "eyes";
 
 pub struct SlackChannel {
@@ -93,10 +92,19 @@ impl SlackChannel {
         }
     }
 
-    async fn post_message(&self, channel: &str, text: &str, thread_ts: Option<&str>) -> Result<()> {
+    async fn post_message(
+        &self,
+        channel: &str,
+        text: &str,
+        blocks: Option<Vec<serde_json::Value>>,
+        attachments: Option<Vec<serde_json::Value>>,
+        thread_ts: Option<&str>,
+    ) -> Result<String> {
         let payload = ChatPostMessage {
             channel: channel.to_string(),
             text: text.to_string(),
+            blocks,
+            attachments,
             thread_ts: thread_ts.map(ToOwned::to_owned),
         };
 
@@ -121,13 +129,15 @@ impl SlackChannel {
                 continue;
             }
 
-            let payload: SlackApiResponse = response
+            let payload: ChatPostMessageResponse = response
                 .json()
                 .await
                 .context("slack chat.postMessage decode failed")?;
 
             if payload.ok {
-                return Ok(());
+                return payload
+                    .ts
+                    .ok_or_else(|| anyhow!("slack chat.postMessage missing message timestamp"));
             }
 
             return Err(anyhow!(
@@ -328,7 +338,7 @@ impl SlackChannel {
 
                 let inbound = InboundMessage {
                     channel: self.id.clone(),
-                    peer_id: PeerId(user),
+                    peer_id: PeerId(user.clone()),
                     chat_type,
                     text: cleaned_text,
                     media: Vec::new(),
@@ -338,6 +348,7 @@ impl SlackChannel {
                         "thread_ts": effective_thread_ts,
                         "channel_type": channel_type,
                         "mentioned": mentioned,
+                        "user_id": user,
                     }),
                     timestamp: parse_slack_ts_to_datetime(event.ts.as_deref()),
                 };
@@ -482,6 +493,10 @@ impl Channel for SlackChannel {
     }
 
     async fn send(&self, reply: OutboundReply) -> Result<()> {
+        self.send_with_receipt(reply).await.map(|_| ())
+    }
+
+    async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
         let channel = reply
             .metadata
             .get("channel")
@@ -496,7 +511,11 @@ impl Channel for SlackChannel {
             .metadata
             .get("channel_type")
             .and_then(value_as_string)
-            .unwrap_or_else(|| "channel".to_string());
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| match reply.chat_type {
+                ChatType::Direct => "im".to_string(),
+                _ => "channel".to_string(),
+            });
 
         let thread_ts = reply
             .metadata
@@ -511,13 +530,56 @@ impl Channel for SlackChannel {
             })
             .filter(|value| !value.is_empty());
 
-        let chunks = chunk_text(&reply.text, SLACK_TEXT_LIMIT);
-        for chunk in chunks {
-            self.post_message(&channel, &chunk, thread_ts.as_deref())
+        let slack_messages = markdown_to_slack_messages(&reply.text);
+        let mut first_message_ts: Option<String> = None;
+        let multi_message = slack_messages.len() > 1;
+
+        if slack_messages.is_empty() {
+            // Empty content — send a minimal plain-text message.
+            let ts = self
+                .post_message(&channel, &reply.text, None, None, thread_ts.as_deref())
                 .await?;
+            first_message_ts = Some(ts);
+        } else {
+            for (i, msg) in slack_messages.into_iter().enumerate() {
+                // Slack rate limit: ~1 message/second/channel.
+                // Add a small delay between split messages to avoid hitting it.
+                if multi_message && i > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+                }
+
+                let blocks = if msg.blocks.is_empty() {
+                    None
+                } else {
+                    Some(msg.blocks)
+                };
+                let ts = self
+                    .post_message(
+                        &channel,
+                        &msg.fallback_text,
+                        blocks,
+                        msg.attachments,
+                        thread_ts.as_deref(),
+                    )
+                    .await?;
+                if first_message_ts.is_none() {
+                    first_message_ts = Some(ts);
+                }
+            }
         }
 
-        Ok(())
+        let effective_thread_id = thread_ts.or_else(|| first_message_ts.clone());
+
+        if channel_type != "im"
+            && let Some(thread_id) = effective_thread_id.as_deref()
+        {
+            self.activate_thread(&channel, thread_id);
+        }
+
+        Ok(DeliveryReceipt {
+            message_id: first_message_ts,
+            thread_id: effective_thread_id,
+        })
     }
 
     async fn test(&self) -> Result<ChannelTestResult> {
@@ -598,6 +660,10 @@ struct ChatPostMessage {
     channel: String,
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachments: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     thread_ts: Option<String>,
 }
 
@@ -613,6 +679,15 @@ struct SlackApiResponse {
     ok: bool,
     #[serde(default)]
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatPostMessageResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    ts: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

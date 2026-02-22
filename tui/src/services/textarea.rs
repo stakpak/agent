@@ -1,3 +1,4 @@
+use crate::services::detect_term::ThemeColors;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -1192,15 +1193,17 @@ impl TextArea {
                 y,
                 prefix,
                 if self.shell_mode {
-                    Style::default().fg(Color::Yellow)
+                    Style::default().fg(ThemeColors::warning())
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(ThemeColors::muted())
                 },
             );
 
             // Show cursor at the beginning (after prefix)
             let content_x = area.x + prefix_width;
-            let cursor_style = Style::default().fg(Color::Cyan).bg(Color::Cyan);
+            let cursor_style = Style::default()
+                .fg(ThemeColors::cursor())
+                .bg(ThemeColors::cursor());
             if content_x < area.x + area.width {
                 buf.set_string(content_x, y, "█", cursor_style);
             }
@@ -1212,7 +1215,7 @@ impl TextArea {
                     placeholder_x,
                     y,
                     placeholder,
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::muted()),
                 );
             }
             return;
@@ -1225,7 +1228,12 @@ impl TextArea {
 
             // Draw prefix only on the first line, spaces for continuation lines
             if row == 0 {
-                buf.set_string(area.x, y, prefix, Style::default().fg(Color::Cyan));
+                buf.set_string(
+                    area.x,
+                    y,
+                    prefix,
+                    Style::default().fg(ThemeColors::accent()),
+                );
             } else {
                 // Draw spaces for continuation lines to maintain alignment
                 buf.set_string(
@@ -1259,7 +1267,7 @@ impl TextArea {
                     }
                     let styled = &self.text[overlap_start..overlap_end];
                     let x_off = self.text[line_range.start..overlap_start].width() as u16;
-                    let style = Style::default().fg(Color::Cyan);
+                    let style = Style::default().fg(ThemeColors::accent());
                     buf.set_string(content_x + x_off, y, styled, style);
                 }
             }
@@ -1311,7 +1319,9 @@ impl TextArea {
                 if x < area.x + area.width {
                     // Use a block character with inverted colors for better visibility
                     // Make cursor more visible when input is masked
-                    let cursor_style = Style::default().fg(Color::Cyan).bg(Color::Cyan);
+                    let cursor_style = Style::default()
+                        .fg(ThemeColors::cursor())
+                        .bg(ThemeColors::cursor());
 
                     buf.set_string(x, y, "█", cursor_style);
                 }

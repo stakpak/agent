@@ -707,10 +707,12 @@ impl StakpakAcpAgent {
             "<scratchpad>",
             "<todo>",
             "<local_context>",
+            "<available_skills>",
             "<rulebooks>",
             "</scratchpad>",
             "</todo>",
             "</local_context>",
+            "</available_skills>",
             "</rulebooks>",
         ];
 

@@ -1,8 +1,50 @@
 use crate::types::ContextConfig;
-use stakai::{ContentPart, Message, MessageContent, Role};
+use stakai::{ContentPart, Message, MessageContent, Model, Role, Tool};
 use std::collections::{HashMap, HashSet};
 
 const TRUNCATED_ASSISTANT_PLACEHOLDER: &str = "[assistant message truncated]";
+
+/// Pluggable strategy for reducing context before each inference turn.
+pub trait ContextReducer: Send + Sync {
+    fn reduce(
+        &self,
+        messages: Vec<Message>,
+        model: &Model,
+        max_output_tokens: u32,
+        tools: &[Tool],
+        metadata: &mut serde_json::Value,
+    ) -> Vec<Message>;
+}
+
+#[derive(Debug, Clone)]
+pub struct DefaultContextReducer {
+    config: ContextConfig,
+}
+
+impl DefaultContextReducer {
+    pub fn new(config: ContextConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for DefaultContextReducer {
+    fn default() -> Self {
+        Self::new(ContextConfig::default())
+    }
+}
+
+impl ContextReducer for DefaultContextReducer {
+    fn reduce(
+        &self,
+        messages: Vec<Message>,
+        _model: &Model,
+        _max_output_tokens: u32,
+        _tools: &[Tool],
+        _metadata: &mut serde_json::Value,
+    ) -> Vec<Message> {
+        reduce_context(messages, &self.config)
+    }
+}
 
 pub fn reduce_context(messages: Vec<Message>, config: &ContextConfig) -> Vec<Message> {
     let messages = dedup_tool_results(messages);

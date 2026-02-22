@@ -4,6 +4,7 @@
 
 use crate::app::AppState;
 use crate::services::changeset::FileState;
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -30,7 +31,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     // Create the main block with border and background
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     f.render_widget(block, area);
 
@@ -79,11 +80,11 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         Span::styled(
             title_left,
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(spacing)),
-        Span::styled(count_text, Style::default().fg(Color::Cyan)),
+        Span::styled(count_text, Style::default().fg(ThemeColors::cyan())),
         Span::raw(" "), // right padding
     ];
 
@@ -99,23 +100,23 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     let search_spans = if state.file_changes_search.is_empty() {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
         ]
     } else {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 &state.file_changes_search,
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
         ]
     };
 
@@ -143,7 +144,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         let is_selected = idx == state.file_changes_selected;
 
         let bg_color = if is_selected {
-            Color::Cyan
+            ThemeColors::highlight_bg()
         } else {
             Color::Reset
         };
@@ -151,11 +152,11 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         // Unselected file names to DarkGray
         let name_style = match file.state {
             FileState::Reverted | FileState::Deleted | FileState::Removed => Style::default()
-                .fg(Color::DarkGray)
+                .fg(ThemeColors::dark_gray())
                 .add_modifier(Modifier::CROSSED_OUT),
             _ => {
                 let style = if is_selected {
-                    Style::default().fg(Color::Black)
+                    Style::default().fg(ThemeColors::highlight_fg())
                 } else {
                     Style::default().fg(Color::Reset)
                 };
@@ -200,9 +201,9 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
                         state_text,
                         Style::default()
                             .fg(if is_selected {
-                                Color::Black
+                                ThemeColors::highlight_fg()
                             } else {
-                                Color::DarkGray
+                                ThemeColors::dark_gray()
                             })
                             .bg(bg_color),
                     ),
@@ -219,9 +220,9 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
                         added_str,
                         Style::default()
                             .fg(if is_selected {
-                                Color::Black
+                                ThemeColors::highlight_fg()
                             } else {
-                                Color::Green
+                                ThemeColors::green()
                             })
                             .bg(bg_color),
                     ),
@@ -230,9 +231,9 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
                         removed_str,
                         Style::default()
                             .fg(if is_selected {
-                                Color::Black
+                                ThemeColors::highlight_fg()
                             } else {
-                                Color::Red
+                                ThemeColors::red()
                             })
                             .bg(bg_color),
                     ),
@@ -241,9 +242,9 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
                         revert_icon,
                         Style::default()
                             .fg(if is_selected {
-                                Color::Black
+                                ThemeColors::highlight_fg()
                             } else {
-                                Color::Blue
+                                ThemeColors::accent_secondary()
                             })
                             .bg(bg_color),
                     ),
@@ -275,16 +276,22 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     // Updated shortcuts: Ctrl+X revert single, Ctrl+Z revert all, Ctrl+N open editor
     let footer_text = vec![
         Span::raw(" "),
-        Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-        Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Ctrl+x", Style::default().fg(Color::Cyan)),
-        Span::styled(": Revert  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Ctrl+z", Style::default().fg(Color::Cyan)),
-        Span::styled(": Revert All  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Ctrl+n", Style::default().fg(Color::Cyan)),
-        Span::styled(": Edit  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Cyan)),
-        Span::styled(": Close", Style::default().fg(Color::DarkGray)),
+        Span::styled("↑/↓", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(
+            ": Navigate  ",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ),
+        Span::styled("Ctrl+x", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(": Revert  ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Ctrl+z", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(
+            ": Revert All  ",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ),
+        Span::styled("Ctrl+n", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(": Edit  ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Esc", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(": Close", Style::default().fg(ThemeColors::dark_gray())),
     ];
 
     let footer =

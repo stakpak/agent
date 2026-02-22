@@ -18,7 +18,6 @@ pub struct AgentConfig {
     pub max_output_tokens: u32,
     pub provider_options: Option<stakai::ProviderOptions>,
     pub tool_approval: ToolApprovalPolicy,
-    pub context: ContextConfig,
     pub retry: RetryConfig,
     pub compaction: CompactionConfig,
     pub tools: Vec<stakai::Tool>,
@@ -321,6 +320,7 @@ pub struct AgentLoopResult {
     pub total_usage: TokenUsage,
     pub stop_reason: StopReason,
     pub messages: Vec<stakai::Message>,
+    pub metadata: serde_json::Value,
 }
 
 #[cfg(test)]
