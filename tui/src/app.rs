@@ -10,7 +10,7 @@ use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::board_tasks::TaskProgress;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 #[cfg(unix)]
 use crate::services::helper_block::push_error_message;
@@ -789,9 +789,9 @@ impl AppState {
         push_styled_message(
             self,
             &command,
-            AdaptiveColors::text(),
+            ThemeColors::text(),
             SHELL_PROMPT_PREFIX,
-            AdaptiveColors::dark_magenta(),
+            ThemeColors::magenta(),
         );
         self.messages.push(Message::plain_text("SPACING_MARKER"));
         let rows = if self.terminal_size.height > 0 {

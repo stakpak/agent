@@ -13,6 +13,7 @@ use ratatui::{
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::services::detect_term::ThemeColors;
 
 /// The menu items in the message action popup
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +50,7 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
     // Create the main block with border (Cyan like file_changes_popup)
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     f.render_widget(block, area);
 
@@ -74,7 +75,7 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
     let title = Paragraph::new(Line::from(vec![Span::styled(
         " Message Action",
         Style::default()
-            .fg(Color::Yellow)
+            .fg(ThemeColors::yellow())
             .add_modifier(Modifier::BOLD),
     )]));
     f.render_widget(title, chunks[0]);
@@ -98,18 +99,30 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
 
         let line = if is_selected {
             Line::from(vec![
-                Span::styled("  ", Style::default().bg(Color::Cyan).fg(Color::Black)),
+                Span::styled(
+                    "  ",
+                    Style::default()
+                        .bg(ThemeColors::highlight_bg())
+                        .fg(ThemeColors::highlight_fg()),
+                ),
                 Span::styled(
                     highlight_word,
                     Style::default()
-                        .bg(Color::Cyan)
-                        .fg(Color::Black)
+                        .bg(ThemeColors::highlight_bg())
+                        .fg(ThemeColors::highlight_fg())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(rest_text, Style::default().bg(Color::Cyan).fg(Color::Black)),
+                Span::styled(
+                    rest_text,
+                    Style::default()
+                        .bg(ThemeColors::highlight_bg())
+                        .fg(ThemeColors::highlight_fg()),
+                ),
                 Span::styled(
                     " ".repeat(padding),
-                    Style::default().bg(Color::Cyan).fg(Color::Black),
+                    Style::default()
+                        .bg(ThemeColors::highlight_bg())
+                        .fg(ThemeColors::highlight_fg()),
                 ),
             ])
         } else {
@@ -119,7 +132,7 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
                     highlight_word,
                     Style::default().fg(Color::Reset), // Reset color for highlight word
                 ),
-                Span::styled(rest_text, Style::default().fg(Color::DarkGray)),
+                Span::styled(rest_text, Style::default().fg(ThemeColors::dark_gray())),
             ])
         };
 

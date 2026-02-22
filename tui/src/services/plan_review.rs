@@ -7,13 +7,14 @@
 //! - Bottom bar: key hints
 
 use crate::app::AppState;
+use crate::services::detect_term::ThemeColors;
 use crate::services::plan_comments::{
     AnchorType, CommentAnchor, CommentAuthor, MatchQuality, PlanComments,
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
@@ -32,9 +33,9 @@ pub fn open_plan_review(state: &mut AppState) {
             crate::services::helper_block::push_styled_message(
                 state,
                 " No plan to review yet. The agent hasn't created plan.md.",
-                ratatui::style::Color::Yellow,
+                ThemeColors::yellow(),
                 "⚠ ",
-                ratatui::style::Color::Yellow,
+                ThemeColors::yellow(),
             );
             return;
         }
@@ -247,11 +248,11 @@ pub fn render_plan_review(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(Style::default().fg(ThemeColors::dark_gray()))
         .title(Span::styled(
             " Plan Review ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ThemeColors::cyan())
                 .add_modifier(Modifier::BOLD),
         ));
 
@@ -388,7 +389,7 @@ fn render_gutter(
             if is_cursor {
                 lines.push(Line::from(Span::styled(
                     "   · ",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::dark_gray()),
                 )));
             } else {
                 lines.push(Line::from("     "));
@@ -400,17 +401,17 @@ fn render_gutter(
             let badge = format!("[{}]", count);
             let style = if is_cursor {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
+                    .fg(ThemeColors::highlight_fg())
+                    .bg(ThemeColors::yellow())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Yellow)
+                Style::default().fg(ThemeColors::yellow())
             };
             lines.push(Line::from(Span::styled(format!("{:>4} ", badge), style)));
         } else if is_cursor {
             lines.push(Line::from(Span::styled(
                 "   > ",
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(ThemeColors::cyan()),
             )));
         } else {
             lines.push(Line::from("     "));
@@ -479,7 +480,7 @@ fn render_plan_content(
                 .into_iter()
                 .map(|span| {
                     let mut s = span.style;
-                    s = s.bg(Color::DarkGray);
+                    s = s.bg(ThemeColors::dark_gray());
                     Span::styled(span.content, s)
                 })
                 .collect()
@@ -538,7 +539,7 @@ fn style_plan_line(
     if original_trimmed.starts_with("```") {
         return vec![Span::styled(
             display_text.to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )];
     }
 
@@ -812,10 +813,10 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(Style::default().fg(ThemeColors::dark_gray()))
         .title(Span::styled(
             " Comments ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -824,7 +825,7 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
         let no_comments = Paragraph::new(Line::from(Span::styled(
             " No comments on this line",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(ThemeColors::dark_gray())
                 .add_modifier(Modifier::ITALIC),
         )));
         f.render_widget(no_comments, inner);
@@ -861,20 +862,23 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
                     format!(" {}{}", author_label, resolved_mark),
                     Style::default()
                         .fg(if comment.resolved {
-                            Color::DarkGray
+                            ThemeColors::dark_gray()
                         } else {
-                            Color::Yellow
+                            ThemeColors::yellow()
                         })
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(match_info.to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    match_info.to_string(),
+                    Style::default().fg(ThemeColors::dark_gray()),
+                ),
             ]));
 
             // Comment text
             let text_style = if comment.resolved {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(ThemeColors::muted())
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(ThemeColors::text())
             };
             lines.push(Line::from(Span::styled(
                 format!(" {}", comment.text),
@@ -901,7 +905,7 @@ fn render_confirm_modal(f: &mut Frame, state: &AppState, area: Rect) {
         ConfirmAction::Approve => (
             " Approve Plan ",
             "Approve this plan and start execution?".to_string(),
-            Color::Green,
+            ThemeColors::green(),
         ),
         ConfirmAction::Feedback { count } => (
             " Submit Feedback ",
@@ -910,7 +914,7 @@ fn render_confirm_modal(f: &mut Frame, state: &AppState, area: Rect) {
                 count,
                 if *count == 1 { "" } else { "s" }
             ),
-            Color::Yellow,
+            ThemeColors::yellow(),
         ),
         ConfirmAction::DeleteComments { comment_ids, .. } => {
             let n = comment_ids.len();
@@ -921,7 +925,7 @@ fn render_confirm_modal(f: &mut Frame, state: &AppState, area: Rect) {
                     n,
                     if n == 1 { "" } else { "s" }
                 ),
-                Color::Red,
+                ThemeColors::red(),
             )
         }
     };
@@ -930,17 +934,20 @@ fn render_confirm_modal(f: &mut Frame, state: &AppState, area: Rect) {
 
     let lines: Vec<Line<'_>> = vec![
         Line::from(""),
-        Line::from(Span::styled(message, Style::default().fg(Color::White))),
+        Line::from(Span::styled(
+            message,
+            Style::default().fg(ThemeColors::text()),
+        )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("y", Style::default().fg(Color::Green)),
-            Span::styled("/", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled("=confirm  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("n", Style::default().fg(Color::Red)),
-            Span::styled("/", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled("=cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled("y", Style::default().fg(ThemeColors::green())),
+            Span::styled("/", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled("Enter", Style::default().fg(ThemeColors::green())),
+            Span::styled("=confirm  ", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled("n", Style::default().fg(ThemeColors::red())),
+            Span::styled("/", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+            Span::styled("=cancel", Style::default().fg(ThemeColors::dark_gray())),
         ]),
     ];
 
@@ -1031,9 +1038,9 @@ pub fn handle_feedback(
         crate::services::helper_block::push_styled_message(
             state,
             " No unresolved comments. Approve or add comments first.",
-            ratatui::style::Color::Yellow,
+            ThemeColors::yellow(),
             "⚠ ",
-            ratatui::style::Color::Yellow,
+            ThemeColors::yellow(),
         );
         return;
     };
@@ -1462,7 +1469,10 @@ Build login and refresh endpoints.
     fn test_style_plan_line_fence_delimiter() {
         let style = md_style();
         let spans = style_plan_line("```rust", "```rust", false, &style);
-        assert_eq!(spans[0].style, Style::default().fg(Color::DarkGray));
+        assert_eq!(
+            spans[0].style,
+            Style::default().fg(ThemeColors::dark_gray())
+        );
     }
 
     #[test]
@@ -1527,16 +1537,16 @@ Build login and refresh endpoints.
 /// Render the bottom key hints bar.
 fn render_key_hints(f: &mut Frame, area: Rect) {
     let hints = Line::from(vec![
-        Span::styled(" c", Style::default().fg(Color::Cyan)),
-        Span::styled("=comment ", Style::default().fg(Color::DarkGray)),
-        Span::styled("d", Style::default().fg(Color::Red)),
-        Span::styled("=delete ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Enter", Style::default().fg(Color::Green)),
-        Span::styled("=submit ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Tab", Style::default().fg(Color::Cyan)),
-        Span::styled("=next ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::styled("=close", Style::default().fg(Color::DarkGray)),
+        Span::styled(" c", Style::default().fg(ThemeColors::cyan())),
+        Span::styled("=comment ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("d", Style::default().fg(ThemeColors::red())),
+        Span::styled("=delete ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Enter", Style::default().fg(ThemeColors::green())),
+        Span::styled("=submit ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Tab", Style::default().fg(ThemeColors::cyan())),
+        Span::styled("=next ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+        Span::styled("=close", Style::default().fg(ThemeColors::dark_gray())),
     ]);
 
     let paragraph = Paragraph::new(hints);
@@ -1756,8 +1766,8 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
         let max_chars = (modal_width as usize).saturating_sub(17);
         let display: String = anchor_text.chars().take(max_chars).collect();
         lines.push(Line::from(vec![
-            Span::styled("On: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(display, Style::default().fg(Color::White)),
+            Span::styled("On: ", Style::default().fg(ThemeColors::muted())),
+            Span::styled(display, Style::default().fg(ThemeColors::text())),
         ]));
         lines.push(Line::from("")); // padding below anchor
     }
@@ -1766,12 +1776,12 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
     let input_text = &state.plan_review_comment_input;
     if input_text.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::DarkGray)),
-            Span::styled("█", Style::default().fg(Color::Cyan)),
+            Span::styled("> ", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled("█", Style::default().fg(ThemeColors::cyan())),
             Span::styled(
                 " Type your comment...",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(ThemeColors::dark_gray())
                     .add_modifier(Modifier::ITALIC),
             ),
         ]));
@@ -1787,21 +1797,21 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("> {}", input_line),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(ThemeColors::text()),
                     ),
-                    Span::styled("█", Style::default().fg(Color::Cyan)),
+                    Span::styled("█", Style::default().fg(ThemeColors::cursor())),
                 ]));
             } else {
                 lines.push(Line::from(Span::styled(
                     format!("> {}", input_line),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(ThemeColors::text()),
                 )));
             }
         }
         if trailing_newline {
             lines.push(Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::White)),
-                Span::styled("█", Style::default().fg(Color::Cyan)),
+                Span::styled("> ", Style::default().fg(ThemeColors::text())),
+                Span::styled("█", Style::default().fg(ThemeColors::cursor())),
             ]));
         }
     }
@@ -1809,12 +1819,12 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
     // Hints
     lines.push(Line::from("")); // padding above hints
     lines.push(Line::from(vec![
-        Span::styled("Enter", Style::default().fg(Color::Cyan)),
-        Span::styled("=submit  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Ctrl+J", Style::default().fg(Color::Cyan)),
-        Span::styled("=newline  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::styled("=cancel", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(ThemeColors::cyan())),
+        Span::styled("=submit  ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Ctrl+J", Style::default().fg(ThemeColors::cyan())),
+        Span::styled("=newline  ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+        Span::styled("=cancel", Style::default().fg(ThemeColors::dark_gray())),
     ]));
 
     // Dynamic height: content lines + 2 for border
@@ -1829,11 +1839,11 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(ThemeColors::cyan()))
         .title(Span::styled(
             title,
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ThemeColors::cyan())
                 .add_modifier(Modifier::BOLD),
         ));
 

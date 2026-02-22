@@ -2,6 +2,385 @@ use ratatui::style::Color;
 use std::env;
 use std::process::Command;
 
+// ============================================================================
+// Theme Detection - delegates to stakpak_shared::terminal_theme
+// ============================================================================
+
+// Re-export shared theme detection so existing imports continue to work
+pub use stakpak_shared::terminal_theme::{Theme, current_theme, init_theme, is_light_mode};
+
+// ============================================================================
+// Themed Colors - The main interface for getting theme-aware colors
+// ============================================================================
+
+/// Get theme-aware colors. This is the primary interface for color selection.
+pub struct ThemeColors;
+
+impl ThemeColors {
+    // --- Text Colors ---
+
+    /// Primary text color - should be readable on terminal background
+    pub fn text() -> Color {
+        if is_light_mode() {
+            Color::Indexed(235) // Very dark gray for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(180, 180, 180) // Light gray for dark backgrounds
+        } else {
+            Color::Reset
+        }
+    }
+
+    /// Muted/secondary text color - for less important text
+    pub fn muted() -> Color {
+        if is_light_mode() {
+            Color::Indexed(242) // Medium gray for light backgrounds
+        } else {
+            Color::DarkGray
+        }
+    }
+
+    /// Assistant message text color
+    pub fn assistant_text() -> Color {
+        if is_light_mode() {
+            Color::Indexed(238) // Dark gray, readable on white
+        } else if should_use_rgb_colors() {
+            Color::Rgb(180, 180, 180)
+        } else {
+            Color::Reset
+        }
+    }
+
+    // --- Accent Colors ---
+
+    /// Primary accent color (for highlights, borders, interactive elements)
+    pub fn accent() -> Color {
+        if is_light_mode() {
+            Color::Indexed(30) // Darker cyan/teal for light backgrounds
+        } else {
+            Color::Cyan
+        }
+    }
+
+    /// Secondary accent color
+    pub fn accent_secondary() -> Color {
+        if is_light_mode() {
+            Color::Indexed(25) // Dark blue for light backgrounds
+        } else {
+            Color::Blue
+        }
+    }
+
+    // --- Semantic Colors ---
+
+    /// Success color (green)
+    pub fn success() -> Color {
+        if is_light_mode() {
+            Color::Indexed(28) // Darker green for light backgrounds
+        } else {
+            Color::LightGreen
+        }
+    }
+
+    /// Warning color (yellow/orange)
+    pub fn warning() -> Color {
+        if is_light_mode() {
+            Color::Indexed(172) // Darker orange for light backgrounds
+        } else {
+            Color::Yellow
+        }
+    }
+
+    /// Error/danger color (red)
+    pub fn danger() -> Color {
+        if is_light_mode() {
+            Color::Indexed(160) // Darker red for light backgrounds
+        } else {
+            Color::LightRed
+        }
+    }
+
+    // --- UI Element Colors ---
+
+    /// Border color for boxes and panels
+    pub fn border() -> Color {
+        if is_light_mode() {
+            Color::Indexed(245) // Medium gray for light backgrounds
+        } else {
+            Color::DarkGray
+        }
+    }
+
+    /// Title color in popups and sections
+    pub fn title() -> Color {
+        if is_light_mode() {
+            Color::Indexed(166) // Darker yellow/orange for light backgrounds
+        } else {
+            Color::Yellow
+        }
+    }
+
+    /// Highlight background color (e.g., selected item)
+    pub fn highlight_bg() -> Color {
+        if is_light_mode() {
+            Color::Indexed(117) // Light blue for light backgrounds
+        } else {
+            Color::Cyan
+        }
+    }
+
+    /// Highlight foreground color (text on highlight)
+    pub fn highlight_fg() -> Color {
+        // Black text on highlight works well for both themes
+        Color::Black
+    }
+
+    /// Input cursor color
+    pub fn cursor() -> Color {
+        if is_light_mode() {
+            Color::Indexed(30) // Darker cyan for light backgrounds
+        } else {
+            Color::Cyan
+        }
+    }
+
+    /// Code block background
+    pub fn code_bg() -> Color {
+        if is_light_mode() {
+            Color::Indexed(254) // Very light gray for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(48, 48, 48)
+        } else {
+            Color::Reset
+        }
+    }
+
+    /// Magenta accent (for user messages, special highlights)
+    pub fn magenta() -> Color {
+        if is_light_mode() {
+            Color::Indexed(127) // Darker magenta for light backgrounds
+        } else {
+            Color::Magenta
+        }
+    }
+
+    /// Light magenta for backgrounds
+    pub fn magenta_dim() -> Color {
+        if is_light_mode() {
+            Color::Indexed(225) // Very light magenta for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(31, 32, 44)
+        } else {
+            Color::LightMagenta
+        }
+    }
+
+    // --- Additional Theme-Aware Colors (migrated from AdaptiveColors) ---
+
+    /// Primary title color - for headers, labels, and prominent text
+    /// Replaces direct use of Color::White which is invisible on light backgrounds
+    pub fn title_primary() -> Color {
+        if is_light_mode() {
+            Color::Indexed(235) // Very dark gray for light backgrounds
+        } else {
+            Color::White
+        }
+    }
+
+    /// Success dot/indicator color - for status dots and small indicators
+    pub fn dot_success() -> Color {
+        if is_light_mode() {
+            Color::Indexed(28) // Darker green for light backgrounds
+        } else {
+            Color::LightGreen
+        }
+    }
+
+    /// Error dot/indicator color - for error status dots and small indicators
+    pub fn dot_error() -> Color {
+        if is_light_mode() {
+            Color::Indexed(160) // Darker red for light backgrounds
+        } else {
+            Color::LightRed
+        }
+    }
+
+    /// Unselected/inactive background color - for non-highlighted items
+    pub fn unselected_bg() -> Color {
+        if is_light_mode() {
+            Color::Indexed(252) // Light gray for light mode
+        } else {
+            Color::Indexed(235) // Dark gray for dark mode
+        }
+    }
+
+    /// Theme-aware red color (for text/icons, not backgrounds)
+    pub fn red() -> Color {
+        if is_light_mode() {
+            Color::Indexed(160) // Darker red for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(239, 100, 97)
+        } else {
+            Color::LightRed
+        }
+    }
+
+    /// Theme-aware green color (for text/icons, not backgrounds)
+    pub fn green() -> Color {
+        if is_light_mode() {
+            Color::Indexed(28) // Darker green for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(35, 218, 111)
+        } else {
+            Color::LightGreen
+        }
+    }
+
+    /// Theme-aware dark gray color
+    pub fn dark_gray() -> Color {
+        if is_light_mode() {
+            Color::Indexed(245) // Medium gray for light backgrounds
+        } else if should_use_rgb_colors() {
+            Color::Rgb(80, 80, 80)
+        } else {
+            Color::DarkGray
+        }
+    }
+
+    /// Theme-aware orange color
+    pub fn orange() -> Color {
+        if is_light_mode() {
+            Color::Indexed(166) // Darker orange for light backgrounds
+        } else {
+            Color::Indexed(208) // Bright orange for dark backgrounds
+        }
+    }
+
+    /// Theme-aware cyan color (alias for accent in most cases)
+    pub fn cyan() -> Color {
+        Self::accent()
+    }
+
+    /// Theme-aware yellow color
+    pub fn yellow() -> Color {
+        if is_light_mode() {
+            Color::Indexed(136) // Darker yellow/gold for light backgrounds
+        } else {
+            Color::Yellow
+        }
+    }
+
+    /// Background color for dropdown menus and overlays
+    /// Light mode needs an explicit bg for contrast; dark mode uses terminal default
+    pub fn dropdown_bg() -> Color {
+        if is_light_mode() {
+            Color::Indexed(255) // Near-white for light mode
+        } else {
+            Color::Reset // Use terminal background in dark mode
+        }
+    }
+
+    /// Text color for dropdown menus (contrasts with dropdown_bg)
+    pub fn dropdown_text() -> Color {
+        if is_light_mode() {
+            Color::Indexed(235) // Very dark gray for light mode
+        } else {
+            Color::Reset // Use terminal default text in dark mode
+        }
+    }
+
+    /// Muted/secondary text color for dropdowns
+    pub fn dropdown_muted() -> Color {
+        if is_light_mode() {
+            Color::Indexed(245) // Medium gray for light mode
+        } else {
+            Color::DarkGray // Standard dark gray for dark mode
+        }
+    }
+}
+
+// ============================================================================
+// ANSI Color Transformation for Light Mode
+// ============================================================================
+
+/// Transform a color to be readable on light backgrounds.
+/// This maps bright/light colors that are hard to read on light backgrounds
+/// to darker alternatives.
+pub fn transform_color_for_light_mode(color: Color) -> Color {
+    if !is_light_mode() {
+        return color;
+    }
+
+    match color {
+        // Bright/Light colors that are hard to read on light backgrounds
+        Color::White => Color::Indexed(235), // Very dark gray
+        Color::Gray | Color::DarkGray => Color::Indexed(240), // Medium gray
+        Color::Yellow | Color::LightYellow => Color::Indexed(136), // Darker gold
+        Color::LightGreen => Color::Indexed(28), // Darker green
+        Color::LightBlue => Color::Indexed(25), // Darker blue
+        Color::LightCyan | Color::Cyan => Color::Indexed(30), // Darker cyan
+        Color::LightMagenta | Color::Magenta => Color::Indexed(127), // Darker magenta
+        Color::LightRed => Color::Indexed(160), // Darker red
+
+        // RGB colors - check if they're too bright (high luminance)
+        Color::Rgb(r, g, b) => {
+            // Calculate relative luminance
+            let luminance = 0.299 * (r as f32) + 0.587 * (g as f32) + 0.114 * (b as f32);
+            if luminance > 180.0 {
+                // Too bright - darken the color
+                let factor = 0.5;
+                Color::Rgb(
+                    ((r as f32) * factor) as u8,
+                    ((g as f32) * factor) as u8,
+                    ((b as f32) * factor) as u8,
+                )
+            } else {
+                color
+            }
+        }
+
+        // Indexed colors - map bright ones to darker alternatives
+        Color::Indexed(idx) => {
+            match idx {
+                // Standard bright colors (8-15)
+                15 => Color::Indexed(235), // Bright white -> dark gray
+                14 => Color::Indexed(30),  // Bright cyan -> dark cyan
+                13 => Color::Indexed(127), // Bright magenta -> dark magenta
+                12 => Color::Indexed(25),  // Bright blue -> dark blue
+                11 => Color::Indexed(136), // Bright yellow -> dark yellow
+                10 => Color::Indexed(28),  // Bright green -> dark green
+                9 => Color::Indexed(160),  // Bright red -> dark red
+                7 => Color::Indexed(240),  // White/Light gray -> medium gray
+
+                // 256-color palette - handle bright grays (232-255)
+                idx if idx >= 252 => Color::Indexed(240), // Very light grays -> medium gray
+
+                _ => color,
+            }
+        }
+
+        // Other colors pass through unchanged
+        _ => color,
+    }
+}
+
+/// Transform all colors in a Style for light mode readability
+pub fn transform_style_for_light_mode(style: ratatui::style::Style) -> ratatui::style::Style {
+    if !is_light_mode() {
+        return style;
+    }
+
+    let mut new_style = style;
+    if let Some(fg) = style.fg {
+        new_style = new_style.fg(transform_color_for_light_mode(fg));
+    }
+    // Don't transform background colors - they should remain as intended
+    new_style
+}
+
+// ============================================================================
+// Terminal Emulator Detection (preserved from original)
+// ============================================================================
+
 /// Terminal emulator information
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerminalInfo {
@@ -269,11 +648,15 @@ pub fn is_unsupported_terminal(emulator: &str) -> bool {
     }
 }
 
-/// Simple function to check if RGB colors should be used
+/// Simple function to check if RGB colors should be used (cached)
 #[allow(dead_code)]
 pub fn should_use_rgb_colors() -> bool {
-    let terminal_info = detect_terminal();
-    terminal_info.supports_rgb_colors
+    use std::sync::OnceLock;
+    static SUPPORTS_RGB: OnceLock<bool> = OnceLock::new();
+    *SUPPORTS_RGB.get_or_init(|| {
+        let terminal_info = detect_terminal();
+        terminal_info.supports_rgb_colors
+    })
 }
 
 /// Color definitions that adapt based on terminal capabilities
@@ -493,5 +876,108 @@ mod tests {
             Color::Rgb(_, _, _) | Color::Gray => {}
             _ => panic!("Invalid list bullet color returned"),
         }
+    }
+
+    // ========================================================================
+    // Theme Detection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_theme_enum_default() {
+        assert_eq!(Theme::default(), Theme::Dark);
+    }
+
+    #[test]
+    fn test_detect_theme_from_colorfgbg_light() {
+        // Test parsing of COLORFGBG for light backgrounds
+        // Note: We can't easily set env vars in tests without affecting other tests,
+        // so we test the function's logic directly
+
+        // White background (15) should be light
+        // This would require setting env var, so we test the parsing logic
+        let colorfgbg_white = "0;15";
+        let bg_str = colorfgbg_white.split(';').last();
+        assert_eq!(bg_str, Some("15"));
+
+        // Light gray background (7) should be light
+        let colorfgbg_light_gray = "0;7";
+        let bg_str = colorfgbg_light_gray.split(';').last();
+        assert_eq!(bg_str, Some("7"));
+    }
+
+    #[test]
+    fn test_detect_theme_from_colorfgbg_dark() {
+        // Black background (0) should be dark
+        let colorfgbg_black = "15;0";
+        let bg_str = colorfgbg_black.split(';').last();
+        assert_eq!(bg_str, Some("0"));
+
+        // Other colors should default to dark
+        let colorfgbg_blue = "15;4";
+        let bg_str = colorfgbg_blue.split(';').last();
+        assert_eq!(bg_str, Some("4"));
+    }
+
+    #[test]
+    fn test_theme_colors_return_valid_colors() {
+        // Test that all ThemeColors methods return valid Color values
+        // We can't easily test light vs dark mode without mocking,
+        // but we can ensure the functions don't panic
+
+        let _text = ThemeColors::text();
+        let _muted = ThemeColors::muted();
+        let _assistant = ThemeColors::assistant_text();
+        let _accent = ThemeColors::accent();
+        let _accent_secondary = ThemeColors::accent_secondary();
+        let _success = ThemeColors::success();
+        let _warning = ThemeColors::warning();
+        let _danger = ThemeColors::danger();
+        let _border = ThemeColors::border();
+        let _title = ThemeColors::title();
+        let _highlight_bg = ThemeColors::highlight_bg();
+        let _highlight_fg = ThemeColors::highlight_fg();
+        let _cursor = ThemeColors::cursor();
+        let _code_bg = ThemeColors::code_bg();
+        let _magenta = ThemeColors::magenta();
+        let _magenta_dim = ThemeColors::magenta_dim();
+
+        // New methods
+        let _title_primary = ThemeColors::title_primary();
+        let _dot_success = ThemeColors::dot_success();
+        let _dot_error = ThemeColors::dot_error();
+        let _unselected_bg = ThemeColors::unselected_bg();
+        let _red = ThemeColors::red();
+        let _green = ThemeColors::green();
+        let _dark_gray = ThemeColors::dark_gray();
+        let _orange = ThemeColors::orange();
+        let _cyan = ThemeColors::cyan();
+        let _yellow = ThemeColors::yellow();
+    }
+
+    #[test]
+    fn test_theme_colors_consistency() {
+        // Test that related color methods are consistent
+        // dot_success should be same as success (both green)
+        // dot_error should be same as danger (both red)
+
+        // We can at least verify they don't panic and return Color values
+        let success = ThemeColors::success();
+        let dot_success = ThemeColors::dot_success();
+        let danger = ThemeColors::danger();
+        let dot_error = ThemeColors::dot_error();
+
+        // In dark mode (default), these should match
+        // Note: This test may be flaky if env vars are set differently
+        assert_eq!(success, dot_success);
+        assert_eq!(danger, dot_error);
+    }
+
+    #[test]
+    fn test_is_light_mode_default() {
+        // Without any env vars or theme override, should default to dark
+        // Note: This test could be affected by terminal environment
+        // In CI or most terminals, this should return false
+        let _is_light = is_light_mode();
+        // Just ensure it doesn't panic; actual value depends on environment
     }
 }

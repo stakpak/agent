@@ -8,12 +8,12 @@ use crate::services::board_tasks::{
     FetchTasksResult, extract_board_agent_id_from_messages, fetch_tasks_as_todo_items,
 };
 use crate::services::commands::list_auto_approved_tools;
+use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{handle_errors, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use crate::services::message::get_wrapped_collapsed_message_lines_cached;
 use ratatui::layout::Size;
-use ratatui::style::Color;
 use stakai::Model;
 use uuid::Uuid;
 
@@ -96,9 +96,9 @@ pub fn handle_toggle_auto_approve(state: &mut AppState) {
         };
 
         let status_color = if state.auto_approve_manager.is_enabled() {
-            Color::Green
+            ThemeColors::green()
         } else {
-            Color::LightRed
+            ThemeColors::red()
         };
 
         push_styled_message(
@@ -106,7 +106,7 @@ pub fn handle_toggle_auto_approve(state: &mut AppState) {
             &format!("Auto-approve {}", status),
             status_color,
             "",
-            Color::Green,
+            ThemeColors::green(),
         );
     }
 }

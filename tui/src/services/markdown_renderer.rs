@@ -1,3 +1,4 @@
+use crate::services::detect_term::{AdaptiveColors, ThemeColors};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -5,7 +6,6 @@ use ratatui::{
 use regex::Regex;
 use std::time::Instant;
 
-use crate::services::detect_term::AdaptiveColors;
 use crate::services::syntax_highlighter;
 use crossterm;
 
@@ -98,14 +98,88 @@ impl Default for MarkdownStyle {
 impl MarkdownStyle {
     /// Create an adaptive style that works well on both dark and light backgrounds
     pub fn adaptive() -> Self {
+        let is_light = crate::services::detect_term::is_light_mode();
         let is_rgb_supported = crate::services::detect_term::should_use_rgb_colors();
 
-        if is_rgb_supported {
+        if is_light {
+            // Light theme with dark colors for good contrast
+            Self::light_theme()
+        } else if is_rgb_supported {
             // Use RGB colors for supported terminals (dark theme optimized)
             Self::dark_theme()
         } else {
             // Use high-contrast colors for unsupported terminals (works on both light and dark)
             Self::high_contrast_theme()
+        }
+    }
+
+    /// Light theme optimized for light terminal backgrounds
+    fn light_theme() -> Self {
+        Self {
+            h1_style: Style::default()
+                .fg(Color::Indexed(25)) // Dark blue
+                .add_modifier(Modifier::BOLD),
+            h2_style: Style::default()
+                .fg(Color::Indexed(30)) // Dark cyan/teal
+                .add_modifier(Modifier::BOLD),
+            h3_style: Style::default()
+                .fg(Color::Indexed(28)) // Dark green
+                .add_modifier(Modifier::BOLD),
+            h4_style: Style::default()
+                .fg(Color::Indexed(127)) // Dark magenta
+                .add_modifier(Modifier::BOLD),
+            h5_style: Style::default()
+                .fg(Color::Indexed(130)) // Dark orange/brown
+                .add_modifier(Modifier::BOLD),
+            h6_style: Style::default()
+                .fg(Color::Indexed(124)) // Dark red
+                .add_modifier(Modifier::BOLD),
+            bold_style: Style::default()
+                .fg(Color::Indexed(232)) // Near-black for bold on light backgrounds
+                .add_modifier(Modifier::BOLD),
+            italic_style: Style::default()
+                .fg(ThemeColors::text())
+                .add_modifier(Modifier::ITALIC),
+            bold_italic_style: Style::default()
+                .fg(Color::Indexed(232)) // Near-black
+                .add_modifier(Modifier::BOLD | Modifier::ITALIC),
+            strikethrough_style: Style::default()
+                .fg(ThemeColors::muted())
+                .add_modifier(Modifier::CROSSED_OUT),
+            code_style: Style::default()
+                .fg(Color::Indexed(124)) // Dark red
+                .bg(Color::Indexed(254)), // Very light gray background
+            code_block_style: Style::default()
+                .fg(Color::Indexed(235)) // Very dark gray
+                .bg(Color::Indexed(254)), // Very light gray background
+            link_style: Style::default()
+                .fg(Color::Indexed(25)) // Dark blue
+                .add_modifier(Modifier::UNDERLINED),
+            quote_style: Style::default().fg(Color::Indexed(241)), // Medium gray
+            list_bullet_style: Style::default().fg(Color::Indexed(240)), // Medium gray
+            task_open_style: Style::default().fg(Color::Indexed(130)), // Dark orange
+            task_complete_style: Style::default().fg(Color::Indexed(28)), // Dark green
+            important_style: Style::default()
+                .fg(Color::Indexed(160)) // Dark red
+                .add_modifier(Modifier::BOLD),
+            note_style: Style::default()
+                .fg(Color::Indexed(25)) // Dark blue
+                .add_modifier(Modifier::BOLD),
+            tip_style: Style::default()
+                .fg(Color::Indexed(28)) // Dark green
+                .add_modifier(Modifier::BOLD),
+            warning_style: Style::default()
+                .fg(Color::Indexed(130)) // Dark orange
+                .add_modifier(Modifier::BOLD),
+            caution_style: Style::default()
+                .fg(Color::Indexed(160)) // Dark red
+                .add_modifier(Modifier::BOLD),
+            text_style: Style::default().fg(ThemeColors::text()),
+            separator_style: Style::default().fg(ThemeColors::muted()),
+            table_header_style: Style::default()
+                .fg(ThemeColors::text())
+                .add_modifier(Modifier::BOLD),
+            table_cell_style: Style::default().fg(ThemeColors::text()),
         }
     }
 
@@ -125,7 +199,7 @@ impl MarkdownStyle {
                 .fg(Color::Rgb(255, 100, 255)) // Bright magenta
                 .add_modifier(Modifier::BOLD),
             h5_style: Style::default()
-                .fg(Color::Rgb(255, 255, 100)) // Bright yellow
+                .fg(Color::Indexed(136)) // Dark yellow/gold - visible on both
                 .add_modifier(Modifier::BOLD),
             h6_style: Style::default()
                 .fg(Color::Rgb(255, 100, 100)) // Bright red
@@ -135,17 +209,17 @@ impl MarkdownStyle {
             bold_italic_style: Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
             strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
             code_style: Style::default()
-                .fg(Color::Rgb(255, 150, 150)) // Light red
+                .fg(Color::Rgb(255, 150, 100)) // Orange-red for inline code
                 .bg(AdaptiveColors::code_bg()),
             code_block_style: Style::default()
-                .fg(Color::Rgb(150, 255, 150)) // Light green
+                .fg(Color::Rgb(150, 220, 150)) // Soft green for code blocks
                 .bg(AdaptiveColors::code_block_bg()),
             link_style: Style::default()
-                .fg(Color::Rgb(100, 150, 255)) // Bright blue
+                .fg(Color::Rgb(100, 150, 255)) // Bright blue for links
                 .add_modifier(Modifier::UNDERLINED),
-            quote_style: Style::default().fg(Color::Rgb(180, 180, 180)), // Light gray
-            list_bullet_style: Style::default().fg(AdaptiveColors::list_bullet()),
-            task_open_style: Style::default().fg(Color::Rgb(255, 255, 100)), // Bright yellow
+            quote_style: Style::default().fg(ThemeColors::muted()),
+            list_bullet_style: Style::default().fg(ThemeColors::muted()),
+            task_open_style: Style::default().fg(Color::Rgb(255, 200, 50)), // Bright yellow/gold
             task_complete_style: Style::default().fg(Color::Rgb(100, 255, 100)), // Bright green
             important_style: Style::default()
                 .fg(Color::Rgb(255, 100, 100)) // Bright red
@@ -157,21 +231,21 @@ impl MarkdownStyle {
                 .fg(Color::Rgb(100, 255, 100)) // Bright green
                 .add_modifier(Modifier::BOLD),
             warning_style: Style::default()
-                .fg(Color::Rgb(255, 255, 100)) // Bright yellow
+                .fg(Color::Rgb(255, 200, 50)) // Bright yellow/gold
                 .add_modifier(Modifier::BOLD),
             caution_style: Style::default()
                 .fg(Color::Rgb(255, 100, 100)) // Bright red
                 .add_modifier(Modifier::BOLD),
-            text_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Light gray
-            separator_style: Style::default().fg(Color::Rgb(120, 120, 120)), // Medium gray
+            text_style: Style::default().fg(ThemeColors::text()),
+            separator_style: Style::default().fg(ThemeColors::muted()),
             table_header_style: Style::default()
-                .fg(Color::Reset) // Reset to terminal default
+                .fg(ThemeColors::text())
                 .add_modifier(Modifier::BOLD),
-            table_cell_style: Style::default().fg(Color::Reset), // Reset to terminal default
+            table_cell_style: Style::default().fg(ThemeColors::text()),
         }
     }
 
-    /// High contrast theme that works well on both light and dark backgrounds
+    /// High contrast theme for dark terminals without RGB support
     fn high_contrast_theme() -> Self {
         Self {
             h1_style: Style::default()
@@ -190,9 +264,13 @@ impl MarkdownStyle {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             h6_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            bold_style: Style::default().add_modifier(Modifier::BOLD),
+            bold_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
             italic_style: Style::default().add_modifier(Modifier::ITALIC),
-            bold_italic_style: Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
+            bold_italic_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD | Modifier::ITALIC),
             strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
             code_style: Style::default().fg(Color::Red), // Red text only - no background for better compatibility
             code_block_style: Style::default().fg(Color::Cyan), // Cyan text only - no background for better compatibility

@@ -9,6 +9,7 @@ use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
+use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::handle_file_selection;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_styled_message, render_system_message,
@@ -416,9 +417,9 @@ fn handle_input_submitted(
                 push_styled_message(
                     state,
                     &format!("Auto-approve {} for {} tool", status, tool_name),
-                    Color::Yellow,
+                    ThemeColors::yellow(),
                     "",
-                    Color::Yellow,
+                    ThemeColors::yellow(),
                 );
             }
         } else {
@@ -571,8 +572,8 @@ fn handle_input_submitted(
                         "Shell history".to_string(),
                         history_lines.clone(),
                         Some(BubbleColors {
-                            border_color: Color::Magenta,
-                            title_color: Color::Magenta,
+                            border_color: ThemeColors::magenta(),
+                            title_color: ThemeColors::magenta(),
                             content_color: Color::Reset,
                             tool_type: "Shell".to_string(),
                         }),
@@ -743,12 +744,12 @@ fn handle_input_submitted(
 
             // Add spacing after user message
             state.messages.push(Message::plain_text(""));
-            state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(Color::Yellow))));
+            state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(ThemeColors::yellow()))));
             state.messages.push(Message::plain_text(""));
             state.messages.push(Message::info(
                 "Start a new session or /summarize to export compressed summary to be resued"
                     .to_string(),
-                Some(Style::default().fg(Color::Green)),
+                Some(Style::default().fg(ThemeColors::green())),
             ));
             state.messages.push(Message::plain_text(""));
         }

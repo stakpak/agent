@@ -4,7 +4,7 @@ use crate::services::bash_block::{
     format_text_content, render_bash_block, render_collapsed_command_message, render_file_diff,
     render_file_diff_full, render_result_block, render_streaming_block_compact,
 };
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::ThemeColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -300,14 +300,6 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
     hasher.finish()
 }
 
-fn term_color(color: Color) -> Color {
-    if crate::services::detect_term::should_use_rgb_colors() {
-        color
-    } else {
-        Color::Reset
-    }
-}
-
 // Strip markdown code block delimiters from content (for session resume)
 fn strip_markdown_delimiters(text: &str) -> String {
     let mut result = text.to_string();
@@ -410,8 +402,8 @@ fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, St
     use textwrap::{Options, wrap};
 
     let mut lines = Vec::new();
-    let accent_color = Color::DarkGray;
-    let text_color = AdaptiveColors::user_text();
+    let accent_color = ThemeColors::muted();
+    let text_color = ThemeColors::text();
 
     // The bar takes 2 chars "┃ ", so content width is width - 2
     let content_width = width.saturating_sub(2).max(10);
@@ -453,7 +445,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 text.into(),
-                style.unwrap_or(Style::default().fg(Color::DarkGray)),
+                style.unwrap_or(Style::default().fg(ThemeColors::muted())),
             ),
             is_collapsed: None,
         }
@@ -821,7 +813,7 @@ fn render_shell_bubble_with_unicode_border(
     // Top border
     lines.push(Line::from(vec![Span::styled(
         format!("╭{}╮", horizontal),
-        Style::default().fg(Color::Magenta),
+        Style::default().fg(ThemeColors::magenta()),
     )]));
 
     // Command line - truncate if too long
@@ -847,13 +839,10 @@ fn render_shell_bubble_with_unicode_border(
     let cmd_content_width = unicode_width::UnicodeWidthStr::width(truncated_cmd.as_str());
     let cmd_padding = inner_width.saturating_sub(cmd_content_width);
     lines.push(Line::from(vec![
-        Span::styled("│ ", Style::default().fg(Color::Magenta)),
-        Span::styled(
-            truncated_cmd,
-            Style::default().fg(term_color(Color::LightYellow)),
-        ),
+        Span::styled("│ ", Style::default().fg(ThemeColors::magenta())),
+        Span::styled(truncated_cmd, Style::default().fg(ThemeColors::warning())),
         Span::from(" ".repeat(cmd_padding)),
-        Span::styled(" │", Style::default().fg(Color::Magenta)),
+        Span::styled(" │", Style::default().fg(ThemeColors::magenta())),
     ]));
 
     // Output lines - truncate if too long
@@ -879,17 +868,17 @@ fn render_shell_bubble_with_unicode_border(
         let content_width = unicode_width::UnicodeWidthStr::width(truncated_out.as_str());
         let padding = inner_width.saturating_sub(content_width);
         lines.push(Line::from(vec![
-            Span::styled("│ ", Style::default().fg(Color::Magenta)),
-            Span::styled(truncated_out, Style::default().fg(AdaptiveColors::text())),
+            Span::styled("│ ", Style::default().fg(ThemeColors::magenta())),
+            Span::styled(truncated_out, Style::default().fg(ThemeColors::text())),
             Span::from(" ".repeat(padding)),
-            Span::styled(" │", Style::default().fg(Color::Magenta)),
+            Span::styled(" │", Style::default().fg(ThemeColors::magenta())),
         ]));
     }
 
     // Bottom border
     lines.push(Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal),
-        Style::default().fg(Color::Magenta),
+        Style::default().fg(ThemeColors::magenta()),
     )]));
     lines
 }
@@ -1424,7 +1413,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             if rendered.len() >= 2 {
                 let insert_pos = rendered.len() - 2;
                 let inner_width = if width > 4 { width - 4 } else { 40 };
-                let border_color = Color::Cyan;
+                let border_color = ThemeColors::cyan();
 
                 let warning_text = stall_message;
                 let warning_display_width =
@@ -1435,7 +1424,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                     Span::styled(
                         format!("  {}{}", warning_text, " ".repeat(warning_padding)),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(ThemeColors::dark_gray())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(" │", Style::default().fg(border_color)),
@@ -1507,15 +1496,15 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 lines.push((spacing_marker.clone(), Style::default()));
 
                 let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                    Color::LightGreen
+                    ThemeColors::dot_success()
                 } else {
-                    Color::Red
+                    ThemeColors::danger()
                 };
 
                 let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                    AdaptiveColors::text()
+                    ThemeColors::text()
                 } else {
-                    Color::Red
+                    ThemeColors::danger()
                 };
 
                 let header_lines =
@@ -1524,8 +1513,8 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                         &command_args,
                         Some(crate::services::bash_block::LinesColors {
                             dot: dot_color,
-                            title: Color::White,
-                            command: AdaptiveColors::text(),
+                            title: ThemeColors::title_primary(),
+                            command: ThemeColors::text(),
                             message: message_color,
                         }),
                         Some(width),
@@ -1567,7 +1556,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 lines.extend(rendered.into_iter().take(MAX_PREVIEW_LINES));
                 // Add collapsed hint line
                 let hidden = total_lines - MAX_PREVIEW_LINES;
-                let accent_color = Color::DarkGray;
+                let accent_color = ThemeColors::dark_gray();
                 lines.push((
                     Line::from(vec![
                         Span::styled("┃ ".to_string(), Style::default().fg(accent_color)),
@@ -2120,7 +2109,7 @@ fn get_wrapped_message_lines_internal(
                 if rendered_lines.len() >= 2 {
                     let insert_pos = rendered_lines.len() - 2; // Before bottom border and SPACING_MARKER
                     let inner_width = if width > 4 { width - 4 } else { 40 };
-                    let border_color = Color::Cyan;
+                    let border_color = ThemeColors::cyan();
 
                     // Add warning line inside the block (use simple ASCII to avoid width issues)
                     let warning_text = stall_message;
@@ -2132,7 +2121,7 @@ fn get_wrapped_message_lines_internal(
                         Span::styled(
                             format!("  {}{}", warning_text, " ".repeat(warning_padding)),
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(ThemeColors::dark_gray())
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(" │", Style::default().fg(border_color)),
@@ -2218,16 +2207,16 @@ fn get_wrapped_message_lines_internal(
                     all_lines.push((spacing_marker.clone(), Style::default()));
 
                     let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
-                        Color::LightGreen
+                        ThemeColors::dot_success()
                     } else {
-                        Color::Red
+                        ThemeColors::danger()
                     };
 
                     let message_color = if tool_call_result.status == ToolCallResultStatus::Success
                     {
-                        crate::services::detect_term::AdaptiveColors::text()
+                        ThemeColors::text()
                     } else {
-                        Color::Red
+                        ThemeColors::danger()
                     };
 
                     let header_lines =
@@ -2236,8 +2225,8 @@ fn get_wrapped_message_lines_internal(
                             &command_args,
                             Some(crate::services::bash_block::LinesColors {
                                 dot: dot_color,
-                                title: Color::White,
-                                command: crate::services::detect_term::AdaptiveColors::text(),
+                                title: ThemeColors::title_primary(),
+                                command: ThemeColors::text(),
                                 message: message_color,
                             }),
                             Some(width),

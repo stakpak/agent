@@ -8,10 +8,11 @@
 //! - Models grouped by provider with headers
 
 use crate::app::{AppState, ModelSwitcherMode};
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -60,7 +61,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     // Create the main block with border
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     // Show loading message if no models are available yet
     if state.available_models.is_empty() {
@@ -68,12 +69,12 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 "  Loading models...",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(ThemeColors::yellow()),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Press ESC to cancel",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )),
         ]);
 
@@ -109,7 +110,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     // Render title inside the popup
     let title = " Switch Model";
     let title_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(ThemeColors::yellow())
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
@@ -123,24 +124,24 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     let search_spans = if state.model_switcher_search.is_empty() {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(placeholder, Style::default().fg(ThemeColors::dark_gray())),
             Span::raw(" "),
         ]
     } else {
         vec![
             Span::raw(" "),
-            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
                 &state.model_switcher_search,
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(cursor, Style::default().fg(ThemeColors::cyan())),
         ]
     };
 
@@ -161,21 +162,27 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     // Help text
     let help = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-            Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+            Span::styled("↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
             Span::raw("  "),
-            Span::styled("↵", Style::default().fg(Color::DarkGray)),
-            Span::styled(" select", Style::default().fg(Color::Cyan)),
+            Span::styled("↵", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled(" select", Style::default().fg(ThemeColors::cyan())),
             Span::raw("  "),
-            Span::styled("esc", Style::default().fg(Color::DarkGray)),
-            Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+            Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
         ]),
         Line::from(vec![
-            Span::styled("[R]", Style::default().fg(Color::Magenta)),
-            Span::styled(" = reasoning", Style::default().fg(Color::DarkGray)),
+            Span::styled("[R]", Style::default().fg(ThemeColors::magenta())),
+            Span::styled(
+                " = reasoning",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ),
             Span::raw("  "),
-            Span::styled("$in/$out", Style::default().fg(Color::DarkGray)),
-            Span::styled(" = cost/1M tokens", Style::default().fg(Color::DarkGray)),
+            Span::styled("$in/$out", Style::default().fg(ThemeColors::dark_gray())),
+            Span::styled(
+                " = cost/1M tokens",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ),
         ]),
     ]);
 
@@ -205,7 +212,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         };
         let empty_widget = Paragraph::new(Line::from(vec![Span::styled(
             empty_message,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )]));
         f.render_widget(empty_widget, list_area);
         return;
@@ -242,7 +249,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         lines.push(Line::from(vec![Span::styled(
             format!(" {} ", provider_name),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::yellow())
                 .add_modifier(Modifier::BOLD),
         )]));
         line_to_model_idx.push(None); // Header is not selectable
@@ -260,7 +267,10 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
             // Current indicator
             if is_current {
-                spans.push(Span::styled("  ", Style::default().fg(Color::Green)));
+                spans.push(Span::styled(
+                    "  ",
+                    Style::default().fg(ThemeColors::green()),
+                ));
             } else {
                 spans.push(Span::raw("   "));
             }
@@ -268,15 +278,15 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
             // Model name with selection/current styling
             let name_style = if is_current {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(ThemeColors::green())
                     .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(ThemeColors::highlight_fg())
+                    .bg(ThemeColors::highlight_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(ThemeColors::text())
             };
 
             // Build the full model line
@@ -304,18 +314,18 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
                 if model.reasoning {
                     let reasoning_style = if is_current {
-                        Style::default().fg(Color::Green)
+                        Style::default().fg(ThemeColors::green())
                     } else {
-                        Style::default().fg(Color::Magenta)
+                        Style::default().fg(ThemeColors::magenta())
                     };
                     spans.push(Span::styled(" [R]", reasoning_style));
                 }
 
                 if let Some(cost) = &model.cost {
                     let cost_style = if is_current {
-                        Style::default().fg(Color::Green)
+                        Style::default().fg(ThemeColors::green())
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(ThemeColors::dark_gray())
                     };
                     spans.push(Span::styled(
                         format!(" ${:.2}/${:.2}", cost.input, cost.output),

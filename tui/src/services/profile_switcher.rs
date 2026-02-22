@@ -1,8 +1,9 @@
 use crate::app::AppState;
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
@@ -29,14 +30,14 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
             // Profile name (no selection indicator)
             let name_style = if is_current {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::accent())
                     .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default()
-                    .fg(Color::White)
+                    .fg(ThemeColors::title_primary())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(ThemeColors::muted())
             };
             spans.push(Span::styled(
                 format!(" {}", profile_name.clone()),
@@ -45,7 +46,10 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
 
             // Current indicator
             if is_current {
-                spans.push(Span::styled(" (current)", Style::default().fg(Color::Cyan)));
+                spans.push(Span::styled(
+                    " (current)",
+                    Style::default().fg(ThemeColors::cyan()),
+                ));
             }
 
             ListItem::new(Line::from(spans))
@@ -55,9 +59,9 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
     // Create the main block with border (no title)
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
-    // Split area for title, list and help text inside the block
+    // Split area for title, content and help text inside the block
     let inner_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
@@ -77,7 +81,7 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
     // Render title inside the popup
     let title = " Switch Profile";
     let title_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(ThemeColors::yellow())
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
@@ -86,7 +90,11 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Create list with proper block and padding
     let list = List::new(items)
-        .highlight_style(Style::default().bg(Color::Cyan).fg(Color::Black))
+        .highlight_style(
+            Style::default()
+                .bg(ThemeColors::highlight_bg())
+                .fg(ThemeColors::highlight_fg()),
+        )
         .block(Block::default().borders(Borders::NONE));
 
     // Create list state for highlighting
@@ -105,14 +113,14 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
-        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::styled("↑/↓", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" navigate", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("↵", Style::default().fg(Color::DarkGray)),
-        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::styled("↵", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" switch", Style::default().fg(ThemeColors::cyan())),
         Span::raw("  "),
-        Span::styled("esc", Style::default().fg(Color::DarkGray)),
-        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
+        Span::styled("esc", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" cancel", Style::default().fg(ThemeColors::cyan())),
     ]));
 
     let help_area = Rect {
@@ -141,17 +149,17 @@ pub fn render_profile_switch_overlay(f: &mut Frame, state: &AppState) {
     let block = Block::default()
         .title(" Profile Switch ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::cyan()));
 
     let paragraph = Paragraph::new(vec![
         Line::from(Span::styled(
             status_text,
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(ThemeColors::yellow()),
         )),
         Line::from(""),
         Line::from(Span::styled(
             "Please wait... (Ctrl+C to cancel)",
-            Style::default().fg(Color::Gray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )),
     ])
     .block(block)

@@ -5,6 +5,7 @@ use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
 
 use crate::commands::auto_update::run_auto_update;
+use crate::utils::cli_colors::CliColors;
 
 /// Parse version string (with or without 'v' prefix) into semver Version
 fn parse_version(version_str: &str) -> Option<Version> {
@@ -49,6 +50,10 @@ fn format_changelog(body: &str) -> String {
     let mut i = 0;
     let mut is_first_section = true;
 
+    let magenta = CliColors::magenta();
+    let text = CliColors::text();
+    let reset = CliColors::reset();
+
     while i < lines.len() {
         let trimmed_line = lines[i].trim();
 
@@ -73,10 +78,12 @@ fn format_changelog(body: &str) -> String {
                 }
                 // Ensure consistent indentation: exactly 2 spaces before bullet
                 output.push_str("  ");
-                output.push_str("\x1b[1;35m");
+                output.push_str(magenta);
                 output.push_str("● ");
                 output.push_str(section_name);
-                output.push_str(":\x1b[0m\n");
+                output.push(':');
+                output.push_str(reset);
+                output.push('\n');
                 is_first_section = false;
             }
             i += 1;
@@ -88,11 +95,12 @@ fn format_changelog(body: &str) -> String {
             let item = trimmed_line.strip_prefix("- ").unwrap_or("").trim();
             if !item.is_empty() {
                 output.push_str("    ");
-                output.push_str("\x1b[1;37m");
+                output.push_str(text);
                 output.push('•');
-                output.push_str(" \x1b[0;37m");
+                output.push(' ');
                 output.push_str(item);
-                output.push_str("\x1b[0m\n");
+                output.push_str(reset);
+                output.push('\n');
             }
             i += 1;
             continue;
@@ -105,9 +113,11 @@ fn format_changelog(body: &str) -> String {
         }
 
         // Handle other content as regular text
-        output.push_str("  \x1b[0;37m");
+        output.push_str("  ");
+        output.push_str(text);
         output.push_str(trimmed_line);
-        output.push_str("\x1b[0m\n");
+        output.push_str(reset);
+        output.push('\n');
 
         i += 1;
     }
@@ -117,35 +127,47 @@ fn format_changelog(body: &str) -> String {
 pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
     if is_newer_version(current_version, &release.tag_name) {
-        let sep = "\x1b[1;34m═\x1b[0m".repeat(40);
-        println!("\n\x1b[1;34m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
+        let blue = CliColors::blue();
+        let cyan = CliColors::cyan();
+        let yellow = CliColors::yellow();
+        let green = CliColors::green();
+        let magenta = CliColors::magenta();
+        let text = CliColors::text();
+        let reset = CliColors::reset();
+
+        let sep = format!("{}═{}", magenta, reset).repeat(40);
+        println!("\n{}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓{}", blue, reset);
         println!(
-            "\x1b[1;34m┃\x1b[0m\x1b[1;36m⮕ \x1b[1;37m Version Update Available!\x1b[0m\x1b[1;34m ┃\x1b[0m"
+            "{}┃{}{}⮕ {} Version Update Available!{}{}┃{}",
+            blue, reset, cyan, text, reset, blue, reset
         );
-        println!("\x1b[1;34m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m");
+        println!("{}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛{}", blue, reset);
         println!(
-            "\x1b[1;37m \x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m",
-            current_version, release.tag_name
+            "{} {}{}{} → {}{}{}",
+            text, yellow, current_version, reset, green, release.tag_name, reset
         );
-        println!("\x1b[1;35m{}\x1b[0m", sep);
+        println!("{}", sep);
 
         if let Some(body) = &release.body
             && !body.trim().is_empty()
         {
-            println!("\x1b[1;37m What's new in this update:\x1b[0m");
-            println!("\x1b[1;35m{}\x1b[0m", sep);
+            println!("{} What's new in this update:{}", text, reset);
+            println!("{}", sep);
             let changelog = format_changelog(body);
             println!("{}", changelog);
-            println!("\x1b[1;35m{}\x1b[0m", sep);
+            println!("{}", sep);
             println!(
-                "\x1b[1;37m View full changelog: \x1b[0m\x1b[1;36m{}\x1b[0m",
-                release.html_url
+                "{} View full changelog: {}{}{}{}",
+                text, reset, cyan, release.html_url, reset
             );
-            println!("\x1b[1;35m{}\x1b[0m", sep);
+            println!("{}", sep);
         }
 
-        println!("\x1b[1;37m Upgrade to access the latest features! 🚀\x1b[0m");
-        println!("\x1b[1;35m{}\x1b[0m", sep);
+        println!(
+            "{} Upgrade to access the latest features! 🚀{}",
+            text, reset
+        );
+        println!("{}", sep);
     }
 
     Ok(())
@@ -178,22 +200,28 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
     if is_newer_version(&current_version, &release.tag_name) {
+        let yellow = CliColors::yellow();
+        let green = CliColors::green();
+        let cyan = CliColors::cyan();
+        let text = CliColors::text();
+        let reset = CliColors::reset();
+
         println!(
-            "\n🚀 Update available!  \x1b[1;37m\x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m ✨\n",
-            current_version, release.tag_name
+            "\n🚀 Update available!  {}{}{}{} → {}{}{} ✨\n",
+            text, yellow, current_version, reset, green, release.tag_name, reset
         );
 
         if let Some(body) = &release.body
             && !body.trim().is_empty()
         {
-            println!("\x1b[1;37m What's new in this update:\x1b[0m");
-            println!("\x1b[1;36m{}\x1b[0m", "─".repeat(50));
+            println!("{} What's new in this update:{}", text, reset);
+            println!("{}{}{}", cyan, "─".repeat(50), reset);
             let changelog = format_changelog(body);
             println!("{}", changelog);
-            println!("\x1b[1;36m{}\x1b[0m", "─".repeat(50));
+            println!("{}{}{}", cyan, "─".repeat(50), reset);
             println!(
-                "\x1b[1;37m View full changelog: \x1b[0m\x1b[1;36m{}\x1b[0m\n",
-                release.html_url
+                "{} View full changelog: {}{}{}\n",
+                text, cyan, release.html_url, reset
             );
         }
 
