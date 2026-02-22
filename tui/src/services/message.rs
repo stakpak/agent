@@ -743,18 +743,34 @@ pub fn get_wrapped_plain_lines<'a>(
     lines
 }
 
-pub fn get_wrapped_styled_lines<'a>(line: &Line<'a>, _width: usize) -> Vec<(Line<'a>, Style)> {
-    vec![(line.clone(), Style::default())]
+pub fn get_wrapped_styled_lines<'a>(line: &'a Line<'a>, width: usize) -> Vec<(Line<'a>, Style)> {
+    if width == 0 {
+        return vec![(line.clone(), Style::default())];
+    }
+    super::wrapping::word_wrap_line(line, width)
+        .into_iter()
+        .map(|l| (l, Style::default()))
+        .collect()
 }
 
 pub fn get_wrapped_styled_block_lines<'a>(
     lines: &'a [Line<'a>],
-    _width: usize,
+    width: usize,
 ) -> Vec<(Line<'a>, Style)> {
-    lines
-        .iter()
-        .map(|l| (l.clone(), Style::default()))
-        .collect()
+    if width == 0 {
+        return lines
+            .iter()
+            .map(|l| (l.clone(), Style::default()))
+            .collect();
+    }
+    let mut result = Vec::new();
+    for line in lines {
+        let wrapped = super::wrapping::word_wrap_line(line, width);
+        for wrapped_line in wrapped {
+            result.push((wrapped_line, Style::default()));
+        }
+    }
+    result
 }
 
 pub fn get_wrapped_markdown_lines(markdown: &str, width: usize) -> Vec<(Line<'_>, Style)> {

@@ -873,7 +873,7 @@ impl AppConfig {
     /// prefix (e.g., "anthropic/claude-opus-4-5"), it searches within that
     /// provider first. Otherwise, it searches all providers.
     pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
-        let use_stakpak = self.api_key.is_some();
+        let use_stakpak = self.get_stakpak_api_key().is_some();
 
         // Priority: cli_override > model > default
         let model_str = cli_override

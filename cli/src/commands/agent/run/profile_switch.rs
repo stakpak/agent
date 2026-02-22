@@ -17,9 +17,12 @@ pub async fn validate_profile_switch(
     let mut new_config = AppConfig::load(new_profile, config_path)
         .map_err(|e| format!("Failed to load profile '{}': {}", new_profile, e))?;
 
-    // 2. Handle API key - inherit from default if not present
-    // Note: With AgentClient, no API key is fine - it will use local providers
+    // 2. Handle API key - inherit from default if not present and new profile is remote
+    // Only inherit the Stakpak API key for remote profiles; local profiles use their own
+    // provider credentials and inheriting a Stakpak key would cause model routing confusion
+    // (e.g., use_stakpak=true would transform model IDs for Stakpak proxy format).
     if new_config.api_key.is_none()
+        && matches!(new_config.provider, crate::config::ProviderType::Remote)
         && let Some(default_key) = default_api_key
     {
         new_config.api_key = Some(default_key);

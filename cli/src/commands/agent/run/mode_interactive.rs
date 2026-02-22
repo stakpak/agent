@@ -1595,6 +1595,7 @@ pub async fn run_interactive(
             };
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
+            config.model = new_config.get_default_model(None);
 
             // Update ctx
             ctx = new_config;
