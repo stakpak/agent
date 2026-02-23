@@ -24,7 +24,7 @@ use crate::{
     router::{RouterConfig, resolve_routing_key},
     store::{GatewayStore, SessionMapping},
     targeting::{render_title_template, target_key_from_inbound},
-    types::{DeliveryContext, InboundMessage, OutboundReply, PeerId},
+    types::{ChatType, DeliveryContext, InboundMessage, OutboundReply, PeerId},
 };
 
 pub struct Dispatcher {
@@ -37,6 +37,8 @@ pub struct Dispatcher {
     // consistency after gateway restart.
     active_runs: Mutex<HashMap<String, ActiveRun>>,
     pending_queues: Mutex<HashMap<String, Vec<QueuedMessage>>>,
+    // Invariant: at most one pending approval batch per session.
+    // The run stream pauses on `tool_calls_proposed` until decisions are submitted.
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
     event_cursors: Mutex<HashMap<String, u64>>,
     default_model: Option<String>,
@@ -70,6 +72,28 @@ struct RunStartOptions {
     model: Option<String>,
     sandbox: Option<bool>,
     timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ApprovalNeededContext {
+    session_id: String,
+    run_id: String,
+    tool_calls: Vec<ProposedToolCall>,
+    auto_resolved_count: usize,
+    delivery: DeliveryContext,
+    cursor: Option<u64>,
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct RejectAndResumeContext {
+    session_id: String,
+    run_id: String,
+    tool_calls: Vec<ProposedToolCall>,
+    delivery: DeliveryContext,
+    cursor: Option<u64>,
+    timeout_seconds: Option<u64>,
+    reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -367,13 +391,15 @@ impl Dispatcher {
                 }
 
                 self.handle_approval_needed(
-                    session_id,
-                    run_id,
-                    tool_calls,
-                    auto_resolved_count,
-                    delivery,
-                    cursor,
-                    timeout_seconds,
+                    ApprovalNeededContext {
+                        session_id,
+                        run_id,
+                        tool_calls,
+                        auto_resolved_count,
+                        delivery,
+                        cursor,
+                        timeout_seconds,
+                    },
                     run_tx,
                 )
                 .await
@@ -407,30 +433,54 @@ impl Dispatcher {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn handle_approval_needed(
         self: &Arc<Self>,
-        session_id: String,
-        run_id: String,
-        tool_calls: Vec<ProposedToolCall>,
-        auto_resolved_count: usize,
-        delivery: DeliveryContext,
-        cursor: Option<u64>,
-        timeout_seconds: Option<u64>,
+        approval: ApprovalNeededContext,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
+        let ApprovalNeededContext {
+            session_id,
+            run_id,
+            tool_calls,
+            auto_resolved_count,
+            delivery,
+            cursor,
+            timeout_seconds,
+        } = approval;
+
+        // NOTE: TOCTOU between this early check and final insert is intentional.
+        // We can't hold `std::sync::Mutex` across `.await` while posting the prompt.
+        // The second check before insert preserves the "one pending approval per session"
+        // invariant and marks any raced duplicate prompt as ignored.
+        {
+            let guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+            if let Some(existing) = guard.get(&session_id) {
+                warn!(
+                    session_id = %session_id,
+                    existing_approval_id = %existing.approval_id,
+                    "ignoring duplicate approval request; only one pending approval is allowed per session"
+                );
+                return Ok(());
+            }
+        }
+
         let channel_name = delivery.channel.0.clone();
         let Some(channel) = self.channels.get(&channel_name) else {
             warn!(channel = %channel_name, "approval channel not connected; auto-rejecting tools");
             self.reject_tools_and_resume(
-                &session_id,
-                &run_id,
-                &tool_calls,
-                &delivery,
-                cursor,
-                timeout_seconds,
+                RejectAndResumeContext {
+                    session_id,
+                    run_id,
+                    tool_calls,
+                    delivery,
+                    cursor,
+                    timeout_seconds,
+                    reason: "Cancelled — approval channel unavailable".to_string(),
+                },
                 run_tx,
-                "Cancelled — approval channel unavailable",
             )
             .await?;
             return Ok(());
@@ -465,14 +515,16 @@ impl Dispatcher {
             Err(error) => {
                 warn!(error = %error, "failed to send approval prompt; auto-rejecting tools");
                 self.reject_tools_and_resume(
-                    &session_id,
-                    &run_id,
-                    &tool_calls,
-                    &delivery,
-                    cursor,
-                    timeout_seconds,
+                    RejectAndResumeContext {
+                        session_id,
+                        run_id,
+                        tool_calls,
+                        delivery,
+                        cursor,
+                        timeout_seconds,
+                        reason: "Cancelled — failed to post approval prompt".to_string(),
+                    },
                     run_tx,
-                    "Cancelled — failed to post approval prompt",
                 )
                 .await?;
                 return Ok(());
@@ -484,7 +536,8 @@ impl Dispatcher {
             run_id,
             tool_calls,
             approval_id,
-            prompt_message_id,
+            // Keep a local copy for duplicate-race fallback edit_message path below.
+            prompt_message_id: prompt_message_id.clone(),
             channel_name,
             delivery,
             cursor,
@@ -492,11 +545,37 @@ impl Dispatcher {
             requested_at: Instant::now(),
         };
 
-        let mut guard = self
-            .pending_approvals
-            .lock()
-            .map_err(|_| "failed to lock pending_approvals".to_string())?;
-        guard.insert(session_id, pending);
+        let has_pending = {
+            let mut guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+
+            if let Some(existing) = guard.get(&session_id) {
+                warn!(
+                    session_id = %session_id,
+                    existing_approval_id = %existing.approval_id,
+                    "approval prompt sent but session already has a pending approval; dropping duplicate"
+                );
+                true
+            } else {
+                guard.insert(session_id, pending);
+                false
+            }
+        };
+
+        if has_pending {
+            if let Err(error) = channel
+                .edit_message(
+                    &prompt_message_id,
+                    "⏭️ Ignored — another approval is already pending",
+                )
+                .await
+            {
+                warn!(error = %error, "failed to edit duplicate approval prompt");
+            }
+            return Ok(());
+        }
 
         Ok(())
     }
@@ -566,6 +645,27 @@ impl Dispatcher {
         resolved_by: &PeerId,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), ResolveApprovalError> {
+        if matches!(pending.delivery.chat_type, ChatType::Direct)
+            && pending.delivery.peer_id != *resolved_by
+        {
+            return Err(ResolveApprovalError {
+                message: "approval responder does not match the direct-chat requester".to_string(),
+                decision_sent: false,
+            });
+        }
+
+        // For group/thread chats we currently allow non-requesters to resolve approvals,
+        // but emit an audit warning with both identities.
+        if pending.delivery.peer_id != *resolved_by {
+            warn!(
+                session_id = %pending.session_id,
+                run_id = %pending.run_id,
+                requested_by = %pending.delivery.peer_id.0,
+                resolved_by = %resolved_by.0,
+                "approval resolved by a different user than the original requester"
+            );
+        }
+
         let action = if approve {
             ToolDecisionAction::Accept
         } else {
@@ -622,30 +722,36 @@ impl Dispatcher {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn reject_tools_and_resume(
         self: &Arc<Self>,
-        session_id: &str,
-        run_id: &str,
-        tool_calls: &[ProposedToolCall],
-        delivery: &DeliveryContext,
-        cursor: Option<u64>,
-        timeout_seconds: Option<u64>,
+        request: RejectAndResumeContext,
         run_tx: mpsc::Sender<RunTaskResult>,
-        reason: &str,
     ) -> Result<(), String> {
-        let decisions =
-            build_decisions_for_tool_calls(tool_calls, ToolDecisionAction::Reject, Some(reason));
+        let RejectAndResumeContext {
+            session_id,
+            run_id,
+            tool_calls,
+            delivery,
+            cursor,
+            timeout_seconds,
+            reason,
+        } = request;
+
+        let decisions = build_decisions_for_tool_calls(
+            &tool_calls,
+            ToolDecisionAction::Reject,
+            Some(reason.as_str()),
+        );
 
         self.client
-            .resolve_tools(session_id, run_id, decisions)
+            .resolve_tools(&session_id, &run_id, decisions)
             .await
             .map_err(|error| format!("resolve_tools failed: {error}"))?;
 
         self.resume_run_after_approval(
-            session_id,
-            run_id,
-            delivery,
+            &session_id,
+            &run_id,
+            &delivery,
             cursor,
             timeout_seconds,
             run_tx,
@@ -1457,7 +1563,10 @@ fn generate_approval_id() -> String {
 }
 
 fn strip_mcp_prefix(name: &str) -> &str {
-    if let Some((_, suffix)) = name.split_once("__")
+    // Tool names can be namespaced (e.g. `mcp__run_command`,
+    // `mcp__server__run_command`, `stakpak__view`).
+    // Normalize display/allowlist matching to the bare tool segment.
+    if let Some((_, suffix)) = name.rsplit_once("__")
         && !suffix.is_empty()
     {
         return suffix;
@@ -1494,11 +1603,22 @@ fn truncate(value: &str, max_chars: usize) -> String {
     }
 }
 
+// UX trade-off: if approval wait consumes the entire timeout budget, give the resumed
+// stream a small floor so it can flush/complete instead of timing out immediately.
+const MIN_RESUME_TIMEOUT_SECONDS: u64 = 5;
+
 fn remaining_timeout_after_approval(
     timeout_seconds: Option<u64>,
     approval_wait: Duration,
 ) -> Option<u64> {
-    timeout_seconds.map(|seconds| seconds.saturating_sub(approval_wait.as_secs()))
+    timeout_seconds.map(|seconds| {
+        let remaining = seconds.saturating_sub(approval_wait.as_secs());
+        if remaining == 0 {
+            MIN_RESUME_TIMEOUT_SECONDS
+        } else {
+            remaining
+        }
+    })
 }
 
 const MAX_CONTEXT_FIELD_CHARS: usize = 8_000;
@@ -2097,6 +2217,7 @@ mod tests {
     #[test]
     fn strip_mcp_prefix_removes_namespace() {
         assert_eq!(strip_mcp_prefix("mcp__run_command"), "run_command");
+        assert_eq!(strip_mcp_prefix("mcp__tools__run_command"), "run_command");
         assert_eq!(strip_mcp_prefix("run_command"), "run_command");
     }
 
@@ -2157,7 +2278,7 @@ mod tests {
         );
         assert_eq!(
             remaining_timeout_after_approval(Some(60), Duration::from_secs(120)),
-            Some(0)
+            Some(MIN_RESUME_TIMEOUT_SECONDS)
         );
         assert_eq!(
             remaining_timeout_after_approval(None, Duration::from_secs(5)),

@@ -20,6 +20,26 @@ use crate::{
 const DISCORD_TEXT_LIMIT: usize = 2000;
 const DISCORD_INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // 37377
 
+const DISCORD_OP_DISPATCH: u8 = 0;
+const DISCORD_OP_HEARTBEAT: u8 = 1;
+const DISCORD_OP_IDENTIFY: u8 = 2;
+const DISCORD_OP_RECONNECT: u8 = 7;
+const DISCORD_OP_INVALID_SESSION: u8 = 9;
+const DISCORD_OP_HELLO: u8 = 10;
+const DISCORD_OP_HEARTBEAT_ACK: u8 = 11;
+
+const DISCORD_INTERACTION_TYPE_COMPONENT: u8 = 3;
+const DISCORD_MESSAGE_TYPE_DEFAULT: u8 = 0;
+const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD: u8 = 11;
+const DISCORD_CHANNEL_TYPE_PRIVATE_THREAD: u8 = 12;
+
+const DISCORD_COMPONENT_TYPE_ACTION_ROW: u8 = 1;
+const DISCORD_COMPONENT_TYPE_BUTTON: u8 = 2;
+const DISCORD_BUTTON_STYLE_SUCCESS: u8 = 3;
+const DISCORD_BUTTON_STYLE_DANGER: u8 = 4;
+
+const DISCORD_INTERACTION_ACK_DEFERRED_UPDATE_MESSAGE: u8 = 6;
+
 pub struct DiscordChannel {
     id: ChannelId,
     token: String,
@@ -145,6 +165,23 @@ impl DiscordChannel {
         Ok(meta)
     }
 
+    async fn response_or_retry_after_rate_limit(
+        response: reqwest::Response,
+    ) -> Option<reqwest::Response> {
+        if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Some(response);
+        }
+
+        let retry = response
+            .json::<DiscordRateLimitResponse>()
+            .await
+            .ok()
+            .map(|value| value.retry_after)
+            .unwrap_or(1.0);
+        tokio::time::sleep(std::time::Duration::from_secs_f64(retry.max(0.1))).await;
+        None
+    }
+
     async fn post_message(
         &self,
         channel_id: &str,
@@ -172,16 +209,9 @@ impl DiscordChannel {
                 .await
                 .context("discord create message request failed")?;
 
-            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let retry = response
-                    .json::<DiscordRateLimitResponse>()
-                    .await
-                    .ok()
-                    .map(|value| value.retry_after)
-                    .unwrap_or(1.0);
-                tokio::time::sleep(std::time::Duration::from_secs_f64(retry.max(0.1))).await;
+            let Some(response) = Self::response_or_retry_after_rate_limit(response).await else {
                 continue;
-            }
+            };
 
             if !response.status().is_success() {
                 let body = response.text().await.unwrap_or_default();
@@ -220,16 +250,9 @@ impl DiscordChannel {
                 .await
                 .context("discord edit message request failed")?;
 
-            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let retry = response
-                    .json::<DiscordRateLimitResponse>()
-                    .await
-                    .ok()
-                    .map(|value| value.retry_after)
-                    .unwrap_or(1.0);
-                tokio::time::sleep(std::time::Duration::from_secs_f64(retry.max(0.1))).await;
+            let Some(response) = Self::response_or_retry_after_rate_limit(response).await else {
                 continue;
-            }
+            };
 
             if !response.status().is_success() {
                 let body = response.text().await.unwrap_or_default();
@@ -246,7 +269,7 @@ impl DiscordChannel {
         interaction_token: &str,
     ) -> Result<()> {
         let payload = serde_json::json!({
-            "type": 6
+            "type": DISCORD_INTERACTION_ACK_DEFERRED_UPDATE_MESSAGE
         });
 
         let response = self
@@ -370,7 +393,7 @@ impl Channel for DiscordChannel {
                             }
                         };
 
-                        if payload.op == 10 {
+                        if payload.op == DISCORD_OP_HELLO {
                             let interval = payload
                                 .d
                                 .as_ref()
@@ -390,7 +413,7 @@ impl Channel for DiscordChannel {
             };
 
             let identify = serde_json::json!({
-                "op": 2,
+                "op": DISCORD_OP_IDENTIFY,
                 "d": {
                     "token": self.token,
                     "intents": DISCORD_INTENTS,
@@ -426,7 +449,8 @@ impl Channel for DiscordChannel {
                         return Ok(());
                     }
                     _ = heartbeat.tick() => {
-                        let heartbeat_payload = serde_json::json!({"op": 1, "d": last_sequence});
+                        let heartbeat_payload =
+                            serde_json::json!({"op": DISCORD_OP_HEARTBEAT, "d": last_sequence});
                         if writer.send(WsMessage::Text(heartbeat_payload.to_string())).await.is_err() {
                             break;
                         }
@@ -459,7 +483,7 @@ impl Channel for DiscordChannel {
                                 }
 
                                 match payload.op {
-                                    0 => {
+                                    DISCORD_OP_DISPATCH => {
                                         let event = payload.t.unwrap_or_default();
                                         if event == "READY" {
                                             if let Ok(ready) = serde_json::from_value::<ReadyEvent>(payload.d.unwrap_or_default())
@@ -479,7 +503,7 @@ impl Channel for DiscordChannel {
                                                 }
                                             };
 
-                                            if interaction.kind != 3 {
+                                            if interaction.kind != DISCORD_INTERACTION_TYPE_COMPONENT {
                                                 continue;
                                             }
 
@@ -550,7 +574,9 @@ impl Channel for DiscordChannel {
                                             continue;
                                         }
 
-                                        if message_event.kind != 0 || message_event.content.trim().is_empty() {
+                                        if message_event.kind != DISCORD_MESSAGE_TYPE_DEFAULT
+                                            || message_event.content.trim().is_empty()
+                                        {
                                             continue;
                                         }
 
@@ -558,10 +584,17 @@ impl Channel for DiscordChannel {
 
                                         let chat_type = match (&message_event.guild_id, channel_meta) {
                                             (None, _) => ChatType::Direct,
-                                            (Some(_guild_id), Some(meta)) if meta.kind == 11 || meta.kind == 12 => ChatType::Thread {
-                                                group_id: meta.parent_id.unwrap_or_else(|| message_event.channel_id.clone()),
-                                                thread_id: message_event.channel_id.clone(),
-                                            },
+                                            (Some(_guild_id), Some(meta))
+                                                if meta.kind == DISCORD_CHANNEL_TYPE_PUBLIC_THREAD
+                                                    || meta.kind == DISCORD_CHANNEL_TYPE_PRIVATE_THREAD =>
+                                            {
+                                                ChatType::Thread {
+                                                    group_id: meta
+                                                        .parent_id
+                                                        .unwrap_or_else(|| message_event.channel_id.clone()),
+                                                    thread_id: message_event.channel_id.clone(),
+                                                }
+                                            }
                                             (Some(_), _) => ChatType::Group {
                                                 id: message_event.channel_id.clone(),
                                             },
@@ -589,16 +622,23 @@ impl Channel for DiscordChannel {
                                             return Ok(());
                                         }
                                     }
-                                    1 => {
-                                        let heartbeat_payload = serde_json::json!({"op": 1, "d": last_sequence});
-                                        if writer.send(WsMessage::Text(heartbeat_payload.to_string())).await.is_err() {
+                                    DISCORD_OP_HEARTBEAT => {
+                                        let heartbeat_payload = serde_json::json!({
+                                            "op": DISCORD_OP_HEARTBEAT,
+                                            "d": last_sequence
+                                        });
+                                        if writer
+                                            .send(WsMessage::Text(heartbeat_payload.to_string()))
+                                            .await
+                                            .is_err()
+                                        {
                                             break;
                                         }
                                     }
-                                    7 | 9 => {
+                                    DISCORD_OP_RECONNECT | DISCORD_OP_INVALID_SESSION => {
                                         break;
                                     }
-                                    11 => {}
+                                    DISCORD_OP_HEARTBEAT_ACK => {}
                                     _ => {}
                                 }
                             }
@@ -645,14 +685,14 @@ impl Channel for DiscordChannel {
     ) -> Result<String> {
         let channel_id = Self::extract_target(&reply)?;
         let row = DiscordActionRow {
-            kind: 1,
+            kind: DISCORD_COMPONENT_TYPE_ACTION_ROW,
             components: buttons
                 .iter()
                 .map(|button| DiscordButton {
-                    kind: 2,
+                    kind: DISCORD_COMPONENT_TYPE_BUTTON,
                     style: match button.style {
-                        ButtonStyle::Success => 3,
-                        ButtonStyle::Danger => 4,
+                        ButtonStyle::Success => DISCORD_BUTTON_STYLE_SUCCESS,
+                        ButtonStyle::Danger => DISCORD_BUTTON_STYLE_DANGER,
                     },
                     label: button.label.clone(),
                     custom_id: button.callback_data.clone(),
@@ -856,12 +896,14 @@ fn value_as_string(value: &serde_json::Value) -> Option<String> {
 }
 
 fn parse_discord_message_id(message_id: &str) -> Option<(&str, &str)> {
-    message_id.split_once(':')
+    message_id.rsplit_once(':')
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GatewayPayload, MessageCreateEvent};
+    use super::{
+        DISCORD_OP_DISPATCH, GatewayPayload, MessageCreateEvent, parse_discord_message_id,
+    };
 
     #[test]
     fn gateway_payload_deserializes() {
@@ -871,7 +913,7 @@ mod tests {
             Err(error) => panic!("failed to parse payload: {error}"),
         };
 
-        assert_eq!(payload.op, 0);
+        assert_eq!(payload.op, DISCORD_OP_DISPATCH);
         assert_eq!(payload.t.as_deref(), Some("READY"));
         assert_eq!(payload.s, Some(1));
     }
@@ -898,5 +940,14 @@ mod tests {
         assert_eq!(event.guild_id.as_deref(), Some("g1"));
         assert_eq!(event.content, "hello");
         assert_eq!(event.kind, 0);
+    }
+
+    #[test]
+    fn parse_discord_message_id_splits_on_last_colon() {
+        assert_eq!(parse_discord_message_id("123:456"), Some(("123", "456")));
+        assert_eq!(
+            parse_discord_message_id("team:123:456"),
+            Some(("team:123", "456"))
+        );
     }
 }

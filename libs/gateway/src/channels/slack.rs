@@ -1048,7 +1048,7 @@ fn build_approval_blocks(text: &str, buttons: &[ApprovalButton]) -> Vec<serde_js
 }
 
 fn parse_slack_message_id(message_id: &str) -> Option<(&str, &str)> {
-    message_id.split_once(':')
+    message_id.rsplit_once(':')
 }
 
 fn is_bot_mentioned(text: &str, bot_user_id: &str) -> bool {
@@ -1076,7 +1076,9 @@ fn collapse_whitespace(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DedupBuffer, is_bot_mentioned, map_chat_type, strip_bot_mention};
+    use super::{
+        DedupBuffer, is_bot_mentioned, map_chat_type, parse_slack_message_id, strip_bot_mention,
+    };
     use crate::types::ChatType;
 
     #[test]
@@ -1124,5 +1126,17 @@ mod tests {
 
         let unchanged = strip_bot_mention("please help", "U12345");
         assert_eq!(unchanged, "please help");
+    }
+
+    #[test]
+    fn parse_slack_message_id_splits_on_last_colon() {
+        assert_eq!(
+            parse_slack_message_id("C123:1700000000.123456"),
+            Some(("C123", "1700000000.123456"))
+        );
+        assert_eq!(
+            parse_slack_message_id("team:C123:1700000000.123456"),
+            Some(("team:C123", "1700000000.123456"))
+        );
     }
 }

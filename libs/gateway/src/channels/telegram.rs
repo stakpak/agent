@@ -492,7 +492,7 @@ fn parse_i64_value(value: &serde_json::Value) -> Option<i64> {
 }
 
 fn parse_telegram_message_id(message_id: &str) -> Option<(i64, i64)> {
-    let (chat, message) = message_id.split_once(':')?;
+    let (chat, message) = message_id.rsplit_once(':')?;
     let chat_id = chat.parse::<i64>().ok()?;
     let message_id = message.parse::<i64>().ok()?;
     Some((chat_id, message_id))
@@ -635,7 +635,9 @@ struct TgChat {
 
 #[cfg(test)]
 mod tests {
-    use super::{GetUpdatesParams, SendMessageParams, TgResponse, TgUpdate};
+    use super::{
+        GetUpdatesParams, SendMessageParams, TgResponse, TgUpdate, parse_telegram_message_id,
+    };
 
     #[test]
     fn telegram_update_deserialization() {
@@ -736,5 +738,15 @@ mod tests {
             "offset should be omitted when None"
         );
         assert_eq!(obj.get("timeout").and_then(|v| v.as_i64()), Some(30));
+    }
+
+    #[test]
+    fn parse_telegram_message_id_splits_correctly() {
+        assert_eq!(parse_telegram_message_id("12345:678"), Some((12345, 678)));
+        assert_eq!(
+            parse_telegram_message_id("-100123:678"),
+            Some((-100123, 678))
+        );
+        assert_eq!(parse_telegram_message_id("invalid"), None);
     }
 }
