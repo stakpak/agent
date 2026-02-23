@@ -442,6 +442,10 @@ pub fn handle_toggle_collapsed_messages(
     message_area_height: usize,
     message_area_width: usize,
 ) {
+    // Clear any active text selection when toggling the popup
+    // (prevents stale selection from one context bleeding into the other)
+    state.selection = crate::services::text_selection::SelectionState::default();
+
     // Handle collapsed messages popup
     state.show_collapsed_messages = !state.show_collapsed_messages;
     if state.show_collapsed_messages {

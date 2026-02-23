@@ -1280,8 +1280,12 @@ pub fn update(
         }
         InputEvent::ApprovalPopupSubmit => {}
         InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
-            // Check if click is on file changes popup first
-            if state.show_file_changes_popup {
+            if state.show_collapsed_messages {
+                // When collapsed popup is open, route directly to text selection
+                // (which handles popup geometry internally)
+                text_selection::handle_drag_start(state, col, row);
+            } else if state.show_file_changes_popup {
+                // Check if click is on file changes popup first
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
             } else {
                 // Try side panel click first, then start text selection if in message area

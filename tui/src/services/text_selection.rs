@@ -113,15 +113,9 @@ fn extract_text_from_line(line: &Line, start_col: u16, end_col: u16) -> String {
     result
 }
 
-/// Extract selected text from the assembled lines cache
-pub fn extract_selected_text(state: &AppState) -> String {
-    let Some((start_line, start_col, end_line, end_col)) = state.selection.normalized_bounds()
-    else {
-        return String::new();
-    };
-
-    // Get cached lines
-    let Some((_, cached_lines, _)) = &state.assembled_lines_cache else {
+/// Extract selected text from a slice of cached lines using the current selection bounds
+fn extract_selected_text_from_lines(selection: &SelectionState, cached_lines: &[Line]) -> String {
+    let Some((start_line, start_col, end_line, end_col)) = selection.normalized_bounds() else {
         return String::new();
     };
 
@@ -145,6 +139,13 @@ pub fn extract_selected_text(state: &AppState) -> String {
 
         let line_text = extract_text_from_line(line, col_start, col_end);
 
+        // Skip SPACING_MARKER lines (internal rendering markers that should be treated as empty)
+        let line_text = if line_text.trim() == "SPACING_MARKER" {
+            String::new()
+        } else {
+            line_text
+        };
+
         if !line_text.is_empty() {
             if !result.is_empty() {
                 result.push('\n');
@@ -163,6 +164,24 @@ pub fn extract_selected_text(state: &AppState) -> String {
         .map(|l| l.trim())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Extract selected text from the assembled lines cache (main message area)
+pub fn extract_selected_text(state: &AppState) -> String {
+    let Some((_, cached_lines, _)) = &state.assembled_lines_cache else {
+        return String::new();
+    };
+
+    extract_selected_text_from_lines(&state.selection, cached_lines)
+}
+
+/// Extract selected text from the collapsed message lines cache (fullscreen popup)
+pub fn extract_selected_text_from_collapsed(state: &AppState) -> String {
+    let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache else {
+        return String::new();
+    };
+
+    extract_selected_text_from_lines(&state.selection, cached_lines)
 }
 
 /// Calculate display width of a line
