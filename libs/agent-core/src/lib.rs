@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod approval;
+pub mod budget_context;
 pub mod checkpoint;
 pub mod compaction;
 pub mod context;
@@ -12,14 +13,16 @@ pub mod types;
 
 pub use agent::run_agent;
 pub use approval::{ApprovalError, ApprovalStateMachine, ResolvedToolCall};
+pub use budget_context::BudgetAwareContextReducer;
 pub use checkpoint::{
     CHECKPOINT_FORMAT_V1, CHECKPOINT_VERSION_V1, CheckpointEnvelopeV1, CheckpointError,
     deserialize_checkpoint, serialize_checkpoint,
 };
 pub use compaction::{CompactionEngine, CompactionResult, PassthroughCompactionEngine};
 pub use context::{
-    dedup_tool_results, merge_consecutive_same_role, reduce_context, remove_orphaned_tool_results,
-    truncate_old_assistant_messages, truncate_old_tool_results,
+    ContextReducer, DefaultContextReducer, dedup_tool_results, merge_consecutive_same_role,
+    reduce_context, remove_orphaned_tool_results, truncate_old_assistant_messages,
+    truncate_old_tool_results,
 };
 pub use error::AgentError;
 pub use hooks::AgentHook;

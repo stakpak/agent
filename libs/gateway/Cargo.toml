@@ -24,11 +24,13 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 stakai = { workspace = true }
 stakpak-agent-core = { workspace = true }
+stakpak-shared = { workspace = true }
 axum = { workspace = true }
 tracing = { workspace = true }
 bytes = "1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 tempfile = { workspace = true }
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [features]
 libsql-test = []

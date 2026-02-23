@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod checkpoint_store;
+pub mod context;
 pub mod error;
 pub mod event_log;
 pub mod idempotency;
@@ -14,6 +15,10 @@ pub mod types;
 
 pub use auth::AuthConfig;
 pub use checkpoint_store::CheckpointStore;
+pub use context::{
+    ContextBudget, ContextFile, ContextPriority, EnvironmentContext, GitContext, ProjectContext,
+    SessionContext, SessionContextBuilder,
+};
 pub use error::SessionManagerError;
 pub use event_log::{EventEnvelope, EventLog, EventSubscription, GapDetected};
 pub use idempotency::{IdempotencyRequest, IdempotencyStore, LookupResult, StoredResponse};

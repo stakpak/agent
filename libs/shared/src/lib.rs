@@ -14,5 +14,6 @@ pub mod secret_manager;
 pub mod secrets;
 pub mod task_manager;
 pub mod telemetry;
+pub mod terminal_theme;
 pub mod tls_client;
 pub mod utils;

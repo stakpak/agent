@@ -1,23 +1,44 @@
 //! Styled output utilities for inline terminal output matching Stakpak TUI style guide
 
+use crate::utils::cli_colors::CliColors;
+
 /// ANSI color codes matching Stakpak TUI style
+/// Now uses theme-aware colors that adapt to light/dark terminal backgrounds
 pub struct Colors;
 
 impl Colors {
     /// Yellow - for titles and active items
-    pub const YELLOW: &'static str = "\x1b[1;33m";
+    pub fn yellow() -> &'static str {
+        CliColors::yellow()
+    }
     /// Cyan - for borders, accents, selected items
-    pub const CYAN: &'static str = "\x1b[1;36m";
+    pub fn cyan() -> &'static str {
+        CliColors::cyan()
+    }
     /// Green - for success, completed steps
-    pub const GREEN: &'static str = "\x1b[1;32m";
+    pub fn green() -> &'static str {
+        CliColors::green()
+    }
     /// White - for default text
-    pub const WHITE: &'static str = "\x1b[1;37m";
+    pub fn white() -> &'static str {
+        CliColors::text()
+    }
     /// Gray - for inactive/secondary text
-    pub const GRAY: &'static str = "\x1b[90m";
+    pub fn gray() -> &'static str {
+        CliColors::gray()
+    }
     /// Magenta - for info messages
-    pub const MAGENTA: &'static str = "\x1b[1;35m";
+    pub fn magenta() -> &'static str {
+        CliColors::magenta()
+    }
+    /// Red - for errors
+    pub fn red() -> &'static str {
+        CliColors::red()
+    }
     /// Reset color
-    pub const RESET: &'static str = "\x1b[0m";
+    pub fn reset() -> &'static str {
+        CliColors::reset()
+    }
 }
 
 /// Step status for rendering
@@ -34,25 +55,25 @@ pub fn render_steps(steps: &[(String, StepStatus)]) {
 
     for (i, (step, status)) in steps.iter().enumerate() {
         if i > 0 {
-            parts.push(format!("{} {} ", Colors::GRAY, "|"));
+            parts.push(format!("{} {} ", Colors::gray(), "|"));
         }
 
         let (indicator, color) = match status {
-            StepStatus::Active => ("◆", Colors::YELLOW),
-            StepStatus::Completed => ("◆", Colors::GREEN),
-            StepStatus::Pending => ("", Colors::GRAY),
+            StepStatus::Active => ("◆", Colors::yellow()),
+            StepStatus::Completed => ("◆", Colors::green()),
+            StepStatus::Pending => ("", Colors::gray()),
         };
 
         let text_color = match status {
-            StepStatus::Active => Colors::GREEN,
-            StepStatus::Completed => Colors::GREEN,
-            StepStatus::Pending => Colors::WHITE,
+            StepStatus::Active => Colors::green(),
+            StepStatus::Completed => Colors::green(),
+            StepStatus::Pending => Colors::white(),
         };
 
         if !indicator.is_empty() {
-            parts.push(format!("{}{}{} ", color, indicator, Colors::RESET));
+            parts.push(format!("{}{}{} ", color, indicator, Colors::reset()));
         }
-        parts.push(format!("{}{}{}", text_color, step, Colors::RESET));
+        parts.push(format!("{}{}{}", text_color, step, Colors::reset()));
     }
 
     print!("{}\r\n", parts.join(""));
@@ -60,31 +81,31 @@ pub fn render_steps(steps: &[(String, StepStatus)]) {
 
 /// Render a title (yellow, bold)
 pub fn render_title(title: &str) {
-    print!("{}{}{}\r\n", Colors::YELLOW, title, Colors::RESET);
+    print!("{}{}{}\r\n", Colors::yellow(), title, Colors::reset());
 }
 
 /// Render a subtitle (cyan)
 pub fn render_subtitle(subtitle: &str) {
-    print!("{}{}{}\r\n", Colors::CYAN, subtitle, Colors::RESET);
+    print!("{}{}{}\r\n", Colors::cyan(), subtitle, Colors::reset());
 }
 
 /// Render a success message (green)
 pub fn render_success(message: &str) {
-    print!("{}{}{}\r\n", Colors::GREEN, message, Colors::RESET);
+    print!("{}{}{}\r\n", Colors::green(), message, Colors::reset());
 }
 
 /// Render an option in a menu
 pub fn render_option(option: &str, is_selected: bool, _is_recommended: bool) {
     let indicator = if is_selected {
-        format!("{}●{}", Colors::GREEN, Colors::RESET)
+        format!("{}●{}", Colors::green(), Colors::reset())
     } else {
-        format!("{}○{}", Colors::GRAY, Colors::RESET)
+        format!("{}○{}", Colors::gray(), Colors::reset())
     };
 
     let text_color = if is_selected {
-        Colors::WHITE
+        Colors::white()
     } else {
-        Colors::GRAY
+        Colors::gray()
     };
 
     print!(
@@ -92,7 +113,7 @@ pub fn render_option(option: &str, is_selected: bool, _is_recommended: bool) {
         indicator,
         text_color,
         option,
-        Colors::RESET
+        Colors::reset()
     );
 }
 
@@ -101,25 +122,25 @@ pub fn render_config_preview(config: &str) {
     print!("\r\n");
     print!(
         "{}Configuration preview:{}\r\n",
-        Colors::CYAN,
-        Colors::RESET
+        Colors::cyan(),
+        Colors::reset()
     );
-    print!("{}\r\n", Colors::GRAY);
+    print!("{}\r\n", Colors::gray());
     for line in config.lines() {
         if line.trim().starts_with('[') {
             // Section headers
-            print!("{}{}{}\r\n", Colors::YELLOW, line, Colors::RESET);
+            print!("{}{}{}\r\n", Colors::yellow(), line, Colors::reset());
         } else if line.contains('=') {
             // Key-value pairs
             if let Some((key, value)) = line.split_once('=') {
                 print!(
                     "{}{}{}={}{}{}\r\n",
-                    Colors::CYAN,
+                    Colors::cyan(),
                     key.trim(),
-                    Colors::RESET,
-                    Colors::GRAY,
+                    Colors::reset(),
+                    Colors::gray(),
                     value.trim(),
-                    Colors::RESET
+                    Colors::reset()
                 );
             } else {
                 print!("{}\r\n", line);
@@ -128,21 +149,21 @@ pub fn render_config_preview(config: &str) {
             print!("{}\r\n", line);
         }
     }
-    print!("{}\r\n", Colors::RESET);
+    print!("{}\r\n", Colors::reset());
 }
 
 /// Render colorized keyboard shortcuts footer (like TUI style)
 pub fn render_footer_shortcuts() {
     // Green for Enter
-    let enter = format!("{}{}{}", Colors::GREEN, "Enter", Colors::GRAY);
+    let enter = format!("{}{}{}", Colors::green(), "Enter", Colors::gray());
     // Yellow for arrows (↑/↓)
-    let arrows = format!("{}{}{}", Colors::YELLOW, " ↑/↓", Colors::GRAY);
+    let arrows = format!("{}{}{}", Colors::yellow(), " ↑/↓", Colors::gray());
     // Light blue/cyan for Type
-    let type_key = format!("{}{}{}", Colors::CYAN, " Type", Colors::GRAY);
+    let type_key = format!("{}{}{}", Colors::cyan(), " Type", Colors::gray());
     // Red for Esc
-    let esc = format!("{}\x1b[1;31m{}{}", Colors::RESET, " Esc", Colors::GRAY);
-    // White for action words
-    let gray = Colors::GRAY;
+    let esc = format!("{}{}{}", Colors::red(), " Esc", Colors::gray());
+    // Gray for action words
+    let gray = Colors::gray();
 
     print!(
         "{}{} confirm {}{} select {}{} search {}{} cancel\r\n",
@@ -152,47 +173,52 @@ pub fn render_footer_shortcuts() {
 
 /// Render an error message (red)
 pub fn render_error(message: &str) {
-    eprint!("\x1b[1;31m{}\x1b[0m\r\n", message);
+    eprint!("{}{}{}\r\n", Colors::red(), message, Colors::reset());
 }
 
 /// Render a warning message (yellow)
 pub fn render_warning(message: &str) {
-    print!("{}⚠️  {}{}\r\n", Colors::YELLOW, message, Colors::RESET);
+    print!("{}⚠️  {}{}\r\n", Colors::yellow(), message, Colors::reset());
 }
 
 /// Render an info message (magenta)
 pub fn render_info(message: &str) {
-    print!("{}{}{}\r\n", Colors::MAGENTA, message, Colors::RESET);
+    print!("{}{}{}\r\n", Colors::magenta(), message, Colors::reset());
 }
 
 /// Render profile name display (Profile in GRAY, name in RESET)
 pub fn render_profile_name(profile_name: &str) {
     print!(
         "{}Profile{} {}{}\r\n",
-        Colors::GRAY,
-        Colors::RESET,
+        Colors::gray(),
+        Colors::reset(),
         profile_name,
-        Colors::RESET
+        Colors::reset()
     );
 }
 
 /// Render default models for a provider in neutral colors (white/gray)
 pub fn render_default_models(smart_model: &str, eco_model: &str) {
-    print!("{}Default models:{}\r\n", Colors::WHITE, Colors::RESET);
+    print!("{}Default models:{}\r\n", Colors::white(), Colors::reset());
     print!(
         "  {}Smart: {}{}\r\n",
-        Colors::GRAY,
-        Colors::WHITE,
+        Colors::gray(),
+        Colors::white(),
         smart_model
     );
-    print!("  {}Eco: {}{}\r\n", Colors::GRAY, Colors::WHITE, eco_model);
+    print!(
+        "  {}Eco: {}{}\r\n",
+        Colors::gray(),
+        Colors::white(),
+        eco_model
+    );
     print!("\r\n");
 }
 
 /// Render a styled telemetry disclaimer box for local providers
 pub fn render_telemetry_disclaimer() {
-    let border = Colors::CYAN;
-    let r = Colors::RESET;
+    let border = Colors::cyan();
+    let r = Colors::reset();
 
     print!("\r\n");
     print!(
@@ -203,7 +229,7 @@ pub fn render_telemetry_disclaimer() {
         "{}│{}  {}Anonymous Telemetry{}                                     {}│{}\r\n",
         border,
         r,
-        Colors::GREEN,
+        Colors::green(),
         r,
         border,
         r
@@ -220,7 +246,7 @@ pub fn render_telemetry_disclaimer() {
         "{}│{}  opt-out: set {}collect_telemetry = false{} in config        {}│{}\r\n",
         border,
         r,
-        Colors::YELLOW,
+        Colors::yellow(),
         r,
         border,
         r

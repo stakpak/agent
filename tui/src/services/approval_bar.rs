@@ -15,9 +15,10 @@
 //! - Left/Right arrows navigate between tabs
 //! - Enter confirms all decisions and executes
 
+use crate::services::detect_term::ThemeColors;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use stakpak_shared::models::integrations::openai::ToolCall;
@@ -317,7 +318,7 @@ impl ApprovalBar {
         // Clear the area first
         f.render_widget(Clear, area);
 
-        let border_color = Color::DarkGray;
+        let border_color = ThemeColors::border();
         let inner_width = area.width.saturating_sub(2) as usize;
 
         // Available width for tabs (full inner width, tabs wrap to next line)
@@ -333,8 +334,8 @@ impl ApprovalBar {
 
             // Status indicator (checkmark or X)
             let (indicator, indicator_color) = match action.status {
-                ApprovalStatus::Approved => ("✓", Color::Green),
-                ApprovalStatus::Rejected => ("✗", Color::Red),
+                ApprovalStatus::Approved => ("✓", ThemeColors::success()),
+                ApprovalStatus::Rejected => ("✗", ThemeColors::danger()),
             };
 
             // Calculate button width: " ✓ Label " with spaces
@@ -359,33 +360,40 @@ impl ApprovalBar {
 
             // Style like approval popup tabs
             if is_selected {
-                // Selected: black text on cyan background
-                // First render the background with indicator colored
+                // Selected: contrasting text on accent background
                 current_line.push(Span::styled(
                     " ",
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                    Style::default()
+                        .fg(ThemeColors::highlight_fg())
+                        .bg(ThemeColors::highlight_bg()),
                 ));
                 current_line.push(Span::styled(
                     indicator,
-                    Style::default().fg(indicator_color).bg(Color::Cyan),
+                    Style::default()
+                        .fg(indicator_color)
+                        .bg(ThemeColors::highlight_bg()),
                 ));
                 current_line.push(Span::styled(
                     format!(" {} ", action.label),
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                    Style::default()
+                        .fg(ThemeColors::highlight_fg())
+                        .bg(ThemeColors::highlight_bg()),
                 ));
             } else {
-                // Unselected: white text on dark background (Indexed 235)
+                // Unselected: muted style
+                let unselected_bg = ThemeColors::unselected_bg();
+                let unselected_fg = ThemeColors::text();
                 current_line.push(Span::styled(
                     " ",
-                    Style::default().fg(Color::White).bg(Color::Indexed(235)),
+                    Style::default().fg(unselected_fg).bg(unselected_bg),
                 ));
                 current_line.push(Span::styled(
                     indicator,
-                    Style::default().fg(indicator_color).bg(Color::Indexed(235)),
+                    Style::default().fg(indicator_color).bg(unselected_bg),
                 ));
                 current_line.push(Span::styled(
                     format!(" {} ", action.label),
-                    Style::default().fg(Color::White).bg(Color::Indexed(235)),
+                    Style::default().fg(unselected_fg).bg(unselected_bg),
                 ));
             }
             current_width += button_width;
@@ -415,7 +423,7 @@ impl ApprovalBar {
             Span::styled(
                 title,
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::title())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("─".repeat(dashes_after), Style::default().fg(border_color)),
@@ -478,17 +486,17 @@ impl ApprovalBar {
         if footer_y < area.y + area.height.saturating_sub(1) {
             // Build footer controls with same style as approval popup
             let footer_controls = vec![
-                Span::styled("space", Style::default().fg(Color::Cyan)),
-                Span::styled(" toggle", Style::default().fg(Color::DarkGray)),
+                Span::styled("space", Style::default().fg(ThemeColors::accent())),
+                Span::styled(" toggle", Style::default().fg(ThemeColors::muted())),
                 Span::raw("  "),
-                Span::styled("←→", Style::default().fg(Color::Cyan)),
-                Span::styled(" navigate", Style::default().fg(Color::DarkGray)),
+                Span::styled("←→", Style::default().fg(ThemeColors::accent())),
+                Span::styled(" navigate", Style::default().fg(ThemeColors::muted())),
                 Span::raw("  "),
-                Span::styled("enter", Style::default().fg(Color::Cyan)),
-                Span::styled(" submit", Style::default().fg(Color::DarkGray)),
+                Span::styled("enter", Style::default().fg(ThemeColors::accent())),
+                Span::styled(" submit", Style::default().fg(ThemeColors::muted())),
                 Span::raw("  "),
-                Span::styled("esc", Style::default().fg(Color::Cyan)),
-                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+                Span::styled("esc", Style::default().fg(ThemeColors::accent())),
+                Span::styled(" reject all", Style::default().fg(ThemeColors::muted())),
             ];
 
             let footer_content_width: usize = footer_controls

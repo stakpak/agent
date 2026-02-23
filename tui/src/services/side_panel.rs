@@ -9,6 +9,7 @@
 
 use crate::app::AppState;
 use crate::services::changeset::{SidePanelSection, TodoStatus};
+use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -28,7 +29,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the side panel with a subtle border
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(ThemeColors::border()));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -200,7 +201,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     let make_row = |label: &str, value: String, value_color: Color| -> Line<'_> {
         let label_span = Span::styled(
             format!("{}  {} ", LEFT_PADDING, label),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         );
         let label_len = LEFT_PADDING.len() + 2 + label.len();
         let value_len = value.chars().count();
@@ -217,10 +218,10 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
 
     // Phase row — derived from plan_metadata status
     let (phase_label, phase_color) = match state.plan_metadata.as_ref().map(|m| m.status) {
-        Some(PlanStatus::Drafting) => ("Drafting", Color::Yellow),
-        Some(PlanStatus::PendingReview) => ("Pending Review", Color::Cyan),
-        Some(PlanStatus::Approved) => ("Approved", Color::Green),
-        None => ("Planning", Color::Yellow),
+        Some(PlanStatus::Drafting) => ("Drafting", ThemeColors::yellow()),
+        Some(PlanStatus::PendingReview) => ("Pending Review", ThemeColors::cyan()),
+        Some(PlanStatus::Approved) => ("Approved", ThemeColors::green()),
+        None => ("Planning", ThemeColors::yellow()),
     };
     lines.push(make_row("Phase", phase_label.to_string(), phase_color));
 
@@ -229,13 +230,13 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
         // Title — truncate to fit
         let avail_for_title = (area.width as usize).saturating_sub(12);
         let title = truncate_string(&meta.title, avail_for_title);
-        lines.push(make_row("Title", title, Color::White));
+        lines.push(make_row("Title", title, ThemeColors::title_primary()));
 
         // Status from front matter
         let (status_label, status_color) = match meta.status {
-            PlanStatus::Drafting => ("Drafting", Color::Yellow),
-            PlanStatus::PendingReview => ("Pending Review", Color::Cyan),
-            PlanStatus::Approved => ("Approved", Color::Green),
+            PlanStatus::Drafting => ("Drafting", ThemeColors::yellow()),
+            PlanStatus::PendingReview => ("Pending Review", ThemeColors::cyan()),
+            PlanStatus::Approved => ("Approved", ThemeColors::green()),
         };
         lines.push(make_row(
             "Status",
@@ -246,7 +247,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
         lines.push(make_row(
             "File",
             "Not created yet".to_string(),
-            Color::DarkGray,
+            ThemeColors::dark_gray(),
         ));
     }
 
@@ -280,7 +281,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         // Indent label by 2 spaces to align with "No tasks"
         let label_span = Span::styled(
             format!("{}  {} ", LEFT_PADDING, label),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         );
         // LEFT_PADDING (2) + "  " (2 indent) + label
         let label_len = LEFT_PADDING.len() + 2 + label.len();
@@ -307,7 +308,11 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
     // Show tokens info
     if tokens == 0 {
-        lines.push(make_row("Tokens", "N/A".to_string(), Color::DarkGray));
+        lines.push(make_row(
+            "Tokens",
+            "N/A".to_string(),
+            ThemeColors::dark_gray(),
+        ));
     } else {
         let percentage = if max_tokens > 0 {
             ((tokens as f64 / max_tokens as f64) * 100.0).round() as u32
@@ -323,7 +328,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
                 format_tokens(max_tokens),
                 percentage
             ),
-            Color::White,
+            ThemeColors::title_primary(),
         ));
     }
 
@@ -334,17 +339,17 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     let avail_for_model = area.width as usize - 10;
     let truncated_model = truncate_string(model_name, avail_for_model);
 
-    lines.push(make_row("Model", truncated_model, Color::Cyan));
+    lines.push(make_row("Model", truncated_model, ThemeColors::cyan()));
 
     // Provider - from active model (display name)
     let provider = format_provider_display_name(&active_model.provider);
-    lines.push(make_row("Provider", provider, Color::DarkGray));
+    lines.push(make_row("Provider", provider, ThemeColors::dark_gray()));
 
     // Profile
     lines.push(make_row(
         "Profile",
         state.current_profile_name.clone(),
-        Color::DarkGray,
+        ThemeColors::dark_gray(),
     ));
 
     let paragraph = Paragraph::new(lines);
@@ -375,7 +380,7 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     let make_row = |label: &str, value: String, value_color: Color| -> Line {
         let label_span = Span::styled(
             format!("{}  {} ", LEFT_PADDING, label),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         );
         // LEFT_PADDING (2) + "  " (2 indent) + label
         let label_len = LEFT_PADDING.len() + 2 + label.len();
@@ -400,20 +405,28 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
             .find(|p| p.status == "active")
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "-".to_string());
-        lines.push(make_row("Plan", plan_name, Color::Cyan));
+        lines.push(make_row("Plan", plan_name, ThemeColors::cyan()));
 
         let credits = info.features.get("credits");
         if let Some(credit_feature) = credits {
             let balance = credit_feature.balance.unwrap_or(0.0);
-            lines.push(make_row("Balance", format!("${:.2}", balance), Color::Cyan));
+            lines.push(make_row(
+                "Balance",
+                format!("${:.2}", balance),
+                ThemeColors::cyan(),
+            ));
         } else {
-            lines.push(make_row("Balance", "-".to_string(), Color::DarkGray));
+            lines.push(make_row(
+                "Balance",
+                "-".to_string(),
+                ThemeColors::dark_gray(),
+            ));
         }
     } else {
         lines.push(Line::from(Span::styled(
             format!("{}  Loading...", LEFT_PADDING),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(ThemeColors::dark_gray())
                 .add_modifier(Modifier::ITALIC),
         )));
     }
@@ -453,7 +466,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
         lines.push(Line::from(Span::styled(
             format!("{}  No tasks", LEFT_PADDING),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(ThemeColors::dark_gray())
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
@@ -468,9 +481,9 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
 
         for todo in &state.todos {
             let (symbol, symbol_color, text_color) = match todo.status {
-                TodoStatus::Done => ("✓", Color::Green, Color::DarkGray),
-                TodoStatus::InProgress => ("◐", Color::Yellow, Color::Reset),
-                TodoStatus::Pending => ("○", Color::DarkGray, Color::DarkGray),
+                TodoStatus::Done => ("✓", ThemeColors::green(), ThemeColors::dark_gray()),
+                TodoStatus::InProgress => ("◐", ThemeColors::yellow(), Color::Reset),
+                TodoStatus::Pending => ("○", ThemeColors::dark_gray(), ThemeColors::dark_gray()),
             };
 
             match todo.item_type {
@@ -510,7 +523,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
                             lines.push(Line::from(vec![
                                 Span::styled(
                                     format!("{}     └ ", LEFT_PADDING),
-                                    Style::default().fg(Color::DarkGray),
+                                    Style::default().fg(ThemeColors::dark_gray()),
                                 ),
                                 Span::styled(
                                     format!("{} ", symbol),
@@ -534,12 +547,12 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!("{}     ⋮ ", LEFT_PADDING),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(ThemeColors::dark_gray()),
                         ),
                         Span::styled(
                             todo.text.clone(),
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(ThemeColors::dark_gray())
                                 .add_modifier(Modifier::ITALIC),
                         ),
                     ]));
@@ -596,7 +609,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
         lines.push(Line::from(Span::styled(
             format!("{}  No changes", LEFT_PADDING),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(ThemeColors::dark_gray())
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
@@ -616,23 +629,25 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
             // Determine state label and color
             let state_label = file.state.label();
             let state_color = match file.state {
-                FileState::Created => Color::Green,
-                FileState::Modified => Color::Blue,
-                FileState::Removed => Color::Red,
-                FileState::Reverted => Color::DarkGray,
-                FileState::Deleted => Color::DarkGray,
+                FileState::Created => ThemeColors::green(),
+                FileState::Modified => ThemeColors::accent_secondary(),
+                FileState::Removed => ThemeColors::red(),
+                FileState::Reverted => ThemeColors::dark_gray(),
+                FileState::Deleted => ThemeColors::dark_gray(),
             };
 
             // File Name Style
             let name_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::White)
+                Style::default()
+                    .fg(ThemeColors::highlight_fg())
+                    .bg(ThemeColors::highlight_bg())
             } else {
                 match file.state {
-                    FileState::Removed => Style::default().fg(Color::Red),
+                    FileState::Removed => Style::default().fg(ThemeColors::red()),
                     FileState::Reverted | FileState::Deleted => Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(ThemeColors::dark_gray())
                         .add_modifier(Modifier::CROSSED_OUT),
-                    _ => Style::default().fg(Color::DarkGray),
+                    _ => Style::default().fg(ThemeColors::dark_gray()),
                 }
             };
 
@@ -647,19 +662,22 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                 FileState::Reverted => (
                     vec![Span::styled(
                         "REVERTED",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(ThemeColors::dark_gray()),
                     )],
                     8,
                 ),
                 FileState::Deleted => (
                     vec![Span::styled(
                         "DELETED",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(ThemeColors::dark_gray()),
                     )],
                     7,
                 ),
                 FileState::Removed => (
-                    vec![Span::styled("REMOVED", Style::default().fg(Color::Red))],
+                    vec![Span::styled(
+                        "REMOVED",
+                        Style::default().fg(ThemeColors::red()),
+                    )],
                     7,
                 ),
                 _ => {
@@ -667,9 +685,15 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                     let removed = file.total_lines_removed();
                     (
                         vec![
-                            Span::styled(format!("+{}", added), Style::default().fg(Color::Green)),
+                            Span::styled(
+                                format!("+{}", added),
+                                Style::default().fg(ThemeColors::green()),
+                            ),
                             Span::raw(" "),
-                            Span::styled(format!("-{}", removed), Style::default().fg(Color::Red)),
+                            Span::styled(
+                                format!("-{}", removed),
+                                Style::default().fg(ThemeColors::red()),
+                            ),
                         ],
                         format!("+{} -{}", added, removed).len(),
                     )
@@ -697,7 +721,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                 .saturating_sub(prefix_visual_len + label_len + truncated_name.len() + stats_len);
 
             let mut line_spans = vec![
-                Span::styled(prefix_part, Style::default().fg(Color::DarkGray)),
+                Span::styled(prefix_part, Style::default().fg(ThemeColors::dark_gray())),
                 label_span,
                 Span::styled(truncated_name, name_style),
                 Span::raw(" ".repeat(spacing)),
@@ -712,9 +736,11 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                     let time = edit.timestamp.format("%H:%M").to_string();
                     let edit_selected = is_selected && j == file.selected_edit;
                     let edit_style = if edit_selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default()
+                            .fg(ThemeColors::highlight_fg())
+                            .bg(ThemeColors::highlight_bg())
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(ThemeColors::dark_gray())
                     };
                     lines.push(Line::from(Span::styled(
                         format!(
@@ -733,7 +759,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
         if total_files > max_display {
             lines.push(Line::from(Span::styled(
                 format!("{}  ctrl+g to show all files", LEFT_PADDING),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )));
         }
     }
@@ -751,7 +777,7 @@ fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
     // Line 1: Version (left)
     lines.push(Line::from(vec![Span::styled(
         format!("{}v{}", LEFT_PADDING, version),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(ThemeColors::dark_gray()),
     )]));
 
     // Empty line between version/profile and shortcuts
@@ -764,25 +790,25 @@ fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
 
     let left_padding_span = Span::styled(
         LEFT_PADDING.to_string(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(ThemeColors::muted()),
     );
 
     lines.push(Line::from(vec![
         left_padding_span.clone(),
-        Span::styled("tab", Style::default().fg(Color::DarkGray)),
-        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::styled("tab", Style::default().fg(ThemeColors::muted())),
+        Span::styled(" select", Style::default().fg(ThemeColors::accent())),
         Span::raw("  "),
-        Span::styled("enter", Style::default().fg(Color::DarkGray)),
-        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
+        Span::styled("enter", Style::default().fg(ThemeColors::muted())),
+        Span::styled(" toggle", Style::default().fg(ThemeColors::accent())),
     ]));
 
     lines.push(Line::from(vec![
         left_padding_span,
-        Span::styled("ctrl+y", Style::default().fg(Color::DarkGray)),
-        Span::styled(" hide", Style::default().fg(Color::Cyan)),
+        Span::styled("ctrl+y", Style::default().fg(ThemeColors::muted())),
+        Span::styled(" hide", Style::default().fg(ThemeColors::accent())),
         Span::raw("  "),
-        Span::styled("ctrl+g", Style::default().fg(Color::DarkGray)),
-        Span::styled(" changes", Style::default().fg(Color::Cyan)),
+        Span::styled("ctrl+g", Style::default().fg(ThemeColors::muted())),
+        Span::styled(" changes", Style::default().fg(ThemeColors::accent())),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -793,10 +819,10 @@ fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
 fn section_header_style(focused: bool) -> Style {
     if focused {
         Style::default()
-            .fg(Color::Magenta)
+            .fg(ThemeColors::magenta())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Reset)
+        Style::default().fg(ThemeColors::text())
     }
 }
 

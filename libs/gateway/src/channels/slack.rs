@@ -16,11 +16,10 @@ use crate::{
         ApprovalButton, ButtonStyle, Channel, ChannelTestResult, DeliveryReceipt,
         parse_approval_callback,
     },
-    chunking::chunk_text,
+    slack_blocks::markdown_to_slack_messages,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
 
-const SLACK_TEXT_LIMIT: usize = 40_000;
 const RECEIVED_REACTION: &str = "eyes";
 
 pub struct SlackChannel {
@@ -100,14 +99,16 @@ impl SlackChannel {
         &self,
         channel: &str,
         text: &str,
-        thread_ts: Option<&str>,
         blocks: Option<Vec<serde_json::Value>>,
+        attachments: Option<Vec<serde_json::Value>>,
+        thread_ts: Option<&str>,
     ) -> Result<String> {
         let payload = ChatPostMessage {
             channel: channel.to_string(),
             text: text.to_string(),
-            thread_ts: thread_ts.map(ToOwned::to_owned),
             blocks,
+            attachments,
+            thread_ts: thread_ts.map(ToOwned::to_owned),
         };
 
         loop {
@@ -661,14 +662,41 @@ impl Channel for SlackChannel {
     async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
         let (channel, channel_type, thread_ts) = Self::extract_target(&reply)?;
 
-        let chunks = chunk_text(&reply.text, SLACK_TEXT_LIMIT);
+        let slack_messages = markdown_to_slack_messages(&reply.text);
         let mut first_message_ts: Option<String> = None;
-        for chunk in chunks {
+        let multi_message = slack_messages.len() > 1;
+
+        if slack_messages.is_empty() {
+            // Empty content — send a minimal plain-text message.
             let ts = self
-                .post_message(&channel, &chunk, thread_ts.as_deref(), None)
+                .post_message(&channel, &reply.text, None, None, thread_ts.as_deref())
                 .await?;
-            if first_message_ts.is_none() {
-                first_message_ts = Some(ts);
+            first_message_ts = Some(ts);
+        } else {
+            for (i, msg) in slack_messages.into_iter().enumerate() {
+                // Slack rate limit: ~1 message/second/channel.
+                // Add a small delay between split messages to avoid hitting it.
+                if multi_message && i > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+                }
+
+                let blocks = if msg.blocks.is_empty() {
+                    None
+                } else {
+                    Some(msg.blocks)
+                };
+                let ts = self
+                    .post_message(
+                        &channel,
+                        &msg.fallback_text,
+                        blocks,
+                        msg.attachments,
+                        thread_ts.as_deref(),
+                    )
+                    .await?;
+                if first_message_ts.is_none() {
+                    first_message_ts = Some(ts);
+                }
             }
         }
 
@@ -694,7 +722,13 @@ impl Channel for SlackChannel {
         let (channel, _channel_type, thread_ts) = Self::extract_target(&reply)?;
         let blocks = build_approval_blocks(&reply.text, &buttons);
         let ts = self
-            .post_message(&channel, &reply.text, thread_ts.as_deref(), Some(blocks))
+            .post_message(
+                &channel,
+                &reply.text,
+                Some(blocks),
+                None,
+                thread_ts.as_deref(),
+            )
             .await?;
         Ok(format!("{channel}:{ts}"))
     }
@@ -820,9 +854,11 @@ struct ChatPostMessage {
     channel: String,
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    thread_ts: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     blocks: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachments: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_ts: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

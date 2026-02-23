@@ -128,6 +128,13 @@ struct ApiError {
     message: String,
 }
 
+const MAX_INTERACTIVE_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_INTERACTIVE_CALLER_CONTEXT_ITEMS: usize = 50;
+const MAX_INTERACTIVE_CALLER_CONTEXT_NAME_BYTES: usize = 256;
+const MAX_INTERACTIVE_CALLER_CONTEXT_PRIORITY_BYTES: usize = 32;
+const MAX_INTERACTIVE_CALLER_CONTEXT_ITEM_BYTES: usize = 10 * 1024;
+const MAX_INTERACTIVE_CALLER_CONTEXT_TOTAL_BYTES: usize = 100 * 1024;
+
 pub fn router(state: Arc<GatewayApiState>) -> Router {
     Router::new()
         .route(
@@ -245,6 +252,24 @@ async fn send_handler(
             .into_response();
     };
 
+    if let Some(interactive_request) = interactive.as_ref() {
+        if state.auth_token.is_none() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError {
+                    error: "interactive_auth_required".to_string(),
+                    message: "interactive sends require gateway auth token configuration"
+                        .to_string(),
+                }),
+            )
+                .into_response();
+        }
+
+        if let Err(error) = validate_interactive_options(interactive_request) {
+            return (StatusCode::BAD_REQUEST, Json(error)).into_response();
+        }
+    }
+
     let mut effective_target = target.clone();
 
     let first_reply = OutboundReply {
@@ -279,28 +304,6 @@ async fn send_handler(
     }
 
     if let Some(interactive) = interactive {
-        if interactive.prompt.trim().is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiError {
-                    error: "invalid_interactive_prompt".to_string(),
-                    message: "interactive.prompt must not be empty".to_string(),
-                }),
-            )
-                .into_response();
-        }
-
-        if interactive.timeout == Some(0) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiError {
-                    error: "invalid_interactive_timeout".to_string(),
-                    message: "interactive.timeout must be greater than 0".to_string(),
-                }),
-            )
-                .into_response();
-        }
-
         if let Some(check_output) = request_context
             .as_ref()
             .and_then(extract_check_output)
@@ -604,6 +607,103 @@ async fn send_interactive_failure_notice(
     }
 }
 
+fn validate_interactive_options(interactive: &InteractiveOptions) -> Result<(), ApiError> {
+    if interactive.prompt.trim().is_empty() {
+        return Err(ApiError {
+            error: "invalid_interactive_prompt".to_string(),
+            message: "interactive.prompt must not be empty".to_string(),
+        });
+    }
+
+    if interactive.prompt.len() > MAX_INTERACTIVE_PROMPT_BYTES {
+        return Err(ApiError {
+            error: "invalid_interactive_prompt".to_string(),
+            message: format!(
+                "interactive.prompt exceeds {} bytes",
+                MAX_INTERACTIVE_PROMPT_BYTES
+            ),
+        });
+    }
+
+    if interactive.timeout == Some(0) {
+        return Err(ApiError {
+            error: "invalid_interactive_timeout".to_string(),
+            message: "interactive.timeout must be greater than 0".to_string(),
+        });
+    }
+
+    if interactive.caller_context.len() > MAX_INTERACTIVE_CALLER_CONTEXT_ITEMS {
+        return Err(ApiError {
+            error: "invalid_interactive_caller_context".to_string(),
+            message: format!(
+                "interactive.caller_context supports up to {} items",
+                MAX_INTERACTIVE_CALLER_CONTEXT_ITEMS
+            ),
+        });
+    }
+
+    let mut total_payload_bytes = interactive.prompt.len();
+
+    for item in &interactive.caller_context {
+        let name = item.name.trim();
+        if name.is_empty() {
+            return Err(ApiError {
+                error: "invalid_interactive_caller_context".to_string(),
+                message: "interactive.caller_context item name must not be empty".to_string(),
+            });
+        }
+
+        let name_bytes = item.name.len();
+        if name_bytes > MAX_INTERACTIVE_CALLER_CONTEXT_NAME_BYTES {
+            return Err(ApiError {
+                error: "invalid_interactive_caller_context".to_string(),
+                message: format!(
+                    "interactive.caller_context item name '{}' exceeds {} bytes",
+                    item.name, MAX_INTERACTIVE_CALLER_CONTEXT_NAME_BYTES
+                ),
+            });
+        }
+
+        let priority_bytes = item.priority.as_ref().map_or(0, String::len);
+        if priority_bytes > MAX_INTERACTIVE_CALLER_CONTEXT_PRIORITY_BYTES {
+            return Err(ApiError {
+                error: "invalid_interactive_caller_context".to_string(),
+                message: format!(
+                    "interactive.caller_context item '{}' priority exceeds {} bytes",
+                    item.name, MAX_INTERACTIVE_CALLER_CONTEXT_PRIORITY_BYTES
+                ),
+            });
+        }
+
+        let content_bytes = item.content.len();
+        if content_bytes > MAX_INTERACTIVE_CALLER_CONTEXT_ITEM_BYTES {
+            return Err(ApiError {
+                error: "invalid_interactive_caller_context".to_string(),
+                message: format!(
+                    "interactive.caller_context item '{}' exceeds {} bytes",
+                    item.name, MAX_INTERACTIVE_CALLER_CONTEXT_ITEM_BYTES
+                ),
+            });
+        }
+
+        total_payload_bytes = total_payload_bytes
+            .saturating_add(name_bytes)
+            .saturating_add(priority_bytes)
+            .saturating_add(content_bytes);
+        if total_payload_bytes > MAX_INTERACTIVE_CALLER_CONTEXT_TOTAL_BYTES {
+            return Err(ApiError {
+                error: "invalid_interactive_caller_context".to_string(),
+                message: format!(
+                    "interactive payload exceeds {} bytes",
+                    MAX_INTERACTIVE_CALLER_CONTEXT_TOTAL_BYTES
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn extract_check_output(context: &serde_json::Value) -> Option<String> {
     context
         .get("check_output")
@@ -773,10 +873,136 @@ async fn session_status_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        CallerContextInput, InteractiveOptions, build_interactive_prompt, extract_check_output,
-        render_title,
+        CallerContextInput, GatewayApiState, GatewaySendRequest, InteractiveOptions,
+        build_interactive_prompt, extract_check_output, render_title, send_handler,
+        validate_interactive_options,
     };
+    use crate::channels::{Channel, ChannelTestResult};
+    use crate::client::StakpakClient;
+    use crate::config::ApprovalMode;
+    use crate::dispatcher::Dispatcher;
+    use crate::router::RouterConfig;
+    use crate::store::GatewayStore;
     use crate::targeting::ChannelTarget;
+    use crate::types::{ChannelId, InboundMessage, OutboundReply};
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+    use tokio::sync::{RwLock, mpsc};
+    use tokio_util::sync::CancellationToken;
+
+    struct MockChannel {
+        id: ChannelId,
+        send_count: Arc<AtomicUsize>,
+    }
+
+    impl MockChannel {
+        fn new(id: &str, send_count: Arc<AtomicUsize>) -> Self {
+            Self {
+                id: ChannelId::from(id),
+                send_count,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Channel for MockChannel {
+        fn id(&self) -> &ChannelId {
+            &self.id
+        }
+
+        fn display_name(&self) -> &str {
+            "Mock Channel"
+        }
+
+        async fn start(
+            &self,
+            _inbound_tx: mpsc::Sender<InboundMessage>,
+            _cancel: CancellationToken,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send(&self, _reply: OutboundReply) -> Result<()> {
+            self.send_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn test(&self) -> Result<ChannelTestResult> {
+            Ok(ChannelTestResult {
+                channel: self.id.0.clone(),
+                identity: "mock".to_string(),
+                details: "ok".to_string(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn interactive_request_without_auth_is_rejected_before_delivery() {
+        let send_count = Arc::new(AtomicUsize::new(0));
+        let channel_impl = Arc::new(MockChannel::new("slack", send_count.clone()));
+
+        let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
+        channels.insert("slack".to_string(), channel_impl);
+
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("failed to open in-memory gateway store"),
+        );
+
+        let client = StakpakClient::new("http://127.0.0.1:3999".to_string(), "".to_string());
+        let dispatcher = Arc::new(Dispatcher::new(
+            client.clone(),
+            channels.clone(),
+            store.clone(),
+            RouterConfig::default(),
+            None,
+            ApprovalMode::AllowAll,
+            Vec::new(),
+            "{channel}:{chat_type}:{chat_id}".to_string(),
+        ));
+
+        let state = Arc::new(GatewayApiState {
+            channels,
+            store,
+            started_at: Instant::now(),
+            delivery_context_ttl_hours: 4,
+            auth_token: None,
+            client,
+            dispatcher,
+            router_config: RouterConfig::default(),
+            title_template: "{channel}:{chat_type}:{chat_id}".to_string(),
+            inbound_tx: Arc::new(RwLock::new(None)),
+        });
+
+        let request = GatewaySendRequest {
+            channel: "slack".to_string(),
+            target: serde_json::json!({"channel": "C123"}),
+            text: "hello".to_string(),
+            context: None,
+            interactive: Some(InteractiveOptions {
+                prompt: "run".to_string(),
+                caller_context: Vec::new(),
+                model: None,
+                sandbox: None,
+                timeout: None,
+                title: None,
+            }),
+        };
+
+        let response = send_handler(state, HeaderMap::new(), request)
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(send_count.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn extract_check_output_reads_context_field() {
@@ -841,5 +1067,92 @@ mod tests {
         );
 
         assert!(prompt.contains("check_output"));
+    }
+
+    #[test]
+    fn validate_interactive_options_rejects_empty_prompt() {
+        let options = InteractiveOptions {
+            prompt: "   ".to_string(),
+            caller_context: Vec::new(),
+            model: None,
+            sandbox: None,
+            timeout: None,
+            title: None,
+        };
+
+        let result = validate_interactive_options(&options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_interactive_options_rejects_large_caller_context_item() {
+        let options = InteractiveOptions {
+            prompt: "Investigate alert".to_string(),
+            caller_context: vec![CallerContextInput {
+                name: "check_output".to_string(),
+                content: "x".repeat((10 * 1024) + 1),
+                priority: Some("high".to_string()),
+            }],
+            model: None,
+            sandbox: None,
+            timeout: None,
+            title: None,
+        };
+
+        let result = validate_interactive_options(&options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_interactive_options_rejects_large_prompt() {
+        let options = InteractiveOptions {
+            prompt: "x".repeat((32 * 1024) + 1),
+            caller_context: Vec::new(),
+            model: None,
+            sandbox: None,
+            timeout: None,
+            title: None,
+        };
+
+        let result = validate_interactive_options(&options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_interactive_options_rejects_empty_caller_context_name() {
+        let options = InteractiveOptions {
+            prompt: "Investigate alert".to_string(),
+            caller_context: vec![CallerContextInput {
+                name: "   ".to_string(),
+                content: "something".to_string(),
+                priority: Some("high".to_string()),
+            }],
+            model: None,
+            sandbox: None,
+            timeout: None,
+            title: None,
+        };
+
+        let result = validate_interactive_options(&options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_interactive_options_rejects_large_priority() {
+        let options = InteractiveOptions {
+            prompt: "Investigate alert".to_string(),
+            caller_context: vec![CallerContextInput {
+                name: "schedule".to_string(),
+                content: "run now".to_string(),
+                priority: Some("x".repeat(33)),
+            }],
+            model: None,
+            sandbox: None,
+            timeout: None,
+            title: None,
+        };
+
+        let result = validate_interactive_options(&options);
+        assert!(result.is_err());
     }
 }

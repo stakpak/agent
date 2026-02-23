@@ -12,11 +12,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 use uuid::Uuid;
 
+use stakpak_shared::utils::truncate_chars_with_ellipsis;
+
 use crate::{
     channels::{ApprovalButton, ButtonStyle, Channel},
     client::{
-        MessageType, RunErrorPayload, SendMessageOptions, StakpakClient, ToolCallsProposedPayload,
-        ToolDecisionAction, ToolDecisionInput,
+        CallerContextInput, MessageType, RunErrorPayload, SendMessageOptions, StakpakClient,
+        ToolCallsProposedPayload, ToolDecisionAction, ToolDecisionInput,
     },
     config::ApprovalMode,
     router::{RouterConfig, resolve_routing_key},
@@ -30,6 +32,9 @@ pub struct Dispatcher {
     channels: HashMap<String, Arc<dyn Channel>>,
     store: Arc<GatewayStore>,
     router_config: RouterConfig,
+    // TODO: persist dispatcher state (active_runs, pending_queues, event_cursors) to store
+    // for crash recovery. Current behavior relies on watch-side reconciler for eventual
+    // consistency after gateway restart.
     active_runs: Mutex<HashMap<String, ActiveRun>>,
     pending_queues: Mutex<HashMap<String, Vec<QueuedMessage>>>,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
@@ -72,6 +77,7 @@ struct QueuedMessage {
     inbound: InboundMessage,
     text: String,
     run_options: RunStartOptions,
+    context: Vec<CallerContextInput>,
 }
 
 #[derive(Debug)]
@@ -206,16 +212,16 @@ impl Dispatcher {
         );
 
         let target_key = target_key_from_inbound(&inbound);
-        let enriched_text = match self
+        let caller_context = match self
             .store
             .pop_delivery_context(&inbound.channel.0, &target_key)
             .await
         {
-            Ok(Some(context)) => enrich_with_context(&context, &inbound.text),
-            Ok(None) => inbound.text.clone(),
+            Ok(Some(context)) => delivery_context_to_caller_context(&context),
+            Ok(None) => Vec::new(),
             Err(error) => {
                 warn!(error = %error, "failed to pop delivery context");
-                inbound.text.clone()
+                Vec::new()
             }
         };
 
@@ -257,9 +263,10 @@ impl Dispatcher {
 
         let run_options = extract_run_options(&inbound.metadata);
         let queued = QueuedMessage {
-            inbound,
-            text: enriched_text,
+            text: inbound.text.clone(),
             run_options,
+            context: caller_context,
+            inbound,
         };
 
         if self.is_run_active(&mapping.session_id) {
@@ -703,6 +710,7 @@ impl Dispatcher {
                     message_type: MessageType::Message,
                     run_id: None,
                     sandbox: queued.run_options.sandbox,
+                    context: queued.context.clone(),
                 },
             )
             .await;
@@ -820,33 +828,35 @@ impl Dispatcher {
 
         let combined_text = format_batched_queue_messages(&queue);
 
-        if let Some(latest) = queue.last() {
-            let routing_key = resolve_routing_key(
-                &self.router_config,
-                &latest.inbound.channel,
-                &latest.inbound.peer_id,
-                &latest.inbound.chat_type,
-            );
-            let delivery = self.delivery_context_from_inbound(&latest.inbound);
-            if let Err(error) = self.store.update_delivery(&routing_key, &delivery).await {
-                warn!(error = %error, "failed to refresh delivery context from queue");
-            }
+        // Keep only the latest caller context snapshot to avoid breaching
+        // context item limits during long queue drains.
+        let combined_context = latest_non_empty_context(&queue);
+
+        let latest = &queue[queue.len() - 1];
+        let routing_key = resolve_routing_key(
+            &self.router_config,
+            &latest.inbound.channel,
+            &latest.inbound.peer_id,
+            &latest.inbound.chat_type,
+        );
+        let delivery = self.delivery_context_from_inbound(&latest.inbound);
+        if let Err(error) = self.store.update_delivery(&routing_key, &delivery).await {
+            warn!(error = %error, "failed to refresh delivery context from queue");
         }
 
-        let Some(latest) = queue.last() else {
-            return Ok(());
+        let queued = QueuedMessage {
+            inbound: latest.inbound.clone(),
+            text: combined_text,
+            run_options: latest.run_options.clone(),
+            context: combined_context,
         };
 
-        self.start_run(
-            session_id.to_string(),
-            QueuedMessage {
-                inbound: latest.inbound.clone(),
-                text: combined_text,
-                run_options: latest.run_options.clone(),
-            },
-            run_tx,
-        )
-        .await
+        if let Err(error) = self.start_run(session_id.to_string(), queued, run_tx).await {
+            self.restore_queue(session_id.to_string(), queue)?;
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     fn render_title(&self, inbound: &InboundMessage) -> String {
@@ -883,6 +893,19 @@ impl Dispatcher {
             .map_err(|_| "failed to lock pending_queues".to_string())?;
 
         guard.entry(session_id).or_default().push(message);
+        Ok(())
+    }
+
+    fn restore_queue(&self, session_id: String, drained: Vec<QueuedMessage>) -> Result<(), String> {
+        let mut guard = self
+            .pending_queues
+            .lock()
+            .map_err(|_| "failed to lock pending_queues".to_string())?;
+
+        let entry = guard.entry(session_id).or_default();
+        let existing = std::mem::take(entry);
+        *entry = merge_drained_queue(drained, existing);
+
         Ok(())
     }
 
@@ -989,6 +1012,14 @@ impl Dispatcher {
     }
 }
 
+fn merge_drained_queue(
+    mut drained: Vec<QueuedMessage>,
+    mut existing: Vec<QueuedMessage>,
+) -> Vec<QueuedMessage> {
+    drained.append(&mut existing);
+    drained
+}
+
 async fn consume_run_events(
     client: StakpakClient,
     run_context: RunContext,
@@ -1032,7 +1063,7 @@ async fn consume_run_events(
                 return RunOutcome::Cancelled { cursor };
             }
             _ = &mut timeout_future => {
-                flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                 deliver_channel_text(&run_context.channels, &run_context.delivery, "⏱️ Interactive run timed out.").await;
                 return RunOutcome::Error {
                     error: Some(RunErrorPayload {
@@ -1046,11 +1077,11 @@ async fn consume_run_events(
                 let event = match next {
                     Ok(Some(event)) => event,
                     Ok(None) => {
-                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                         return RunOutcome::StreamEnded { cursor };
                     }
                     Err(error) => {
-                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                         warn!(error = %error, "run event stream read failed");
                         return RunOutcome::Error {
                             error: None,
@@ -1073,14 +1104,14 @@ async fn consume_run_events(
                             streamed_buffer.push_str(&delta);
 
                             if should_flush_stream_buffer(&streamed_buffer, last_stream_at.elapsed()) {
-                                flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                                flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, false).await;
                                 last_stream_at = Instant::now();
                             }
                         }
                     }
                     "tool_calls_proposed" => {
                         if let Some(proposed) = event.as_tool_calls_proposed() {
-                            flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                            flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
 
                             match approval_mode {
                                 ApprovalMode::Allowlist => {
@@ -1166,17 +1197,34 @@ async fn consume_run_events(
                         }
                     }
                     "run_completed" => {
-                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                         return RunOutcome::Completed { cursor };
                     }
                     "run_error" => {
-                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer).await;
+                        flush_stream_buffer(
+                            &run_context.channels,
+                            &run_context.delivery,
+                            &mut streamed_buffer,
+                            true,
+                        )
+                        .await;
                         let payload = event.as_run_error();
                         let error_text = payload
                             .as_ref()
                             .and_then(|payload| payload.error.clone())
-                            .unwrap_or_else(|| "Agent run failed".to_string());
-                        deliver_channel_text(&run_context.channels, &run_context.delivery, format!("⚠️ {error_text}")).await;
+                            .unwrap_or_else(|| "unknown error".to_string());
+                        warn!(
+                            session_id = %run_context.session_id,
+                            run_id = %run_context.run_id,
+                            error = %error_text,
+                            "interactive run failed"
+                        );
+                        deliver_channel_text(
+                            &run_context.channels,
+                            &run_context.delivery,
+                            format!("⚠️ Agent run failed (session: {})", run_context.session_id),
+                        )
+                        .await;
 
                         return RunOutcome::Error {
                             error: payload,
@@ -1198,22 +1246,50 @@ fn should_flush_stream_buffer(buffer: &str, elapsed_since_last_stream: Duration)
         return false;
     }
 
-    buffer.contains("\n\n")
-        || buffer.chars().count() >= STREAM_MAX_BUFFER_LEN
-        || elapsed_since_last_stream >= STREAM_MIN_INTERVAL
+    if buffer.contains("\n\n") {
+        return true;
+    }
+
+    let has_complete_line = buffer.contains('\n');
+    has_complete_line
+        && (buffer.chars().count() >= STREAM_MAX_BUFFER_LEN
+            || elapsed_since_last_stream >= STREAM_MIN_INTERVAL)
+}
+
+fn take_completed_line_chunk(buffer: &mut String) -> Option<String> {
+    let split_index = buffer.rfind('\n')?;
+    let split_after = split_index + '\n'.len_utf8();
+
+    let remainder = buffer.split_off(split_after);
+    let chunk = std::mem::replace(buffer, remainder);
+
+    Some(chunk)
 }
 
 async fn flush_stream_buffer(
     channels: &HashMap<String, Arc<dyn Channel>>,
     delivery: &DeliveryContext,
     buffer: &mut String,
+    force: bool,
 ) {
     if buffer.trim().is_empty() {
         buffer.clear();
         return;
     }
 
-    let text = std::mem::take(buffer);
+    let text = if force {
+        std::mem::take(buffer)
+    } else {
+        let Some(chunk) = take_completed_line_chunk(buffer) else {
+            return;
+        };
+        chunk
+    };
+
+    if text.trim().is_empty() {
+        return;
+    }
+
     deliver_channel_text(channels, delivery, text.trim()).await;
 }
 
@@ -1425,42 +1501,71 @@ fn remaining_timeout_after_approval(
     timeout_seconds.map(|seconds| seconds.saturating_sub(approval_wait.as_secs()))
 }
 
-fn enrich_with_context(context: &serde_json::Value, user_text: &str) -> String {
-    let mut enriched =
-        String::from("The user is replying to a previous notification.\n\n--- Watch Context ---\n");
+const MAX_CONTEXT_FIELD_CHARS: usize = 8_000;
+
+fn latest_non_empty_context(queue: &[QueuedMessage]) -> Vec<CallerContextInput> {
+    queue
+        .iter()
+        .rev()
+        .find_map(|item| {
+            if item.context.is_empty() {
+                None
+            } else {
+                Some(item.context.clone())
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn delivery_context_to_caller_context(context: &serde_json::Value) -> Vec<CallerContextInput> {
+    let mut lines = vec![
+        "The user is replying to a previous notification.".to_string(),
+        "--- Watch Context ---".to_string(),
+    ];
 
     if let Some(trigger) = context.get("trigger").and_then(|value| value.as_str()) {
-        enriched.push_str(&format!("Trigger: {trigger}\n"));
+        lines.push(format!(
+            "Trigger: {}",
+            truncate_chars_with_ellipsis(trigger, MAX_CONTEXT_FIELD_CHARS)
+        ));
     }
 
     if let Some(status) = context.get("status").and_then(|value| value.as_str()) {
-        enriched.push_str(&format!("Status: {status}\n"));
+        lines.push(format!(
+            "Status: {}",
+            truncate_chars_with_ellipsis(status, MAX_CONTEXT_FIELD_CHARS)
+        ));
     }
 
     if let Some(summary) = context.get("summary").and_then(|value| value.as_str()) {
-        enriched.push_str(&format!("Summary: {summary}\n"));
+        lines.push(format!(
+            "Summary: {}",
+            truncate_chars_with_ellipsis(summary, MAX_CONTEXT_FIELD_CHARS)
+        ));
     }
 
     if let Some(check_output) = context.get("check_output").and_then(|value| value.as_str()) {
-        enriched.push_str(&format!("Check output: {check_output}\n"));
+        lines.push(format!(
+            "Check output: {}",
+            truncate_chars_with_ellipsis(check_output, MAX_CONTEXT_FIELD_CHARS)
+        ));
     }
 
-    enriched.push_str("---\n\n");
-    enriched.push_str(&format!("User message: {user_text}"));
-    enriched
+    lines.push("---".to_string());
+
+    vec![CallerContextInput {
+        name: "watch_delivery_context".to_string(),
+        content: lines.join("\n\n"),
+        priority: Some("high".to_string()),
+    }]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActiveRun, Dispatcher, PendingApproval, QueuedMessage, RunOutcome, extract_run_options,
-        format_batched_queue_messages, generate_approval_id, is_allowlisted,
-        remaining_timeout_after_approval, render_approval_prompt, render_args_preview, sender_name,
-        should_flush_stream_buffer, strip_mcp_prefix, truncate,
-    };
+    use super::*;
     use crate::{
         channels::{Channel, ChannelTestResult},
-        client::StakpakClient,
+        client::{CallerContextInput, StakpakClient},
         config::ApprovalMode,
         router::RouterConfig,
         store::GatewayStore,
@@ -1504,7 +1609,8 @@ mod tests {
                 timestamp: Utc::now(),
             },
             text: text.to_string(),
-            run_options: super::RunStartOptions::default(),
+            run_options: RunStartOptions::default(),
+            context: Vec::new(),
         }
     }
 
@@ -1857,18 +1963,90 @@ mod tests {
         server_handle.abort();
     }
 
+    fn inbound() -> InboundMessage {
+        InboundMessage {
+            channel: ChannelId("slack".to_string()),
+            peer_id: PeerId("u1".to_string()),
+            chat_type: ChatType::Direct,
+            text: "hello".to_string(),
+            media: Vec::new(),
+            metadata: serde_json::Value::Null,
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn delivery_context_maps_to_caller_context_entry() {
+        let context = serde_json::json!({
+            "trigger": "nightly",
+            "status": "failed",
+            "summary": "disk at 95%",
+            "check_output": "df -h"
+        });
+
+        let mapped = delivery_context_to_caller_context(&context);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].name, "watch_delivery_context");
+        assert_eq!(mapped[0].priority.as_deref(), Some("high"));
+        assert!(mapped[0].content.contains("Trigger: nightly"));
+        assert!(mapped[0].content.contains("Status: failed"));
+    }
+
+    #[test]
+    fn truncate_chars_respects_unicode_boundaries() {
+        let input = "ééééé";
+        let output = truncate_chars_with_ellipsis(input, 3);
+        assert_eq!(output, "ééé...");
+    }
+
+    #[test]
+    fn delivery_context_maps_partial_payload() {
+        let context = serde_json::json!({ "trigger": "manual" });
+
+        let mapped = delivery_context_to_caller_context(&context);
+        assert_eq!(mapped.len(), 1);
+        assert!(mapped[0].content.contains("Trigger: manual"));
+        assert!(!mapped[0].content.contains("Status:"));
+        assert!(!mapped[0].content.contains("Summary:"));
+        assert!(!mapped[0].content.contains("Check output:"));
+    }
+
+    #[test]
+    fn delivery_context_handles_empty_payload() {
+        let mapped = delivery_context_to_caller_context(&serde_json::json!({}));
+        assert_eq!(mapped.len(), 1);
+        assert!(
+            mapped[0]
+                .content
+                .contains("The user is replying to a previous notification")
+        );
+        assert!(!mapped[0].content.contains("Trigger:"));
+    }
+
     #[test]
     fn stream_buffer_flush_rules() {
         assert!(should_flush_stream_buffer(
             "hello\n\nworld",
             Duration::from_millis(100)
         ));
-        assert!(should_flush_stream_buffer(
+        assert!(!should_flush_stream_buffer(
             &"x".repeat(501),
             Duration::from_millis(100)
         ));
-        assert!(should_flush_stream_buffer("hello", Duration::from_secs(3)));
-        assert!(!should_flush_stream_buffer("hello", Duration::from_secs(1)));
+        assert!(should_flush_stream_buffer(
+            "hello\nworld",
+            Duration::from_secs(3)
+        ));
+        assert!(!should_flush_stream_buffer("hello", Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn take_completed_line_chunk_keeps_remainder() {
+        let mut buffer = String::from("line1\nline2\npartial");
+        let chunk = take_completed_line_chunk(&mut buffer).expect("chunk should exist");
+
+        assert_eq!(chunk, "line1\nline2\n");
+        assert_eq!(buffer, "partial");
     }
 
     #[test]
@@ -1887,6 +2065,17 @@ mod tests {
     fn sender_name_falls_back_to_username() {
         let metadata = serde_json::json!({"username": "carol"});
         assert_eq!(sender_name(&metadata).as_deref(), Some("carol"));
+    }
+
+    #[test]
+    fn merge_drained_queue_keeps_drained_messages_first() {
+        let drained = vec![queued("drained-1", Some("alice"), "u1")];
+        let existing = vec![queued("existing-1", Some("bob"), "u2")];
+
+        let merged = merge_drained_queue(drained, existing);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "drained-1");
+        assert_eq!(merged[1].text, "existing-1");
     }
 
     #[test]
@@ -1981,5 +2170,44 @@ mod tests {
         let id = generate_approval_id();
         assert_eq!(id.len(), 8);
         assert!(id.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn latest_non_empty_context_prefers_last_non_empty() {
+        let queue = vec![
+            QueuedMessage {
+                inbound: inbound(),
+                text: "one".to_string(),
+                run_options: RunStartOptions::default(),
+                context: Vec::new(),
+            },
+            QueuedMessage {
+                inbound: inbound(),
+                text: "two".to_string(),
+                run_options: RunStartOptions::default(),
+                context: vec![CallerContextInput {
+                    name: "ctx".to_string(),
+                    content: "value".to_string(),
+                    priority: Some("high".to_string()),
+                }],
+            },
+        ];
+
+        let context = latest_non_empty_context(&queue);
+        assert_eq!(context.len(), 1);
+        assert_eq!(context[0].name, "ctx");
+    }
+
+    #[test]
+    fn latest_non_empty_context_all_empty_returns_empty() {
+        let queue = vec![QueuedMessage {
+            inbound: inbound(),
+            text: "one".to_string(),
+            run_options: RunStartOptions::default(),
+            context: Vec::new(),
+        }];
+
+        let context = latest_non_empty_context(&queue);
+        assert!(context.is_empty());
     }
 }

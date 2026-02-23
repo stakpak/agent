@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::constants::{DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES};
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::ThemeColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
@@ -13,7 +13,7 @@ use crate::services::side_panel;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -312,16 +312,16 @@ fn render_toast(f: &mut Frame, state: &mut AppState) {
     // Clear background
     f.render_widget(ratatui::widgets::Clear, area);
 
-    // Create block with cyan border (matching our popups)
+    // Create block with accent border (matching our popups)
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(ThemeColors::accent()));
 
     // Centered text
     let text_line = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
         text,
         Style::default()
-            .fg(Color::White)
+            .fg(ThemeColors::text())
             .add_modifier(ratatui::style::Modifier::BOLD),
     )]);
 
@@ -343,8 +343,9 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
         .as_ref()
         .and_then(|p| p.metadata.as_ref())
         .map(|m| {
-            let truncated = if m.title.len() > 40 {
-                format!("{}…", &m.title[..39])
+            let truncated = if m.title.chars().count() > 40 {
+                let t: String = m.title.chars().take(39).collect();
+                format!("{t}…")
             } else {
                 m.title.clone()
             };
@@ -355,29 +356,35 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
     let mut lines: Vec<Line<'_>> = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Plan: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Plan: ", Style::default().fg(ThemeColors::muted())),
             Span::styled(
                 title_text,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
     if !status_text.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("  Status: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(status_text, Style::default().fg(Color::Yellow)),
+            Span::styled("  Status: ", Style::default().fg(ThemeColors::muted())),
+            Span::styled(status_text, Style::default().fg(ThemeColors::warning())),
         ]));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("  u", Style::default().fg(Color::Cyan)),
-        Span::styled(" use existing  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("n", Style::default().fg(Color::Green)),
-        Span::styled(" start new  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
+        Span::styled("  u", Style::default().fg(ThemeColors::cyan())),
+        Span::styled(
+            " use existing  ",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ),
+        Span::styled("n", Style::default().fg(ThemeColors::green())),
+        Span::styled(
+            " start new  ",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ),
+        Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+        Span::styled(" cancel", Style::default().fg(ThemeColors::dark_gray())),
     ]));
 
     let modal_width = 52u16.min(area.width.saturating_sub(4));
@@ -394,11 +401,11 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(ThemeColors::cyan()))
         .title(Span::styled(
             " Existing Plan Found ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ThemeColors::cyan())
                 .add_modifier(Modifier::BOLD),
         ));
 
@@ -492,7 +499,9 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
                                         .map(|span| {
                                             ratatui::text::Span::styled(
                                                 span.content,
-                                                span.style.bg(Color::Indexed(240)).fg(Color::White),
+                                                span.style
+                                                    .bg(ThemeColors::unselected_bg())
+                                                    .fg(ThemeColors::title_primary()),
                                             )
                                         })
                                         .collect::<Vec<_>>(),
@@ -547,12 +556,12 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &mut AppState) {
     // Create a block with title and background
     let block = Block::default()
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightMagenta))
+        .border_style(ratatui::style::Style::default().fg(ThemeColors::magenta()))
         .style(ratatui::style::Style::default())
         .title(ratatui::text::Span::styled(
             "Expanded Messages (ctrl+t to close, tab to previous message, ↑/↓ to scroll)",
             ratatui::style::Style::default()
-                .fg(ratatui::style::Color::LightMagenta)
+                .fg(ThemeColors::magenta())
                 .add_modifier(ratatui::style::Modifier::BOLD),
         ));
 
@@ -631,9 +640,9 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
-            Style::default().fg(AdaptiveColors::dark_magenta())
+            Style::default().fg(ThemeColors::magenta())
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(ThemeColors::dark_gray())
         });
 
     // Create content area inside the block (border takes 1 char on each side)
@@ -706,7 +715,7 @@ fn render_queue_preview_line(f: &mut Frame, state: &AppState, area: Rect) {
         let preview = truncate_to(text, max_chars);
         lines.push(Line::from(Span::styled(
             format!("  > {preview}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )));
     }
 

@@ -1,6 +1,7 @@
 use crate::{
-    checkpoint_store::CheckpointStore, event_log::EventLog, idempotency::IdempotencyStore,
-    sandbox::SandboxConfig, session_manager::SessionManager,
+    checkpoint_store::CheckpointStore, context::ContextBudget, context::ContextFile,
+    event_log::EventLog, idempotency::IdempotencyStore, sandbox::SandboxConfig,
+    session_manager::SessionManager,
 };
 use stakpak_agent_core::{ProposedToolCall, ToolApprovalPolicy};
 use stakpak_api::SessionStorage;
@@ -34,6 +35,15 @@ pub struct AppState {
     pub mcp_server_shutdown_tx: Option<broadcast::Sender<()>>,
     pub mcp_proxy_shutdown_tx: Option<broadcast::Sender<()>>,
     pub sandbox_config: Option<SandboxConfig>,
+    pub base_system_prompt: Option<String>,
+    pub context_budget: ContextBudget,
+    /// Base directory for project context discovery (AGENTS.md, APPS.md).
+    /// Falls back to process cwd if not set. Should be set to the directory
+    /// where `stakpak up` was run so gateway sessions can discover project files.
+    pub project_dir: Option<String>,
+    /// Cached remote skill context files (currently fetched from the remote
+    /// skills endpoint contract) and injected into new sessions as baseline context.
+    pub skills_context: Arc<RwLock<Vec<ContextFile>>>,
     pending_tools: Arc<RwLock<HashMap<Uuid, PendingToolApprovals>>>,
 }
 
@@ -64,6 +74,10 @@ impl AppState {
             mcp_server_shutdown_tx: None,
             mcp_proxy_shutdown_tx: None,
             sandbox_config: None,
+            base_system_prompt: None,
+            context_budget: ContextBudget::default(),
+            project_dir: None,
+            skills_context: Arc::new(RwLock::new(Vec::new())),
             pending_tools: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -87,9 +101,38 @@ impl AppState {
         self
     }
 
+    pub fn with_base_system_prompt(mut self, prompt: Option<String>) -> Self {
+        self.base_system_prompt = prompt.filter(|value| !value.trim().is_empty());
+        self
+    }
+
+    pub fn with_context_budget(mut self, budget: ContextBudget) -> Self {
+        self.context_budget = budget;
+        self
+    }
+
+    pub fn with_project_dir(mut self, dir: Option<String>) -> Self {
+        self.project_dir = dir.filter(|value| !value.trim().is_empty());
+        self
+    }
+
+    pub fn with_skills(mut self, context_files: Vec<ContextFile>) -> Self {
+        self.skills_context = Arc::new(RwLock::new(context_files));
+        self
+    }
+
     pub fn with_checkpoint_store(mut self, checkpoint_store: Arc<CheckpointStore>) -> Self {
         self.checkpoint_store = checkpoint_store;
         self
+    }
+
+    pub async fn current_skills(&self) -> Vec<ContextFile> {
+        self.skills_context.read().await.clone()
+    }
+
+    pub async fn replace_skills(&self, context_files: Vec<ContextFile>) {
+        let mut guard = self.skills_context.write().await;
+        *guard = context_files;
     }
 
     pub async fn current_mcp_tools(&self) -> Vec<stakai::Tool> {

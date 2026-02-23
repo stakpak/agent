@@ -4,7 +4,8 @@
 
 use crate::commands::agent::run::pause::EXIT_CODE_PAUSED;
 use stakpak_gateway::client::{
-    ClientError, SendMessageOptions, StakpakClient, ToolDecisionAction, ToolDecisionInput,
+    CallerContextInput, ClientError, SendMessageOptions, StakpakClient, ToolDecisionAction,
+    ToolDecisionInput,
 };
 use stakpak_shared::models::async_manifest::PauseReason;
 use std::collections::HashMap;
@@ -89,6 +90,8 @@ pub struct SpawnConfig {
     pub pause_on_approval: bool,
     /// Run agent tool calls inside a sandboxed warden container.
     pub sandbox: bool,
+    /// Additional structured caller context injected via server API.
+    pub caller_context: Vec<CallerContextInput>,
     /// Agent server connection.
     pub server: AgentServerConnection,
 }
@@ -157,6 +160,7 @@ async fn run_server_session(
     let opts = SendMessageOptions {
         model: server.model.clone(),
         sandbox: if config.sandbox { Some(true) } else { None },
+        context: config.caller_context.clone(),
         ..Default::default()
     };
 

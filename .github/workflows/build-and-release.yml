@@ -99,6 +99,14 @@ jobs:
           key: docker-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: docker-cargo-${{ matrix.target }}-
 
+      - name: Docker build cache (target dir)
+        if: matrix.docker
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: docker-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: docker-target-${{ matrix.target }}-
+
       # Alpine is required for aarch64-musl: Ubuntu's musl-gcc wrapper lacks
       # C11 atomics support needed by jemalloc and libsql-ffi on ARM.
       - name: Build and test in Alpine container

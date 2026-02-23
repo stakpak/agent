@@ -6,7 +6,7 @@ use super::navigation::adjust_scroll;
 use crate::app::InputEvent;
 use crate::app::{AppState, OutputEvent, ToolCallStatus};
 use crate::services::bash_block::preprocess_terminal_output;
-use crate::services::detect_term::AdaptiveColors;
+use crate::services::detect_term::{ThemeColors, transform_color_for_light_mode};
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, invalidate_message_lines_cache,
@@ -23,13 +23,15 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-// Helper to convert vt100 color to ratatui color
+// Helper to convert vt100 color to ratatui color, with light mode adjustment
 fn convert_vt100_color(c: vt100::Color) -> Color {
-    match c {
+    let color = match c {
         vt100::Color::Default => Color::Reset,
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
-    }
+    };
+    // Transform for light mode readability
+    transform_color_for_light_mode(color)
 }
 
 /// Check if a line appears to be a shell prompt (ends with common prompt characters)
@@ -220,15 +222,15 @@ pub fn handle_run_shell_command(
 
     // Create initial shell message with loading indicator
     let loading_colors = BubbleColors {
-        border_color: Color::Yellow,
-        title_color: Color::Yellow,
-        content_color: AdaptiveColors::text(),
+        border_color: ThemeColors::warning(),
+        title_color: ThemeColors::warning(),
+        content_color: ThemeColors::text(),
         tool_type: "Interactive Bash".to_string(),
     };
     let loading_content = vec![Line::from(vec![Span::styled(
         "  Starting shell...",
         Style::default()
-            .fg(Color::Yellow)
+            .fg(ThemeColors::warning())
             .add_modifier(Modifier::BOLD),
     )])];
     let new_id = Uuid::new_v4();
@@ -327,10 +329,10 @@ pub fn background_shell_session(state: &mut AppState) {
             Span::styled(
                 "$ ",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::warning())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(cmd, Style::default().fg(ThemeColors::text())),
         ]);
         fresh_lines.insert(0, command_line);
     }
@@ -340,9 +342,9 @@ pub fn background_shell_session(state: &mut AppState) {
         for msg in &mut state.messages {
             if msg.id == id {
                 let new_colors = BubbleColors {
-                    border_color: Color::DarkGray,
-                    title_color: Color::DarkGray,
-                    content_color: AdaptiveColors::text(),
+                    border_color: ThemeColors::dark_gray(),
+                    title_color: ThemeColors::dark_gray(),
+                    content_color: ThemeColors::text(),
                     tool_type: "Interactive Bash".to_string(),
                 };
                 msg.content = MessageContent::RenderRefreshedTerminal(
@@ -395,9 +397,9 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
             let current_screen = capture_styled_screen(&mut state.shell_screen);
 
             let focused_colors = BubbleColors {
-                border_color: Color::Cyan,
-                title_color: Color::Cyan,
-                content_color: AdaptiveColors::text(),
+                border_color: ThemeColors::cyan(),
+                title_color: ThemeColors::cyan(),
+                content_color: ThemeColors::text(),
                 tool_type: "Interactive Bash".to_string(),
             };
 
@@ -482,15 +484,15 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
                         &msg.content
                     {
                         let (new_color, status_suffix) = if state.is_tool_call_shell_command {
-                            (Color::Green, "Completed")
+                            (ThemeColors::green(), "Completed")
                         } else {
-                            (Color::DarkGray, "Terminated")
+                            (ThemeColors::dark_gray(), "Terminated")
                         };
 
                         let new_colors = BubbleColors {
                             border_color: new_color,
                             title_color: new_color,
-                            content_color: AdaptiveColors::text(),
+                            content_color: ThemeColors::text(),
                             tool_type: format!("Interactive Bash ({})", status_suffix),
                         };
                         let trimmed_lines = trim_shell_lines(lines.clone());
@@ -565,9 +567,9 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     let (colors, title) = if state.show_shell_mode {
         (
             BubbleColors {
-                border_color: Color::Cyan, // Using Cyan for "Cool" look
-                title_color: Color::Cyan,
-                content_color: AdaptiveColors::text(),
+                border_color: ThemeColors::cyan(),
+                title_color: ThemeColors::cyan(),
+                content_color: ThemeColors::text(),
                 tool_type: "Interactive Bash".to_string(),
             },
             format!("Shell Command {} [Focused]", shell_name),
@@ -575,9 +577,9 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     } else {
         (
             BubbleColors {
-                border_color: Color::DarkGray,
-                title_color: Color::DarkGray,
-                content_color: AdaptiveColors::text(),
+                border_color: ThemeColors::dark_gray(),
+                title_color: ThemeColors::dark_gray(),
+                content_color: ThemeColors::text(),
                 tool_type: "Interactive Bash".to_string(),
             },
             format!("Shell Command {} (Background - '$' to focus)", shell_name),
@@ -655,10 +657,10 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
             Span::styled(
                 "$ ",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::warning())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(cmd, Style::default().fg(ThemeColors::text())),
         ]);
         display_lines.insert(0, command_line);
     }

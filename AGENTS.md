@@ -211,6 +211,7 @@ All tools done → fall through to API call
 - Prefer `LLMMessage::from` over `|msg| LLMMessage::from(msg)` (clippy: redundant closure)
 - Collapse nested `if` + `if let` into combined conditions where readable
 - Use `std::mem::take` for efficient ownership transfer in place
+- Prefer importing local types/enums in tests and module code (`use ...`) instead of verbose `crate::...` paths in struct literals
 
 ### String Slicing & UTF-8 Char Boundaries
 

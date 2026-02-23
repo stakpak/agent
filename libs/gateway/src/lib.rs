@@ -6,6 +6,7 @@ pub mod config;
 pub mod dispatcher;
 pub mod router;
 pub mod runtime;
+pub mod slack_blocks;
 pub mod store;
 pub mod targeting;
 pub mod types;

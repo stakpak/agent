@@ -14,8 +14,8 @@ use crate::commands::watch::reconciler::{
 };
 use crate::commands::watch::{
     AgentServerConnection, INTERACTIVE_DELEGATED_NOTE, InteractionMode, ListRunsFilter, RunStatus,
-    ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig, assemble_prompt, is_process_running,
-    run_check_script, spawn_agent,
+    ScheduleConfig, ScheduleDb, Scheduler, SpawnConfig, assemble_prompt,
+    build_schedule_caller_context, is_process_running, run_check_script, spawn_agent,
 };
 use chrono::{DateTime, Utc};
 use croner::Cron;
@@ -33,6 +33,8 @@ use tracing::{error, info, warn};
 const HEARTBEAT_STALE_SECONDS: i64 = 120;
 const HEARTBEAT_UPDATE_INTERVAL_SECONDS: u64 = 30;
 const INTERACTIVE_STATUS_POLL_INTERVAL_SECONDS: u64 = 15;
+const INTERACTIVE_MAX_RUN_AGE_HOURS: i64 = 24;
+const INTERACTIVE_RUN_MAX_AGE_GRACE_SECONDS: i64 = 60 * 60;
 const MAX_GATEWAY_CHECK_OUTPUT_CHARS: usize = 4_000;
 
 static WATCH_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -665,8 +667,9 @@ async fn handle_schedule_event(
         None
     };
 
-    // Assemble prompt
+    // Assemble prompt + structured caller context
     let prompt = assemble_prompt(schedule, check_result.as_ref());
+    let caller_context = build_schedule_caller_context(schedule, check_result.as_ref());
 
     if schedule.interaction == InteractionMode::Interactive {
         match try_start_interactive_session(config, schedule, check_result.as_ref(), &prompt).await
@@ -712,6 +715,7 @@ async fn handle_schedule_event(
         enable_subagents: schedule.effective_enable_subagents(&config.defaults),
         pause_on_approval: schedule.effective_pause_on_approval(&config.defaults),
         sandbox: schedule.effective_sandbox(&config.defaults),
+        caller_context,
         server: server.clone(),
     };
 
@@ -1029,19 +1033,39 @@ async fn reconcile_interactive_runs(
         return Ok(());
     };
 
-    let filter = ListRunsFilter {
-        status: Some(RunStatus::Running),
-        limit: Some(200),
-        ..Default::default()
-    };
+    let page_limit: u32 = 200;
+    let mut offset: u32 = 0;
+    let mut runs = Vec::new();
 
-    let runs = db
-        .list_runs(&filter)
-        .await
-        .map_err(|error| format!("failed to list running runs: {}", error))?;
+    loop {
+        let filter = ListRunsFilter {
+            status: Some(RunStatus::Running),
+            limit: Some(page_limit),
+            offset: Some(offset),
+            ..Default::default()
+        };
+
+        let page = db
+            .list_runs(&filter)
+            .await
+            .map_err(|error| format!("failed to list running runs: {}", error))?;
+
+        if page.is_empty() {
+            break;
+        }
+
+        let page_count = page.len();
+        runs.extend(page);
+
+        if page_count < page_limit as usize {
+            break;
+        }
+
+        offset = offset.saturating_add(page_limit);
+    }
 
     for run in runs {
-        if run.error_message.as_deref() != Some(INTERACTIVE_DELEGATED_NOTE) {
+        if !run.interactive_delegated {
             continue;
         }
 
@@ -1049,8 +1073,30 @@ async fn reconcile_interactive_runs(
             continue;
         };
 
+        let run_age = Utc::now().signed_duration_since(run.started_at);
+        let run_expired = run_age > interactive_run_max_age(config, &run.schedule_name);
+
         match get_gateway_session_status(notifications, session_id).await {
-            Ok(Some(status)) if status.active => {}
+            Ok(Some(status)) if status.active && !run_expired => {}
+            Ok(Some(status)) if status.active && run_expired => {
+                warn!(
+                    run_id = run.id,
+                    session_id = %session_id,
+                    age_hours = run_age.num_hours(),
+                    "Interactive run exceeded max age while still active; marking failed"
+                );
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::TimedOut,
+                    Some("Interactive gateway session exceeded max age"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| {
+                    format!("failed to finalize expired interactive run: {}", error)
+                })?;
+            }
             Ok(Some(_status)) => {
                 db.update_run_finished(
                     run.id,
@@ -1075,6 +1121,29 @@ async fn reconcile_interactive_runs(
                     format!("failed to finalize missing interactive run: {}", error)
                 })?;
             }
+            Err(error) if run_expired => {
+                warn!(
+                    run_id = run.id,
+                    session_id = %session_id,
+                    age_hours = run_age.num_hours(),
+                    error = %error,
+                    "Failed to fetch interactive status for expired run; marking timed out"
+                );
+                db.update_run_finished(
+                    run.id,
+                    RunStatus::TimedOut,
+                    Some("Interactive gateway session status unavailable beyond max age"),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|db_error| {
+                    format!(
+                        "failed to finalize expired interactive run after status errors: {}",
+                        db_error
+                    )
+                })?;
+            }
             Err(error) => {
                 warn!(
                     run_id = run.id,
@@ -1087,6 +1156,24 @@ async fn reconcile_interactive_runs(
     }
 
     Ok(())
+}
+
+fn interactive_run_max_age(config: &ScheduleConfig, schedule_name: &str) -> chrono::Duration {
+    let fallback_seconds = INTERACTIVE_MAX_RUN_AGE_HOURS.saturating_mul(60 * 60);
+
+    let schedule_timeout_seconds = config
+        .schedules
+        .iter()
+        .find(|schedule| schedule.name == schedule_name)
+        .map(|schedule| schedule.effective_timeout(&config.defaults).as_secs())
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .unwrap_or(fallback_seconds);
+
+    let timeout_with_grace =
+        schedule_timeout_seconds.saturating_add(INTERACTIVE_RUN_MAX_AGE_GRACE_SECONDS);
+    let max_age_seconds = timeout_with_grace.max(fallback_seconds);
+
+    chrono::Duration::seconds(max_age_seconds)
 }
 
 async fn maybe_send_notification(
@@ -1396,16 +1483,20 @@ fn print_event(event_type: &str, trigger_name: &str, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_GATEWAY_CHECK_OUTPUT_CHARS, build_interactive_caller_context, normalized_check_output,
-        trigger_config_reload_with_loader, validate_prior_scheduler_state,
+        MAX_GATEWAY_CHECK_OUTPUT_CHARS, build_interactive_caller_context, interactive_run_max_age,
+        normalized_check_output, trigger_config_reload_with_loader, validate_prior_scheduler_state,
     };
+    use crate::commands::watch::config::{ScheduleDefaults, ScheduleSettings};
     use crate::commands::watch::db::{RELOAD_SENTINEL, SchedulerState};
     use crate::commands::watch::reconciler::{RegisteredSchedule, ScheduleSnapshot};
-    use crate::commands::watch::{CheckResult, Schedule, ScheduleConfig, ScheduleDb, Scheduler};
+    use crate::commands::watch::{
+        CheckResult, InteractionMode, Schedule, ScheduleConfig, ScheduleDb, Scheduler,
+    };
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::time::Duration as StdDuration;
     use tempfile::tempdir;
     use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc};
 
@@ -1817,7 +1908,7 @@ mod tests {
             notify_on: None,
             notify_channel: None,
             notify_chat_id: None,
-            interaction: crate::commands::watch::InteractionMode::Interactive,
+            interaction: InteractionMode::Interactive,
             enabled: true,
         }
     }
@@ -1852,5 +1943,34 @@ mod tests {
         let normalized = normalized_check_output(Some(&check)).expect("output should exist");
         assert!(normalized.contains("truncated"));
         assert!(normalized.chars().count() > MAX_GATEWAY_CHECK_OUTPUT_CHARS);
+    }
+
+    #[test]
+    fn test_interactive_run_max_age_uses_schedule_timeout_when_larger_than_default() {
+        let config = ScheduleConfig {
+            watch: ScheduleSettings::default(),
+            defaults: ScheduleDefaults::default(),
+            notifications: None,
+            schedules: vec![Schedule {
+                timeout: Some(StdDuration::from_secs(48 * 60 * 60)),
+                ..sample_schedule_for_context("long-run")
+            }],
+        };
+
+        let max_age = interactive_run_max_age(&config, "long-run");
+        assert!(max_age.num_hours() >= 49);
+    }
+
+    #[test]
+    fn test_interactive_run_max_age_uses_default_floor_for_unknown_schedule() {
+        let config = ScheduleConfig {
+            watch: ScheduleSettings::default(),
+            defaults: ScheduleDefaults::default(),
+            notifications: None,
+            schedules: Vec::new(),
+        };
+        let max_age = interactive_run_max_age(&config, "missing");
+
+        assert!(max_age.num_hours() >= 24);
     }
 }

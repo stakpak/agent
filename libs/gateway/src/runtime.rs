@@ -63,6 +63,12 @@ impl Gateway {
             inbound_tx: Arc::new(tokio::sync::RwLock::new(None)),
         });
 
+        if api_state.auth_token.is_none() {
+            warn!(
+                "gateway API auth token is not configured; /v1/gateway/send interactive requests will be rejected"
+            );
+        }
+
         Ok(Self {
             config,
             store,

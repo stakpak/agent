@@ -177,10 +177,14 @@ pub fn prepare_volumes(config: &AppConfig, check_enabled: bool) -> Vec<String> {
     }
 
     // Append every default mount that isn't already covered by the profile.
-    // Dedup by the container-side path (the part after the first `:`).
+    // Dedup by exact match on the container-side path (the part after the first `:`).
+    // NOTE: We must use exact equality, not substring matching, because paths
+    // like `/agent` would otherwise match `/home/agent/...` as a substring.
     for default_vol in stakpak_agent_default_mounts() {
         let container_path = default_vol.split(':').nth(1).unwrap_or(&default_vol);
-        let already_mounted = volumes_to_mount.iter().any(|v| v.contains(container_path));
+        let already_mounted = volumes_to_mount
+            .iter()
+            .any(|v| v.split(':').nth(1).unwrap_or(v) == container_path);
         if !already_mounted {
             volumes_to_mount.push(default_vol);
         }
@@ -500,6 +504,65 @@ mod tests {
             "should keep user mount, not add a second: {vols:?}"
         );
         assert!(vols.contains(&custom), "user mount should be preserved");
+    }
+
+    // ── Dedup must not drop working-dir mounts ─────────────────────────
+    // Regression: the container path `/agent` was incorrectly matched as a
+    // substring of `/home/agent/...`, causing `./:/agent:ro` and
+    // `./.stakpak:/agent/.stakpak` to be silently dropped.
+
+    #[test]
+    fn workdir_mount_present_when_no_warden_config() {
+        let config = test_config(None);
+        let vols = prepare_volumes(&config, false);
+        assert!(
+            vols.iter().any(|v| v == "./:/agent:ro"),
+            "working directory mount ./:/agent:ro missing: {vols:?}"
+        );
+    }
+
+    #[test]
+    fn stakpak_session_mount_present_when_no_warden_config() {
+        let config = test_config(None);
+        let vols = prepare_volumes(&config, false);
+        assert!(
+            vols.iter().any(|v| v == "./.stakpak:/agent/.stakpak"),
+            "session mount ./.stakpak:/agent/.stakpak missing: {vols:?}"
+        );
+    }
+
+    #[test]
+    fn workdir_mount_not_dropped_by_home_agent_paths() {
+        // Even when profile volumes contain /home/agent/... paths,
+        // the ./:/agent:ro default must not be deduped away.
+        let config = test_config(Some(WardenConfig {
+            enabled: true,
+            volumes: vec!["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".into()],
+        }));
+        let vols = prepare_volumes(&config, false);
+        assert!(
+            vols.iter().any(|v| v == "./:/agent:ro"),
+            "working directory mount ./:/agent:ro incorrectly deduped: {vols:?}"
+        );
+        assert!(
+            vols.iter().any(|v| v == "./.stakpak:/agent/.stakpak"),
+            "session mount ./.stakpak:/agent/.stakpak incorrectly deduped: {vols:?}"
+        );
+    }
+
+    #[test]
+    fn workdir_mount_deduped_when_profile_provides_it() {
+        // If the profile already has ./:/agent:ro, the default should not add a duplicate.
+        let config = test_config(Some(WardenConfig {
+            enabled: true,
+            volumes: vec!["./:/agent:ro".into()],
+        }));
+        let vols = prepare_volumes(&config, false);
+        let agent_count = vols.iter().filter(|v| *v == "./:/agent:ro").count();
+        assert_eq!(
+            agent_count, 1,
+            "working directory mount should appear exactly once: {vols:?}"
+        );
     }
 
     // ── expand_volume_path ─────────────────────────────────────────────

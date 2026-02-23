@@ -1,5 +1,6 @@
 use crate::app::AppState;
 use crate::constants::{EXCEEDED_API_LIMIT_ERROR, EXCEEDED_API_LIMIT_ERROR_MESSAGE};
+use crate::services::detect_term::ThemeColors;
 use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -17,23 +18,23 @@ pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
         "disabled"
     };
     let status_color = if state.mouse_capture_enabled {
-        Color::LightGreen
+        ThemeColors::success()
     } else {
-        Color::LightRed
+        ThemeColors::danger()
     };
 
     let styled_line = Line::from(vec![
         Span::styled(
             "█",
             Style::default()
-                .fg(Color::LightMagenta)
-                .bg(Color::LightMagenta),
+                .fg(ThemeColors::magenta())
+                .bg(ThemeColors::magenta()),
         ),
         Span::raw("  Mouse capture "),
         Span::styled(status, Style::default().fg(status_color)),
         Span::styled(
             " • Ctrl+L to toggle",
-            Style::default().fg(Color::LightMagenta),
+            Style::default().fg(ThemeColors::magenta()),
         ),
     ]);
 
@@ -73,7 +74,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(vec![Span::styled(
             "Working Directory",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::warning())
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(format!("  L {}", cwd)),
@@ -81,7 +82,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(vec![Span::styled(
             "Account",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::warning())
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(format!("  L Username: {}", username)),
@@ -98,7 +99,7 @@ pub fn push_status_message(state: &mut AppState) {
 }
 
 pub fn push_usage_message(state: &mut AppState) {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
 
     let usage = &state.total_session_usage;
@@ -107,7 +108,7 @@ pub fn push_usage_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Session Usage",
         Style::default()
-            .fg(Color::Cyan)
+            .fg(ThemeColors::cyan())
             .add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(""));
@@ -115,7 +116,7 @@ pub fn push_usage_message(state: &mut AppState) {
     if usage.total_tokens == 0 {
         lines.push(Line::from(vec![Span::styled(
             " No tokens used yet in this session.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         )]));
     } else {
         // Manually format each line with fixed spacing to align all numbers (no colons)
@@ -126,7 +127,7 @@ pub fn push_usage_message(state: &mut AppState) {
             Span::styled(
                 formatted_prompt,
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::warning())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -143,17 +144,17 @@ pub fn push_usage_message(state: &mut AppState) {
             lines.push(Line::from(vec![
                 Span::raw("  ├─ Input tokens"),
                 Span::raw("   "), // 3 spaces to align numbers
-                Span::styled(input_tokens, Style::default().fg(Color::DarkGray)),
+                Span::styled(input_tokens, Style::default().fg(ThemeColors::dark_gray())),
             ]));
             lines.push(Line::from(vec![
                 Span::raw("  ├─ Cache write"),
                 Span::raw("    "), // 4 spaces to align numbers
-                Span::styled(cache_write, Style::default().fg(Color::DarkGray)),
+                Span::styled(cache_write, Style::default().fg(ThemeColors::dark_gray())),
             ]));
             lines.push(Line::from(vec![
                 Span::raw("  └─ Cache read"),
                 Span::raw("     "), // 5 spaces to align numbers
-                Span::styled(cache_read, Style::default().fg(Color::DarkGray)),
+                Span::styled(cache_read, Style::default().fg(ThemeColors::dark_gray())),
             ]));
         }
 
@@ -164,7 +165,7 @@ pub fn push_usage_message(state: &mut AppState) {
             Span::styled(
                 formatted_completion,
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(ThemeColors::warning())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -176,7 +177,7 @@ pub fn push_usage_message(state: &mut AppState) {
             Span::styled(
                 formatted_total,
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(ThemeColors::cyan())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -207,7 +208,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         Line::from(vec![Span::styled(
             "📝 Memorizing conversation history...",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(ThemeColors::warning())
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -217,7 +218,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         )]),
         Line::from(vec![Span::styled(
             "Feel free to continue talking to the agent while this happens!",
-            Style::default().fg(Color::Green),
+            Style::default().fg(ThemeColors::green()),
         )]),
         Line::from(""),
     ];
@@ -255,7 +256,7 @@ pub fn push_help_message(state: &mut AppState) {
             Span::styled(
                 "● ",
                 Style::default()
-                    .fg(Color::Gray)
+                    .fg(ThemeColors::dark_gray())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(mode),
@@ -275,7 +276,10 @@ pub fn push_help_message(state: &mut AppState) {
                 .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("to see all commands", Style::default().fg(Color::Gray)),
+        Span::styled(
+            "to see all commands",
+            Style::default().fg(ThemeColors::dark_gray()),
+        ),
     ]));
     lines.push(Line::from(""));
     // Section header
@@ -290,7 +294,7 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Slash-commands",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(ThemeColors::dark_gray())
             .add_modifier(Modifier::BOLD),
     )]));
 
@@ -299,7 +303,7 @@ pub fn push_help_message(state: &mut AppState) {
 
     for cmd in &commands {
         lines.push(Line::from(vec![
-            Span::styled(cmd.command, Style::default().fg(Color::Cyan)),
+            Span::styled(cmd.command, Style::default().fg(ThemeColors::cyan())),
             Span::raw(" – "),
             Span::raw(cmd.description),
         ]));
@@ -310,16 +314,20 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Keyboard shortcuts",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(ThemeColors::dark_gray())
             .add_modifier(Modifier::BOLD),
     )]));
 
     // Shortcuts list
     let shortcuts = vec![
-        ("Enter", "send message", Color::Yellow),
-        ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
-        // ("Up/Down", "scroll prompt history", Color::Yellow),
-        ("Ctrl+C", "quit Stakpak", Color::Yellow),
+        ("Enter", "send message", ThemeColors::warning()),
+        (
+            "Ctrl+J or Shift+Enter",
+            "insert newline",
+            ThemeColors::warning(),
+        ),
+        // ("Up/Down", "scroll prompt history", ThemeColors::warning()),
+        ("Ctrl+C", "quit Stakpak", ThemeColors::warning()),
     ];
     for (key, desc, color) in shortcuts {
         lines.push(Line::from(vec![
@@ -344,7 +352,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
         Span::styled(
             " System",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ThemeColors::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -364,7 +372,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
 }
 
 pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option<bool>) {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
     let mut flag = "[Error] ".to_string();
     if let Some(remove_flag) = remove_flag
@@ -381,15 +389,17 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
             lines.push(Line::from(vec![
                 Span::styled(
                     flag.clone(),
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(ThemeColors::red())
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(*part, Style::default().fg(Color::Red)),
+                Span::styled(*part, Style::default().fg(ThemeColors::red())),
             ]));
         } else {
             // Subsequent lines are just the error text
             lines.push(Line::from(vec![Span::styled(
                 *part,
-                Style::default().fg(Color::Red),
+                Style::default().fg(ThemeColors::red()),
             )]));
         }
     }
@@ -438,7 +448,7 @@ pub fn version_message(latest_version: Option<String>) -> Message {
                         env!("CARGO_PKG_VERSION"),
                         version
                     ),
-                    Some(Style::default().fg(ratatui::style::Color::Yellow)),
+                    Some(Style::default().fg(ThemeColors::warning())),
                 )
             } else {
                 Message::info(format!("version: {}", env!("CARGO_PKG_VERSION")), None)
@@ -462,7 +472,7 @@ pub fn welcome_messages(
 >═║███████║═< ╚════██║  ██║   ██╔══██║██╔═██╗ ██╔═══╝ ██╔══██║██╔═██╗ 
 >═║███████║═< ███████║  ██║   ██║  ██║██║  ██╗██║     ██║  ██║██║  ██╗ 
   ╚═══════╝   ╚══════╝  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝ ",
-            Some(Style::default().fg(ratatui::style::Color::Cyan)),
+            Some(Style::default().fg(ThemeColors::cyan())),
         ),
         Message::info("SPACING_MARKER", None),
         version_message(latest_version),
@@ -575,7 +585,7 @@ pub fn push_issue_message(state: &mut AppState) {
             let message = Message::styled(Line::from(vec![
                 Span::styled(
                     "🔗 Opening GitHub Issues... ",
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(ThemeColors::green()),
                 ),
                 Span::raw(url),
             ]));
@@ -585,7 +595,7 @@ pub fn push_issue_message(state: &mut AppState) {
             let message = Message::styled(Line::from(vec![
                 Span::styled(
                     "❌ Failed to open GitHub Issues: ",
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(ThemeColors::red()),
                 ),
                 Span::raw(e.to_string()),
                 Span::raw(" - "),
@@ -606,7 +616,7 @@ pub fn push_support_message(state: &mut AppState) {
             let message = Message::styled(Line::from(vec![
                 Span::styled(
                     "💬 Opening Discord Support... ",
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(ThemeColors::green()),
                 ),
                 Span::raw(url),
             ]));
@@ -616,7 +626,7 @@ pub fn push_support_message(state: &mut AppState) {
             let message = Message::styled(Line::from(vec![
                 Span::styled(
                     "❌ Failed to open Discord Support: ",
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(ThemeColors::red()),
                 ),
                 Span::raw(e.to_string()),
                 Span::raw(" - "),

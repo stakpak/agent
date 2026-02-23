@@ -1,7 +1,7 @@
 use crate::{
     approval::ApprovalStateMachine,
     compaction::CompactionEngine,
-    context::reduce_context,
+    context::ContextReducer,
     error::AgentError,
     hooks::AgentHook,
     retry::exponential_backoff_ms,
@@ -35,6 +35,7 @@ pub async fn run_agent(
     inference: &stakai::Inference,
     config: &AgentConfig,
     mut initial_messages: Vec<Message>,
+    context_metadata: &mut serde_json::Value,
     user_message: Message,
     tools: &dyn ToolExecutor,
     hooks: &[Box<dyn AgentHook>],
@@ -42,6 +43,7 @@ pub async fn run_agent(
     mut command_rx: mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
     compactor: &dyn CompactionEngine,
+    context_reducer: &dyn ContextReducer,
 ) -> Result<AgentLoopResult, AgentError> {
     if !config.system_prompt.is_empty() && !has_system_message(&initial_messages) {
         initial_messages.insert(0, Message::new(Role::System, config.system_prompt.clone()));
@@ -51,6 +53,10 @@ pub async fn run_agent(
     messages.push(user_message);
 
     emit(&event_tx, AgentEvent::RunStarted { run_id: run.run_id }).await;
+
+    if !context_metadata.is_object() {
+        *context_metadata = serde_json::json!({});
+    }
 
     let mut current_model = config.model.clone();
     let mut queues = RuntimeQueues::default();
@@ -83,6 +89,7 @@ pub async fn run_agent(
                 total_usage,
                 stop_reason: StopReason::Cancelled,
                 messages,
+                metadata: context_metadata.clone(),
             });
         }
 
@@ -110,6 +117,7 @@ pub async fn run_agent(
                 total_usage,
                 stop_reason: StopReason::MaxTurns,
                 messages,
+                metadata: context_metadata.clone(),
             });
         }
 
@@ -144,10 +152,17 @@ pub async fn run_agent(
                     total_usage,
                     stop_reason: StopReason::Cancelled,
                     messages,
+                    metadata: context_metadata.clone(),
                 });
             }
 
-            let reduced_messages = reduce_context(messages.clone(), &config.context);
+            let reduced_messages = context_reducer.reduce(
+                messages.clone(),
+                &current_model,
+                config.max_output_tokens,
+                &config.tools,
+                context_metadata,
+            );
 
             for hook in hooks {
                 hook.before_inference(&run, &reduced_messages, &current_model)
@@ -393,6 +408,7 @@ pub async fn run_agent(
                         total_usage,
                         stop_reason: StopReason::Cancelled,
                         messages,
+                        metadata: context_metadata.clone(),
                     });
                 }
                 ToolCycleOutcome::Completed => {
@@ -449,6 +465,7 @@ pub async fn run_agent(
             total_usage,
             stop_reason,
             messages,
+            metadata: context_metadata.clone(),
         });
     }
 }

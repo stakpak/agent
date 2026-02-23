@@ -21,6 +21,6 @@ pub use agent::{AgentServerConnection, SpawnConfig, spawn_agent};
 pub use config::{DeliveryConfig, InteractionMode, Schedule, ScheduleConfig};
 pub use db::{INTERACTIVE_DELEGATED_NOTE, ListRunsFilter, RELOAD_SENTINEL, RunStatus, ScheduleDb};
 pub use executor::{CheckResult, run_check_script};
-pub use prompt::assemble_prompt;
+pub use prompt::{assemble_prompt, build_schedule_caller_context};
 pub use scheduler::Scheduler;
 pub use utils::is_process_running;

@@ -1,8 +1,10 @@
-use crossterm::style::{Color, Stylize};
+use crossterm::style::Stylize;
 use serde_json::Value;
 use stakpak_api::storage::{SessionStats, ToolUsageStats};
 use stakpak_shared::models::{integrations::openai::ChatMessage, llm::LLMTokenUsage};
 use std::fmt;
+
+use crate::utils::cli_colors::crossterm_colors;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutputFormat {
@@ -447,8 +449,14 @@ impl OutputRenderer {
         let total_minutes = total_seconds / 60;
         let remaining_seconds = total_seconds % 60;
 
+        // Theme-aware colors
+        let cyan = crossterm_colors::cyan();
+        let white = crossterm_colors::white();
+        let gray = crossterm_colors::gray();
+        let magenta = crossterm_colors::magenta();
+
         // Main ROI-focused header
-        output.push_str(&format!("\n{}\n", "━".repeat(50).with(Color::Cyan)));
+        output.push_str(&format!("\n{}\n", "━".repeat(50).with(cyan)));
 
         if total_minutes >= 60 {
             let hours = total_minutes / 60;
@@ -456,7 +464,7 @@ impl OutputRenderer {
             output.push_str(&format!(
                 "{}\n\n",
                 format!("You just saved {}h {}m of work!", hours, mins)
-                    .with(Color::Cyan)
+                    .with(cyan)
                     .bold()
             ));
         } else {
@@ -466,7 +474,7 @@ impl OutputRenderer {
                     "You just saved {}m {}s of work!",
                     total_minutes, remaining_seconds
                 )
-                .with(Color::Cyan)
+                .with(cyan)
                 .bold()
             ));
         }
@@ -484,10 +492,7 @@ impl OutputRenderer {
         });
 
         if !time_saving_tools.is_empty() {
-            output.push_str(&format!(
-                "{}\n",
-                "Top time savers:".with(Color::Cyan).bold()
-            ));
+            output.push_str(&format!("{}\n", "Top time savers:".with(cyan).bold()));
 
             for (i, tool) in time_saving_tools.iter().take(3).enumerate() {
                 let saved_seconds = tool.time_saved_seconds.unwrap_or(0);
@@ -501,17 +506,17 @@ impl OutputRenderer {
                 };
 
                 let bullet = match i {
-                    0 => "▶".with(Color::Cyan),
-                    1 => "▶".with(Color::Cyan),
-                    2 => "▶".with(Color::Cyan),
-                    _ => "▷".with(Color::DarkGrey),
+                    0 => "▶".with(cyan),
+                    1 => "▶".with(cyan),
+                    2 => "▶".with(cyan),
+                    _ => "▷".with(gray),
                 };
 
                 output.push_str(&format!(
                     "  {} {} - {}\n",
                     bullet,
-                    tool.display_name.clone().with(Color::White),
-                    time_display.with(Color::Cyan)
+                    tool.display_name.clone().with(white),
+                    time_display.with(cyan)
                 ));
             }
 
@@ -527,18 +532,18 @@ impl OutputRenderer {
                 "At this pace, you could save {} per week!\n",
                 format!("{}h", (weekly_estimate as u32))
                     .to_string()
-                    .with(Color::Magenta)
+                    .with(magenta)
                     .bold()
             ));
         } else {
             let weekly_minutes = (weekly_estimate * 60.0) as u32;
             output.push_str(&format!(
                 "At this pace, you could save {} per week!\n",
-                format!("{}m", weekly_minutes).with(Color::Magenta).bold()
+                format!("{}m", weekly_minutes).with(magenta).bold()
             ));
         }
 
-        output.push_str(&format!("{}\n\n", "━".repeat(50).with(Color::Cyan)));
+        output.push_str(&format!("{}\n\n", "━".repeat(50).with(cyan)));
 
         output
     }
@@ -594,8 +599,14 @@ impl OutputRenderer {
             OutputFormat::Text => {
                 let mut output = String::new();
 
+                // Theme-aware colors
+                let cyan = crossterm_colors::cyan();
+                let yellow = crossterm_colors::yellow();
+                let green = crossterm_colors::green();
+                let gray = crossterm_colors::gray();
+
                 // Header (no border, no gap - flows directly after time saved stats)
-                output.push_str(&format!("{}\n\n", "Session Usage".with(Color::Cyan).bold()));
+                output.push_str(&format!("{}\n\n", "Session Usage".with(cyan).bold()));
 
                 // Format numbers with thousands separator
                 let format_num = |n: u32| {
@@ -613,7 +624,7 @@ impl OutputRenderer {
                 // Manually format each line with fixed spacing to align all numbers (no colons)
                 output.push_str(&format!(
                     " Prompt tokens      {}\n", // 6 spaces to align numbers
-                    format_num(usage.prompt_tokens).with(Color::Yellow).bold()
+                    format_num(usage.prompt_tokens).with(yellow).bold()
                 ));
 
                 // Show prompt token details if available
@@ -621,29 +632,25 @@ impl OutputRenderer {
                     // Always show fields except output_tokens (redundant), using 0 if None, with fixed spacing
                     output.push_str(&format!(
                         "  ├─ Input tokens   {}\n", // 3 spaces to align numbers
-                        format_num(details.input_tokens.unwrap_or(0)).with(Color::DarkGrey)
+                        format_num(details.input_tokens.unwrap_or(0)).with(gray)
                     ));
                     output.push_str(&format!(
                         "  ├─ Cache write    {}\n", // 4 spaces to align numbers
-                        format_num(details.cache_write_input_tokens.unwrap_or(0))
-                            .with(Color::DarkGrey)
+                        format_num(details.cache_write_input_tokens.unwrap_or(0)).with(gray)
                     ));
                     output.push_str(&format!(
                         "  └─ Cache read     {}\n", // 5 spaces to align numbers
-                        format_num(details.cache_read_input_tokens.unwrap_or(0))
-                            .with(Color::DarkGrey)
+                        format_num(details.cache_read_input_tokens.unwrap_or(0)).with(gray)
                     ));
                 }
 
                 output.push_str(&format!(
                     " Completion tokens  {}\n", // 2 spaces to align numbers
-                    format_num(usage.completion_tokens)
-                        .with(Color::Yellow)
-                        .bold()
+                    format_num(usage.completion_tokens).with(yellow).bold()
                 ));
                 output.push_str(&format!(
                     " Total tokens       {}\n", // 7 spaces to align numbers
-                    format_num(usage.total_tokens).with(Color::Green).bold()
+                    format_num(usage.total_tokens).with(green).bold()
                 ));
 
                 output

@@ -1,6 +1,6 @@
-use crate::services::detect_term::detect_terminal;
+use crate::app::AppState;
+use crate::services::detect_term::{ThemeColors, detect_terminal};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
-use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -13,7 +13,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         ));
         f.render_widget(hint, area);
         return;
@@ -21,7 +21,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.ctrl_c_pressed_once && state.ctrl_c_timer.is_some() {
         let hint = Paragraph::new(Span::styled(
             "Press Ctrl+C again to exit Stakpak",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         ));
         f.render_widget(hint, area);
         return;
@@ -30,7 +30,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shell_mode && !state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
-            Style::default().fg(AdaptiveColors::dark_magenta()),
+            Style::default().fg(ThemeColors::magenta()),
         ));
         f.render_widget(hint, area);
         return;
@@ -45,7 +45,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             )),
         ];
         let shortcuts_widget =
-            Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
+            Paragraph::new(shortcuts).style(Style::default().fg(ThemeColors::dark_gray()));
         f.render_widget(shortcuts_widget, area);
     } else if !state.is_dialog_open && state.input().is_empty() {
         // Use current_model if set (from streaming), otherwise use default model
@@ -82,14 +82,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 left_spans.push(Span::styled(
                     format!("{} {}", spinner, spinner_text),
                     Style::default()
-                        .fg(AdaptiveColors::orange())
+                        .fg(ThemeColors::orange())
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 ));
 
                 if state.loading_type == crate::app::LoadingType::Llm {
                     left_spans.push(Span::styled(
                         " - esc cancel",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(ThemeColors::dark_gray()),
                     ));
                 }
             }
@@ -97,14 +97,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Right side: helper text (always on right), plus profile info if side panel hidden
             let mut right_spans = vec![Span::styled(
                 helper_text,
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ThemeColors::dark_gray()),
             )];
 
             // Add profile info only if side panel is hidden and not loading heavily
             if !state.show_side_panel && !high_cost_warning && !approaching_max {
                 right_spans.push(Span::styled(
                     " | profile ",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::dark_gray()),
                 ));
                 right_spans.push(Span::styled(
                     state.current_profile_name.clone(),
@@ -112,7 +112,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 ));
                 right_spans.push(Span::styled(
                     " | ctrl+y side panel",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::dark_gray()),
                 ));
             }
 
@@ -143,8 +143,10 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         height: 1, // Only 1 line
                     };
 
-                    let select_hint_widget =
-                        Paragraph::new(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
+                    let select_hint_widget = Paragraph::new(Span::styled(
+                        select_hint,
+                        Style::default().fg(ThemeColors::cyan()),
+                    ));
                     f.render_widget(select_hint_widget, second_line_area);
                 }
             }
@@ -154,32 +156,38 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let spans_vec = if state.approval_bar.is_esc_pending() {
             // After first ESC: show confirmation hint
             vec![
-                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::styled("Enter", Style::default().fg(ThemeColors::green())),
                 Span::styled(
                     " show approval bar . ",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ThemeColors::dark_gray()),
                 ),
-                Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+                Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+                Span::styled(" reject all", Style::default().fg(ThemeColors::dark_gray())),
             ]
         } else {
             // Normal approval bar hints
             vec![
-                Span::styled("←→", Style::default().fg(Color::Cyan)),
-                Span::styled(" navigate . ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Space", Style::default().fg(Color::Cyan)),
-                Span::styled(" toggle . ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Enter", Style::default().fg(Color::Green)),
-                Span::styled(" accept all . ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+                Span::styled("←→", Style::default().fg(ThemeColors::cyan())),
+                Span::styled(
+                    " navigate . ",
+                    Style::default().fg(ThemeColors::dark_gray()),
+                ),
+                Span::styled("Space", Style::default().fg(ThemeColors::cyan())),
+                Span::styled(" toggle . ", Style::default().fg(ThemeColors::dark_gray())),
+                Span::styled("Enter", Style::default().fg(ThemeColors::green())),
+                Span::styled(
+                    " accept all . ",
+                    Style::default().fg(ThemeColors::dark_gray()),
+                ),
+                Span::styled("Esc", Style::default().fg(ThemeColors::red())),
+                Span::styled(" reject all", Style::default().fg(ThemeColors::dark_gray())),
             ]
         };
         let hint =
             Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
         f.render_widget(hint, area);
     } else if !state.is_dialog_open {
-        let status_color = Color::DarkGray;
+        let status_color = ThemeColors::dark_gray();
 
         // detect if terminal is vscode
         let terminal_info = detect_terminal();
@@ -194,21 +202,27 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     } else if state.is_dialog_open {
         let mut spans_vec = vec![];
         if !state.approval_bar.is_visible() && state.message_tool_calls.is_some() {
-            spans_vec.push(Span::styled("Enter", Style::default().fg(Color::Cyan)));
+            spans_vec.push(Span::styled(
+                "Enter",
+                Style::default().fg(ThemeColors::cyan()),
+            ));
             spans_vec.push(Span::styled(
                 " show approval bar . ",
                 Style::default().fg(Color::Reset),
             ));
-            spans_vec.push(Span::styled("Esc", Style::default().fg(Color::Red)));
+            spans_vec.push(Span::styled("Esc", Style::default().fg(ThemeColors::red())));
             spans_vec.push(Span::styled(
                 " reject all . ",
                 Style::default().fg(Color::Reset),
             ));
         }
-        spans_vec.push(Span::styled("ctrl+o", Style::default().fg(Color::Cyan)));
+        spans_vec.push(Span::styled(
+            "ctrl+o",
+            Style::default().fg(ThemeColors::cyan()),
+        ));
         spans_vec.push(Span::styled(
             " toggle auto-approve",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ThemeColors::dark_gray()),
         ));
         // Show focus information when dialog is open
         let hint =

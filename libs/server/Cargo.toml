@@ -28,6 +28,7 @@ thiserror = { workspace = true }
 axum = { workspace = true }
 async-trait = { workspace = true }
 async-stream = "0.3"
+dirs = "5.0"
 utoipa = { version = "5.4.0", features = ["chrono", "uuid"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
@@ -35,6 +36,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tower = "0.5"
 http-body-util = "0.1"
+tempfile = { workspace = true }
 
 [lints.clippy]
 string_slice = "deny"
