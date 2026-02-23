@@ -282,8 +282,8 @@ impl AppConfig {
             .ok_or_else(|| ConfigError::Message("Invalid config path".into()))?;
         let auth_path = config_dir.join("auth.toml");
 
-        // Skip if auth.toml doesn't exist
-        if !auth_path.exists() {
+        // Skip if auth.toml doesn't exist or isn't a file
+        if !auth_path.is_file() {
             return Ok(false);
         }
 

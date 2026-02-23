@@ -68,7 +68,7 @@ impl AuthManager {
     /// Load auth manager for the given config directory
     pub fn new(config_dir: &Path) -> OAuthResult<Self> {
         let auth_path = config_dir.join(AUTH_FILE_NAME);
-        let auth_file = if auth_path.exists() {
+        let auth_file = if auth_path.is_file() {
             let content = std::fs::read_to_string(&auth_path)?;
             toml::from_str(&content)?
         } else {
