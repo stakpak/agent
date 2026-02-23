@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -600,6 +601,7 @@ struct AutopilotStatusJson {
     profile: String,
     config_path: String,
     server_config: AutopilotServerConfig,
+    server_allowed_tool_count: usize,
     service: ServiceStatusJson,
     server: EndpointStatusJson,
     gateway: EndpointStatusJson,
@@ -798,11 +800,20 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
     )
     .map(|c| c.enabled_channels().join(", "))
     .unwrap_or_default();
+    let resolved_tool_policy = resolve_server_tool_policy(
+        config.allowed_tools.as_ref(),
+        config.auto_approve.as_ref(),
+        effective_server.auto_approve_all,
+    );
 
     println!();
     println!("  Autopilot is running.");
     println!();
     println!("  Server      http://{}", effective_server.listen);
+    println!(
+        "  Tools       {}",
+        describe_tool_policy(&resolved_tool_policy)
+    );
     println!(
         "  Schedules   {}",
         if schedule_count > 0 {
@@ -925,8 +936,11 @@ async fn start_foreground_runtime(
 
     let mut models = runtime_client.list_models().await;
     let requested_model = options.model.clone().or(config.model.clone());
-    let auto_approve_tools = config.auto_approve.clone();
-    let allowed_tools = config.allowed_tools.clone();
+    let resolved_tool_policy = resolve_server_tool_policy(
+        config.allowed_tools.as_ref(),
+        config.auto_approve.as_ref(),
+        options.auto_approve_all,
+    );
 
     let requested_model_from_catalog = requested_model.as_deref().and_then(|name| {
         if let Some((provider, id)) = name.split_once('/') {
@@ -971,21 +985,8 @@ async fn start_foreground_runtime(
         models.push(default_model);
     }
 
-    let tool_approval_policy = if options.auto_approve_all {
-        stakpak_server::ToolApprovalPolicy::All
-    } else {
-        let policy = stakpak_server::ToolApprovalPolicy::with_defaults();
-        if let Some(ref auto_approve_tools) = auto_approve_tools {
-            policy.with_overrides(
-                auto_approve_tools
-                    .iter()
-                    .cloned()
-                    .map(|tool| (tool, stakpak_server::ToolApprovalAction::Approve)),
-            )
-        } else {
-            policy
-        }
-    };
+    let mcp_allowed_tools =
+        mcp_allowed_tools_from_policy(&resolved_tool_policy, config.allowed_tools.as_ref());
 
     let mcp_init_config = crate::commands::agent::run::mcp_init::McpInitConfig {
         redact_secrets: true, // applied in proxy layer
@@ -993,7 +994,7 @@ async fn start_foreground_runtime(
         enabled_tools: stakpak_mcp_server::EnabledToolsConfig { slack: false },
         enable_mtls: true,
         enable_subagents: true,
-        allowed_tools,
+        allowed_tools: mcp_allowed_tools,
         subagent_config: stakpak_mcp_server::SubagentConfig {
             profile_name: Some(config.profile_name.clone()),
             config_path: Some(config.config_path.clone()),
@@ -1050,7 +1051,7 @@ async fn start_foreground_runtime(
         inference,
         models,
         default_model,
-        tool_approval_policy,
+        resolved_tool_policy.clone(),
     )
     .with_base_system_prompt(Some(DEFAULT_SYSTEM_PROMPT.trim().to_string()))
     .with_project_dir(startup_project_dir)
@@ -1096,14 +1097,7 @@ async fn start_foreground_runtime(
     let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(config_path.as_path(), &gateway_cli)
         .unwrap_or_default();
 
-    if options.auto_approve_all {
-        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::AllowAll;
-        gateway_cfg.gateway.approval_allowlist.clear();
-    } else if let Some(auto_approve_tools) = auto_approve_tools.as_ref() {
-        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::Allowlist;
-        gateway_cfg.gateway.approval_allowlist =
-            expand_gateway_approval_allowlist(auto_approve_tools);
-    }
+    apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &resolved_tool_policy);
 
     let gateway_runtime = if gateway_cfg.has_channels() {
         match stakpak_gateway::Gateway::new(gateway_cfg).await {
@@ -1179,10 +1173,15 @@ async fn start_foreground_runtime(
 
     // --- 4. Schedule runtime (spawned AFTER all SQLite initialization to avoid
     //     sqlite3Close/sqlite3_open race in libsql on musl) ---
+    let watch_allowed_tools: HashSet<String> = approved_tools_from_policy(&resolved_tool_policy)
+        .into_iter()
+        .collect();
+
     let schedule_server = crate::commands::watch::AgentServerConnection {
         url: loopback_url,
         token: loopback_token,
         model: server_model_id,
+        default_allowed_tools: watch_allowed_tools,
     };
     let schedule_task = tokio::spawn(async move {
         if let Err(error) = crate::commands::watch::commands::run_scheduler(schedule_server).await {
@@ -1208,6 +1207,10 @@ async fn start_foreground_runtime(
     } else {
         println!("  Gateway     no channels configured");
     }
+    println!(
+        "  Tools       {}",
+        describe_tool_policy(&resolved_tool_policy)
+    );
 
     // --- Shutdown handler ---
     let shutdown = async move {
@@ -1281,6 +1284,131 @@ fn loopback_server_url(listener_addr: std::net::SocketAddr) -> String {
         format!("http://[::1]:{port}")
     } else {
         format!("http://127.0.0.1:{port}")
+    }
+}
+
+fn resolve_server_tool_policy(
+    allowed_tools: Option<&Vec<String>>,
+    auto_approve_tools: Option<&Vec<String>>,
+    auto_approve_all: bool,
+) -> stakpak_server::ToolApprovalPolicy {
+    if auto_approve_all {
+        return stakpak_server::ToolApprovalPolicy::All;
+    }
+
+    let mut resolved_allowed_tools: Vec<String> = match allowed_tools {
+        Some(tools) if tools.is_empty() => {
+            return stakpak_server::ToolApprovalPolicy::All;
+        }
+        Some(tools) => tools.clone(),
+        None => stakpak_server::SAFE_AUTOPILOT_TOOLS
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
+    };
+
+    resolved_allowed_tools.retain(|tool| !tool.trim().is_empty());
+    let mut policy = stakpak_server::ToolApprovalPolicy::from_allowlist(&resolved_allowed_tools);
+
+    if let Some(overrides) = auto_approve_tools {
+        policy = policy.with_overrides(overrides.iter().filter_map(|tool| {
+            let trimmed = tool.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some((
+                    stakpak_server::strip_tool_prefix(trimmed).to_string(),
+                    stakpak_server::ToolApprovalAction::Approve,
+                ))
+            }
+        }));
+    }
+
+    policy
+}
+
+fn approved_tools_from_policy(policy: &stakpak_server::ToolApprovalPolicy) -> Vec<String> {
+    match policy {
+        stakpak_server::ToolApprovalPolicy::Custom { rules, .. } => rules
+            .iter()
+            .filter_map(|(name, action)| {
+                if *action == stakpak_server::ToolApprovalAction::Approve {
+                    let trimmed = name.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn mcp_allowed_tools_from_policy(
+    policy: &stakpak_server::ToolApprovalPolicy,
+    configured_allowed_tools: Option<&Vec<String>>,
+) -> Option<Vec<String>> {
+    match policy {
+        stakpak_server::ToolApprovalPolicy::Custom { .. } => {
+            let approved = approved_tools_from_policy(policy);
+            Some(expand_mcp_allowed_tools(&approved))
+        }
+        stakpak_server::ToolApprovalPolicy::All | stakpak_server::ToolApprovalPolicy::None => {
+            configured_allowed_tools.cloned()
+        }
+    }
+}
+
+fn expand_mcp_allowed_tools(tools: &[String]) -> Vec<String> {
+    let mut normalized = BTreeSet::new();
+
+    for tool in tools {
+        let trimmed = tool.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        normalized.insert(trimmed.to_string());
+        if !trimmed.starts_with("stakpak__") {
+            normalized.insert(format!("stakpak__{trimmed}"));
+        }
+    }
+
+    normalized.into_iter().collect()
+}
+
+fn apply_gateway_policy_from_resolved_tools(
+    gateway_cfg: &mut stakpak_gateway::GatewayConfig,
+    policy: &stakpak_server::ToolApprovalPolicy,
+) {
+    match policy {
+        stakpak_server::ToolApprovalPolicy::All => {
+            gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::AllowAll;
+            gateway_cfg.gateway.approval_allowlist.clear();
+        }
+        stakpak_server::ToolApprovalPolicy::Custom { .. } => {
+            gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::Allowlist;
+            gateway_cfg.gateway.approval_allowlist =
+                expand_gateway_approval_allowlist(&approved_tools_from_policy(policy));
+        }
+        stakpak_server::ToolApprovalPolicy::None => {}
+    }
+}
+
+fn describe_tool_policy(policy: &stakpak_server::ToolApprovalPolicy) -> String {
+    match policy {
+        stakpak_server::ToolApprovalPolicy::All => "all tools (auto-approve all)".to_string(),
+        stakpak_server::ToolApprovalPolicy::Custom { .. } => {
+            let count = approved_tools_from_policy(policy).len();
+            format!("{count} tools allowed")
+        }
+        stakpak_server::ToolApprovalPolicy::None => "no tools approved".to_string(),
     }
 }
 
@@ -2030,6 +2158,12 @@ async fn status_autopilot(
 ) -> Result<(), String> {
     let autopilot_config = AutopilotConfigFile::load_or_default_async().await?;
     let server_config = autopilot_config.server.clone();
+    let resolved_tool_policy = resolve_server_tool_policy(
+        config.allowed_tools.as_ref(),
+        config.auto_approve.as_ref(),
+        server_config.auto_approve_all,
+    );
+    let server_allowed_tool_count = approved_tools_from_policy(&resolved_tool_policy).len();
     let config_path = AutopilotConfigFile::path();
     let base_url = loopback_base_url_from_bind(&server_config.listen);
     let probe_client = build_probe_http_client();
@@ -2079,6 +2213,7 @@ async fn status_autopilot(
             profile: config.profile_name.clone(),
             config_path: config_path.display().to_string(),
             server_config: server_config.clone(),
+            server_allowed_tool_count,
             service,
             server,
             gateway,
@@ -2120,6 +2255,10 @@ async fn status_autopilot(
         } else {
             format!("✗ unreachable ({})", gateway.url)
         }
+    );
+    println!(
+        "  Tools           {}",
+        describe_tool_policy(&resolved_tool_policy)
     );
 
     // Scheduler status
@@ -2385,6 +2524,23 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         println!("✓ Server health endpoint reachable");
     } else {
         println!("⚠ Server health endpoint not reachable (not running is OK before start)");
+    }
+
+    let resolved_tool_policy = resolve_server_tool_policy(
+        config.allowed_tools.as_ref(),
+        config.auto_approve.as_ref(),
+        autopilot_config.server.auto_approve_all,
+    );
+
+    println!();
+    println!("Security:");
+    match &resolved_tool_policy {
+        stakpak_server::ToolApprovalPolicy::All => {
+            println!("  ⚠ all tools allowed (auto_approve_all = true)");
+        }
+        _ => {
+            println!("  ✓ {}", describe_tool_policy(&resolved_tool_policy));
+        }
     }
 
     if failures > 0 {
@@ -3565,6 +3721,118 @@ app_token = "xapp-test"
     }
 
     #[test]
+    fn resolve_policy_none_allowed_tools_falls_back_to_safe_list() {
+        let policy = resolve_server_tool_policy(None, None, false);
+
+        assert_eq!(
+            policy.action_for("view"),
+            stakpak_server::ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            policy.action_for("run_command"),
+            stakpak_server::ToolApprovalAction::Deny
+        );
+    }
+
+    #[test]
+    fn resolve_policy_explicit_allowed_tools() {
+        let allowed_tools = vec!["view".to_string()];
+        let policy = resolve_server_tool_policy(Some(&allowed_tools), None, false);
+
+        assert_eq!(
+            policy.action_for("view"),
+            stakpak_server::ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            policy.action_for("run_command"),
+            stakpak_server::ToolApprovalAction::Deny
+        );
+    }
+
+    #[test]
+    fn resolve_policy_auto_approve_all_overrides() {
+        let policy = resolve_server_tool_policy(None, None, true);
+
+        assert_eq!(
+            policy.action_for("run_command"),
+            stakpak_server::ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            policy.action_for("some_future_tool"),
+            stakpak_server::ToolApprovalAction::Approve
+        );
+    }
+
+    #[test]
+    fn resolve_policy_auto_approve_extras_promoted() {
+        let allowed_tools = vec!["view".to_string()];
+        let auto_approve = vec!["run_command".to_string()];
+        let policy = resolve_server_tool_policy(Some(&allowed_tools), Some(&auto_approve), false);
+
+        assert_eq!(
+            policy.action_for("run_command"),
+            stakpak_server::ToolApprovalAction::Approve
+        );
+    }
+
+    #[test]
+    fn mcp_allowed_tools_include_prefixed_aliases() {
+        let policy = resolve_server_tool_policy(None, None, false);
+        let allowed = mcp_allowed_tools_from_policy(&policy, None);
+
+        assert!(allowed.is_some());
+        let allowed = match allowed {
+            Some(value) => value,
+            None => panic!("expected MCP allowlist"),
+        };
+
+        assert!(allowed.contains(&"view".to_string()));
+        assert!(allowed.contains(&"stakpak__view".to_string()));
+    }
+
+    #[test]
+    fn test_gateway_gets_allowlist_from_resolved_policy() {
+        let policy = resolve_server_tool_policy(None, None, false);
+        let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
+
+        apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &policy);
+
+        assert!(matches!(
+            gateway_cfg.gateway.approval_mode,
+            stakpak_gateway::ApprovalMode::Allowlist
+        ));
+        assert!(!gateway_cfg.gateway.approval_allowlist.is_empty());
+        assert!(
+            gateway_cfg
+                .gateway
+                .approval_allowlist
+                .contains(&"view".to_string())
+        );
+        assert!(
+            gateway_cfg
+                .gateway
+                .approval_allowlist
+                .contains(&"stakpak__view".to_string())
+        );
+    }
+
+    #[test]
+    fn test_gateway_gets_allow_all_when_auto_approve_all() {
+        let policy = resolve_server_tool_policy(None, None, true);
+        let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
+        gateway_cfg.gateway.approval_mode = stakpak_gateway::ApprovalMode::Allowlist;
+        gateway_cfg.gateway.approval_allowlist = vec!["view".to_string()];
+
+        apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &policy);
+
+        assert!(matches!(
+            gateway_cfg.gateway.approval_mode,
+            stakpak_gateway::ApprovalMode::AllowAll
+        ));
+        assert!(gateway_cfg.gateway.approval_allowlist.is_empty());
+    }
+
+    #[test]
     fn status_json_schema_contains_core_fields() {
         let payload = AutopilotStatusJson {
             command: "autopilot.status",
@@ -3572,6 +3840,7 @@ app_token = "xapp-test"
             profile: "default".to_string(),
             config_path: "/tmp/autopilot.toml".to_string(),
             server_config: AutopilotServerConfig::default(),
+            server_allowed_tool_count: 9,
             service: ServiceStatusJson {
                 installed: true,
                 active: true,
@@ -3630,6 +3899,7 @@ app_token = "xapp-test"
                 Some("autopilot.status")
             );
             assert!(value.get("server_config").is_some());
+            assert!(value.get("server_allowed_tool_count").is_some());
             assert!(value.get("service").is_some());
             assert!(value.get("server").is_some());
             assert!(value.get("gateway").is_some());
