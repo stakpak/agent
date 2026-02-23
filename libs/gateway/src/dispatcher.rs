@@ -1364,13 +1364,33 @@ fn should_flush_stream_buffer(buffer: &str, elapsed_since_last_stream: Duration)
 }
 
 fn take_completed_line_chunk(buffer: &mut String) -> Option<String> {
-    let split_index = buffer.rfind('\n')?;
-    let split_after = split_index + '\n'.len_utf8();
+    let split_after = last_safe_markdown_split(buffer)?;
 
     let remainder = buffer.split_off(split_after);
     let chunk = std::mem::replace(buffer, remainder);
 
     Some(chunk)
+}
+
+fn last_safe_markdown_split(buffer: &str) -> Option<usize> {
+    let mut in_fenced_code_block = false;
+    let mut scanned_bytes = 0;
+    let mut last_safe_split: Option<usize> = None;
+
+    for line in buffer.split_inclusive('\n') {
+        scanned_bytes += line.len();
+
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fenced_code_block = !in_fenced_code_block;
+        }
+
+        if line.ends_with('\n') && !in_fenced_code_block {
+            last_safe_split = Some(scanned_bytes);
+        }
+    }
+
+    last_safe_split
 }
 
 async fn flush_stream_buffer(
@@ -2176,6 +2196,24 @@ mod tests {
 
         assert_eq!(chunk, "line1\nline2\n");
         assert_eq!(buffer, "partial");
+    }
+
+    #[test]
+    fn take_completed_line_chunk_avoids_splitting_open_fenced_code_block() {
+        let mut buffer = String::from("before\n```sh\necho one\n");
+        let chunk = take_completed_line_chunk(&mut buffer).expect("chunk should exist");
+
+        assert_eq!(chunk, "before\n");
+        assert_eq!(buffer, "```sh\necho one\n");
+    }
+
+    #[test]
+    fn take_completed_line_chunk_flushes_only_completed_fenced_code_blocks() {
+        let mut buffer = String::from("```sh\necho one\n```\n```sh\necho two\n");
+        let chunk = take_completed_line_chunk(&mut buffer).expect("chunk should exist");
+
+        assert_eq!(chunk, "```sh\necho one\n```\n");
+        assert_eq!(buffer, "```sh\necho two\n");
     }
 
     #[test]
