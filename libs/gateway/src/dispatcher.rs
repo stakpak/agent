@@ -683,17 +683,18 @@ impl Dispatcher {
             })?;
 
         if let Some(channel) = self.channels.get(&pending.channel_name) {
+            let resolved_by_display = render_approver_display(&pending.channel_name, resolved_by);
             let status = if approve {
                 format!(
                     "✅ {} tool(s) approved by {}",
                     pending.tool_calls.len(),
-                    resolved_by.0
+                    resolved_by_display
                 )
             } else {
                 format!(
                     "❌ {} tool(s) denied by {}",
                     pending.tool_calls.len(),
-                    resolved_by.0
+                    resolved_by_display
                 )
             };
 
@@ -1533,6 +1534,14 @@ fn build_decisions_for_tool_calls(
         .collect()
 }
 
+fn render_approver_display(channel_name: &str, resolved_by: &PeerId) -> String {
+    match channel_name {
+        // Channel-native mention format renders the user's @name in clients.
+        "slack" | "discord" => format!("<@{}>", resolved_by.0),
+        _ => resolved_by.0.clone(),
+    }
+}
+
 fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) -> String {
     let mut text = if tool_calls.len() == 1 {
         "🔧 Tool approval required\n\n".to_string()
@@ -2244,6 +2253,14 @@ mod tests {
         assert!(is_allowlisted("run_command", &allowlist));
         assert!(is_allowlisted("mcp__run_command", &allowlist));
         assert!(!is_allowlisted("mcp__str_replace", &allowlist));
+    }
+
+    #[test]
+    fn render_approver_display_uses_channel_mentions() {
+        let peer = PeerId("U123".to_string());
+        assert_eq!(render_approver_display("slack", &peer), "<@U123>");
+        assert_eq!(render_approver_display("discord", &peer), "<@U123>");
+        assert_eq!(render_approver_display("telegram", &peer), "U123");
     }
 
     #[test]
