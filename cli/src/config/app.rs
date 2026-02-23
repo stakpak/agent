@@ -873,7 +873,7 @@ impl AppConfig {
     /// prefix (e.g., "anthropic/claude-opus-4-5"), it searches within that
     /// provider first. Otherwise, it searches all providers.
     pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
-        let use_stakpak = self.get_stakpak_api_key().is_some();
+        let has_stakpak_key = self.get_stakpak_api_key().is_some();
 
         // Priority: cli_override > model > default
         let model_str = cli_override
@@ -883,8 +883,8 @@ impl AppConfig {
         // Extract explicit provider prefix if present (e.g., "amazon-bedrock/claude-sonnet-4-5")
         let explicit_provider = model_str.find('/').map(|idx| &model_str[..idx]);
 
-        // Search the model catalog
-        let model = stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {
+        // First, find the model without Stakpak transform to determine its native provider
+        let model = stakpak_api::find_model(model_str, false).unwrap_or_else(|| {
             // Model not found in catalog - create a custom model
             // Extract provider from prefix if present
             let (provider, model_id) = if let Some(idx) = model_str.find('/') {
@@ -894,27 +894,37 @@ impl AppConfig {
                 ("anthropic", model_str) // Default to anthropic
             };
 
-            let final_provider = if use_stakpak { "stakpak" } else { provider };
-            let final_id = if use_stakpak {
-                format!("{}/{}", provider, model_id)
-            } else {
-                model_id.to_string()
-            };
-
-            stakpak_api::Model::custom(final_id, final_provider)
+            stakpak_api::Model::custom(model_id.to_string(), provider)
         });
 
         // If the user specified an explicit provider prefix (e.g., "amazon-bedrock/..."),
         // ensure the resolved model uses that provider — the catalog may have returned
         // the model under a different provider (e.g., "anthropic" instead of "amazon-bedrock").
-        if let Some(prefix) = explicit_provider
-            && !use_stakpak
+        let model = if let Some(prefix) = explicit_provider
             && model.provider != prefix
         {
-            return stakpak_api::Model {
+            stakpak_api::Model {
                 provider: prefix.to_string(),
                 ..model
-            };
+            }
+        } else {
+            model
+        };
+
+        // Transform for Stakpak routing only if:
+        // 1. User has a Stakpak API key
+        // 2. The model is from a known cloud provider (not custom/ollama/litellm)
+        // 3. User does NOT have a direct API key for this model's provider
+        // If the user has a direct provider key, use it instead of routing through Stakpak.
+        // NOTE: keep in sync with known_cloud_providers in mode_interactive.rs SwitchToModel handler
+        let known_cloud_providers = ["anthropic", "openai", "google", "gemini", "amazon-bedrock"];
+        let has_direct_provider_key = self.resolve_provider_auth(&model.provider).is_some();
+        if has_stakpak_key
+            && !has_direct_provider_key
+            && model.provider != "stakpak"
+            && known_cloud_providers.contains(&model.provider.as_str())
+        {
+            return stakpak_api::transform_for_stakpak(model);
         }
 
         model

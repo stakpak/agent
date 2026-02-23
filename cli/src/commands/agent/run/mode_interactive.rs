@@ -467,11 +467,16 @@ pub async fn run_interactive(
                 match output_event {
                     OutputEvent::SwitchToModel(new_model) => {
                         // Transform model for Stakpak routing if using Stakpak API,
-                        // but only for known cloud providers. Local/custom providers
-                        // (litellm, ollama, custom, etc.) should not be transformed.
+                        // but only for known cloud providers that don't have a direct
+                        // API key configured. If the user has a direct provider key,
+                        // use it instead of routing through Stakpak.
                         let known_cloud_providers =
                             ["anthropic", "openai", "google", "gemini", "amazon-bedrock"];
+                        let has_direct_provider_key = ctx_clone
+                            .resolve_provider_auth(&new_model.provider)
+                            .is_some();
                         let should_transform = has_stakpak_key
+                            && !has_direct_provider_key
                             && new_model.provider != "stakpak"
                             && known_cloud_providers.contains(&new_model.provider.as_str());
 
