@@ -66,6 +66,18 @@ pub struct RunConfig {
     pub max_turns: usize,
 }
 
+impl std::fmt::Debug for RunConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunConfig")
+            .field("model", &self.model)
+            .field("tool_approval_policy", &self.tool_approval_policy)
+            .field("system_prompt", &self.system_prompt)
+            .field("max_turns", &self.max_turns)
+            .field("inference", &"<opaque>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub enum SessionRuntimeState {
     #[default]

@@ -1555,15 +1555,14 @@ fn apply_profile_to_channel(
     boot_profile: &str,
     config_path: &str,
 ) {
-    let profile_name = profile.clone();
-    *profile = None;
-
-    let Some(profile_name) = profile_name else {
+    // Preserve the configured profile name in-memory to avoid accidental config
+    // loss if this GatewayConfig is ever persisted later.
+    let Some(profile_name) = profile.as_deref() else {
         return;
     };
 
     let Some(resolved) =
-        resolve_profile_to_overrides(&profile_name, boot_profile, Some(config_path))
+        resolve_profile_to_overrides(profile_name, boot_profile, Some(config_path))
     else {
         return;
     };
@@ -4080,7 +4079,7 @@ auto_approve = ["view"]
         if let Some(slack) = slack {
             assert_eq!(slack.model.as_deref(), Some("anthropic/claude-opus-4-5"));
             assert_eq!(slack.auto_approve, Some(vec!["view".to_string()]));
-            assert!(slack.profile.is_none());
+            assert_eq!(slack.profile.as_deref(), Some("ops"));
         }
 
         let _ = std::fs::remove_file(path);

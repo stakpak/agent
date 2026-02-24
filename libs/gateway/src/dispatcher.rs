@@ -847,9 +847,16 @@ impl Dispatcher {
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
         let channel_name = queued.inbound.channel.0.clone();
-        let effective_model =
-            self.resolve_effective_model(&channel_name, queued.run_options.model.clone());
-        let run_overrides = self.build_run_overrides(&channel_name, effective_model.clone());
+        let run_overrides = self.build_run_overrides(&channel_name);
+        let top_level_model = if run_overrides
+            .as_ref()
+            .and_then(|overrides| overrides.model.as_ref())
+            .is_some()
+        {
+            None
+        } else {
+            self.resolve_effective_model(&channel_name, queued.run_options.model.clone())
+        };
 
         let message = Message::new(Role::User, queued.text.clone());
         let response = self
@@ -858,7 +865,7 @@ impl Dispatcher {
                 &session_id,
                 vec![message],
                 SendMessageOptions {
-                    model: effective_model,
+                    model: top_level_model,
                     message_type: MessageType::Message,
                     run_id: None,
                     sandbox: queued.run_options.sandbox,
@@ -1200,11 +1207,7 @@ impl Dispatcher {
         (approval_mode, approval_allowlist)
     }
 
-    fn build_run_overrides(
-        &self,
-        channel_name: &str,
-        _effective_model: Option<String>,
-    ) -> Option<RunOverrides> {
+    fn build_run_overrides(&self, channel_name: &str) -> Option<RunOverrides> {
         let channel_overrides = self.channel_overrides.get(channel_name)?;
 
         let auto_approve = channel_overrides
@@ -2730,7 +2733,7 @@ mod tests {
         assert!(allowlist.contains("view"));
 
         let overrides = dispatcher
-            .build_run_overrides("slack", Some("ignored/model".to_string()))
+            .build_run_overrides("slack")
             .expect("expected run overrides");
         assert_eq!(
             overrides.model.as_deref(),

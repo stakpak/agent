@@ -235,6 +235,9 @@ struct ModelsResponse {
 }
 
 const DEFAULT_MAX_TURNS: usize = 64;
+const MIN_MAX_TURNS: usize = 1;
+const MAX_MAX_TURNS: usize = 256;
+const MAX_SYSTEM_PROMPT_CHARS: usize = 32 * 1024;
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
     public_router()
@@ -514,10 +517,10 @@ async fn sessions_message_handler(
 
             let _ = state.refresh_mcp_tools().await;
 
-            let requested_or_persisted_model = match request
-                .overrides
-                .as_ref()
-                .and_then(|overrides| overrides.model.clone())
+            let overrides = request.overrides.as_ref();
+
+            let requested_or_persisted_model = match overrides
+                .and_then(|value| value.model.clone())
                 .or_else(|| request.model.clone())
             {
                 Some(model) => Some(model),
@@ -531,24 +534,20 @@ async fn sessions_message_handler(
                 })?;
 
             let tool_approval_policy = resolve_tool_approval_override(
-                request
-                    .overrides
-                    .as_ref()
-                    .and_then(|overrides| overrides.auto_approve.as_ref()),
+                overrides.and_then(|value| value.auto_approve.as_ref()),
                 &state.tool_approval_policy,
             );
 
-            let system_prompt_override = request
-                .overrides
-                .as_ref()
-                .and_then(|overrides| overrides.system_prompt.clone())
+            let system_prompt_override = overrides
+                .and_then(|value| value.system_prompt.clone())
                 .filter(|value| !value.trim().is_empty());
 
-            let max_turns = request
-                .overrides
-                .as_ref()
-                .and_then(|overrides| overrides.max_turns)
-                .unwrap_or(DEFAULT_MAX_TURNS);
+            let max_turns = overrides
+                .and_then(|value| value.max_turns)
+                .unwrap_or(DEFAULT_MAX_TURNS)
+                // Defense-in-depth: clamp after validation in case a code path
+                // bypasses validate_session_message_request.
+                .clamp(MIN_MAX_TURNS, MAX_MAX_TURNS);
 
             let run_config = RunConfig {
                 model,
@@ -1052,6 +1051,28 @@ fn validate_session_message_request(request: &SessionMessageRequest) -> Option<R
             "invalid_context",
             &message,
         ));
+    }
+
+    if let Some(overrides) = request.overrides.as_ref() {
+        if let Some(max_turns) = overrides.max_turns
+            && !(MIN_MAX_TURNS..=MAX_MAX_TURNS).contains(&max_turns)
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                "max_turns must be between 1 and 256",
+            ));
+        }
+
+        if let Some(system_prompt) = overrides.system_prompt.as_ref()
+            && system_prompt.chars().count() > MAX_SYSTEM_PROMPT_CHARS
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                "system_prompt exceeds maximum length",
+            ));
+        }
     }
 
     None
@@ -2894,6 +2915,100 @@ mod tests {
             validate_session_message_request(&request).is_some(),
             "raw content length must be enforced even when trimmed content is empty"
         );
+    }
+
+    #[test]
+    fn validate_session_message_request_rejects_out_of_bounds_max_turns() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(0),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_some());
+
+        let request_too_large = SessionMessageRequest {
+            overrides: Some(RunOverrides {
+                max_turns: Some(MAX_MAX_TURNS + 1),
+                ..RunOverrides::default()
+            }),
+            ..request
+        };
+        assert!(validate_session_message_request(&request_too_large).is_some());
+    }
+
+    #[test]
+    fn validate_session_message_request_accepts_boundary_max_turns() {
+        let request_min = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(MIN_MAX_TURNS),
+                ..RunOverrides::default()
+            }),
+        };
+        assert!(validate_session_message_request(&request_min).is_none());
+
+        let request_max = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(MAX_MAX_TURNS),
+                ..RunOverrides::default()
+            }),
+        };
+        assert!(validate_session_message_request(&request_max).is_none());
+    }
+
+    #[test]
+    fn validate_session_message_request_rejects_oversized_system_prompt_override() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                system_prompt: Some("x".repeat(MAX_SYSTEM_PROMPT_CHARS + 1)),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_some());
+    }
+
+    #[test]
+    fn validate_session_message_request_accepts_boundary_system_prompt_override() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                system_prompt: Some("x".repeat(MAX_SYSTEM_PROMPT_CHARS)),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_none());
     }
 
     #[tokio::test]

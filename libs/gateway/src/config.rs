@@ -667,24 +667,19 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 }
 
 fn normalize_allowlist(list: Option<Vec<String>>) -> Option<Vec<String>> {
-    let values = list
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|item| {
-            let trimmed = item.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if values.is_empty() {
-        None
-    } else {
-        Some(values)
-    }
+    list.map(|items| {
+        items
+            .into_iter()
+            .filter_map(|item| {
+                let trimmed = item.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+            .collect()
+    })
 }
 
 fn load_toml_root_table(config_path: &Path) -> Result<toml::value::Table> {
@@ -1008,6 +1003,50 @@ mod tests {
             ));
             assert_eq!(telegram.approval_allowlist, Some(vec!["view".to_string()]));
         }
+    }
+
+    #[test]
+    fn channel_overrides_preserves_explicit_empty_auto_approve() {
+        let channels = ChannelConfigs {
+            telegram: Some(TelegramConfig {
+                token: "123:ABC".to_string(),
+                require_mention: false,
+                model: None,
+                auto_approve: Some(vec![]),
+                profile: None,
+            }),
+            discord: None,
+            slack: None,
+        };
+
+        let overrides = channels.overrides_for("telegram");
+        assert!(matches!(
+            overrides.approval_mode,
+            Some(ApprovalMode::Allowlist)
+        ));
+        assert_eq!(overrides.approval_allowlist, Some(vec![]));
+    }
+
+    #[test]
+    fn channel_overrides_preserves_whitespace_only_auto_approve_as_empty_allowlist() {
+        let channels = ChannelConfigs {
+            telegram: Some(TelegramConfig {
+                token: "123:ABC".to_string(),
+                require_mention: false,
+                model: None,
+                auto_approve: Some(vec!["  ".to_string(), "".to_string()]),
+                profile: None,
+            }),
+            discord: None,
+            slack: None,
+        };
+
+        let overrides = channels.overrides_for("telegram");
+        assert!(matches!(
+            overrides.approval_mode,
+            Some(ApprovalMode::Allowlist)
+        ));
+        assert_eq!(overrides.approval_allowlist, Some(vec![]));
     }
 
     #[test]
