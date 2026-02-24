@@ -1308,7 +1308,22 @@ fn resolve_server_tool_policy(
     };
 
     resolved_allowed_tools.retain(|tool| !tool.trim().is_empty());
-    let mut policy = stakpak_server::ToolApprovalPolicy::from_allowlist(&resolved_allowed_tools);
+
+    let mut policy = stakpak_server::ToolApprovalPolicy::Custom {
+        rules: std::collections::HashMap::new(),
+        default: stakpak_server::ToolApprovalAction::Ask,
+    }
+    .with_overrides(resolved_allowed_tools.into_iter().filter_map(|tool| {
+        let trimmed = tool.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some((
+                stakpak_server::strip_tool_prefix(&trimmed).to_string(),
+                stakpak_server::ToolApprovalAction::Approve,
+            ))
+        }
+    }));
 
     if let Some(overrides) = auto_approve_tools {
         policy = policy.with_overrides(overrides.iter().filter_map(|tool| {
@@ -1355,9 +1370,15 @@ fn mcp_allowed_tools_from_policy(
     configured_allowed_tools: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
     match policy {
-        stakpak_server::ToolApprovalPolicy::Custom { .. } => {
-            let approved = approved_tools_from_policy(policy);
-            Some(expand_mcp_allowed_tools(&approved))
+        stakpak_server::ToolApprovalPolicy::Custom { default, .. } => {
+            if *default == stakpak_server::ToolApprovalAction::Ask {
+                // Ask-by-default policies require full tool visibility so gateway/user
+                // can approve unlisted tools at runtime.
+                configured_allowed_tools.cloned()
+            } else {
+                let approved = approved_tools_from_policy(policy);
+                Some(expand_mcp_allowed_tools(&approved))
+            }
         }
         stakpak_server::ToolApprovalPolicy::All | stakpak_server::ToolApprovalPolicy::None => {
             configured_allowed_tools.cloned()
@@ -3730,7 +3751,7 @@ app_token = "xapp-test"
         );
         assert_eq!(
             policy.action_for("run_command"),
-            stakpak_server::ToolApprovalAction::Deny
+            stakpak_server::ToolApprovalAction::Ask
         );
     }
 
@@ -3745,7 +3766,7 @@ app_token = "xapp-test"
         );
         assert_eq!(
             policy.action_for("run_command"),
-            stakpak_server::ToolApprovalAction::Deny
+            stakpak_server::ToolApprovalAction::Ask
         );
     }
 
@@ -3776,18 +3797,11 @@ app_token = "xapp-test"
     }
 
     #[test]
-    fn mcp_allowed_tools_include_prefixed_aliases() {
+    fn mcp_allowed_tools_unrestricted_when_policy_is_ask_default() {
         let policy = resolve_server_tool_policy(None, None, false);
         let allowed = mcp_allowed_tools_from_policy(&policy, None);
 
-        assert!(allowed.is_some());
-        let allowed = match allowed {
-            Some(value) => value,
-            None => panic!("expected MCP allowlist"),
-        };
-
-        assert!(allowed.contains(&"view".to_string()));
-        assert!(allowed.contains(&"stakpak__view".to_string()));
+        assert!(allowed.is_none());
     }
 
     #[test]

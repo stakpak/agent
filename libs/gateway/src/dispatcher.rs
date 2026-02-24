@@ -9,7 +9,7 @@ use stakai::{Message, Role};
 use stakpak_agent_core::ProposedToolCall;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use stakpak_shared::utils::truncate_chars_with_ellipsis;
@@ -355,6 +355,13 @@ impl Dispatcher {
             return Ok(());
         };
 
+        debug!(
+            approval_id = %approval_id,
+            decision = %decision,
+            resolved_by = %inbound.peer_id.0,
+            "received approval response"
+        );
+
         let approve = decision == "allow";
         if let Err(error) = self
             .resolve_approval(&pending, approve, &inbound.peer_id, run_tx)
@@ -597,6 +604,13 @@ impl Dispatcher {
             return Ok(());
         };
 
+        info!(
+            session_id = %pending.session_id,
+            run_id = %pending.run_id,
+            tool_count = pending.tool_calls.len(),
+            "auto-rejecting pending approval: new message received"
+        );
+
         let decisions = build_decisions_for_tool_calls(
             &pending.tool_calls,
             ToolDecisionAction::Reject,
@@ -674,13 +688,31 @@ impl Dispatcher {
 
         let decisions = build_decisions_for_tool_calls(&pending.tool_calls, action, None);
 
-        self.client
+        if let Err(error) = self
+            .client
             .resolve_tools(&pending.session_id, &pending.run_id, decisions)
             .await
-            .map_err(|error| ResolveApprovalError {
+        {
+            let is_conflict = matches!(error, crate::client::ClientError::Conflict);
+
+            if is_conflict
+                && let Some(channel) = self.channels.get(&pending.channel_name)
+                && let Err(edit_error) = channel
+                    .edit_message(
+                        &pending.prompt_message_id,
+                        "⏱️ Approval expired — run no longer waiting for decision",
+                    )
+                    .await
+            {
+                warn!(error = %edit_error, "failed to edit expired approval prompt");
+            }
+
+            return Err(ResolveApprovalError {
                 message: format!("resolve_tools failed: {error}"),
-                decision_sent: false,
-            })?;
+                // Avoid re-inserting stale approvals when server rejects with 409.
+                decision_sent: is_conflict,
+            });
+        }
 
         if let Some(channel) = self.channels.get(&pending.channel_name) {
             let resolved_by_display = render_approver_display(&pending.channel_name, resolved_by);
@@ -737,6 +769,14 @@ impl Dispatcher {
             timeout_seconds,
             reason,
         } = request;
+
+        info!(
+            session_id = %session_id,
+            run_id = %run_id,
+            tool_count = tool_calls.len(),
+            reason = %reason,
+            "auto-rejecting tools and resuming run"
+        );
 
         let decisions = build_decisions_for_tool_calls(
             &tool_calls,

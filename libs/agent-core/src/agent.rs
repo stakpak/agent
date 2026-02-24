@@ -561,7 +561,7 @@ async fn run_tool_cycle(
                             append_tool_result_message(
                                 messages,
                                 &tool_call_id,
-                                json!({"error": "TOOL_CALL_CANCELLED"}),
+                                json!("TOOL_CALL_CANCELLED"),
                             );
                             completed_tool_ids.insert(tool_call_id.clone());
 
@@ -617,11 +617,7 @@ async fn run_tool_cycle(
                 }
                 ToolDecision::Reject => {
                     let reason = "Tool call rejected by user".to_string();
-                    append_tool_result_message(
-                        messages,
-                        &tool_call_id,
-                        json!({"rejected": reason.clone()}),
-                    );
+                    append_tool_result_message(messages, &tool_call_id, json!(reason.clone()));
                     completed_tool_ids.insert(tool_call_id.clone());
 
                     emit(
@@ -738,11 +734,7 @@ async fn append_cancelled_placeholders(
         }
 
         completed_tool_ids.insert(tool_call.id.clone());
-        append_tool_result_message(
-            messages,
-            &tool_call.id,
-            json!({"error": "TOOL_CALL_CANCELLED"}),
-        );
+        append_tool_result_message(messages, &tool_call.id, json!("TOOL_CALL_CANCELLED"));
 
         emit(
             event_tx,
