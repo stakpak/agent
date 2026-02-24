@@ -31,4 +31,4 @@ pub use stakpak_agent_core::{
     SAFE_AUTOPILOT_TOOLS, ToolApprovalAction, ToolApprovalPolicy, strip_tool_prefix,
 };
 pub use state::AppState;
-pub use types::{SessionHandle, SessionRuntimeState};
+pub use types::{AutoApproveOverride, RunConfig, RunOverrides, SessionHandle, SessionRuntimeState};

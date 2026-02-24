@@ -20,8 +20,9 @@ use crate::commands::watch::{
 use chrono::{DateTime, Utc};
 use croner::Cron;
 use serde::Deserialize;
+use stakpak_gateway::client::{AutoApproveOverride, RunOverrides};
 use stakpak_shared::utils::sanitize_text_output;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
@@ -705,10 +706,14 @@ async fn handle_schedule_event(
     info!(schedule = %schedule.name, "Waking agent");
     print_event("agent", &schedule.name, "Spawning agent...");
 
+    let profile_name = schedule.effective_profile(&config.defaults).to_string();
+    let (profile_overrides, profile_allowed_tools) =
+        resolve_schedule_profile_overrides(&profile_name, server);
+
     // Spawn agent
     let spawn_config = SpawnConfig {
         prompt,
-        profile: schedule.effective_profile(&config.defaults).to_string(),
+        profile: profile_name,
         timeout: schedule.effective_timeout(&config.defaults),
         workdir: None,
         enable_slack_tools: schedule.effective_enable_slack_tools(&config.defaults),
@@ -716,7 +721,9 @@ async fn handle_schedule_event(
         pause_on_approval: schedule.effective_pause_on_approval(&config.defaults),
         sandbox: schedule.effective_sandbox(&config.defaults),
         caller_context,
-        allowed_tools: server.default_allowed_tools.clone(),
+        allowed_tools: profile_allowed_tools
+            .unwrap_or_else(|| server.default_allowed_tools.clone()),
+        overrides: profile_overrides,
         server: server.clone(),
     };
 
@@ -836,6 +843,67 @@ async fn handle_schedule_event(
     }
 
     Ok(())
+}
+
+fn resolve_schedule_profile_overrides(
+    profile_name: &str,
+    server: &AgentServerConnection,
+) -> (Option<RunOverrides>, Option<HashSet<String>>) {
+    let Some(resolved) = crate::commands::autopilot::resolve_profile_to_overrides(
+        profile_name,
+        &server.boot_profile,
+        Some(server.config_path.as_str()),
+    ) else {
+        return (None, None);
+    };
+
+    let normalized_model = resolved.model.and_then(|model| {
+        if model.trim().is_empty() {
+            None
+        } else {
+            Some(model)
+        }
+    });
+
+    let normalized_auto_approve = resolved
+        .auto_approve
+        .map(|tools| AutoApproveOverride::AllowList(normalize_tool_list(tools)));
+
+    let normalized_allowed_tools = resolved.allowed_tools.map(normalize_allowed_tools);
+
+    let overrides = RunOverrides {
+        model: normalized_model,
+        auto_approve: normalized_auto_approve,
+        ..RunOverrides::default()
+    };
+
+    let overrides = if overrides.is_empty() {
+        None
+    } else {
+        Some(overrides)
+    };
+
+    (overrides, normalized_allowed_tools)
+}
+
+fn normalize_tool_list(tools: Vec<String>) -> Vec<String> {
+    tools
+        .into_iter()
+        .filter_map(|tool| {
+            let normalized = stakpak_server::strip_tool_prefix(&tool).trim().to_string();
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn normalize_allowed_tools(tools: Vec<String>) -> HashSet<String> {
+    normalize_tool_list(tools).into_iter().collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1485,16 +1553,18 @@ fn print_event(event_type: &str, trigger_name: &str, message: &str) {
 mod tests {
     use super::{
         MAX_GATEWAY_CHECK_OUTPUT_CHARS, build_interactive_caller_context, interactive_run_max_age,
-        normalized_check_output, trigger_config_reload_with_loader, validate_prior_scheduler_state,
+        normalized_check_output, resolve_schedule_profile_overrides,
+        trigger_config_reload_with_loader, validate_prior_scheduler_state,
     };
     use crate::commands::watch::config::{ScheduleDefaults, ScheduleSettings};
     use crate::commands::watch::db::{RELOAD_SENTINEL, SchedulerState};
     use crate::commands::watch::reconciler::{RegisteredSchedule, ScheduleSnapshot};
     use crate::commands::watch::{
-        CheckResult, InteractionMode, Schedule, ScheduleConfig, ScheduleDb, Scheduler,
+        AgentServerConnection, CheckResult, InteractionMode, Schedule, ScheduleConfig, ScheduleDb,
+        Scheduler,
     };
     use chrono::{Duration, Utc};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::Duration as StdDuration;
@@ -1973,5 +2043,110 @@ mod tests {
         let max_age = interactive_run_max_age(&config, "missing");
 
         assert!(max_age.num_hours() >= 24);
+    }
+
+    #[test]
+    fn test_resolve_schedule_profile_overrides_uses_profile_specific_values() {
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("config.toml");
+
+        let config = r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+model = "openai/default-model"
+allowed_tools = ["view"]
+auto_approve = ["view"]
+
+[profiles.production]
+api_key = "prod-key"
+model = "anthropic/claude-sonnet-4-5"
+allowed_tools = ["stakpak__run_command", "  "]
+auto_approve = ["stakpak__view"]
+"#;
+
+        std::fs::write(&config_path, config).expect("failed to write config");
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: String::new(),
+            model: Some("openai/default-model".to_string()),
+            default_allowed_tools: HashSet::from(["view".to_string()]),
+            boot_profile: "default".to_string(),
+            config_path: config_path.to_string_lossy().to_string(),
+        };
+
+        let (overrides, allowed_tools) = resolve_schedule_profile_overrides("production", &server);
+
+        let overrides = overrides.expect("expected run overrides");
+        assert_eq!(
+            overrides.model.as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
+        assert!(matches!(
+            overrides.auto_approve,
+            Some(stakpak_gateway::client::AutoApproveOverride::AllowList(_))
+        ));
+
+        let allowed_tools = allowed_tools.expect("expected allowed tools override");
+        assert!(allowed_tools.contains("run_command"));
+    }
+
+    #[test]
+    fn test_resolve_schedule_profile_overrides_noop_for_boot_profile() {
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: String::new(),
+            model: Some("openai/default-model".to_string()),
+            default_allowed_tools: HashSet::from(["view".to_string()]),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/does-not-matter.toml".to_string(),
+        };
+
+        let (overrides, allowed_tools) = resolve_schedule_profile_overrides("default", &server);
+        assert!(overrides.is_none());
+        assert!(allowed_tools.is_none());
+    }
+
+    #[test]
+    fn test_resolve_schedule_profile_overrides_preserves_empty_allowed_tools_as_allow_all() {
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("config-empty-tools.toml");
+
+        let config = r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+
+[profiles.production]
+api_key = "prod-key"
+allowed_tools = []
+auto_approve = []
+"#;
+
+        std::fs::write(&config_path, config).expect("failed to write config");
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: String::new(),
+            model: Some("openai/default-model".to_string()),
+            default_allowed_tools: HashSet::from(["view".to_string()]),
+            boot_profile: "default".to_string(),
+            config_path: config_path.to_string_lossy().to_string(),
+        };
+
+        let (overrides, allowed_tools) = resolve_schedule_profile_overrides("production", &server);
+        let allowed_tools = allowed_tools.expect("expected explicit allow-all override");
+        assert!(allowed_tools.is_empty());
+
+        let overrides = overrides.expect("expected run overrides");
+        assert!(matches!(
+            overrides.auto_approve,
+            Some(stakpak_gateway::client::AutoApproveOverride::AllowList(ref tools)) if tools.is_empty()
+        ));
     }
 }

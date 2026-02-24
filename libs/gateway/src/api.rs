@@ -965,6 +965,7 @@ mod tests {
             None,
             ApprovalMode::AllowAll,
             Vec::new(),
+            HashMap::new(),
             "{channel}:{chat_type}:{chat_id}".to_string(),
         ));
 

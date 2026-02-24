@@ -3,7 +3,7 @@ use crate::{
     message_bridge,
     sandbox::{SandboxConfig, SandboxedMcpServer},
     state::AppState,
-    types::SessionHandle,
+    types::{RunConfig, SessionHandle},
 };
 use async_trait::async_trait;
 use rmcp::model::{
@@ -25,7 +25,6 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-const MAX_TURNS: usize = 64;
 const CHECKPOINT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 pub(crate) const ACTIVE_MODEL_METADATA_KEY: &str = "active_model";
 
@@ -45,7 +44,7 @@ pub fn spawn_session_actor(
     state: AppState,
     session_id: Uuid,
     run_id: Uuid,
-    model: stakai::Model,
+    run_config: RunConfig,
     user_message: Message,
     caller_context: Vec<ContextFile>,
     sandbox_config: Option<SandboxConfig>,
@@ -61,7 +60,7 @@ pub fn spawn_session_actor(
             state_for_task.clone(),
             session_id,
             run_id,
-            model,
+            run_config,
             user_message,
             caller_context,
             command_rx,
@@ -85,7 +84,7 @@ async fn run_session_actor(
     state: AppState,
     session_id: Uuid,
     run_id: Uuid,
-    model: stakai::Model,
+    run_config: RunConfig,
     mut user_message: Message,
     caller_context: Vec<ContextFile>,
     command_rx: mpsc::Receiver<AgentCommand>,
@@ -165,7 +164,13 @@ async fn run_session_actor(
         ProjectContext::discover(Path::new(&session_cwd)).with_caller_context(all_caller_context);
 
     let session_context = SessionContextBuilder::new()
-        .base_system_prompt(state.base_system_prompt.clone().unwrap_or_default())
+        .base_system_prompt(
+            run_config
+                .system_prompt
+                .clone()
+                .or_else(|| state.base_system_prompt.clone())
+                .unwrap_or_default(),
+        )
         .environment(environment)
         .project(project)
         .tools(&run_tools)
@@ -185,7 +190,7 @@ async fn run_session_actor(
         state.clone(),
         session_id,
         run_id,
-        model.clone(),
+        run_config.model.clone(),
         parent_checkpoint_id,
         baseline_messages,
         initial_metadata.clone(),
@@ -225,14 +230,14 @@ async fn run_session_actor(
     // Use the model's maximum output capacity as the output budget for context
     // window calculations. This is conservative — the actual response may be shorter,
     // but reserving the full limit avoids mid-response context truncation.
-    let max_output_tokens = model.limit.output as u32;
+    let max_output_tokens = run_config.model.limit.output as u32;
     let agent_config = AgentConfig {
-        model,
+        model: run_config.model.clone(),
         system_prompt: session_context.system_prompt,
-        max_turns: MAX_TURNS,
+        max_turns: run_config.max_turns,
         max_output_tokens,
         provider_options: None,
-        tool_approval: state.tool_approval_policy.clone(),
+        tool_approval: run_config.tool_approval_policy.clone(),
         retry: RetryConfig::default(),
         compaction: CompactionConfig::default(),
         tools: run_tools,
@@ -248,7 +253,7 @@ async fn run_session_actor(
 
     let run_result = run_agent(
         run_context,
-        state.inference.as_ref(),
+        run_config.inference.as_ref(),
         &agent_config,
         initial_messages,
         &mut initial_metadata,

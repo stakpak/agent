@@ -43,6 +43,7 @@ impl Gateway {
             config.gateway.model.clone(),
             config.gateway.approval_mode.clone(),
             config.gateway.approval_allowlist.clone(),
+            config.channels.overrides_map(),
             config.gateway.title_template.clone(),
         ));
 

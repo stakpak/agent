@@ -42,7 +42,7 @@ pub struct GatewaySettings {
     pub approval_allowlist: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalMode {
     #[default]
@@ -132,11 +132,24 @@ pub struct ChannelConfigs {
     pub slack: Option<SlackConfig>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelOverrides {
+    pub model: Option<String>,
+    pub approval_mode: Option<ApprovalMode>,
+    pub approval_allowlist: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramConfig {
     pub token: String,
     #[serde(default)]
     pub require_mention: bool,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,12 +157,24 @@ pub struct DiscordConfig {
     pub token: String,
     #[serde(default)]
     pub guilds: Vec<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackConfig {
     pub bot_token: String,
     pub app_token: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 impl Default for GatewayConfig {
@@ -415,6 +440,9 @@ impl GatewayConfig {
             self.channels.telegram = Some(TelegramConfig {
                 token,
                 require_mention: false,
+                model: None,
+                auto_approve: None,
+                profile: None,
             });
         }
 
@@ -424,6 +452,9 @@ impl GatewayConfig {
             self.channels.discord = Some(DiscordConfig {
                 token,
                 guilds: Vec::new(),
+                model: None,
+                auto_approve: None,
+                profile: None,
             });
         }
 
@@ -434,6 +465,9 @@ impl GatewayConfig {
                 self.channels.slack = Some(SlackConfig {
                     bot_token,
                     app_token,
+                    model: None,
+                    auto_approve: None,
+                    profile: None,
                 });
             }
         }
@@ -459,6 +493,21 @@ impl GatewayConfig {
                     .as_ref()
                     .map(|value| value.require_mention)
                     .unwrap_or(false),
+                model: self
+                    .channels
+                    .telegram
+                    .as_ref()
+                    .and_then(|value| value.model.clone()),
+                auto_approve: self
+                    .channels
+                    .telegram
+                    .as_ref()
+                    .and_then(|value| value.auto_approve.clone()),
+                profile: self
+                    .channels
+                    .telegram
+                    .as_ref()
+                    .and_then(|value| value.profile.clone()),
             });
         }
 
@@ -472,6 +521,21 @@ impl GatewayConfig {
             self.channels.discord = Some(DiscordConfig {
                 token: token.clone(),
                 guilds,
+                model: self
+                    .channels
+                    .discord
+                    .as_ref()
+                    .and_then(|value| value.model.clone()),
+                auto_approve: self
+                    .channels
+                    .discord
+                    .as_ref()
+                    .and_then(|value| value.auto_approve.clone()),
+                profile: self
+                    .channels
+                    .discord
+                    .as_ref()
+                    .and_then(|value| value.profile.clone()),
             });
         }
 
@@ -479,12 +543,147 @@ impl GatewayConfig {
             self.channels.slack = Some(SlackConfig {
                 bot_token: bot_token.clone(),
                 app_token: app_token.clone(),
+                model: self
+                    .channels
+                    .slack
+                    .as_ref()
+                    .and_then(|value| value.model.clone()),
+                auto_approve: self
+                    .channels
+                    .slack
+                    .as_ref()
+                    .and_then(|value| value.auto_approve.clone()),
+                profile: self
+                    .channels
+                    .slack
+                    .as_ref()
+                    .and_then(|value| value.profile.clone()),
             });
         }
     }
 
     fn normalize_paths(&mut self) {
         self.gateway.store_path = expand_tilde_path(&self.gateway.store_path);
+    }
+}
+
+impl ChannelConfigs {
+    pub fn overrides_for(&self, channel_name: &str) -> ChannelOverrides {
+        match channel_name {
+            "telegram" => self
+                .telegram
+                .as_ref()
+                .map(channel_overrides_from_parts)
+                .unwrap_or_default(),
+            "discord" => self
+                .discord
+                .as_ref()
+                .map(channel_overrides_from_parts)
+                .unwrap_or_default(),
+            "slack" => self
+                .slack
+                .as_ref()
+                .map(channel_overrides_from_parts)
+                .unwrap_or_default(),
+            _ => ChannelOverrides::default(),
+        }
+    }
+
+    pub fn overrides_map(&self) -> std::collections::HashMap<String, ChannelOverrides> {
+        let mut overrides = std::collections::HashMap::new();
+
+        let telegram = self.overrides_for("telegram");
+        if telegram != ChannelOverrides::default() {
+            overrides.insert("telegram".to_string(), telegram);
+        }
+
+        let discord = self.overrides_for("discord");
+        if discord != ChannelOverrides::default() {
+            overrides.insert("discord".to_string(), discord);
+        }
+
+        let slack = self.overrides_for("slack");
+        if slack != ChannelOverrides::default() {
+            overrides.insert("slack".to_string(), slack);
+        }
+
+        overrides
+    }
+}
+
+trait ChannelOverrideParts {
+    fn model(&self) -> Option<String>;
+    fn auto_approve(&self) -> Option<Vec<String>>;
+}
+
+impl ChannelOverrideParts for TelegramConfig {
+    fn model(&self) -> Option<String> {
+        self.model.clone()
+    }
+
+    fn auto_approve(&self) -> Option<Vec<String>> {
+        self.auto_approve.clone()
+    }
+}
+
+impl ChannelOverrideParts for DiscordConfig {
+    fn model(&self) -> Option<String> {
+        self.model.clone()
+    }
+
+    fn auto_approve(&self) -> Option<Vec<String>> {
+        self.auto_approve.clone()
+    }
+}
+
+impl ChannelOverrideParts for SlackConfig {
+    fn model(&self) -> Option<String> {
+        self.model.clone()
+    }
+
+    fn auto_approve(&self) -> Option<Vec<String>> {
+        self.auto_approve.clone()
+    }
+}
+
+fn channel_overrides_from_parts(parts: &impl ChannelOverrideParts) -> ChannelOverrides {
+    let allowlist = normalize_allowlist(parts.auto_approve());
+
+    ChannelOverrides {
+        model: normalize_optional_string(parts.model()),
+        approval_mode: allowlist.as_ref().map(|_| ApprovalMode::Allowlist),
+        approval_allowlist: allowlist,
+    }
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+}
+
+fn normalize_allowlist(list: Option<Vec<String>>) -> Option<Vec<String>> {
+    let values = list
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
     }
 }
 
@@ -725,6 +924,9 @@ mod tests {
         config.channels.telegram = Some(TelegramConfig {
             token: "abc".to_string(),
             require_mention: false,
+            model: None,
+            auto_approve: None,
+            profile: None,
         });
         config.gateway.approval_mode = ApprovalMode::Allowlist;
         config.gateway.approval_allowlist.clear();
@@ -759,6 +961,9 @@ mod tests {
                 telegram: Some(TelegramConfig {
                     token: "123:ABC".to_string(),
                     require_mention: false,
+                    model: None,
+                    auto_approve: None,
+                    profile: None,
                 }),
                 discord: None,
                 slack: None,
@@ -772,6 +977,37 @@ mod tests {
 
         let title = config.render_title_template("telegram", "42", "group", "-100");
         assert_eq!(title, "telegram:group:42");
+    }
+
+    #[test]
+    fn channel_overrides_map_includes_configured_channel_overrides() {
+        let channels = ChannelConfigs {
+            telegram: Some(TelegramConfig {
+                token: "123:ABC".to_string(),
+                require_mention: false,
+                model: Some("anthropic/claude-sonnet-4-5".to_string()),
+                auto_approve: Some(vec!["view".to_string(), "  ".to_string()]),
+                profile: Some("prod".to_string()),
+            }),
+            discord: None,
+            slack: None,
+        };
+
+        let overrides = channels.overrides_map();
+        let telegram = overrides.get("telegram");
+        assert!(telegram.is_some());
+
+        if let Some(telegram) = telegram {
+            assert_eq!(
+                telegram.model.as_deref(),
+                Some("anthropic/claude-sonnet-4-5")
+            );
+            assert!(matches!(
+                telegram.approval_mode,
+                Some(ApprovalMode::Allowlist)
+            ));
+            assert_eq!(telegram.approval_allowlist, Some(vec!["view".to_string()]));
+        }
     }
 
     #[test]
@@ -848,6 +1084,9 @@ chat_id = "#ops"
         config.channels.telegram = Some(TelegramConfig {
             token: "123:ABC".to_string(),
             require_mention: false,
+            model: None,
+            auto_approve: None,
+            profile: None,
         });
 
         let save_result = config.save(&path);
