@@ -241,6 +241,8 @@ pub struct AppState {
     // ========== Text Selection State ==========
     pub selection: SelectionState,
     pub toast: Option<Toast>,
+    /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
+    pub selection_auto_scroll: i32,
 
     // ========== Message Action Popup State ==========
     pub show_message_action_popup: bool,
@@ -561,6 +563,7 @@ impl AppState {
             // Text selection initialization
             selection: SelectionState::default(),
             toast: None,
+            selection_auto_scroll: 0,
             input_content_area: None,
 
             // Message action popup initialization
