@@ -48,13 +48,7 @@ pub struct AppConfig {
     pub warden: Option<WardenConfig>,
     /// Unified provider configurations (key = provider name)
     pub providers: HashMap<String, ProviderConfig>,
-    /// Smart (capable) model name
-    pub smart_model: Option<String>,
-    /// Eco (fast/cheap) model name
-    pub eco_model: Option<String>,
-    /// Recovery model name
-    pub recovery_model: Option<String>,
-    /// New unified model field (replaces smart/eco/recovery model selection)
+    /// User's preferred model (unified field, replaces smart/eco/recovery)
     pub model: Option<String>,
     /// Unique ID for anonymous telemetry
     pub anonymous_id: Option<String>,
@@ -62,6 +56,8 @@ pub struct AppConfig {
     pub collect_telemetry: Option<bool>,
     /// Editor command
     pub editor: Option<String>,
+    /// Recently used model IDs (most recent first)
+    pub recent_models: Vec<String>,
 }
 
 impl AppConfig {
@@ -140,6 +136,8 @@ impl AppConfig {
     ) -> Self {
         // Migrate any legacy provider fields to the unified providers HashMap
         profile_config.migrate_legacy_providers();
+        // Migrate any legacy model fields to unified 'model' field
+        profile_config.migrate_model_fields();
 
         AppConfig {
             api_endpoint: std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
@@ -161,13 +159,11 @@ impl AppConfig {
             warden: profile_config.warden,
             provider: profile_config.provider.unwrap_or(ProviderType::Remote),
             providers: profile_config.providers,
-            smart_model: profile_config.smart_model,
-            eco_model: profile_config.eco_model,
-            recovery_model: profile_config.recovery_model,
             model: profile_config.model,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
+            recent_models: profile_config.recent_models,
         }
     }
 
@@ -231,16 +227,27 @@ impl AppConfig {
 
     /// Migrate legacy provider configs (openai, anthropic, gemini)
     /// to the new unified `providers` HashMap format.
-    /// Also ensures settings have default values (e.g., editor).
+    /// Also migrates auth.toml to config.toml, model fields, and ensures settings have default values.
     fn migrate_legacy_provider_configs<P: AsRef<Path>>(
         config_path: P,
         mut config_file: ConfigFile,
     ) -> Result<ConfigFile, ConfigError> {
         let mut any_migrated = false;
 
+        // Migrate auth.toml to config.toml
+        if Self::migrate_auth_file(config_path.as_ref(), &mut config_file)? {
+            any_migrated = true;
+        }
+
         for (_profile_name, profile) in config_file.profiles.iter_mut() {
+            // Migrate legacy provider fields
             if profile.needs_provider_migration() {
                 profile.migrate_legacy_providers();
+                any_migrated = true;
+            }
+            // Migrate legacy model fields (smart_model, eco_model, recovery_model -> model)
+            if profile.needs_model_migration() {
+                profile.migrate_model_fields();
                 any_migrated = true;
             }
         }
@@ -253,24 +260,90 @@ impl AppConfig {
 
         // Save if any setting was migrated or added
         if any_migrated {
-            toml::to_string_pretty(&config_file)
-                .map_err(|e| {
-                    ConfigError::Message(format!(
-                        "Failed to serialize config after migration: {}",
-                        e
-                    ))
-                })
-                .and_then(|config_str| {
-                    write(config_path, config_str).map_err(|e| {
-                        ConfigError::Message(format!(
-                            "Failed to save config after migration: {}",
-                            e
-                        ))
-                    })
-                })?;
+            config_file.save_to(config_path.as_ref())?;
         }
 
         Ok(config_file)
+    }
+
+    /// Migrate auth.toml credentials into config.toml.
+    ///
+    /// This merges all credentials from auth.toml into the config file's
+    /// provider configurations, then backs up auth.toml to auth.toml.bak.
+    ///
+    /// Returns true if migration was performed.
+    fn migrate_auth_file<P: AsRef<Path>>(
+        config_path: P,
+        config_file: &mut ConfigFile,
+    ) -> Result<bool, ConfigError> {
+        let config_dir = config_path
+            .as_ref()
+            .parent()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".into()))?;
+        let auth_path = config_dir.join("auth.toml");
+
+        // Skip if auth.toml doesn't exist or isn't a file
+        if !auth_path.is_file() {
+            return Ok(false);
+        }
+
+        // Load auth.toml
+        let auth_manager = AuthManager::new(config_dir).map_err(|e| {
+            ConfigError::Message(format!("Failed to load auth.toml for migration: {}", e))
+        })?;
+
+        // Skip if no credentials to migrate
+        if !auth_manager.has_credentials() {
+            return Ok(false);
+        }
+
+        // Merge credentials into config file
+        for (profile_name, providers) in auth_manager.list() {
+            for (provider_name, auth) in providers {
+                // Get or create profile
+                let profile = config_file
+                    .profiles
+                    .entry(profile_name.clone())
+                    .or_default();
+
+                // Get or create provider config
+                let provider_config = profile
+                    .providers
+                    .entry(provider_name.clone())
+                    .or_insert_with(|| {
+                        // Create empty provider config for this provider type
+                        ProviderConfig::empty_for_provider(provider_name).unwrap_or_else(|| {
+                            // For unknown providers, create a custom provider with empty endpoint
+                            // This shouldn't happen in practice since auth.toml only has known providers
+                            ProviderConfig::Custom {
+                                api_key: None,
+                                api_endpoint: String::new(),
+                                auth: None,
+                            }
+                        })
+                    });
+
+                // Set auth on provider config
+                provider_config.set_auth(auth.clone());
+            }
+        }
+
+        // Backup auth.toml — credentials are now in config.toml
+        let backup_path = auth_path.with_extension("toml.bak");
+        if let Err(e) = std::fs::rename(&auth_path, &backup_path) {
+            // Log warning but don't fail migration
+            eprintln!(
+                "Warning: Failed to backup auth.toml to auth.toml.bak: {}",
+                e
+            );
+        } else {
+            eprintln!(
+                "Migrated credentials from auth.toml to config.toml. \
+                 Backup saved to auth.toml.bak — you can safely delete it."
+            );
+        }
+
+        Ok(true)
     }
 
     fn validate_profile_name(profile_name: &str) -> Result<(), ConfigError> {
@@ -298,38 +371,29 @@ impl AppConfig {
     /// Resolve provider credentials with fallback chain.
     ///
     /// Resolution order:
-    /// 1. auth.toml -> [{profile}.{provider}] (profile-specific)
-    /// 2. auth.toml -> [all.{provider}] (shared fallback)
-    /// 3. config.toml -> [profiles.{profile}.providers.{provider}].api_key
-    /// 4. Environment variable (e.g., ANTHROPIC_API_KEY)
+    /// 1. config.toml -> [profiles.{profile}.providers.{provider}.auth] (new format)
+    /// 2. config.toml -> [profiles.{profile}.providers.{provider}].api_key (legacy)
+    /// 3. auth.toml -> [{profile}.{provider}] (legacy, for migration period)
+    /// 4. auth.toml -> [all.{provider}] (legacy fallback)
+    /// 5. Environment variable (e.g., ANTHROPIC_API_KEY)
     pub fn resolve_provider_auth(&self, provider: &str) -> Option<ProviderAuth> {
-        let config_dir = self.get_config_dir();
+        // 1 & 2: Check config.toml providers HashMap (get_auth checks auth field then legacy fields)
+        if let Some(provider_config) = self.providers.get(provider)
+            && let Some(auth) = provider_config.get_auth()
+        {
+            return Some(auth);
+        }
 
-        // 1 & 2: Check auth.toml (handles profile inheritance internally)
+        // 3 & 4: Check auth.toml (legacy, for users who haven't migrated yet)
+        // This fallback will be removed in a future version
+        let config_dir = self.get_config_dir();
         if let Ok(auth_manager) = AuthManager::new(&config_dir)
             && let Some(auth) = auth_manager.get(&self.profile_name, provider)
         {
             return Some(auth.clone());
         }
 
-        // 3: Check config.toml providers HashMap
-        if let Some(provider_config) = self.providers.get(provider) {
-            // Check for API key in provider config
-            if let Some(key) = provider_config.api_key()
-                && !key.is_empty()
-            {
-                return Some(ProviderAuth::api_key(key));
-            }
-            // Check for access token (Anthropic OAuth)
-            if let Some(token) = provider_config.access_token()
-                && !token.is_empty()
-            {
-                // For OAuth tokens, we'd need more info, but for now just treat as API key
-                return Some(ProviderAuth::api_key(token));
-            }
-        }
-
-        // 4: Check environment variable
+        // 5: Check environment variable
         let env_var = match provider {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openai" => "OPENAI_API_KEY",
@@ -394,11 +458,8 @@ impl AppConfig {
         let new_auth =
             ProviderAuth::oauth(&tokens.access_token, &tokens.refresh_token, new_expires);
 
-        // Save the updated tokens
-        let config_dir = self.get_config_dir();
-        if let Ok(mut auth_manager) = AuthManager::new(&config_dir)
-            && let Err(e) = auth_manager.set(&self.profile_name, provider, new_auth.clone())
-        {
+        // Save the updated tokens to config.toml
+        if let Err(e) = self.save_provider_auth(provider, new_auth.clone()) {
             // Log but don't fail - the tokens are still valid for this session
             tracing::warn!("Failed to save refreshed tokens: {}", e);
         }
@@ -406,50 +467,69 @@ impl AppConfig {
         Ok(new_auth)
     }
 
-    /// Get Anthropic config with resolved credentials from auth.toml fallback chain.
+    /// Save provider auth credentials to config.toml.
+    ///
+    /// This updates the provider's auth field in the current profile and saves
+    /// the config file with 0600 permissions.
+    pub fn save_provider_auth(&self, provider: &str, auth: ProviderAuth) -> Result<(), String> {
+        let config_path = PathBuf::from(&self.config_path);
+        let mut config_file = Self::load_config_file(&config_path).map_err(|e| format!("{}", e))?;
+
+        // Get or create the profile
+        let profile = config_file
+            .profiles
+            .entry(self.profile_name.clone())
+            .or_default();
+
+        // Get or create the provider config
+        let provider_config = profile
+            .providers
+            .entry(provider.to_string())
+            .or_insert_with(|| {
+                ProviderConfig::empty_for_provider(provider).unwrap_or_else(|| {
+                    ProviderConfig::Custom {
+                        api_key: None,
+                        api_endpoint: String::new(),
+                        auth: None,
+                    }
+                })
+            });
+
+        // Set the auth
+        provider_config.set_auth(auth);
+
+        // Save config file (this sets 0600 permissions)
+        config_file
+            .save_to(&config_path)
+            .map_err(|e| format!("{}", e))
+    }
+
+    /// Get Anthropic config with resolved credentials.
     pub fn get_anthropic_config_with_auth(&self) -> Option<AnthropicConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::Anthropic {
-            api_key,
-            api_endpoint,
-            access_token,
-        }) = self.providers.get("anthropic")
+        if let Some(ProviderConfig::Anthropic { api_endpoint, .. }) =
+            self.providers.get("anthropic")
         {
-            let mut config = AnthropicConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-                access_token: access_token.clone(),
-            };
-            // Override with auth.toml if available
+            // Use resolve_provider_auth which checks auth field, legacy fields, auth.toml, env vars
             if let Some(auth) = self.resolve_provider_auth("anthropic") {
-                config = config.with_provider_auth(&auth);
+                let mut config = AnthropicConfig::from_provider_auth(&auth);
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only
-        if let Some(auth) = self.resolve_provider_auth("anthropic") {
-            return Some(AnthropicConfig::from_provider_auth(&auth));
-        }
-
-        None
+        // Fall back to resolve_provider_auth only (handles auth.toml, env vars)
+        self.resolve_provider_auth("anthropic")
+            .map(|auth| AnthropicConfig::from_provider_auth(&auth))
     }
 
     /// Get Anthropic config with resolved credentials, refreshing OAuth tokens if needed.
     pub async fn get_anthropic_config_with_auth_async(&self) -> Option<AnthropicConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::Anthropic {
-            api_key,
-            api_endpoint,
-            access_token,
-        }) = self.providers.get("anthropic")
+        if let Some(ProviderConfig::Anthropic { api_endpoint, .. }) =
+            self.providers.get("anthropic")
         {
-            let mut config = AnthropicConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-                access_token: access_token.clone(),
-            };
-            // Override with auth.toml if available (with refresh)
             if let Some(auth) = self.resolve_provider_auth("anthropic") {
                 let auth = match self
                     .refresh_provider_auth_if_needed("anthropic", &auth)
@@ -464,12 +544,14 @@ impl AppConfig {
                         auth
                     }
                 };
-                config = config.with_provider_auth(&auth);
+                let mut config = AnthropicConfig::from_provider_auth(&auth);
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only (with refresh)
+        // Fall back to resolve_provider_auth only (with refresh)
         if let Some(auth) = self.resolve_provider_auth("anthropic") {
             let auth = match self
                 .refresh_provider_auth_if_needed("anthropic", &auth)
@@ -490,46 +572,30 @@ impl AppConfig {
         None
     }
 
-    /// Get OpenAI config with resolved credentials from auth.toml fallback chain.
+    /// Get OpenAI config with resolved credentials.
     pub fn get_openai_config_with_auth(&self) -> Option<OpenAIConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::OpenAI {
-            api_key,
-            api_endpoint,
-        }) = self.providers.get("openai")
-        {
-            let config = OpenAIConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-            };
-            // Override with auth.toml if available
+        if let Some(ProviderConfig::OpenAI { api_endpoint, .. }) = self.providers.get("openai") {
             if let Some(auth) = self.resolve_provider_auth("openai") {
-                return config.clone().with_provider_auth(&auth).or(Some(config));
+                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only
-        if let Some(auth) = self.resolve_provider_auth("openai") {
-            return OpenAIConfig::from_provider_auth(&auth);
-        }
-
-        None
+        // Fall back to resolve_provider_auth only
+        self.resolve_provider_auth("openai")
+            .and_then(|auth| OpenAIConfig::from_provider_auth(&auth))
     }
 
     /// Get OpenAI config with resolved credentials, refreshing OAuth tokens if needed.
     pub async fn get_openai_config_with_auth_async(&self) -> Option<OpenAIConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::OpenAI {
-            api_key,
-            api_endpoint,
-        }) = self.providers.get("openai")
-        {
-            let config = OpenAIConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-            };
-            // Override with auth.toml if available (with refresh)
+        if let Some(ProviderConfig::OpenAI { api_endpoint, .. }) = self.providers.get("openai") {
             if let Some(auth) = self.resolve_provider_auth("openai") {
                 let auth = match self.refresh_provider_auth_if_needed("openai", &auth).await {
                     Ok(refreshed_auth) => refreshed_auth,
@@ -541,12 +607,17 @@ impl AppConfig {
                         auth
                     }
                 };
-                return config.clone().with_provider_auth(&auth).or(Some(config));
+                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only (with refresh)
+        // Fall back to resolve_provider_auth only (with refresh)
         if let Some(auth) = self.resolve_provider_auth("openai") {
             let auth = match self.refresh_provider_auth_if_needed("openai", &auth).await {
                 Ok(refreshed_auth) => refreshed_auth,
@@ -564,46 +635,30 @@ impl AppConfig {
         None
     }
 
-    /// Get Gemini config with resolved credentials from auth.toml fallback chain.
+    /// Get Gemini config with resolved credentials.
     pub fn get_gemini_config_with_auth(&self) -> Option<GeminiConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::Gemini {
-            api_key,
-            api_endpoint,
-        }) = self.providers.get("gemini")
-        {
-            let config = GeminiConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-            };
-            // Override with auth.toml if available
+        if let Some(ProviderConfig::Gemini { api_endpoint, .. }) = self.providers.get("gemini") {
             if let Some(auth) = self.resolve_provider_auth("gemini") {
-                return config.clone().with_provider_auth(&auth).or(Some(config));
+                let mut config = GeminiConfig::from_provider_auth(&auth).unwrap_or(GeminiConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only
-        if let Some(auth) = self.resolve_provider_auth("gemini") {
-            return GeminiConfig::from_provider_auth(&auth);
-        }
-
-        None
+        // Fall back to resolve_provider_auth only
+        self.resolve_provider_auth("gemini")
+            .and_then(|auth| GeminiConfig::from_provider_auth(&auth))
     }
 
     /// Get Gemini config with resolved credentials, refreshing OAuth tokens if needed.
     pub async fn get_gemini_config_with_auth_async(&self) -> Option<GeminiConfig> {
         // First check providers HashMap
-        if let Some(ProviderConfig::Gemini {
-            api_key,
-            api_endpoint,
-        }) = self.providers.get("gemini")
-        {
-            let config = GeminiConfig {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-            };
-            // Override with auth.toml if available (with refresh)
+        if let Some(ProviderConfig::Gemini { api_endpoint, .. }) = self.providers.get("gemini") {
             if let Some(auth) = self.resolve_provider_auth("gemini") {
                 let auth = match self.refresh_provider_auth_if_needed("gemini", &auth).await {
                     Ok(refreshed_auth) => refreshed_auth,
@@ -615,12 +670,17 @@ impl AppConfig {
                         auth
                     }
                 };
-                return config.clone().with_provider_auth(&auth).or(Some(config));
+                let mut config = GeminiConfig::from_provider_auth(&auth).unwrap_or(GeminiConfig {
+                    api_key: None,
+                    api_endpoint: None,
+                });
+                config.api_endpoint = api_endpoint.clone();
+                return Some(config);
             }
-            return Some(config);
+            return None;
         }
 
-        // Fall back to auth.toml only (with refresh)
+        // Fall back to resolve_provider_auth only (with refresh)
         if let Some(auth) = self.resolve_provider_auth("gemini") {
             let auth = match self.refresh_provider_auth_if_needed("gemini", &auth).await {
                 Ok(refreshed_auth) => refreshed_auth,
@@ -664,6 +724,7 @@ impl AppConfig {
                 ProviderConfig::OpenAI {
                     api_key: openai.api_key,
                     api_endpoint: openai.api_endpoint,
+                    auth: None, // Auth is already resolved into api_key
                 },
             );
         }
@@ -674,6 +735,7 @@ impl AppConfig {
                     api_key: anthropic.api_key,
                     api_endpoint: anthropic.api_endpoint,
                     access_token: anthropic.access_token,
+                    auth: None, // Auth is already resolved into api_key/access_token
                 },
             );
         }
@@ -683,6 +745,7 @@ impl AppConfig {
                 ProviderConfig::Gemini {
                     api_key: gemini.api_key,
                     api_endpoint: gemini.api_endpoint,
+                    auth: None, // Auth is already resolved into api_key
                 },
             );
         }
@@ -802,28 +865,26 @@ impl AppConfig {
 
     /// Get the default Model from config
     ///
-    /// Uses the `model` field if set, otherwise falls back to `smart_model`,
-    /// and finally to a default Claude Opus model.
+    /// Uses the `model` field if set, otherwise falls back to a default Claude Opus model.
     ///
-    /// If `cli_override` is provided, it takes highest priority over all config values.
+    /// If `cli_override` is provided, it takes highest priority over config values.
     ///
     /// Searches the model catalog by ID. If the model string has a provider
     /// prefix (e.g., "anthropic/claude-opus-4-5"), it searches within that
     /// provider first. Otherwise, it searches all providers.
     pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
-        let use_stakpak = self.api_key.is_some();
+        let has_stakpak_key = self.get_stakpak_api_key().is_some();
 
-        // Priority: cli_override > model > smart_model > default
+        // Priority: cli_override > model > default
         let model_str = cli_override
             .or(self.model.as_deref())
-            .or(self.smart_model.as_deref())
             .unwrap_or("claude-opus-4-5");
 
         // Extract explicit provider prefix if present (e.g., "amazon-bedrock/claude-sonnet-4-5")
         let explicit_provider = model_str.find('/').map(|idx| &model_str[..idx]);
 
-        // Search the model catalog
-        let model = stakpak_api::find_model(model_str, use_stakpak).unwrap_or_else(|| {
+        // First, find the model without Stakpak transform to determine its native provider
+        let model = stakpak_api::find_model(model_str, false).unwrap_or_else(|| {
             // Model not found in catalog - create a custom model
             // Extract provider from prefix if present
             let (provider, model_id) = if let Some(idx) = model_str.find('/') {
@@ -833,27 +894,37 @@ impl AppConfig {
                 ("anthropic", model_str) // Default to anthropic
             };
 
-            let final_provider = if use_stakpak { "stakpak" } else { provider };
-            let final_id = if use_stakpak {
-                format!("{}/{}", provider, model_id)
-            } else {
-                model_id.to_string()
-            };
-
-            stakpak_api::Model::custom(final_id, final_provider)
+            stakpak_api::Model::custom(model_id.to_string(), provider)
         });
 
         // If the user specified an explicit provider prefix (e.g., "amazon-bedrock/..."),
         // ensure the resolved model uses that provider — the catalog may have returned
         // the model under a different provider (e.g., "anthropic" instead of "amazon-bedrock").
-        if let Some(prefix) = explicit_provider
-            && !use_stakpak
+        let model = if let Some(prefix) = explicit_provider
             && model.provider != prefix
         {
-            return stakpak_api::Model {
+            stakpak_api::Model {
                 provider: prefix.to_string(),
                 ..model
-            };
+            }
+        } else {
+            model
+        };
+
+        // Transform for Stakpak routing only if:
+        // 1. User has a Stakpak API key
+        // 2. The model is from a known cloud provider (not custom/ollama/litellm)
+        // 3. User does NOT have a direct API key for this model's provider
+        // If the user has a direct provider key, use it instead of routing through Stakpak.
+        // NOTE: keep in sync with known_cloud_providers in mode_interactive.rs SwitchToModel handler
+        let known_cloud_providers = ["anthropic", "openai", "google", "gemini", "amazon-bedrock"];
+        let has_direct_provider_key = self.resolve_provider_auth(&model.provider).is_some();
+        if has_stakpak_key
+            && !has_direct_provider_key
+            && model.provider != "stakpak"
+            && known_cloud_providers.contains(&model.provider.as_str())
+        {
+            return stakpak_api::transform_for_stakpak(model);
         }
 
         model
@@ -883,16 +954,17 @@ impl From<AppConfig> for ProfileConfig {
             auto_approve: config.auto_approve,
             rulebooks: config.rulebooks,
             warden: config.warden,
-            provider: None,
+            provider: Some(config.provider),
             providers: config.providers,
+            model: config.model,
+            recent_models: config.recent_models,
             // Legacy fields - not used in new format
             openai: None,
             anthropic: None,
             gemini: None,
-            eco_model: config.eco_model,
-            smart_model: config.smart_model,
-            recovery_model: config.recovery_model,
-            model: config.model,
+            eco_model: None,
+            smart_model: None,
+            recovery_model: None,
         }
     }
 }

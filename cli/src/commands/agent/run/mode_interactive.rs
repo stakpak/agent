@@ -180,6 +180,7 @@ pub async fn run_interactive(
         let api_endpoint = ctx.api_endpoint.clone();
         let has_stakpak_key = api_key.is_some();
         let config_path = ctx.config_path.clone();
+        let profile_name = ctx.profile_name.clone();
         let _mcp_server_host = ctx.mcp_server_host.clone();
         let mut agent_context = config.agent_context.clone();
         let mut all_available_remote_skills: Option<Vec<Skill>> = None;
@@ -216,6 +217,7 @@ pub async fn run_interactive(
 
         let auth_display_info_for_tui = ctx.get_auth_display_info();
         let model_for_tui = model.clone();
+        let recent_models_for_tui = ctx.recent_models.clone();
 
         // Use init prompt (loaded at module level as const).
         // Always run discovery probes so both `stakpak init` and `/init` get pre-calculated analysis results.
@@ -253,6 +255,7 @@ pub async fn run_interactive(
                 auth_display_info_for_tui,
                 init_prompt_content_for_tui,
                 send_init_prompt_on_start,
+                recent_models_for_tui,
             )
             .await
             .map_err(|e| e.to_string())
@@ -298,14 +301,9 @@ pub async fn run_interactive(
                         .with_endpoint(api_endpoint_for_client.clone()),
                 );
             }
-            if let Some(smart_model) = &ctx_clone.smart_model {
-                client_config = client_config.with_smart_model(smart_model.clone());
-            }
-            if let Some(eco_model) = &ctx_clone.eco_model {
-                client_config = client_config.with_eco_model(eco_model.clone());
-            }
-            if let Some(recovery_model) = &ctx_clone.recovery_model {
-                client_config = client_config.with_recovery_model(recovery_model.clone());
+            // Pass unified model as smart_model for AgentClient compatibility
+            if let Some(model) = &ctx_clone.model {
+                client_config = client_config.with_smart_model(model.clone());
             }
 
             let client: Arc<dyn AgentProvider> = Arc::new(
@@ -468,7 +466,45 @@ pub async fn run_interactive(
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::SwitchToModel(new_model) => {
-                        model = new_model;
+                        // Transform model for Stakpak routing if using Stakpak API,
+                        // but only for known cloud providers that don't have a direct
+                        // API key configured. If the user has a direct provider key,
+                        // use it instead of routing through Stakpak.
+                        let known_cloud_providers =
+                            ["anthropic", "openai", "google", "gemini", "amazon-bedrock"];
+                        let has_direct_provider_key = ctx_clone
+                            .resolve_provider_auth(&new_model.provider)
+                            .is_some();
+                        let should_transform = has_stakpak_key
+                            && !has_direct_provider_key
+                            && new_model.provider != "stakpak"
+                            && known_cloud_providers.contains(&new_model.provider.as_str());
+
+                        model = if should_transform {
+                            stakpak_api::transform_for_stakpak(new_model.clone())
+                        } else {
+                            new_model.clone()
+                        };
+
+                        // Save to recent models in config and update TUI state
+                        if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                            && let Some(profile) = config_file.profiles.get_mut(&profile_name)
+                        {
+                            // Use the original model ID (before Stakpak transform)
+                            profile.add_recent_model(&new_model.id);
+                            // Clone recent models before saving (to avoid borrow conflict)
+                            let updated_recent_models = profile.recent_models.clone();
+                            // Best-effort save - don't fail the switch if save fails
+                            let _ = config_file.save_to(&config_path);
+
+                            // Update TUI's recent models state for instant feedback
+                            let _ = send_input_event(
+                                &input_tx,
+                                InputEvent::RecentModelsUpdated(updated_recent_models),
+                            )
+                            .await;
+                        }
+
                         continue;
                     }
                     OutputEvent::UserMessage(
@@ -1123,6 +1159,17 @@ pub async fn run_interactive(
                         .await?;
                         continue;
                     }
+                    OutputEvent::SaveRecentModels(recent_models) => {
+                        // Save recent models list to config
+                        if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                            && let Some(profile) = config_file.profiles.get_mut(&profile_name)
+                        {
+                            profile.recent_models = recent_models;
+                            // Best-effort save
+                            let _ = config_file.save_to(&config_path);
+                        }
+                        continue;
+                    }
                     OutputEvent::PlanModeActivated(inline_prompt) => {
                         // Transition to plan mode
                         plan_mode_active = true;
@@ -1473,14 +1520,9 @@ pub async fn run_interactive(
                         .with_endpoint(new_config.api_endpoint.clone()),
                 );
             }
-            if let Some(smart_model) = &new_config.smart_model {
-                new_client_config = new_client_config.with_smart_model(smart_model.clone());
-            }
-            if let Some(eco_model) = &new_config.eco_model {
-                new_client_config = new_client_config.with_eco_model(eco_model.clone());
-            }
-            if let Some(recovery_model) = &new_config.recovery_model {
-                new_client_config = new_client_config.with_recovery_model(recovery_model.clone());
+            // Pass unified model as smart_model for AgentClient compatibility
+            if let Some(model) = &new_config.model {
+                new_client_config = new_client_config.with_smart_model(model.clone());
             }
 
             let client: Box<dyn AgentProvider> = Box::new(
@@ -1515,6 +1557,7 @@ pub async fn run_interactive(
             }
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
+            config.model = new_config.get_default_model(None);
 
             // Update ctx
             ctx = new_config;
@@ -1548,14 +1591,9 @@ pub async fn run_interactive(
                 stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
             );
         }
-        if let Some(smart_model) = &ctx.smart_model {
-            final_client_config = final_client_config.with_smart_model(smart_model.clone());
-        }
-        if let Some(eco_model) = &ctx.eco_model {
-            final_client_config = final_client_config.with_eco_model(eco_model.clone());
-        }
-        if let Some(recovery_model) = &ctx.recovery_model {
-            final_client_config = final_client_config.with_recovery_model(recovery_model.clone());
+        // Pass unified model as smart_model for AgentClient compatibility
+        if let Some(model) = &ctx.model {
+            final_client_config = final_client_config.with_smart_model(model.clone());
         }
 
         let client: Box<dyn AgentProvider> = Box::new(

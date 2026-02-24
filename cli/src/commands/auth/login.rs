@@ -2,7 +2,6 @@
 
 use crate::onboarding::menu::{prompt_password, select_option_no_header};
 use crate::onboarding::navigation::NavResult;
-use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
 use std::io::{self, Write};
@@ -153,6 +152,9 @@ async fn handle_oauth_login(
     method_id: &str,
     profile: &str,
 ) -> Result<(), String> {
+    use crate::config::AppConfig;
+    use stakpak_shared::models::llm::ProviderConfig;
+
     let oauth_config = provider
         .oauth_config(method_id)
         .ok_or("OAuth not supported for this method")?;
@@ -199,12 +201,38 @@ async fn handle_oauth_login(
         .await
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
-    // Save credentials
-    let mut auth_manager =
-        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
+    // Load config using the standard pipeline (handles migrations, old formats, etc.)
+    let config_path = config_dir.join("config.toml");
+    let mut config_file = AppConfig::load_config_file(&config_path)
+        .map_err(|e| format!("Failed to load config file: {}", e))?;
 
-    auth_manager
-        .set(profile, provider.id(), auth)
+    // Get or create profile
+    let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
+
+    // Get or create provider config
+    let provider_config = profile_config
+        .providers
+        .entry(provider.id().to_string())
+        .or_insert_with(|| {
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::Anthropic {
+                api_key: None,
+                api_endpoint: None,
+                access_token: None,
+                auth: None,
+            })
+        });
+
+    // Set auth on provider config
+    provider_config.set_auth(auth);
+
+    // Keep readonly profile in sync when modifying the default profile
+    if profile == "default" {
+        config_file.update_readonly();
+    }
+
+    // Save config file
+    config_file
+        .save_to(&config_path)
         .map_err(|e| format!("Failed to save credentials: {}", e))?;
 
     println!();
@@ -215,6 +243,7 @@ async fn handle_oauth_login(
     } else {
         println!("Credentials saved for profile '{}'.", profile);
     }
+    println!("Config saved to: {}", config_path.display());
 
     Ok(())
 }
@@ -289,25 +318,25 @@ async fn handle_non_interactive_setup(
         }
     };
 
+    // Set endpoint if provided
     if provider_id != "stakpak"
-        && let Some(endpoint) = validated_endpoint
+        && let Some(ref endpoint) = validated_endpoint
     {
         let provider = profile_config
             .providers
             .get_mut(provider_id)
             .ok_or_else(|| format!("Provider '{}' not found in generated profile", provider_id))?;
-        provider.set_api_endpoint(Some(endpoint));
+        provider.set_api_endpoint(Some(endpoint.clone()));
     }
 
-    // Save API key to auth.toml for local providers (not stakpak)
+    // Save API key to provider config in config.toml (not auth.toml)
     if provider_id != "stakpak" {
-        let mut auth_manager = AuthManager::new(config_dir)
-            .map_err(|e| format!("Failed to load auth manager: {}", e))?;
-
         let auth = ProviderAuth::api_key(api_key);
-        auth_manager
-            .set(profile_name, provider_id, auth)
-            .map_err(|e| format!("Failed to save credentials: {}", e))?;
+        let provider = profile_config
+            .providers
+            .get_mut(provider_id)
+            .ok_or_else(|| format!("Provider '{}' not found in generated profile", provider_id))?;
+        provider.set_auth(auth);
     }
 
     // Save profile config to config.toml (this also creates readonly profile)
@@ -324,12 +353,6 @@ async fn handle_non_interactive_setup(
         provider_id, profile_name
     );
     println!("Config saved to: {}", config_path.display());
-    if provider_id != "stakpak" {
-        println!(
-            "Credentials saved to: {}",
-            config_dir.join("auth.toml").display()
-        );
-    }
 
     Ok(())
 }
@@ -370,14 +393,11 @@ async fn handle_bedrock_setup(
 
     // Bedrock uses the same Anthropic models — use friendly aliases
     // that resolve_bedrock_model_id() will map to full Bedrock IDs
-    let smart_model = "amazon-bedrock/claude-sonnet-4-5".to_string();
-    let eco_model = "amazon-bedrock/claude-haiku-4-5".to_string();
+    let default_model = "amazon-bedrock/claude-sonnet-4-5".to_string();
 
     let mut profile_config = ProfileConfig {
         provider: Some(ProviderType::Local),
-        model: Some(smart_model.clone()),
-        smart_model: Some(smart_model),
-        eco_model: Some(eco_model),
+        model: Some(default_model),
         ..ProfileConfig::default()
     };
 
@@ -426,6 +446,9 @@ async fn handle_api_key_login(
     provider: &dyn OAuthProvider,
     profile: &str,
 ) -> Result<(), String> {
+    use crate::config::AppConfig;
+    use stakpak_shared::models::llm::ProviderConfig;
+
     println!();
 
     let key = match prompt_password("Enter API key", true) {
@@ -442,11 +465,37 @@ async fn handle_api_key_login(
 
     let auth = ProviderAuth::api_key(key);
 
-    let mut auth_manager =
-        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
+    // Load config using the standard pipeline (handles migrations, old formats, etc.)
+    let config_path = config_dir.join("config.toml");
+    let mut config_file = AppConfig::load_config_file(&config_path)
+        .map_err(|e| format!("Failed to load config file: {}", e))?;
 
-    auth_manager
-        .set(profile, provider.id(), auth)
+    // Get or create profile
+    let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
+
+    // Get or create provider config
+    let provider_config = profile_config
+        .providers
+        .entry(provider.id().to_string())
+        .or_insert_with(|| {
+            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::OpenAI {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
+            })
+        });
+
+    // Set auth on provider config
+    provider_config.set_auth(auth);
+
+    // Keep readonly profile in sync when modifying the default profile
+    if profile == "default" {
+        config_file.update_readonly();
+    }
+
+    // Save config file
+    config_file
+        .save_to(&config_path)
         .map_err(|e| format!("Failed to save credentials: {}", e))?;
 
     println!();
@@ -457,6 +506,7 @@ async fn handle_api_key_login(
     } else {
         println!("Credentials saved for profile '{}'.", profile);
     }
+    println!("Config saved to: {}", config_path.display());
 
     Ok(())
 }

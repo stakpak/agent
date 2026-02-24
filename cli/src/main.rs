@@ -354,14 +354,9 @@ async fn main() {
                             .with_endpoint(config.api_endpoint.clone()),
                     );
                 }
-                if let Some(smart_model) = &config.smart_model {
-                    client_config = client_config.with_smart_model(smart_model.clone());
-                }
-                if let Some(eco_model) = &config.eco_model {
-                    client_config = client_config.with_eco_model(eco_model.clone());
-                }
-                if let Some(recovery_model) = &config.recovery_model {
-                    client_config = client_config.with_recovery_model(recovery_model.clone());
+                // Pass unified model as smart_model for AgentClient compatibility
+                if let Some(model) = &config.model {
+                    client_config = client_config.with_smart_model(model.clone());
                 }
 
                 let client: Arc<dyn AgentProvider> =

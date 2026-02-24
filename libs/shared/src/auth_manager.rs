@@ -1,10 +1,25 @@
 //! Authentication manager for storing and retrieving provider credentials
 //!
-//! This module manages provider credentials stored in `auth.toml` in the config directory.
-//! Credentials are organized by profile and provider, with support for a shared "all" profile
-//! that serves as a fallback for all other profiles.
+//! # Deprecated
 //!
-//! # File Structure
+//! This module is **deprecated**. Credentials are now stored directly in `config.toml`
+//! under `[profiles.{profile}.providers.{provider}.auth]` instead of in a separate
+//! `auth.toml` file.
+//!
+//! The `AuthManager` is kept temporarily for:
+//! - Reading existing `auth.toml` files during migration
+//! - Backward compatibility during the transition period
+//!
+//! New code should use `ProviderConfig::set_auth()` and `ProviderConfig::get_auth()`
+//! to manage provider credentials directly in `config.toml`.
+//!
+//! ## Migration
+//!
+//! When `config.toml` is loaded, any credentials in `auth.toml` are automatically
+//! migrated to the new format in `config.toml`, and `auth.toml` is backed up to
+//! `auth.toml.bak`.
+//!
+//! # Legacy File Structure (auth.toml - deprecated)
 //!
 //! ```toml
 //! # Shared across all profiles
@@ -53,7 +68,7 @@ impl AuthManager {
     /// Load auth manager for the given config directory
     pub fn new(config_dir: &Path) -> OAuthResult<Self> {
         let auth_path = config_dir.join(AUTH_FILE_NAME);
-        let auth_file = if auth_path.exists() {
+        let auth_file = if auth_path.is_file() {
             let content = std::fs::read_to_string(&auth_path)?;
             toml::from_str(&content)?
         } else {

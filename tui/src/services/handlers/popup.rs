@@ -886,8 +886,43 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
     state.model_switcher_search.clear();
 }
 
+/// Add custom models from recent_models to available_models.
+///
+/// Custom models are those in recent_models but not in available_models.
+/// The provider is inferred from:
+/// 1. The model ID prefix if it has a "/" (e.g., "litellm/glm-4.6" -> provider "litellm")
+/// 2. Otherwise, use the same provider as the configured default model (state.model)
+pub fn ensure_custom_models_in_available(state: &mut AppState) {
+    // Get the default provider from the configured model
+    let default_provider = state.model.provider.clone();
+
+    // Collect models to add first, then extend (avoids cloning recent_models)
+    let to_add: Vec<Model> = state
+        .recent_models
+        .iter()
+        .filter(|recent_id| !state.available_models.iter().any(|m| &m.id == *recent_id))
+        .map(|recent_id| {
+            // Try to infer provider from model ID prefix (e.g., "litellm/glm-4.6" -> "litellm")
+            // split('/').next() is safe for UTF-8; find('/') + slice would also work since '/' is ASCII
+            let provider = recent_id
+                .split('/')
+                .next()
+                .filter(|prefix| !prefix.is_empty() && *prefix != recent_id)
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| default_provider.clone());
+            Model::custom(recent_id.clone(), provider)
+        })
+        .collect();
+
+    state.available_models.extend(to_add);
+}
+
 /// Handle available models loaded event
-pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) {
+pub fn handle_available_models_loaded(
+    state: &mut AppState,
+    models: Vec<Model>,
+    output_tx: &Sender<OutputEvent>,
+) {
     // Sort models by provider to match render order in model_switcher.rs
     // "stakpak" provider always first, then alphabetically
     let mut sorted_models = models;
@@ -902,6 +937,49 @@ pub fn handle_available_models_loaded(state: &mut AppState, models: Vec<Model>) 
         }
     });
     state.available_models = sorted_models;
+
+    // Add custom models from recent_models that aren't in available_models
+    ensure_custom_models_in_available(state);
+
+    // Add the current/default model to recent_models if not already there
+    // This ensures the initial model appears in Recent section
+    let model_to_add = if let Some(current) = &state.current_model {
+        // Use current_model if set (from previous switch)
+        Some(current.id.clone())
+    } else {
+        // Use the configured default model (state.model)
+        // Try to find matching model in available_models first (for correct ID format)
+        let default_model_id = &state.model.id;
+        if let Some(matched) = state.available_models.iter().find(|m| {
+            // Match by ID or by final segment after "/" (for Stakpak routing:
+            // "anthropic/claude-..." matches "claude-...")
+            m.id == *default_model_id
+                || m.id
+                    .split('/')
+                    .next_back()
+                    .is_some_and(|last| last == default_model_id.as_str())
+        }) {
+            Some(matched.id.clone())
+        } else if !default_model_id.is_empty() {
+            // For local providers with custom models not in available_models,
+            // use the configured model ID directly
+            Some(default_model_id.clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(model_id) = model_to_add
+        && !state.recent_models.contains(&model_id)
+    {
+        // Add to front of recent list
+        state.recent_models.insert(0, model_id);
+        // Keep max 5
+        state.recent_models.truncate(5);
+
+        // Persist to config so it survives model switches
+        let _ = output_tx.try_send(OutputEvent::SaveRecentModels(state.recent_models.clone()));
+    }
 
     // Pre-select current model if available and it's in the filtered list
     let filtered = crate::services::model_switcher::filter_models(

@@ -59,13 +59,11 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         }),
         provider: ProviderType::Remote,
         providers: HashMap::new(),
-        smart_model: None,
-        eco_model: None,
-        recovery_model: None,
         model: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        recent_models: Vec::new(),
     }
 }
 
@@ -428,13 +426,11 @@ fn save_writes_profile_and_settings() {
         }),
         provider: ProviderType::Remote,
         providers: HashMap::new(),
-        smart_model: None,
-        eco_model: None,
-        recovery_model: None,
         model: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
+        recent_models: Vec::new(),
     };
 
     config.save().unwrap();
@@ -682,8 +678,7 @@ fn test_providers_toml_parsing_new_format() {
 
 [profiles.litellm]
 provider = "local"
-eco_model = "litellm/claude-opus-4-5"
-smart_model = "litellm/claude-opus-4-5"
+model = "litellm/claude-opus-4-5"
 
 [profiles.litellm.providers.litellm]
 type = "custom"
@@ -702,14 +697,7 @@ api_endpoint = "http://localhost:11434/v1"
         .get("litellm")
         .expect("litellm profile not found");
     assert!(matches!(profile.provider, Some(ProviderType::Local)));
-    assert_eq!(
-        profile.eco_model.as_deref(),
-        Some("litellm/claude-opus-4-5")
-    );
-    assert_eq!(
-        profile.smart_model.as_deref(),
-        Some("litellm/claude-opus-4-5")
-    );
+    assert_eq!(profile.model.as_deref(), Some("litellm/claude-opus-4-5"));
 
     // Check providers HashMap
     assert_eq!(profile.providers.len(), 2);
@@ -722,6 +710,7 @@ api_endpoint = "http://localhost:11434/v1"
         ProviderConfig::Custom {
             api_endpoint,
             api_key,
+            ..
         } => {
             assert_eq!(api_endpoint, "http://localhost:4000");
             assert_eq!(api_key, &Some("sk-1234".to_string()));
@@ -737,6 +726,7 @@ api_endpoint = "http://localhost:11434/v1"
         ProviderConfig::Custom {
             api_endpoint,
             api_key,
+            ..
         } => {
             assert_eq!(api_endpoint, "http://localhost:11434/v1");
             assert!(api_key.is_none());
@@ -1038,13 +1028,13 @@ fn test_custom_provider_config_parsing() {
     let dir = TempDir::new().unwrap();
     let config_path = dir.path().join("config.toml");
 
+    // Test with new unified 'model' field
     let config = r#"
 [settings]
 
 [profiles.default]
 provider = "local"
-smart_model = "litellm/anthropic/claude-opus"
-eco_model = "litellm/openai/gpt-4-turbo"
+model = "litellm/anthropic/claude-opus"
 
 [profiles.default.providers.litellm]
 type = "custom"
@@ -1064,13 +1054,44 @@ api_key = "sk-litellm"
     assert_eq!(litellm.provider_type(), "custom");
 
     assert_eq!(
-        profile.smart_model,
+        profile.model,
         Some("litellm/anthropic/claude-opus".to_string())
     );
+}
+
+#[test]
+fn test_legacy_model_fields_migration() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // Test migration from legacy smart_model/eco_model to unified model field
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "litellm/anthropic/claude-opus"
+eco_model = "litellm/openai/gpt-4-turbo"
+
+[profiles.default.providers.litellm]
+type = "custom"
+api_endpoint = "http://localhost:4000"
+api_key = "sk-litellm"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // After migration, smart_model should be migrated to model field
+    // Legacy fields should be cleared
     assert_eq!(
-        profile.eco_model,
-        Some("litellm/openai/gpt-4-turbo".to_string())
+        profile.model,
+        Some("litellm/anthropic/claude-opus".to_string())
     );
+    // Legacy fields should be None after migration
+    assert!(profile.smart_model.is_none());
+    assert!(profile.eco_model.is_none());
 }
 
 #[test]
@@ -1083,7 +1104,7 @@ fn test_custom_provider_without_api_key() {
 
 [profiles.default]
 provider = "local"
-smart_model = "ollama/llama3"
+model = "ollama/llama3"
 
 [profiles.default.providers.ollama]
 type = "custom"
@@ -1109,8 +1130,7 @@ fn test_multiple_custom_providers() {
 
 [profiles.default]
 provider = "local"
-smart_model = "litellm/claude-opus"
-eco_model = "ollama/llama3"
+model = "litellm/claude-opus"
 
 [profiles.default.providers.litellm]
 type = "custom"

@@ -404,13 +404,11 @@ mod tests {
             warden,
             provider: ProviderType::Remote,
             providers: HashMap::new(),
-            smart_model: None,
-            eco_model: None,
-            recovery_model: None,
             model: None,
             anonymous_id: None,
             collect_telemetry: None,
             editor: None,
+            recent_models: Vec::new(),
         }
     }
 

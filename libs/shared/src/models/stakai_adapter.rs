@@ -417,28 +417,24 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
 
     for (name, provider_config) in &config.providers {
         match provider_config {
-            ProviderConfig::OpenAI {
-                api_key,
-                api_endpoint,
-            } => {
-                if let Some(api_key) = api_key {
+            ProviderConfig::OpenAI { api_endpoint, .. } => {
+                // Use get_auth() to resolve credentials (checks auth field, then legacy api_key)
+                if let Some(api_key) = provider_config.api_key() {
                     inference_config =
-                        inference_config.openai(api_key.clone(), api_endpoint.clone());
+                        inference_config.openai(api_key.to_string(), api_endpoint.clone());
                 }
             }
-            ProviderConfig::Anthropic {
-                api_key,
-                api_endpoint,
-                access_token,
-            } => {
-                let stakai_config = if let Some(token) = access_token {
+            ProviderConfig::Anthropic { api_endpoint, .. } => {
+                // Use get_auth() to resolve credentials
+                // Check for OAuth access token first, then API key
+                let stakai_config = if let Some(token) = provider_config.access_token() {
                     // OAuth authentication - uses Bearer token header
                     let mut cfg = StakaiAnthropicConfig::with_oauth(token);
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
                     Some(cfg)
-                } else if let Some(key) = api_key {
+                } else if let Some(key) = provider_config.api_key() {
                     // API key authentication - uses x-api-key header
                     let mut cfg = StakaiAnthropicConfig::new(key);
                     if let Some(endpoint) = api_endpoint {
@@ -453,23 +449,17 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                     inference_config = inference_config.anthropic_config(cfg);
                 }
             }
-            ProviderConfig::Gemini {
-                api_key,
-                api_endpoint,
-            } => {
-                if let Some(api_key) = api_key {
+            ProviderConfig::Gemini { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
                     inference_config =
-                        inference_config.gemini(api_key.clone(), api_endpoint.clone());
+                        inference_config.gemini(api_key.to_string(), api_endpoint.clone());
                 }
             }
-            ProviderConfig::Stakpak {
-                api_key,
-                api_endpoint,
-            } => {
-                // Skip if api_key is empty - stakpak is optional
-                if !api_key.is_empty() {
+            ProviderConfig::Stakpak { api_endpoint, .. } => {
+                // Skip if no api_key - stakpak is optional
+                if let Some(api_key) = provider_config.api_key() {
                     inference_config =
-                        inference_config.stakpak(api_key.clone(), api_endpoint.clone());
+                        inference_config.stakpak(api_key.to_string(), api_endpoint.clone());
                 }
             }
             ProviderConfig::Custom { .. } => {
@@ -517,12 +507,9 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
 
     for (name, provider_config) in &config.providers {
         match provider_config {
-            ProviderConfig::OpenAI {
-                api_key,
-                api_endpoint,
-            } => {
-                if let Some(api_key) = api_key {
-                    let mut openai_config = StakaiOpenAIConfig::new(api_key.clone());
+            ProviderConfig::OpenAI { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut openai_config = StakaiOpenAIConfig::new(api_key.to_string());
                     if let Some(endpoint) = api_endpoint {
                         openai_config = openai_config.with_base_url(endpoint.clone());
                     }
@@ -531,18 +518,14 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     registry = registry.register("openai", provider);
                 }
             }
-            ProviderConfig::Anthropic {
-                api_key,
-                api_endpoint,
-                access_token,
-            } => {
-                let stakai_config = if let Some(token) = access_token {
+            ProviderConfig::Anthropic { api_endpoint, .. } => {
+                let stakai_config = if let Some(token) = provider_config.access_token() {
                     let mut cfg = StakaiAnthropicConfig::with_oauth(token);
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
                     }
                     Some(cfg)
-                } else if let Some(key) = api_key {
+                } else if let Some(key) = provider_config.api_key() {
                     let mut cfg = StakaiAnthropicConfig::new(key);
                     if let Some(endpoint) = api_endpoint {
                         cfg = cfg.with_base_url(endpoint);
@@ -558,12 +541,9 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     registry = registry.register("anthropic", provider);
                 }
             }
-            ProviderConfig::Gemini {
-                api_key,
-                api_endpoint,
-            } => {
-                if let Some(api_key) = api_key {
-                    let mut gemini_config = StakaiGeminiConfig::new(api_key.clone());
+            ProviderConfig::Gemini { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut gemini_config = StakaiGeminiConfig::new(api_key.to_string());
                     if let Some(endpoint) = api_endpoint {
                         gemini_config = gemini_config.with_base_url(endpoint.clone());
                     }
@@ -572,15 +552,12 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     registry = registry.register("google", provider);
                 }
             }
-            ProviderConfig::Stakpak {
-                api_key,
-                api_endpoint,
-            } => {
-                // Skip if api_key is empty - stakpak is optional
-                if api_key.is_empty() {
+            ProviderConfig::Stakpak { api_endpoint, .. } => {
+                // Skip if no api_key - stakpak is optional
+                let Some(api_key) = provider_config.api_key() else {
                     continue;
-                }
-                let mut stakpak_config = StakpakProviderConfig::new(api_key.clone())
+                };
+                let mut stakpak_config = StakpakProviderConfig::new(api_key.to_string())
                     .with_user_agent(format!("Stakpak/{}", env!("CARGO_PKG_VERSION")));
                 if let Some(endpoint) = api_endpoint {
                     stakpak_config = stakpak_config.with_base_url(endpoint.clone());
@@ -589,16 +566,13 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
                 registry = registry.register("stakpak", provider);
             }
-            ProviderConfig::Custom {
-                api_key,
-                api_endpoint,
-            } => {
+            ProviderConfig::Custom { api_endpoint, .. } => {
                 // Custom providers are registered as OpenAI-compatible providers.
                 // The provider is registered with the config key (e.g., "litellm") as its ID.
                 // When a model like "litellm/anthropic/claude-opus" is used:
                 // 1. "litellm" is matched to this provider
                 // 2. "anthropic/claude-opus" is sent as the model name to the API
-                let key = api_key.clone().unwrap_or_default();
+                let key = provider_config.api_key().unwrap_or_default().to_string();
                 let openai_config =
                     StakaiOpenAIConfig::new(key).with_base_url(api_endpoint.clone());
 
@@ -1636,6 +1610,7 @@ mod tests {
             ProviderConfig::OpenAI {
                 api_key: Some("sk-test-key".to_string()),
                 api_endpoint: Some("https://api.openai.com/v1".to_string()),
+                auth: None,
             },
         );
 
@@ -1654,6 +1629,7 @@ mod tests {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
+                auth: None,
             },
         );
 
@@ -1671,6 +1647,7 @@ mod tests {
             ProviderConfig::Gemini {
                 api_key: Some("gemini-test-key".to_string()),
                 api_endpoint: None,
+                auth: None,
             },
         );
 
@@ -1689,6 +1666,7 @@ mod tests {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
+                auth: None,
             },
         );
         config.add_provider(
@@ -1696,6 +1674,7 @@ mod tests {
             ProviderConfig::OpenAI {
                 api_key: Some("sk-openai-test".to_string()),
                 api_endpoint: None,
+                auth: None,
             },
         );
         config.add_provider(
@@ -1703,6 +1682,7 @@ mod tests {
             ProviderConfig::Gemini {
                 api_key: Some("gemini-test".to_string()),
                 api_endpoint: None,
+                auth: None,
             },
         );
 
@@ -1720,6 +1700,7 @@ mod tests {
             ProviderConfig::Custom {
                 api_endpoint: "http://localhost:4000".to_string(),
                 api_key: Some("sk-1234".to_string()),
+                auth: None,
             },
         );
         config.add_provider(
@@ -1727,6 +1708,7 @@ mod tests {
             ProviderConfig::Custom {
                 api_endpoint: "http://localhost:11434/v1".to_string(),
                 api_key: None,
+                auth: None,
             },
         );
 

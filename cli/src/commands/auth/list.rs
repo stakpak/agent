@@ -1,18 +1,17 @@
 //! List credentials command
 
-use stakpak_shared::auth_manager::AuthManager;
+use super::collect_all_credentials;
 use stakpak_shared::oauth::ProviderRegistry;
 use std::path::Path;
 
 /// Handle the list credentials command
 pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), String> {
-    let auth_manager =
-        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
     let registry = ProviderRegistry::new();
 
-    let credentials = auth_manager.list();
+    // Collect credentials from both config.toml and auth.toml (legacy)
+    let all_credentials = collect_all_credentials(config_dir);
 
-    if credentials.is_empty() {
+    if all_credentials.is_empty() {
         println!("No credentials configured.");
         println!();
         println!("Run 'stakpak auth login' to add credentials.");
@@ -23,7 +22,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
     println!();
 
     // Sort profiles for consistent output
-    let mut profile_names: Vec<_> = credentials.keys().collect();
+    let mut profile_names: Vec<_> = all_credentials.keys().collect();
     profile_names.sort();
 
     // Put "all" first if present
@@ -46,7 +45,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
             continue;
         }
 
-        let Some(providers) = credentials.get(profile_name) else {
+        let Some(providers) = all_credentials.get(profile_name) else {
             continue;
         };
         if providers.is_empty() {
@@ -66,7 +65,7 @@ pub fn handle_list(config_dir: &Path, profile: Option<&str>) -> Result<(), Strin
         provider_ids.sort();
 
         for provider_id in provider_ids {
-            let Some(auth) = providers.get(provider_id) else {
+            let Some((auth, _source)) = providers.get(provider_id) else {
                 continue;
             };
 

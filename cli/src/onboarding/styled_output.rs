@@ -197,20 +197,13 @@ pub fn render_profile_name(profile_name: &str) {
     );
 }
 
-/// Render default models for a provider in neutral colors (white/gray)
-pub fn render_default_models(smart_model: &str, eco_model: &str) {
-    print!("{}Default models:{}\r\n", Colors::white(), Colors::reset());
+/// Render default model for a provider in neutral colors (white/gray)
+pub fn render_default_model(model: &str) {
     print!(
-        "  {}Smart: {}{}\r\n",
+        "{}Default model: {}{}\r\n",
         Colors::gray(),
         Colors::white(),
-        smart_model
-    );
-    print!(
-        "  {}Eco: {}{}\r\n",
-        Colors::gray(),
-        Colors::white(),
-        eco_model
+        model
     );
     print!("\r\n");
 }

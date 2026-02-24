@@ -125,9 +125,10 @@ impl StakpakAcpAgent {
             let client = AgentClient::new(AgentClientConfig {
                 stakpak,
                 providers: config.get_llm_provider_config(),
-                eco_model: config.eco_model.clone(),
-                recovery_model: config.recovery_model.clone(),
-                smart_model: config.smart_model.clone(),
+                // Pass model as smart_model for AgentClient compatibility
+                smart_model: config.model.clone(),
+                eco_model: None,
+                recovery_model: None,
                 store_path: None,
                 hook_registry: None,
             })
@@ -136,21 +137,19 @@ impl StakpakAcpAgent {
             Arc::new(client)
         };
 
-        // Get default model - use smart_model from config or first available model
-        let model = if let Some(smart_model_str) = &config.smart_model {
-            // Parse the smart_model string to determine provider
-            let provider = if smart_model_str.starts_with("anthropic/")
-                || smart_model_str.contains("claude")
-            {
+        // Get default model - use model from config or first available model
+        let model = if let Some(model_str) = &config.model {
+            // Parse the model string to determine provider
+            let provider = if model_str.starts_with("anthropic/") || model_str.contains("claude") {
                 "anthropic"
-            } else if smart_model_str.starts_with("openai/") || smart_model_str.contains("gpt") {
+            } else if model_str.starts_with("openai/") || model_str.contains("gpt") {
                 "openai"
-            } else if smart_model_str.starts_with("google/") || smart_model_str.contains("gemini") {
+            } else if model_str.starts_with("google/") || model_str.contains("gemini") {
                 "google"
             } else {
                 "stakpak"
             };
-            Model::custom(smart_model_str.clone(), provider)
+            Model::custom(model_str.clone(), provider)
         } else {
             // Use first available model from client
             let models = client.list_models().await;
@@ -1648,9 +1647,10 @@ impl acp::Agent for StakpakAcpAgent {
                 let new_client = AgentClient::new(AgentClientConfig {
                     stakpak,
                     providers: config.get_llm_provider_config(),
-                    eco_model: config.eco_model.clone(),
-                    recovery_model: config.recovery_model.clone(),
-                    smart_model: config.smart_model.clone(),
+                    // Pass unified model as smart_model for AgentClient compatibility
+                    smart_model: config.model.clone(),
+                    eco_model: None,
+                    recovery_model: None,
                     store_path: None,
                     hook_registry: None,
                 })

@@ -50,6 +50,56 @@ pub fn filter_models(models: &[Model], mode: ModelSwitcherMode, search: &str) ->
         .collect()
 }
 
+/// Get the navigation order of model indices matching the visual display order.
+/// Returns: (Recent models in order, then provider-grouped models)
+/// This is used for keyboard navigation to match what the user sees on screen.
+pub fn get_navigation_order(state: &AppState, filtered_indices: &[usize]) -> Vec<usize> {
+    let mut nav_order: Vec<usize> = Vec::new();
+
+    // First: Recent models that exist in available_models and match filter
+    for recent_id in &state.recent_models {
+        if let Some(idx) = state
+            .available_models
+            .iter()
+            .position(|m| m.id == *recent_id)
+            && filtered_indices.contains(&idx)
+            && !nav_order.contains(&idx)
+        {
+            nav_order.push(idx);
+        }
+    }
+
+    // Then: Provider sections (grouped, sorted with "stakpak" first)
+    let mut models_by_provider: std::collections::HashMap<&str, Vec<usize>> =
+        std::collections::HashMap::new();
+    for &idx in filtered_indices {
+        let model = &state.available_models[idx];
+        models_by_provider
+            .entry(model.provider.as_str())
+            .or_default()
+            .push(idx);
+    }
+
+    // Sort providers: "stakpak" first, then alphabetical
+    let mut providers: Vec<_> = models_by_provider.keys().collect();
+    providers.sort_by(|a, b| match (**a == "stakpak", **b == "stakpak") {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.cmp(b),
+    });
+
+    // Add models from each provider (skip if already in nav_order from Recent)
+    for provider in providers {
+        for &idx in &models_by_provider[provider] {
+            if !nav_order.contains(&idx) {
+                nav_order.push(idx);
+            }
+        }
+    }
+
+    nav_order
+}
+
 /// Render the model switcher popup
 pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     // Calculate popup size (50% width to fit model names and costs, 70% height)
@@ -198,7 +248,88 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     f.render_widget(block, area);
 }
 
-/// Render the model list with provider headers
+/// Render a single model line
+fn render_model_line(
+    model: &Model,
+    is_selected: bool,
+    is_current: bool,
+    list_width: u16,
+) -> Line<'static> {
+    let mut spans = vec![];
+
+    // Current indicator
+    if is_current {
+        spans.push(Span::styled(
+            "  ",
+            Style::default().fg(ThemeColors::green()),
+        ));
+    } else {
+        spans.push(Span::raw("   "));
+    }
+
+    // Model name with selection/current styling
+    let name_style = if is_current {
+        Style::default()
+            .fg(ThemeColors::green())
+            .add_modifier(Modifier::BOLD)
+    } else if is_selected {
+        Style::default()
+            .fg(ThemeColors::highlight_fg())
+            .bg(ThemeColors::highlight_bg())
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(ThemeColors::text())
+    };
+
+    // Build the full model line
+    let mut model_text = model.name.clone();
+
+    // Reasoning indicator
+    if model.reasoning {
+        model_text.push_str(" [R]");
+    }
+
+    // Cost if available
+    if let Some(cost) = &model.cost {
+        model_text.push_str(&format!(" ${:.2}/${:.2}", cost.input, cost.output));
+    }
+
+    if is_selected && !is_current {
+        // For selected item, apply background to entire line
+        // Calculate padding to fill the width
+        let padding_len = list_width.saturating_sub(model_text.len() as u16 + 4);
+        let padded_text = format!("{}{}", model_text, " ".repeat(padding_len as usize));
+        spans.push(Span::styled(padded_text, name_style));
+    } else {
+        // Normal rendering with separate colors for parts
+        spans.push(Span::styled(model.name.clone(), name_style));
+
+        if model.reasoning {
+            let reasoning_style = if is_current {
+                Style::default().fg(ThemeColors::green())
+            } else {
+                Style::default().fg(ThemeColors::magenta())
+            };
+            spans.push(Span::styled(" [R]", reasoning_style));
+        }
+
+        if let Some(cost) = &model.cost {
+            let cost_style = if is_current {
+                Style::default().fg(ThemeColors::green())
+            } else {
+                Style::default().fg(ThemeColors::dark_gray())
+            };
+            spans.push(Span::styled(
+                format!(" ${:.2}/${:.2}", cost.input, cost.output),
+                cost_style,
+            ));
+        }
+    }
+
+    Line::from(spans)
+}
+
+/// Render the model list with Recent section and provider headers
 fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize], list_area: Rect) {
     // Show empty state if no models match
     if filtered_indices.is_empty() {
@@ -218,10 +349,64 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         return;
     }
 
-    // Group filtered models by provider
+    // Build display lines
+    let mut lines: Vec<Line> = Vec::new();
+    let mut line_to_model_idx: Vec<Option<usize>> = Vec::new(); // Maps line index to model index
+
+    // === Recent Models Section ===
+    // Recent models are now always in available_models (custom models are synthesized
+    // with provider inferred from model ID prefix or the user's default provider)
+    let recent_model_indices: Vec<usize> = state
+        .recent_models
+        .iter()
+        .filter_map(|recent_id| {
+            state
+                .available_models
+                .iter()
+                .position(|m| m.id == *recent_id)
+        })
+        .filter(|idx| filtered_indices.contains(idx))
+        .collect();
+
+    if !recent_model_indices.is_empty() {
+        // Recent header
+        lines.push(Line::from(vec![Span::styled(
+            " Recent ",
+            Style::default()
+                .fg(ThemeColors::cyan())
+                .add_modifier(Modifier::BOLD),
+        )]));
+        line_to_model_idx.push(None); // Header is not selectable
+
+        // Recent model items
+        for &model_idx in &recent_model_indices {
+            let model = &state.available_models[model_idx];
+            let is_selected = model_idx == state.model_switcher_selected;
+            let is_current = state
+                .current_model
+                .as_ref()
+                .is_some_and(|m| m.id == model.id);
+
+            lines.push(render_model_line(
+                model,
+                is_selected,
+                is_current,
+                list_area.width,
+            ));
+            line_to_model_idx.push(Some(model_idx));
+        }
+    }
+
+    // === Provider Sections ===
+    // Group filtered models by provider, excluding those already shown in Recent
+    let recent_set: std::collections::HashSet<usize> =
+        recent_model_indices.iter().copied().collect();
     let mut models_by_provider: std::collections::HashMap<&str, Vec<usize>> =
         std::collections::HashMap::new();
     for &idx in filtered_indices {
+        if recent_set.contains(&idx) {
+            continue; // Skip models already shown in Recent section
+        }
         let model = &state.available_models[idx];
         models_by_provider
             .entry(model.provider.as_str())
@@ -236,10 +421,6 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         (false, true) => std::cmp::Ordering::Greater,
         _ => a.cmp(b),
     });
-
-    // Build display lines
-    let mut lines: Vec<Line> = Vec::new();
-    let mut line_to_model_idx: Vec<Option<usize>> = Vec::new(); // Maps line index to model index
 
     for provider in providers {
         let model_indices = &models_by_provider[provider];
@@ -263,78 +444,12 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
                 .as_ref()
                 .is_some_and(|m| m.id == model.id);
 
-            let mut spans = vec![];
-
-            // Current indicator
-            if is_current {
-                spans.push(Span::styled(
-                    "  ",
-                    Style::default().fg(ThemeColors::green()),
-                ));
-            } else {
-                spans.push(Span::raw("   "));
-            }
-
-            // Model name with selection/current styling
-            let name_style = if is_current {
-                Style::default()
-                    .fg(ThemeColors::green())
-                    .add_modifier(Modifier::BOLD)
-            } else if is_selected {
-                Style::default()
-                    .fg(ThemeColors::highlight_fg())
-                    .bg(ThemeColors::highlight_bg())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(ThemeColors::text())
-            };
-
-            // Build the full model line
-            let mut model_text = model.name.clone();
-
-            // Reasoning indicator
-            if model.reasoning {
-                model_text.push_str(" [R]");
-            }
-
-            // Cost if available
-            if let Some(cost) = &model.cost {
-                model_text.push_str(&format!(" ${:.2}/${:.2}", cost.input, cost.output));
-            }
-
-            if is_selected && !is_current {
-                // For selected item, apply background to entire line
-                // Calculate padding to fill the width
-                let padding_len = list_area.width.saturating_sub(model_text.len() as u16 + 4);
-                let padded_text = format!("{}{}", model_text, " ".repeat(padding_len as usize));
-                spans.push(Span::styled(padded_text, name_style));
-            } else {
-                // Normal rendering with separate colors for parts
-                spans.push(Span::styled(model.name.clone(), name_style));
-
-                if model.reasoning {
-                    let reasoning_style = if is_current {
-                        Style::default().fg(ThemeColors::green())
-                    } else {
-                        Style::default().fg(ThemeColors::magenta())
-                    };
-                    spans.push(Span::styled(" [R]", reasoning_style));
-                }
-
-                if let Some(cost) = &model.cost {
-                    let cost_style = if is_current {
-                        Style::default().fg(ThemeColors::green())
-                    } else {
-                        Style::default().fg(ThemeColors::dark_gray())
-                    };
-                    spans.push(Span::styled(
-                        format!(" ${:.2}/${:.2}", cost.input, cost.output),
-                        cost_style,
-                    ));
-                }
-            }
-
-            lines.push(Line::from(spans));
+            lines.push(render_model_line(
+                model,
+                is_selected,
+                is_current,
+                list_area.width,
+            ));
             line_to_model_idx.push(Some(model_idx));
         }
     }

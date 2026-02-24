@@ -102,7 +102,10 @@ fn find_in_provider(provider_id: &str, model_id: &str) -> Option<Model> {
 }
 
 /// Transform a model for Stakpak API routing
-fn transform_for_stakpak(model: Model) -> Model {
+///
+/// Changes the model's provider to "stakpak" and prefixes the model ID
+/// with the original provider name for routing purposes.
+pub fn transform_for_stakpak(model: Model) -> Model {
     Model {
         id: format!("{}/{}", model.provider, model.id),
         provider: "stakpak".into(),

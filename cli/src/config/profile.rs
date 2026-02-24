@@ -75,6 +75,11 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
+    /// Recently used models (most recent first, max 5)
+    /// Stores model IDs which may include provider prefix for Stakpak API routing
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_models: Vec<String>,
+
     // =========================================================================
     // Legacy model fields - kept for backward compatibility during migration
     // These are read but deprecated (will migrate to 'model' field)
@@ -109,11 +114,10 @@ impl ProfileConfig {
                 api_key: default.api_key.clone(),
                 provider: default.provider,
                 providers: default.providers.clone(),
-                // Copy model fields
+                // Copy unified model field only (legacy fields are not copied)
                 model: default.model.clone(),
-                smart_model: default.smart_model.clone(),
-                eco_model: default.eco_model.clone(),
-                recovery_model: default.recovery_model.clone(),
+                // Copy recent models
+                recent_models: default.recent_models.clone(),
                 // Enable warden for readonly sandboxed execution
                 warden: Some(WardenConfig::readonly_profile()),
                 // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
@@ -164,6 +168,7 @@ impl ProfileConfig {
                 e.insert(ProviderConfig::OpenAI {
                     api_key: openai.api_key,
                     api_endpoint: Self::clean_api_endpoint(openai.api_endpoint),
+                    auth: None,
                 });
                 migrated = true;
             }
@@ -178,6 +183,7 @@ impl ProfileConfig {
                         api_key: anthropic.api_key,
                         api_endpoint: Self::clean_api_endpoint(anthropic.api_endpoint),
                         access_token: anthropic.access_token,
+                        auth: None,
                     },
                 );
                 migrated = true;
@@ -192,6 +198,7 @@ impl ProfileConfig {
                     ProviderConfig::Gemini {
                         api_key: gemini.api_key,
                         api_endpoint: Self::clean_api_endpoint(gemini.api_endpoint),
+                        auth: None,
                     },
                 );
                 migrated = true;
@@ -284,6 +291,38 @@ impl ProfileConfig {
         false
     }
 
+    /// Check if this profile has legacy model fields that need migration.
+    pub fn needs_model_migration(&self) -> bool {
+        // If we have legacy fields but no unified model field, migration is needed
+        self.model.is_none()
+            && (self.smart_model.is_some()
+                || self.eco_model.is_some()
+                || self.recovery_model.is_some())
+    }
+
+    /// Migrate legacy model fields (smart_model, eco_model, recovery_model) to unified 'model' field.
+    ///
+    /// Priority: smart_model > eco_model > recovery_model
+    ///
+    /// After migration, legacy fields are cleared so they won't be serialized.
+    /// Returns true if migration was performed.
+    pub fn migrate_model_fields(&mut self) -> bool {
+        if !self.needs_model_migration() {
+            return false;
+        }
+
+        // Take ownership of legacy fields and pick the best one
+        let smart = self.smart_model.take();
+        let eco = self.eco_model.take();
+        let recovery = self.recovery_model.take();
+
+        // Priority: smart > eco > recovery
+        // (At least one is Some due to needs_model_migration() guard)
+        self.model = smart.or(eco).or(recovery);
+
+        true
+    }
+
     /// Merge this profile with another, using self's values if present.
     pub(crate) fn merge(&self, other: Option<&ProfileConfig>) -> ProfileConfig {
         // Merge providers: start with other's providers, then overlay self's
@@ -334,25 +373,42 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
-            // New unified model field
+            // Unified model field
             model: self
                 .model
                 .clone()
                 .or_else(|| other.and_then(|config| config.model.clone())),
-            // Legacy fields - merge for backward compatibility during transition
-            eco_model: self
-                .eco_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.eco_model.clone())),
-            smart_model: self
-                .smart_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.smart_model.clone())),
-            recovery_model: self
-                .recovery_model
-                .clone()
-                .or_else(|| other.and_then(|config| config.recovery_model.clone())),
+            // Recent models - use self's if non-empty, otherwise other's
+            recent_models: if !self.recent_models.is_empty() {
+                self.recent_models.clone()
+            } else {
+                other
+                    .map(|config| config.recent_models.clone())
+                    .unwrap_or_default()
+            },
+            // Legacy fields - kept for reading only, not merged
+            eco_model: None,
+            smart_model: None,
+            recovery_model: None,
         }
+    }
+
+    /// Maximum number of recent models to store
+    const MAX_RECENT_MODELS: usize = 5;
+
+    /// Add a model to the recent models list.
+    ///
+    /// The model is added to the front of the list. If the model already exists,
+    /// it's moved to the front. The list is truncated to MAX_RECENT_MODELS entries.
+    pub fn add_recent_model(&mut self, model_id: &str) {
+        // Remove if already exists (we'll re-add at front)
+        self.recent_models.retain(|id| id != model_id);
+
+        // Add to front
+        self.recent_models.insert(0, model_id.to_string());
+
+        // Truncate to max size
+        self.recent_models.truncate(Self::MAX_RECENT_MODELS);
     }
 }
 

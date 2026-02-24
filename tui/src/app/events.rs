@@ -147,6 +147,8 @@ pub enum InputEvent {
     ModelSwitcherCancel,
     ModelSwitcherSearchInputChanged(char),
     ModelSwitcherSearchBackspace,
+    /// Update recent models list (sent after model switch is saved)
+    RecentModelsUpdated(Vec<String>),
 
     // Side panel events
     ToggleSidePanel,
@@ -237,6 +239,8 @@ pub enum OutputEvent {
     RequestTotalUsage,
     RequestAvailableModels,
     SwitchToModel(Model),
+    /// Save recent models list to config (used when initial model is added)
+    SaveRecentModels(Vec<String>),
     /// Plan mode activated via /plan command. Contains optional inline prompt.
     PlanModeActivated(Option<String>),
     /// Feedback on the plan — formatted unresolved comments injected as user message.
