@@ -479,20 +479,24 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             if row_in_message_area < height {
                 let absolute_line = scroll + row_in_message_area;
 
-                // Check if this line is a user message
-                let is_user_message = state.line_to_message_map.iter().any(
+                // Find the user message range that contains the hovered line
+                let hovered_message_range = state.line_to_message_map.iter().find(
                     |(start, end, _, is_user, _, _user_idx)| {
                         *is_user && absolute_line >= *start && absolute_line < *end
                     },
                 );
 
-                if is_user_message {
-                    // Highlight this line with subtle dark background
+                if let Some((msg_start, msg_end, _, _, _, _)) = hovered_message_range {
+                    let msg_start = *msg_start;
+                    let msg_end = *msg_end;
+
+                    // Highlight all lines of the hovered user message
                     visible_lines
                         .into_iter()
                         .enumerate()
                         .map(|(i, line)| {
-                            if i == row_in_message_area {
+                            let abs_line = scroll + i;
+                            if abs_line >= msg_start && abs_line < msg_end {
                                 Line::from(
                                     line.spans
                                         .into_iter()
