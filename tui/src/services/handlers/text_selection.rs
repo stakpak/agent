@@ -10,7 +10,9 @@
 
 use crate::app::AppState;
 use crate::services::message_action_popup::find_user_message_at_line;
-use crate::services::text_selection::{SelectionState, copy_to_clipboard, extract_selected_text};
+use crate::services::text_selection::{
+    SelectionState, copy_to_clipboard, extract_selected_text, extract_selected_text_from_collapsed,
+};
 use crate::services::toast::Toast;
 
 /// Check if coordinates are within the input area
@@ -32,8 +34,19 @@ fn content_col(state: &AppState, terminal_col: u16) -> u16 {
     terminal_col.saturating_sub(state.message_area_x)
 }
 
-/// Handle mouse drag start - begins text selection in message area or input area
+/// Convert terminal column to content-relative column within the collapsed popup area.
+fn popup_content_col(state: &AppState, terminal_col: u16) -> u16 {
+    terminal_col.saturating_sub(state.collapsed_popup_area_x)
+}
+
+/// Handle mouse drag start - begins text selection in message area, input area, or collapsed popup
 pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
+    // When collapsed messages popup is open, use popup geometry for selection
+    if state.show_collapsed_messages {
+        handle_popup_drag_start(state, col, row);
+        return;
+    }
+
     // Use the accurate message_area_height from the last render
     let message_area_height = state.message_area_height as usize;
 
@@ -91,8 +104,38 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     };
 }
 
-/// Handle mouse drag - updates selection in message area or input area
+/// Handle drag start within the collapsed messages fullscreen popup
+fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
+    let popup_height = state.collapsed_popup_area_height as usize;
+
+    // Check if click is within the popup content area
+    let row_in_popup = (row as usize).saturating_sub(state.collapsed_popup_area_y as usize);
+    if row < state.collapsed_popup_area_y || row_in_popup >= popup_height {
+        state.selection = SelectionState::default();
+        return;
+    }
+
+    // Convert screen row to absolute line index using popup's own scroll
+    let absolute_line = state.collapsed_messages_scroll + row_in_popup;
+    let rel_col = popup_content_col(state, col);
+
+    state.selection = SelectionState {
+        active: true,
+        start_line: Some(absolute_line),
+        start_col: Some(rel_col),
+        end_line: Some(absolute_line),
+        end_col: Some(rel_col),
+    };
+}
+
+/// Handle mouse drag - updates selection in message area, input area, or collapsed popup
 pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
+    // When collapsed messages popup is open, use popup geometry
+    if state.show_collapsed_messages {
+        handle_popup_drag(state, col, row);
+        return;
+    }
+
     // Use the accurate message_area_height from the last render
     let message_area_height = state.message_area_height as usize;
 
@@ -136,9 +179,35 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     state.selection.end_col = Some(rel_col);
 }
 
+/// Handle drag within the collapsed messages fullscreen popup
+fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
+    if !state.selection.active {
+        return;
+    }
+
+    let popup_height = state.collapsed_popup_area_height as usize;
+
+    // Clamp row to popup content area
+    let row_in_popup = (row as usize).saturating_sub(state.collapsed_popup_area_y as usize);
+    let clamped_row = row_in_popup.min(popup_height.saturating_sub(1));
+
+    // Convert screen row to absolute line index using popup's own scroll
+    let absolute_line = state.collapsed_messages_scroll + clamped_row;
+    let rel_col = popup_content_col(state, col);
+
+    state.selection.end_line = Some(absolute_line);
+    state.selection.end_col = Some(rel_col);
+}
+
 /// Handle mouse drag end - extracts text, copies to clipboard, shows toast
 /// Also detects clicks on user messages to show action popup
 pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
+    // When collapsed messages popup is open, use popup-specific logic
+    if state.show_collapsed_messages {
+        handle_popup_drag_end(state, col, row);
+        return;
+    }
+
     // Check if we're ending an input area selection
     if state.text_area.selection.is_active() {
         if let Some(selected_text) = state.text_area.end_selection()
@@ -221,6 +290,54 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     }
 }
 
+/// Handle drag end within the collapsed messages fullscreen popup
+fn handle_popup_drag_end(state: &mut AppState, col: u16, row: u16) {
+    if !state.selection.active {
+        return;
+    }
+
+    // Update final position using popup geometry
+    handle_popup_drag(state, col, row);
+
+    // Check if this was just a click (no actual drag)
+    let is_just_click = match (
+        &state.selection.start_line,
+        &state.selection.end_line,
+        &state.selection.start_col,
+        &state.selection.end_col,
+    ) {
+        (Some(sl), Some(el), Some(sc), Some(ec)) => *sl == *el && *sc == *ec,
+        _ => true,
+    };
+
+    if is_just_click {
+        // In the popup, a click just clears selection (no message action popup)
+        state.selection = SelectionState::default();
+        return;
+    }
+
+    // Extract selected text from the collapsed message lines cache
+    let selected_text = extract_selected_text_from_collapsed(state);
+
+    // Clear selection
+    state.selection = SelectionState::default();
+
+    if selected_text.is_empty() {
+        return;
+    }
+
+    // Copy to clipboard
+    match copy_to_clipboard(&selected_text) {
+        Ok(()) => {
+            state.toast = Some(Toast::success("Copied!"));
+        }
+        Err(e) => {
+            log::warn!("Failed to copy to clipboard: {}", e);
+            state.toast = Some(Toast::error("Copy failed"));
+        }
+    }
+}
+
 /// Handle scroll during active selection - extends selection in scroll direction
 pub fn handle_scroll_during_selection(
     state: &mut AppState,
@@ -236,6 +353,20 @@ pub fn handle_scroll_during_selection(
         return;
     };
 
+    // Choose the correct cache depending on whether the collapsed popup is open
+    let cached_lines: Option<&Vec<ratatui::text::Line<'static>>> = if state.show_collapsed_messages
+    {
+        state
+            .collapsed_message_lines_cache
+            .as_ref()
+            .map(|(_, _, lines)| lines)
+    } else {
+        state
+            .assembled_lines_cache
+            .as_ref()
+            .map(|(_, lines, _)| lines)
+    };
+
     // Calculate new end line based on scroll direction
     let new_end_line = if direction < 0 {
         // Scrolling up - extend selection upward
@@ -243,10 +374,8 @@ pub fn handle_scroll_during_selection(
     } else {
         // Scrolling down - extend selection downward
         // Get total lines from cache to clamp
-        let max_line = state
-            .assembled_lines_cache
-            .as_ref()
-            .map(|(_, lines, _)| lines.len().saturating_sub(1))
+        let max_line = cached_lines
+            .map(|lines| lines.len().saturating_sub(1))
             .unwrap_or(end_line);
         (end_line + 1).min(max_line)
     };
@@ -255,10 +384,10 @@ pub fn handle_scroll_during_selection(
 
     // Update end column to end of line when extending via scroll
     // This gives a better selection experience
-    if let Some((_, cached_lines, _)) = &state.assembled_lines_cache
-        && new_end_line < cached_lines.len()
+    if let Some(lines) = cached_lines
+        && new_end_line < lines.len()
     {
-        let line_width: u16 = cached_lines[new_end_line]
+        let line_width: u16 = lines[new_end_line]
             .spans
             .iter()
             .map(|span| unicode_width::UnicodeWidthStr::width(span.content.as_ref()) as u16)

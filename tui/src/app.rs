@@ -251,6 +251,11 @@ pub struct AppState {
     pub message_area_height: u16, // Height of message area (set during render for accurate event handling)
     pub hover_row: Option<u16>,   // Current mouse hover row for debugging
 
+    // ========== Collapsed Popup Geometry (for text selection in fullscreen popup) ==========
+    pub collapsed_popup_area_y: u16, // Y offset of popup content area
+    pub collapsed_popup_area_x: u16, // X offset of popup content area
+    pub collapsed_popup_area_height: u16, // Height of popup content area
+
     // ========== Input Area State ==========
     /// Stores the input area content rect for mouse click positioning
     pub input_content_area: Option<ratatui::layout::Rect>,
@@ -563,6 +568,10 @@ impl AppState {
             message_area_x: 0,
             message_area_height: 0,
             hover_row: None,
+
+            collapsed_popup_area_y: 0,
+            collapsed_popup_area_x: 0,
+            collapsed_popup_area_height: 0,
 
             // Profile switcher initialization
             show_profile_switcher: false,

@@ -584,6 +584,11 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let width = area.width as usize;
     let height = area.height as usize;
 
+    // Store popup content area geometry for text selection coordinate mapping
+    state.collapsed_popup_area_y = area.y;
+    state.collapsed_popup_area_x = area.x;
+    state.collapsed_popup_area_height = area.height;
+
     // Messages are already owned, no need to clone
     let all_lines: Vec<Line> = get_wrapped_collapsed_message_lines_cached(state, width);
 
@@ -619,6 +624,11 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
         state.collapsed_messages_scroll
     };
 
+    // Write the clamped scroll back to state so that event handlers (text selection,
+    // click detection) use the same scroll value that was used for rendering.
+    // This mirrors the pattern in render_messages() for state.scroll.
+    state.collapsed_messages_scroll = scroll;
+
     // Create visible lines
     let mut visible_lines = Vec::new();
     for i in 0..height {
@@ -629,6 +639,17 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
             visible_lines.push(Line::from(""));
         }
     }
+
+    // Apply selection highlighting if active (same as render_messages)
+    let visible_lines = if state.selection.active {
+        crate::services::text_selection::apply_selection_highlight(
+            visible_lines,
+            &state.selection,
+            scroll,
+        )
+    } else {
+        visible_lines
+    };
 
     // NOTE: Don't use Paragraph::wrap() - lines are already pre-wrapped
     let message_widget = Paragraph::new(visible_lines);

@@ -120,6 +120,7 @@ pub fn handle_esc_event(
     }
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
+        state.selection = crate::services::text_selection::SelectionState::default();
         return;
     }
 
@@ -171,6 +172,7 @@ pub fn handle_esc(
     state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
+        state.selection = crate::services::text_selection::SelectionState::default();
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
