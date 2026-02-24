@@ -507,6 +507,15 @@ pub fn update(
                 return;
             }
 
+            // --- Paste: insert into custom input if selected ---
+            InputEvent::HandlePaste(text) => {
+                if is_custom {
+                    ask_user::handle_ask_user_custom_input_paste(state, &text);
+                }
+                // Always consume paste when popup is open (don't paste into chat)
+                return;
+            }
+
             // --- Scroll events always pass through ---
             InputEvent::ScrollUp
             | InputEvent::ScrollDown
