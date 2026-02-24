@@ -36,6 +36,6 @@ pub use stream::{
 pub use tools::{ToolExecutionResult, ToolExecutor};
 pub use types::{
     AgentCommand, AgentConfig, AgentEvent, AgentLoopResult, AgentRunContext, CompactionConfig,
-    ContextConfig, ProposedToolCall, RetryConfig, StopReason, TokenUsage, ToolApprovalAction,
-    ToolApprovalPolicy, ToolDecision, TurnFinishReason,
+    ContextConfig, ProposedToolCall, RetryConfig, SAFE_AUTOPILOT_TOOLS, StopReason, TokenUsage,
+    ToolApprovalAction, ToolApprovalPolicy, ToolDecision, TurnFinishReason, strip_tool_prefix,
 };

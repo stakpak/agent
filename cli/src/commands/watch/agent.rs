@@ -8,7 +8,7 @@ use stakpak_gateway::client::{
     ToolDecisionInput,
 };
 use stakpak_shared::models::async_manifest::PauseReason;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -69,6 +69,8 @@ pub struct AgentServerConnection {
     pub token: String,
     /// Resolved model identifier (e.g., "claude-sonnet-4-5-20250929").
     pub model: Option<String>,
+    /// Default approved tools for watch runs (empty = allow all).
+    pub default_allowed_tools: HashSet<String>,
 }
 
 /// Configuration for spawning the agent.
@@ -92,6 +94,8 @@ pub struct SpawnConfig {
     pub sandbox: bool,
     /// Additional structured caller context injected via server API.
     pub caller_context: Vec<CallerContextInput>,
+    /// Tools this run can auto-approve. Empty means allow all tools.
+    pub allowed_tools: HashSet<String>,
     /// Agent server connection.
     pub server: AgentServerConnection,
 }
@@ -137,6 +141,34 @@ pub async fn spawn_agent(config: SpawnConfig) -> Result<AgentResult, AgentError>
             })
         }
     }
+}
+
+fn build_tool_decisions(
+    tool_calls: &[(String, String)],
+    allowed_tools: &HashSet<String>,
+) -> HashMap<String, ToolDecisionInput> {
+    tool_calls
+        .iter()
+        .map(|(tool_call_id, tool_name)| {
+            let normalized = stakpak_server::strip_tool_prefix(tool_name).to_string();
+            let is_allowed = allowed_tools.is_empty()
+                || allowed_tools.contains(&normalized)
+                || allowed_tools.contains(tool_name);
+
+            let (action, content) = if is_allowed {
+                (ToolDecisionAction::Accept, None)
+            } else {
+                (
+                    ToolDecisionAction::Reject,
+                    Some(format!(
+                        "Blocked by profile allowed_tools (tool: {normalized})"
+                    )),
+                )
+            };
+
+            (tool_call_id.clone(), ToolDecisionInput { action, content })
+        })
+        .collect()
 }
 
 /// Execute a full server session: create → send message → drain events.
@@ -205,17 +237,12 @@ async fn run_server_session(
                 break;
             }
 
-            // Auto-approve all tool calls
-            let mut decisions = HashMap::new();
-            for tc in &proposed.tool_calls {
-                decisions.insert(
-                    tc.id.clone(),
-                    ToolDecisionInput {
-                        action: ToolDecisionAction::Accept,
-                        content: None,
-                    },
-                );
-            }
+            let tool_calls: Vec<(String, String)> = proposed
+                .tool_calls
+                .iter()
+                .map(|tool_call| (tool_call.id.clone(), tool_call.name.clone()))
+                .collect();
+            let decisions = build_tool_decisions(&tool_calls, &config.allowed_tools);
             client
                 .resolve_tools(&session_id, &run_id, decisions)
                 .await?;
@@ -267,6 +294,56 @@ async fn run_server_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tool_decision_accepts_listed() {
+        let mut allowed_tools = HashSet::new();
+        allowed_tools.insert("view".to_string());
+
+        let tool_calls = vec![("1".to_string(), "stakpak__view".to_string())];
+        let decisions = build_tool_decisions(&tool_calls, &allowed_tools);
+
+        let decision = decisions.get("1");
+        assert!(decision.is_some());
+        if let Some(decision) = decision {
+            assert!(matches!(decision.action, ToolDecisionAction::Accept));
+            assert!(decision.content.is_none());
+        }
+    }
+
+    #[test]
+    fn test_tool_decision_rejects_unlisted() {
+        let mut allowed_tools = HashSet::new();
+        allowed_tools.insert("view".to_string());
+
+        let tool_calls = vec![("1".to_string(), "stakpak__run_command".to_string())];
+        let decisions = build_tool_decisions(&tool_calls, &allowed_tools);
+
+        let decision = decisions.get("1");
+        assert!(decision.is_some());
+        if let Some(decision) = decision {
+            assert!(matches!(decision.action, ToolDecisionAction::Reject));
+            assert_eq!(
+                decision.content.as_deref(),
+                Some("Blocked by profile allowed_tools (tool: run_command)")
+            );
+        }
+    }
+
+    #[test]
+    fn test_tool_decision_empty_set_accepts_all() {
+        let allowed_tools = HashSet::new();
+
+        let tool_calls = vec![("1".to_string(), "stakpak__run_command".to_string())];
+        let decisions = build_tool_decisions(&tool_calls, &allowed_tools);
+
+        let decision = decisions.get("1");
+        assert!(decision.is_some());
+        if let Some(decision) = decision {
+            assert!(matches!(decision.action, ToolDecisionAction::Accept));
+            assert!(decision.content.is_none());
+        }
+    }
 
     #[test]
     fn test_agent_result_success() {

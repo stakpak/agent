@@ -6,23 +6,25 @@ use std::{
 
 use chrono::Utc;
 use stakai::{Message, Role};
+use stakpak_agent_core::ProposedToolCall;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use stakpak_shared::utils::truncate_chars_with_ellipsis;
 
 use crate::{
-    channels::Channel,
+    channels::{ApprovalButton, ButtonStyle, Channel},
     client::{
-        CallerContextInput, MessageType, SendMessageOptions, StakpakClient,
+        CallerContextInput, MessageType, RunErrorPayload, SendMessageOptions, StakpakClient,
         ToolCallsProposedPayload, ToolDecisionAction, ToolDecisionInput,
     },
     config::ApprovalMode,
     router::{RouterConfig, resolve_routing_key},
     store::{GatewayStore, SessionMapping},
     targeting::{render_title_template, target_key_from_inbound},
-    types::{DeliveryContext, InboundMessage, OutboundReply},
+    types::{ChatType, DeliveryContext, InboundMessage, OutboundReply, PeerId},
 };
 
 pub struct Dispatcher {
@@ -35,6 +37,9 @@ pub struct Dispatcher {
     // consistency after gateway restart.
     active_runs: Mutex<HashMap<String, ActiveRun>>,
     pending_queues: Mutex<HashMap<String, Vec<QueuedMessage>>>,
+    // Invariant: at most one pending approval batch per session.
+    // The run stream pauses on `tool_calls_proposed` until decisions are submitted.
+    pending_approvals: Mutex<HashMap<String, PendingApproval>>,
     event_cursors: Mutex<HashMap<String, u64>>,
     default_model: Option<String>,
     approval_mode: ApprovalMode,
@@ -48,11 +53,47 @@ struct ActiveRun {
     cancel: CancellationToken,
 }
 
+#[derive(Debug, Clone)]
+struct PendingApproval {
+    session_id: String,
+    run_id: String,
+    tool_calls: Vec<ProposedToolCall>,
+    approval_id: String,
+    prompt_message_id: String,
+    channel_name: String,
+    delivery: DeliveryContext,
+    cursor: Option<u64>,
+    timeout_seconds: Option<u64>,
+    requested_at: Instant,
+}
+
 #[derive(Debug, Clone, Default)]
 struct RunStartOptions {
     model: Option<String>,
     sandbox: Option<bool>,
     timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ApprovalNeededContext {
+    session_id: String,
+    run_id: String,
+    tool_calls: Vec<ProposedToolCall>,
+    auto_resolved_count: usize,
+    delivery: DeliveryContext,
+    cursor: Option<u64>,
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct RejectAndResumeContext {
+    session_id: String,
+    run_id: String,
+    tool_calls: Vec<ProposedToolCall>,
+    delivery: DeliveryContext,
+    cursor: Option<u64>,
+    timeout_seconds: Option<u64>,
+    reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -81,10 +122,34 @@ struct RunContext {
 
 #[derive(Debug)]
 enum RunOutcome {
-    Completed { cursor: Option<u64> },
-    Error { cursor: Option<u64> },
-    Cancelled { cursor: Option<u64> },
-    StreamEnded { cursor: Option<u64> },
+    Completed {
+        cursor: Option<u64>,
+    },
+    Error {
+        error: Option<RunErrorPayload>,
+        cursor: Option<u64>,
+    },
+    Cancelled {
+        cursor: Option<u64>,
+    },
+    StreamEnded {
+        cursor: Option<u64>,
+    },
+    ApprovalNeeded {
+        cursor: Option<u64>,
+        session_id: String,
+        run_id: String,
+        tool_calls: Vec<ProposedToolCall>,
+        auto_resolved_count: usize,
+        delivery: DeliveryContext,
+        timeout_seconds: Option<u64>,
+    },
+}
+
+#[derive(Debug)]
+struct ResolveApprovalError {
+    message: String,
+    decision_sent: bool,
 }
 
 impl Dispatcher {
@@ -106,6 +171,7 @@ impl Dispatcher {
             router_config,
             active_runs: Mutex::new(HashMap::new()),
             pending_queues: Mutex::new(HashMap::new()),
+            pending_approvals: Mutex::new(HashMap::new()),
             event_cursors: Mutex::new(HashMap::new()),
             default_model,
             approval_mode,
@@ -124,7 +190,7 @@ impl Dispatcher {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    self.cancel_all_runs();
+                    self.cancel_all_runs().await;
                     break;
                 }
                 maybe_inbound = inbound_rx.recv() => {
@@ -152,6 +218,16 @@ impl Dispatcher {
         inbound: InboundMessage,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
+        if inbound
+            .metadata
+            .get("type")
+            .and_then(|value| value.as_str())
+            == Some("approval_response")
+        {
+            self.handle_approval_response(inbound, run_tx).await?;
+            return Ok(());
+        }
+
         let routing_key = resolve_routing_key(
             &self.router_config,
             &inbound.channel,
@@ -219,10 +295,87 @@ impl Dispatcher {
 
         if self.is_run_active(&mapping.session_id) {
             self.enqueue_message(mapping.session_id.clone(), queued)?;
+            self.reject_pending_approval_for_session(&mapping.session_id, run_tx)
+                .await?;
             return Ok(());
         }
 
         self.start_run(mapping.session_id, queued, run_tx).await
+    }
+
+    async fn handle_approval_response(
+        self: &Arc<Self>,
+        inbound: InboundMessage,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), String> {
+        let approval_id = inbound
+            .metadata
+            .get("approval_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let decision = inbound
+            .metadata
+            .get("decision")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        if approval_id.is_empty() || !matches!(decision.as_str(), "allow" | "deny") {
+            warn!(
+                approval_id = %approval_id,
+                decision = %decision,
+                "ignoring invalid approval callback"
+            );
+            return Ok(());
+        }
+
+        let pending = {
+            let mut guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+
+            let session_id = guard.iter().find_map(|(session_id, pending)| {
+                if pending.approval_id == approval_id {
+                    Some(session_id.clone())
+                } else {
+                    None
+                }
+            });
+
+            session_id.and_then(|session_id| guard.remove(&session_id))
+        };
+
+        let Some(pending) = pending else {
+            warn!(
+                approval_id = %approval_id,
+                "approval already resolved or expired"
+            );
+            return Ok(());
+        };
+
+        debug!(
+            approval_id = %approval_id,
+            decision = %decision,
+            resolved_by = %inbound.peer_id.0,
+            "received approval response"
+        );
+
+        let approve = decision == "allow";
+        if let Err(error) = self
+            .resolve_approval(&pending, approve, &inbound.peer_id, run_tx)
+            .await
+        {
+            if !error.decision_sent
+                && let Ok(mut guard) = self.pending_approvals.lock()
+            {
+                guard.insert(pending.session_id.clone(), pending);
+            }
+            return Err(error.message);
+        }
+
+        Ok(())
     }
 
     async fn handle_run_result(
@@ -230,27 +383,457 @@ impl Dispatcher {
         result: RunTaskResult,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
-        self.remove_active_run(&result.session_id, &result.run_id);
+        match result.outcome {
+            RunOutcome::ApprovalNeeded {
+                cursor,
+                session_id,
+                run_id,
+                tool_calls,
+                auto_resolved_count,
+                delivery,
+                timeout_seconds,
+            } => {
+                if let Some(cursor) = cursor {
+                    self.set_cursor(&session_id, cursor)?;
+                }
 
-        let cursor = match &result.outcome {
+                self.handle_approval_needed(
+                    ApprovalNeededContext {
+                        session_id,
+                        run_id,
+                        tool_calls,
+                        auto_resolved_count,
+                        delivery,
+                        cursor,
+                        timeout_seconds,
+                    },
+                    run_tx,
+                )
+                .await
+            }
+            RunOutcome::Error { error, cursor } => {
+                if let Some(error) = error
+                    && let Some(message) = error.error
+                {
+                    warn!(session_id = %result.session_id, run_id = %result.run_id, error = %message, "run failed");
+                }
+
+                self.remove_active_run(&result.session_id, &result.run_id);
+
+                if let Some(cursor) = cursor {
+                    self.set_cursor(&result.session_id, cursor)?;
+                }
+
+                self.drain_queue(&result.session_id, run_tx).await
+            }
             RunOutcome::Completed { cursor }
-            | RunOutcome::Error { cursor }
             | RunOutcome::Cancelled { cursor }
-            | RunOutcome::StreamEnded { cursor } => *cursor,
+            | RunOutcome::StreamEnded { cursor } => {
+                self.remove_active_run(&result.session_id, &result.run_id);
+
+                if let Some(cursor) = cursor {
+                    self.set_cursor(&result.session_id, cursor)?;
+                }
+
+                self.drain_queue(&result.session_id, run_tx).await
+            }
+        }
+    }
+
+    async fn handle_approval_needed(
+        self: &Arc<Self>,
+        approval: ApprovalNeededContext,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), String> {
+        let ApprovalNeededContext {
+            session_id,
+            run_id,
+            tool_calls,
+            auto_resolved_count,
+            delivery,
+            cursor,
+            timeout_seconds,
+        } = approval;
+
+        // NOTE: TOCTOU between this early check and final insert is intentional.
+        // We can't hold `std::sync::Mutex` across `.await` while posting the prompt.
+        // The second check before insert preserves the "one pending approval per session"
+        // invariant and marks any raced duplicate prompt as ignored.
+        {
+            let guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+            if let Some(existing) = guard.get(&session_id) {
+                warn!(
+                    session_id = %session_id,
+                    existing_approval_id = %existing.approval_id,
+                    "ignoring duplicate approval request; only one pending approval is allowed per session"
+                );
+                return Ok(());
+            }
+        }
+
+        let channel_name = delivery.channel.0.clone();
+        let Some(channel) = self.channels.get(&channel_name) else {
+            warn!(channel = %channel_name, "approval channel not connected; auto-rejecting tools");
+            self.reject_tools_and_resume(
+                RejectAndResumeContext {
+                    session_id,
+                    run_id,
+                    tool_calls,
+                    delivery,
+                    cursor,
+                    timeout_seconds,
+                    reason: "Cancelled — approval channel unavailable".to_string(),
+                },
+                run_tx,
+            )
+            .await?;
+            return Ok(());
         };
 
-        if let Some(cursor) = cursor {
-            self.set_cursor(&result.session_id, cursor)?;
+        let approval_id = generate_approval_id();
+        let text = render_approval_prompt(&tool_calls, auto_resolved_count);
+        let button_label_suffix = if tool_calls.len() == 1 { "" } else { " All" };
+        let buttons = vec![
+            ApprovalButton {
+                label: format!("Allow{button_label_suffix}"),
+                callback_data: format!("a:{approval_id}:allow"),
+                style: ButtonStyle::Success,
+            },
+            ApprovalButton {
+                label: format!("Deny{button_label_suffix}"),
+                callback_data: format!("a:{approval_id}:deny"),
+                style: ButtonStyle::Danger,
+            },
+        ];
+
+        let reply = OutboundReply {
+            channel: delivery.channel.clone(),
+            peer_id: delivery.peer_id.clone(),
+            chat_type: delivery.chat_type.clone(),
+            text,
+            metadata: delivery.channel_meta.clone(),
+        };
+
+        let prompt_message_id = match channel.send_with_buttons(reply, buttons).await {
+            Ok(message_id) => message_id,
+            Err(error) => {
+                warn!(error = %error, "failed to send approval prompt; auto-rejecting tools");
+                self.reject_tools_and_resume(
+                    RejectAndResumeContext {
+                        session_id,
+                        run_id,
+                        tool_calls,
+                        delivery,
+                        cursor,
+                        timeout_seconds,
+                        reason: "Cancelled — failed to post approval prompt".to_string(),
+                    },
+                    run_tx,
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+
+        let pending = PendingApproval {
+            session_id: session_id.clone(),
+            run_id,
+            tool_calls,
+            approval_id,
+            // Keep a local copy for duplicate-race fallback edit_message path below.
+            prompt_message_id: prompt_message_id.clone(),
+            channel_name,
+            delivery,
+            cursor,
+            timeout_seconds,
+            requested_at: Instant::now(),
+        };
+
+        let has_pending = {
+            let mut guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+
+            if let Some(existing) = guard.get(&session_id) {
+                warn!(
+                    session_id = %session_id,
+                    existing_approval_id = %existing.approval_id,
+                    "approval prompt sent but session already has a pending approval; dropping duplicate"
+                );
+                true
+            } else {
+                guard.insert(session_id, pending);
+                false
+            }
+        };
+
+        if has_pending {
+            if let Err(error) = channel
+                .edit_message(
+                    &prompt_message_id,
+                    "⏭️ Ignored — another approval is already pending",
+                )
+                .await
+            {
+                warn!(error = %error, "failed to edit duplicate approval prompt");
+            }
+            return Ok(());
         }
 
-        match result.outcome {
-            RunOutcome::Completed { .. }
-            | RunOutcome::Error { .. }
-            | RunOutcome::Cancelled { .. }
-            | RunOutcome::StreamEnded { .. } => {}
+        Ok(())
+    }
+
+    async fn reject_pending_approval_for_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), String> {
+        let pending = {
+            let mut guard = self
+                .pending_approvals
+                .lock()
+                .map_err(|_| "failed to lock pending_approvals".to_string())?;
+            guard.remove(session_id)
+        };
+
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+
+        info!(
+            session_id = %pending.session_id,
+            run_id = %pending.run_id,
+            tool_count = pending.tool_calls.len(),
+            "auto-rejecting pending approval: new message received"
+        );
+
+        let decisions = build_decisions_for_tool_calls(
+            &pending.tool_calls,
+            ToolDecisionAction::Reject,
+            Some("Cancelled — new message received"),
+        );
+
+        if let Err(error) = self
+            .client
+            .resolve_tools(&pending.session_id, &pending.run_id, decisions)
+            .await
+        {
+            if let Ok(mut guard) = self.pending_approvals.lock() {
+                guard.insert(pending.session_id.clone(), pending);
+            }
+            return Err(format!("resolve_tools failed: {error}"));
         }
 
-        self.drain_queue(&result.session_id, run_tx).await
+        if let Some(channel) = self.channels.get(&pending.channel_name)
+            && let Err(error) = channel
+                .edit_message(
+                    &pending.prompt_message_id,
+                    "⏭️ Tools skipped — new message received",
+                )
+                .await
+        {
+            warn!(error = %error, "failed to edit approval prompt after auto-reject");
+        }
+
+        self.resume_run_after_approval(
+            &pending.session_id,
+            &pending.run_id,
+            &pending.delivery,
+            pending.cursor,
+            remaining_timeout_after_approval(
+                pending.timeout_seconds,
+                pending.requested_at.elapsed(),
+            ),
+            run_tx,
+        )
+    }
+
+    async fn resolve_approval(
+        self: &Arc<Self>,
+        pending: &PendingApproval,
+        approve: bool,
+        resolved_by: &PeerId,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), ResolveApprovalError> {
+        if matches!(pending.delivery.chat_type, ChatType::Direct)
+            && pending.delivery.peer_id != *resolved_by
+        {
+            return Err(ResolveApprovalError {
+                message: "approval responder does not match the direct-chat requester".to_string(),
+                decision_sent: false,
+            });
+        }
+
+        // For group/thread chats we currently allow non-requesters to resolve approvals,
+        // but emit an audit warning with both identities.
+        if pending.delivery.peer_id != *resolved_by {
+            warn!(
+                session_id = %pending.session_id,
+                run_id = %pending.run_id,
+                requested_by = %pending.delivery.peer_id.0,
+                resolved_by = %resolved_by.0,
+                "approval resolved by a different user than the original requester"
+            );
+        }
+
+        let action = if approve {
+            ToolDecisionAction::Accept
+        } else {
+            ToolDecisionAction::Reject
+        };
+
+        let decisions = build_decisions_for_tool_calls(&pending.tool_calls, action, None);
+
+        if let Err(error) = self
+            .client
+            .resolve_tools(&pending.session_id, &pending.run_id, decisions)
+            .await
+        {
+            let is_conflict = matches!(error, crate::client::ClientError::Conflict);
+
+            if is_conflict
+                && let Some(channel) = self.channels.get(&pending.channel_name)
+                && let Err(edit_error) = channel
+                    .edit_message(
+                        &pending.prompt_message_id,
+                        "⏱️ Approval expired — run no longer waiting for decision",
+                    )
+                    .await
+            {
+                warn!(error = %edit_error, "failed to edit expired approval prompt");
+            }
+
+            return Err(ResolveApprovalError {
+                message: format!("resolve_tools failed: {error}"),
+                // Avoid re-inserting stale approvals when server rejects with 409.
+                decision_sent: is_conflict,
+            });
+        }
+
+        if let Some(channel) = self.channels.get(&pending.channel_name) {
+            let resolved_by_display = render_approver_display(&pending.channel_name, resolved_by);
+            let status = if approve {
+                format!(
+                    "✅ {} tool(s) approved by {}",
+                    pending.tool_calls.len(),
+                    resolved_by_display
+                )
+            } else {
+                format!(
+                    "❌ {} tool(s) denied by {}",
+                    pending.tool_calls.len(),
+                    resolved_by_display
+                )
+            };
+
+            if let Err(error) = channel
+                .edit_message(&pending.prompt_message_id, &status)
+                .await
+            {
+                warn!(error = %error, "failed to edit approval prompt after resolution");
+            }
+        }
+
+        self.resume_run_after_approval(
+            &pending.session_id,
+            &pending.run_id,
+            &pending.delivery,
+            pending.cursor,
+            remaining_timeout_after_approval(
+                pending.timeout_seconds,
+                pending.requested_at.elapsed(),
+            ),
+            run_tx,
+        )
+        .map_err(|error| ResolveApprovalError {
+            message: error,
+            decision_sent: true,
+        })
+    }
+
+    async fn reject_tools_and_resume(
+        self: &Arc<Self>,
+        request: RejectAndResumeContext,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), String> {
+        let RejectAndResumeContext {
+            session_id,
+            run_id,
+            tool_calls,
+            delivery,
+            cursor,
+            timeout_seconds,
+            reason,
+        } = request;
+
+        info!(
+            session_id = %session_id,
+            run_id = %run_id,
+            tool_count = tool_calls.len(),
+            reason = %reason,
+            "auto-rejecting tools and resuming run"
+        );
+
+        let decisions = build_decisions_for_tool_calls(
+            &tool_calls,
+            ToolDecisionAction::Reject,
+            Some(reason.as_str()),
+        );
+
+        self.client
+            .resolve_tools(&session_id, &run_id, decisions)
+            .await
+            .map_err(|error| format!("resolve_tools failed: {error}"))?;
+
+        self.resume_run_after_approval(
+            &session_id,
+            &run_id,
+            &delivery,
+            cursor,
+            timeout_seconds,
+            run_tx,
+        )
+    }
+
+    fn spawn_run_consumer(
+        self: &Arc<Self>,
+        run_context: RunContext,
+        last_event_id: Option<u64>,
+        approval_mode: ApprovalMode,
+        approval_allowlist: HashSet<String>,
+        cancel: CancellationToken,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) {
+        let client = self.client.clone();
+        let session_id_for_task = run_context.session_id.clone();
+        let run_id_for_task = run_context.run_id.clone();
+
+        tokio::spawn(async move {
+            let outcome = consume_run_events(
+                client,
+                run_context,
+                last_event_id,
+                approval_mode,
+                approval_allowlist,
+                cancel,
+            )
+            .await;
+
+            if let Err(error) = run_tx
+                .send(RunTaskResult {
+                    session_id: session_id_for_task,
+                    run_id: run_id_for_task,
+                    outcome,
+                })
+                .await
+            {
+                error!(error = %error, "failed to send run outcome");
+            }
+        });
     }
 
     async fn start_run(
@@ -305,42 +888,70 @@ impl Dispatcher {
             );
         }
 
-        let client = self.client.clone();
         let run_context = RunContext {
             channels: self.channels.clone(),
             delivery: self.delivery_context_from_inbound(&queued.inbound),
             session_id: session_id.clone(),
-            run_id: run_id.clone(),
+            run_id,
             timeout_seconds: queued.run_options.timeout_seconds,
         };
-        let session_id_for_task = session_id.clone();
-        let run_id_for_task = run_id.clone();
-        let approval_mode = self.approval_mode.clone();
-        let approval_allowlist = self.approval_allowlist.clone();
+
         let last_event_id = self.get_cursor(&session_id)?;
+        self.spawn_run_consumer(
+            run_context,
+            last_event_id,
+            self.approval_mode.clone(),
+            self.approval_allowlist.clone(),
+            cancel,
+            run_tx,
+        );
 
-        tokio::spawn(async move {
-            let outcome = consume_run_events(
-                client,
-                run_context,
-                last_event_id,
-                approval_mode,
-                approval_allowlist,
-                cancel,
-            )
-            .await;
+        Ok(())
+    }
 
-            if let Err(error) = run_tx
-                .send(RunTaskResult {
-                    session_id: session_id_for_task,
-                    run_id: run_id_for_task,
-                    outcome,
+    #[allow(clippy::too_many_arguments)]
+    fn resume_run_after_approval(
+        self: &Arc<Self>,
+        session_id: &str,
+        run_id: &str,
+        delivery: &DeliveryContext,
+        cursor: Option<u64>,
+        timeout_seconds: Option<u64>,
+        run_tx: mpsc::Sender<RunTaskResult>,
+    ) -> Result<(), String> {
+        let cancel = {
+            let guard = self
+                .active_runs
+                .lock()
+                .map_err(|_| "failed to lock active_runs".to_string())?;
+            guard
+                .get(session_id)
+                .and_then(|active| {
+                    if active.run_id == run_id {
+                        Some(active.cancel.clone())
+                    } else {
+                        None
+                    }
                 })
-                .await
-            {
-                error!(error = %error, "failed to send run outcome");
-            }
-        });
+                .ok_or_else(|| "run is no longer active".to_string())?
+        };
+
+        let run_context = RunContext {
+            channels: self.channels.clone(),
+            delivery: delivery.clone(),
+            session_id: session_id.to_string(),
+            run_id: run_id.to_string(),
+            timeout_seconds,
+        };
+
+        self.spawn_run_consumer(
+            run_context,
+            cursor,
+            self.approval_mode.clone(),
+            self.approval_allowlist.clone(),
+            cancel,
+            run_tx,
+        );
 
         Ok(())
     }
@@ -454,10 +1065,76 @@ impl Dispatcher {
         }
     }
 
-    fn cancel_all_runs(&self) {
+    async fn cancel_all_runs(&self) {
         if let Ok(guard) = self.active_runs.lock() {
             for active in guard.values() {
                 active.cancel.cancel();
+            }
+        }
+
+        let pending_approvals = if let Ok(mut guard) = self.pending_approvals.lock() {
+            std::mem::take(&mut *guard)
+        } else {
+            HashMap::new()
+        };
+
+        if pending_approvals.is_empty() {
+            return;
+        }
+
+        const SHUTDOWN_REJECT_TIMEOUT: Duration = Duration::from_secs(5);
+        const SHUTDOWN_REJECT_CONCURRENCY: usize = 8;
+
+        let client = self.client.clone();
+        let mut set = tokio::task::JoinSet::new();
+
+        for pending in pending_approvals.into_values() {
+            while set.len() >= SHUTDOWN_REJECT_CONCURRENCY {
+                if let Some(result) = set.join_next().await
+                    && let Err(error) = result
+                {
+                    warn!(error = %error, "shutdown approval rejection task join failed");
+                }
+            }
+
+            let client = client.clone();
+            set.spawn(async move {
+                let decisions = build_decisions_for_tool_calls(
+                    &pending.tool_calls,
+                    ToolDecisionAction::Reject,
+                    Some("Cancelled — gateway shutting down"),
+                );
+
+                match tokio::time::timeout(
+                    SHUTDOWN_REJECT_TIMEOUT,
+                    client.resolve_tools(&pending.session_id, &pending.run_id, decisions),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        warn!(
+                            session_id = %pending.session_id,
+                            run_id = %pending.run_id,
+                            error = %error,
+                            "failed to reject pending approval during shutdown"
+                        );
+                    }
+                    Err(error) => {
+                        warn!(
+                            session_id = %pending.session_id,
+                            run_id = %pending.run_id,
+                            error = %error,
+                            "timed out rejecting pending approval during shutdown"
+                        );
+                    }
+                }
+            });
+        }
+
+        while let Some(result) = set.join_next().await {
+            if let Err(error) = result {
+                warn!(error = %error, "shutdown approval rejection task join failed");
             }
         }
     }
@@ -506,6 +1183,7 @@ async fn consume_run_events(
         Err(error) => {
             warn!(error = %error, "failed to subscribe to run event stream");
             return RunOutcome::Error {
+                error: None,
                 cursor: last_event_id,
             };
         }
@@ -534,7 +1212,13 @@ async fn consume_run_events(
             _ = &mut timeout_future => {
                 flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                 deliver_channel_text(&run_context.channels, &run_context.delivery, "⏱️ Interactive run timed out.").await;
-                return RunOutcome::Error { cursor };
+                return RunOutcome::Error {
+                    error: Some(RunErrorPayload {
+                        run_id: None,
+                        error: Some("Interactive run timed out".to_string()),
+                    }),
+                    cursor,
+                };
             }
             next = stream.next_event() => {
                 let event = match next {
@@ -546,7 +1230,10 @@ async fn consume_run_events(
                     Err(error) => {
                         flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
                         warn!(error = %error, "run event stream read failed");
-                        return RunOutcome::Error { cursor };
+                        return RunOutcome::Error {
+                            error: None,
+                            cursor,
+                        };
                     }
                 };
 
@@ -573,29 +1260,86 @@ async fn consume_run_events(
                         if let Some(proposed) = event.as_tool_calls_proposed() {
                             flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
 
-                            let tool_names = proposed
-                                .tool_calls
-                                .iter()
-                                .map(|tool_call| tool_call.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            if !tool_names.is_empty() {
-                                let text = format!("🔧 Running: {tool_names}");
-                                deliver_channel_text(&run_context.channels, &run_context.delivery, text).await;
+                            match approval_mode {
+                                ApprovalMode::Allowlist => {
+                                    let mut auto = HashMap::new();
+                                    let mut need_ask = Vec::new();
+
+                                    for tool_call in proposed.tool_calls {
+                                        if is_allowlisted(&tool_call.name, &approval_allowlist) {
+                                            auto.insert(
+                                                tool_call.id.clone(),
+                                                ToolDecisionInput {
+                                                    action: ToolDecisionAction::Accept,
+                                                    content: None,
+                                                },
+                                            );
+                                        } else {
+                                            need_ask.push(tool_call);
+                                        }
+                                    }
+
+                                    let auto_resolved_count = auto.len();
+                                    if !auto.is_empty()
+                                        && let Err(error) = client
+                                            .resolve_tools(&run_context.session_id, &run_context.run_id, auto)
+                                            .await
+                                    {
+                                        warn!(error = %error, "resolve_tools failed");
+                                        return RunOutcome::Error {
+                                            error: Some(RunErrorPayload {
+                                                run_id: None,
+                                                error: Some(format!("resolve_tools failed: {error}")),
+                                            }),
+                                            cursor,
+                                        };
+                                    }
+
+                                    if !need_ask.is_empty() {
+                                        return RunOutcome::ApprovalNeeded {
+                                            cursor,
+                                            session_id: run_context.session_id.clone(),
+                                            run_id: run_context.run_id.clone(),
+                                            tool_calls: need_ask,
+                                            auto_resolved_count,
+                                            delivery: run_context.delivery.clone(),
+                                            timeout_seconds: run_context.timeout_seconds,
+                                        };
+                                    }
+                                }
+                                ApprovalMode::AllowAll | ApprovalMode::DenyAll => {
+                                    let tool_names = proposed
+                                        .tool_calls
+                                        .iter()
+                                        .map(|tool_call| tool_call.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    if !tool_names.is_empty() {
+                                        let text = format!("🔧 Running: {tool_names}");
+                                        deliver_channel_text(&run_context.channels, &run_context.delivery, text).await;
+                                    }
+
+                                    let decisions = build_tool_decisions(
+                                        proposed,
+                                        &approval_mode,
+                                        &approval_allowlist,
+                                    );
+                                    if let Err(error) = client
+                                        .resolve_tools(&run_context.session_id, &run_context.run_id, decisions)
+                                        .await
+                                    {
+                                        warn!(error = %error, "resolve_tools failed");
+                                        return RunOutcome::Error {
+                                            error: Some(RunErrorPayload {
+                                                run_id: None,
+                                                error: Some(format!("resolve_tools failed: {error}")),
+                                            }),
+                                            cursor,
+                                        };
+                                    }
+                                }
                             }
 
-                            let decisions = build_tool_decisions(
-                                proposed,
-                                &approval_mode,
-                                &approval_allowlist,
-                            );
-                            if let Err(error) = client
-                                .resolve_tools(&run_context.session_id, &run_context.run_id, decisions)
-                                .await
-                            {
-                                warn!(error = %error, "resolve_tools failed");
-                                return RunOutcome::Error { cursor };
-                            }
                             last_stream_at = Instant::now();
                         }
                     }
@@ -604,10 +1348,17 @@ async fn consume_run_events(
                         return RunOutcome::Completed { cursor };
                     }
                     "run_error" => {
-                        flush_stream_buffer(&run_context.channels, &run_context.delivery, &mut streamed_buffer, true).await;
-                        let error_text = event
-                            .as_run_error()
-                            .and_then(|payload| payload.error)
+                        flush_stream_buffer(
+                            &run_context.channels,
+                            &run_context.delivery,
+                            &mut streamed_buffer,
+                            true,
+                        )
+                        .await;
+                        let payload = event.as_run_error();
+                        let error_text = payload
+                            .as_ref()
+                            .and_then(|payload| payload.error.clone())
                             .unwrap_or_else(|| "unknown error".to_string());
                         warn!(
                             session_id = %run_context.session_id,
@@ -622,7 +1373,10 @@ async fn consume_run_events(
                         )
                         .await;
 
-                        return RunOutcome::Error { cursor };
+                        return RunOutcome::Error {
+                            error: payload,
+                            cursor,
+                        };
                     }
                     _ => {}
                 }
@@ -650,13 +1404,33 @@ fn should_flush_stream_buffer(buffer: &str, elapsed_since_last_stream: Duration)
 }
 
 fn take_completed_line_chunk(buffer: &mut String) -> Option<String> {
-    let split_index = buffer.rfind('\n')?;
-    let split_after = split_index + '\n'.len_utf8();
+    let split_after = last_safe_markdown_split(buffer)?;
 
     let remainder = buffer.split_off(split_after);
     let chunk = std::mem::replace(buffer, remainder);
 
     Some(chunk)
+}
+
+fn last_safe_markdown_split(buffer: &str) -> Option<usize> {
+    let mut in_fenced_code_block = false;
+    let mut scanned_bytes = 0;
+    let mut last_safe_split: Option<usize> = None;
+
+    for line in buffer.split_inclusive('\n') {
+        scanned_bytes += line.len();
+
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fenced_code_block = !in_fenced_code_block;
+        }
+
+        if line.ends_with('\n') && !in_fenced_code_block {
+            last_safe_split = Some(scanned_bytes);
+        }
+    }
+
+    last_safe_split
 }
 
 async fn flush_stream_buffer(
@@ -777,7 +1551,7 @@ fn build_tool_decisions(
                 ApprovalMode::AllowAll => ToolDecisionAction::Accept,
                 ApprovalMode::DenyAll => ToolDecisionAction::Reject,
                 ApprovalMode::Allowlist => {
-                    if approval_allowlist.contains(&tool_call.name) {
+                    if is_allowlisted(&tool_call.name, approval_allowlist) {
                         ToolDecisionAction::Accept
                     } else {
                         ToolDecisionAction::Reject
@@ -794,6 +1568,255 @@ fn build_tool_decisions(
             )
         })
         .collect()
+}
+
+fn is_allowlisted(tool_name: &str, approval_allowlist: &HashSet<String>) -> bool {
+    let normalized = strip_mcp_prefix(tool_name);
+    approval_allowlist.contains(tool_name) || approval_allowlist.contains(normalized)
+}
+
+fn build_decisions_for_tool_calls(
+    tool_calls: &[ProposedToolCall],
+    action: ToolDecisionAction,
+    content: Option<&str>,
+) -> HashMap<String, ToolDecisionInput> {
+    tool_calls
+        .iter()
+        .map(|tool_call| {
+            (
+                tool_call.id.clone(),
+                ToolDecisionInput {
+                    action: action.clone(),
+                    content: content.map(ToOwned::to_owned),
+                },
+            )
+        })
+        .collect()
+}
+
+fn render_approver_display(channel_name: &str, resolved_by: &PeerId) -> String {
+    match channel_name {
+        // Channel-native mention format renders the user's @name in clients.
+        "slack" | "discord" => format!("<@{}>", resolved_by.0),
+        _ => resolved_by.0.clone(),
+    }
+}
+
+/// Maximum characters for the entire approval prompt text.
+/// Slack mrkdwn section blocks allow 3000 chars; Discord messages 2000.
+/// We target the lower bound with some headroom for the header/footer.
+const MAX_APPROVAL_PROMPT_CHARS: usize = 1800;
+
+/// Maximum characters for a single tool preview body (code block content, etc.).
+const MAX_TOOL_PREVIEW_CHARS: usize = 500;
+
+fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) -> String {
+    let mut text = if tool_calls.len() == 1 {
+        "🔧 Tool approval required\n\n".to_string()
+    } else {
+        format!("🔧 {} tools need approval\n\n", tool_calls.len())
+    };
+
+    for (index, tool_call) in tool_calls.iter().enumerate() {
+        let name = strip_mcp_prefix(&tool_call.name);
+        let preview = render_tool_preview(name, &tool_call.arguments);
+        text.push_str(&format!("{}. `{}`\n{}\n", index + 1, name, preview));
+
+        if text.len() > MAX_APPROVAL_PROMPT_CHARS {
+            let remaining = tool_calls.len() - index - 1;
+            if remaining > 0 {
+                text.push_str(&format!("_…and {remaining} more tool(s)_\n"));
+            }
+            break;
+        }
+    }
+
+    if auto_count > 0 {
+        text.push_str(&format!("\nℹ️ {auto_count} tool(s) auto-approved\n"));
+    }
+
+    text
+}
+
+fn render_tool_preview(tool_name: &str, args: &serde_json::Value) -> String {
+    let object = match args.as_object() {
+        Some(obj) => obj,
+        None => return format!("`{}`", truncate(&args.to_string(), 80)),
+    };
+
+    match tool_name {
+        "run_command" | "run_command_task" => render_run_command_preview(object),
+        "create" => render_create_preview(object),
+        "str_replace" => render_str_replace_preview(object),
+        "remove" => render_remove_preview(object),
+        "view" => render_view_preview(object),
+        _ => render_generic_preview(object),
+    }
+}
+
+fn render_run_command_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(no command)");
+    let remote = args.get("remote").and_then(|v| v.as_str());
+
+    let mut out = String::new();
+    if let Some(host) = remote {
+        out.push_str(&format!("on `{host}`\n"));
+    }
+    out.push_str(&format!(
+        "```\n{}\n```",
+        truncate(command, MAX_TOOL_PREVIEW_CHARS)
+    ));
+    out
+}
+
+fn render_create_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let file_text = args.get("file_text").and_then(|v| v.as_str());
+
+    let mut out = format!("`{path}`\n");
+    if let Some(content) = file_text {
+        out.push_str(&format!(
+            "```\n{}\n```",
+            truncate(content, MAX_TOOL_PREVIEW_CHARS)
+        ));
+    }
+    out
+}
+
+fn render_str_replace_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let old_str = args.get("old_str").and_then(|v| v.as_str());
+    let new_str = args.get("new_str").and_then(|v| v.as_str());
+
+    let half_budget = MAX_TOOL_PREVIEW_CHARS / 2;
+    let mut out = format!("`{path}`\n");
+    if let Some(old) = old_str {
+        out.push_str(&format!("```\n- {}\n```\n", truncate(old, half_budget)));
+    }
+    if let Some(new) = new_str {
+        out.push_str(&format!("```\n+ {}\n```", truncate(new, half_budget)));
+    }
+    out
+}
+
+fn render_remove_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let recursive = args
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if recursive {
+        format!("`{path}` (recursive)")
+    } else {
+        format!("`{path}`")
+    }
+}
+
+fn render_view_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let grep = args.get("grep").and_then(|v| v.as_str());
+    let range = args.get("view_range");
+
+    let mut out = format!("`{path}`");
+    if let Some(pattern) = grep {
+        out.push_str(&format!(" grep=`{}`", truncate(pattern, 60)));
+    }
+    if let Some(r) = range {
+        out.push_str(&format!(" lines {r}"));
+    }
+    out
+}
+
+fn render_generic_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    // Try the old priority-key heuristic for unknown tools.
+    for key in [
+        "command",
+        "path",
+        "query",
+        "file_text",
+        "search",
+        "keywords",
+        "url",
+    ] {
+        if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+            return format!("`{}`", truncate(value, 120));
+        }
+    }
+
+    // Fall back to showing the first key=value pair.
+    if let Some((key, value)) = args.iter().next() {
+        let display = value
+            .as_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        return format!("{key}=`{}`", truncate(&display, 100));
+    }
+
+    "(no arguments)".to_string()
+}
+
+fn generate_approval_id() -> String {
+    Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(8)
+        .collect()
+}
+
+fn strip_mcp_prefix(name: &str) -> &str {
+    // Tool names can be namespaced (e.g. `mcp__run_command`,
+    // `mcp__server__run_command`, `stakpak__view`).
+    // Normalize display/allowlist matching to the bare tool segment.
+    if let Some((_, suffix)) = name.rsplit_once("__")
+        && !suffix.is_empty()
+    {
+        return suffix;
+    }
+
+    name
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        format!("{}…", value.chars().take(max_chars).collect::<String>())
+    }
+}
+
+// UX trade-off: if approval wait consumes the entire timeout budget, give the resumed
+// stream a small floor so it can flush/complete instead of timing out immediately.
+const MIN_RESUME_TIMEOUT_SECONDS: u64 = 5;
+
+fn remaining_timeout_after_approval(
+    timeout_seconds: Option<u64>,
+    approval_wait: Duration,
+) -> Option<u64> {
+    timeout_seconds.map(|seconds| {
+        let remaining = seconds.saturating_sub(approval_wait.as_secs());
+        if remaining == 0 {
+            MIN_RESUME_TIMEOUT_SECONDS
+        } else {
+            remaining
+        }
+    })
 }
 
 const MAX_CONTEXT_FIELD_CHARS: usize = 8_000;
@@ -858,9 +1881,34 @@ fn delivery_context_to_caller_context(context: &serde_json::Value) -> Vec<Caller
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ChannelId, ChatType, InboundMessage, PeerId};
+    use crate::{
+        channels::{Channel, ChannelTestResult},
+        client::{CallerContextInput, StakpakClient},
+        config::ApprovalMode,
+        router::RouterConfig,
+        store::GatewayStore,
+        types::{ChannelId, ChatType, DeliveryContext, InboundMessage, OutboundReply, PeerId},
+    };
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use axum::{
+        Json, Router,
+        extract::{Path, State},
+        http::{HeaderMap, StatusCode},
+        response::sse::{Event, Sse},
+        routing::{get, post},
+    };
     use chrono::Utc;
-    use std::time::Duration;
+    use futures_util::stream;
+    use stakpak_agent_core::ProposedToolCall;
+    use std::{
+        collections::{HashMap, HashSet},
+        convert::Infallible,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+    use tokio::sync::{Mutex as AsyncMutex, mpsc};
+    use tokio_util::sync::CancellationToken;
 
     fn queued(text: &str, display_name: Option<&str>, peer: &str) -> QueuedMessage {
         let metadata = match display_name {
@@ -882,6 +1930,355 @@ mod tests {
             run_options: RunStartOptions::default(),
             context: Vec::new(),
         }
+    }
+
+    #[derive(Clone)]
+    struct TestServerState {
+        run_id: String,
+        resolve_payloads: Arc<AsyncMutex<Vec<serde_json::Value>>>,
+        last_event_ids: Arc<AsyncMutex<Vec<Option<String>>>>,
+    }
+
+    #[derive(Clone)]
+    struct TestChannel {
+        id: ChannelId,
+        edits: Arc<AsyncMutex<Vec<(String, String)>>>,
+    }
+
+    impl TestChannel {
+        fn new(id: &str) -> Self {
+            Self {
+                id: ChannelId(id.to_string()),
+                edits: Arc::new(AsyncMutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Channel for TestChannel {
+        fn id(&self) -> &ChannelId {
+            &self.id
+        }
+
+        fn display_name(&self) -> &str {
+            "Test"
+        }
+
+        async fn start(
+            &self,
+            _inbound_tx: mpsc::Sender<InboundMessage>,
+            _cancel: CancellationToken,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send(&self, _reply: OutboundReply) -> Result<()> {
+            Ok(())
+        }
+
+        async fn edit_message(&self, message_id: &str, new_text: &str) -> Result<()> {
+            self.edits
+                .lock()
+                .await
+                .push((message_id.to_string(), new_text.to_string()));
+            Ok(())
+        }
+
+        async fn test(&self) -> Result<ChannelTestResult> {
+            Ok(ChannelTestResult {
+                channel: self.id.0.clone(),
+                identity: "test-bot".to_string(),
+                details: "ok".to_string(),
+            })
+        }
+    }
+
+    async fn test_resolve_tools_handler(
+        State(state): State<TestServerState>,
+        Path(_session_id): Path<String>,
+        Json(payload): Json<serde_json::Value>,
+    ) -> StatusCode {
+        state.resolve_payloads.lock().await.push(payload);
+        StatusCode::OK
+    }
+
+    async fn test_events_handler(
+        State(state): State<TestServerState>,
+        Path(_session_id): Path<String>,
+        headers: HeaderMap,
+    ) -> Sse<impl futures_util::Stream<Item = std::result::Result<Event, Infallible>>> {
+        let last_event_id = headers
+            .get("last-event-id")
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+        state.last_event_ids.lock().await.push(last_event_id);
+
+        let event = Event::default()
+            .id("17")
+            .event("run_completed")
+            .data(serde_json::json!({"run_id": state.run_id}).to_string());
+
+        Sse::new(stream::iter(vec![Ok::<Event, Infallible>(event)]))
+    }
+
+    #[tokio::test]
+    async fn approval_not_reinserted_when_resume_fails_after_decision_sent() {
+        let server_state = TestServerState {
+            run_id: "run-1".to_string(),
+            resolve_payloads: Arc::new(AsyncMutex::new(Vec::new())),
+            last_event_ids: Arc::new(AsyncMutex::new(Vec::new())),
+        };
+
+        let app = Router::new()
+            .route(
+                "/v1/sessions/{session_id}/tools/decisions",
+                post(test_resolve_tools_handler),
+            )
+            .with_state(server_state.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("read listener addr");
+        let server_handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service()).await;
+        });
+
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("open in-memory gateway store"),
+        );
+
+        let test_channel = Arc::new(TestChannel::new("slack"));
+        let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
+        channels.insert("slack".to_string(), test_channel);
+
+        let dispatcher = Arc::new(Dispatcher::new(
+            StakpakClient::new(format!("http://{addr}"), String::new()),
+            channels,
+            store,
+            RouterConfig::default(),
+            None,
+            ApprovalMode::Allowlist,
+            Vec::new(),
+            "{channel}-{peer}".to_string(),
+        ));
+
+        let session_id = "session-1".to_string();
+        let run_id = "run-1".to_string();
+
+        dispatcher
+            .pending_approvals
+            .lock()
+            .expect("lock pending_approvals")
+            .insert(
+                session_id.clone(),
+                PendingApproval {
+                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
+                    tool_calls: vec![ProposedToolCall {
+                        id: "tc-1".to_string(),
+                        name: "mcp__run_command".to_string(),
+                        arguments: serde_json::json!({"command": "kubectl get pods"}),
+                        metadata: None,
+                    }],
+                    approval_id: "a3f0c92d".to_string(),
+                    prompt_message_id: "C123:123.456".to_string(),
+                    channel_name: "slack".to_string(),
+                    delivery: DeliveryContext {
+                        channel: ChannelId("slack".to_string()),
+                        peer_id: PeerId("u1".to_string()),
+                        chat_type: ChatType::Direct,
+                        channel_meta: serde_json::json!({"channel": "C123"}),
+                        updated_at: Utc::now().timestamp_millis(),
+                    },
+                    cursor: Some(5),
+                    timeout_seconds: None,
+                    requested_at: Instant::now(),
+                },
+            );
+
+        let inbound = InboundMessage {
+            channel: ChannelId("slack".to_string()),
+            peer_id: PeerId("u1".to_string()),
+            chat_type: ChatType::Direct,
+            text: String::new(),
+            media: Vec::new(),
+            metadata: serde_json::json!({
+                "type": "approval_response",
+                "approval_id": "a3f0c92d",
+                "decision": "allow"
+            }),
+            timestamp: Utc::now(),
+        };
+
+        let (run_tx, _run_rx) = mpsc::channel(4);
+        let result = dispatcher.handle_approval_response(inbound, run_tx).await;
+        assert!(result.is_err());
+
+        let payloads = server_state.resolve_payloads.lock().await.clone();
+        assert_eq!(payloads.len(), 1, "decision should have been sent");
+        assert!(
+            dispatcher
+                .pending_approvals
+                .lock()
+                .expect("lock pending_approvals")
+                .is_empty(),
+            "pending approval should not be reinserted after decision was sent"
+        );
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn auto_reject_pending_approval_resolves_tools_edits_message_and_resumes() {
+        let server_state = TestServerState {
+            run_id: "run-1".to_string(),
+            resolve_payloads: Arc::new(AsyncMutex::new(Vec::new())),
+            last_event_ids: Arc::new(AsyncMutex::new(Vec::new())),
+        };
+
+        let app = Router::new()
+            .route(
+                "/v1/sessions/{session_id}/tools/decisions",
+                post(test_resolve_tools_handler),
+            )
+            .route("/v1/sessions/{session_id}/events", get(test_events_handler))
+            .with_state(server_state.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("read listener addr");
+        let server_handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service()).await;
+        });
+
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("open in-memory gateway store"),
+        );
+
+        let test_channel = Arc::new(TestChannel::new("slack"));
+        let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
+        channels.insert("slack".to_string(), test_channel.clone());
+
+        let dispatcher = Arc::new(Dispatcher::new(
+            StakpakClient::new(format!("http://{addr}"), String::new()),
+            channels,
+            store,
+            RouterConfig::default(),
+            None,
+            ApprovalMode::Allowlist,
+            Vec::new(),
+            "{channel}-{peer}".to_string(),
+        ));
+
+        let session_id = "session-1".to_string();
+        let run_id = "run-1".to_string();
+
+        dispatcher
+            .active_runs
+            .lock()
+            .expect("lock active_runs")
+            .insert(
+                session_id.clone(),
+                ActiveRun {
+                    run_id: run_id.clone(),
+                    cancel: CancellationToken::new(),
+                },
+            );
+
+        dispatcher
+            .pending_approvals
+            .lock()
+            .expect("lock pending_approvals")
+            .insert(
+                session_id.clone(),
+                PendingApproval {
+                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
+                    tool_calls: vec![ProposedToolCall {
+                        id: "tc-1".to_string(),
+                        name: "mcp__run_command".to_string(),
+                        arguments: serde_json::json!({"command": "kubectl get pods"}),
+                        metadata: None,
+                    }],
+                    approval_id: "a3f0c92d".to_string(),
+                    prompt_message_id: "C123:123.456".to_string(),
+                    channel_name: "slack".to_string(),
+                    delivery: DeliveryContext {
+                        channel: ChannelId("slack".to_string()),
+                        peer_id: PeerId("u1".to_string()),
+                        chat_type: ChatType::Direct,
+                        channel_meta: serde_json::json!({"channel": "C123"}),
+                        updated_at: Utc::now().timestamp_millis(),
+                    },
+                    cursor: Some(5),
+                    timeout_seconds: None,
+                    requested_at: Instant::now(),
+                },
+            );
+
+        let (run_tx, mut run_rx) = mpsc::channel(8);
+
+        dispatcher
+            .reject_pending_approval_for_session(&session_id, run_tx)
+            .await
+            .expect("auto reject pending approval");
+
+        assert!(
+            dispatcher
+                .pending_approvals
+                .lock()
+                .expect("lock pending_approvals")
+                .is_empty(),
+            "pending approval should be removed"
+        );
+
+        let run_result = tokio::time::timeout(Duration::from_secs(3), run_rx.recv())
+            .await
+            .expect("timed out waiting for resumed run result")
+            .expect("expected resumed run result");
+
+        assert_eq!(run_result.session_id, session_id);
+        assert_eq!(run_result.run_id, run_id);
+        assert!(matches!(
+            run_result.outcome,
+            RunOutcome::Completed { cursor: Some(17) }
+        ));
+
+        let payloads = server_state.resolve_payloads.lock().await.clone();
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(
+            payloads[0].get("run_id").and_then(|value| value.as_str()),
+            Some("run-1")
+        );
+
+        let decision = payloads[0]
+            .get("decisions")
+            .and_then(|value| value.get("tc-1"))
+            .expect("expected tc-1 decision payload");
+        assert_eq!(
+            decision.get("action").and_then(|value| value.as_str()),
+            Some("reject")
+        );
+        assert_eq!(
+            decision.get("content").and_then(|value| value.as_str()),
+            Some("Cancelled — new message received")
+        );
+
+        let last_event_ids = server_state.last_event_ids.lock().await.clone();
+        assert_eq!(last_event_ids, vec![Some("5".to_string())]);
+
+        let edits = test_channel.edits.lock().await.clone();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].0, "C123:123.456");
+        assert_eq!(edits[0].1, "⏭️ Tools skipped — new message received");
+
+        server_handle.abort();
     }
 
     fn inbound() -> InboundMessage {
@@ -971,6 +2368,24 @@ mod tests {
     }
 
     #[test]
+    fn take_completed_line_chunk_avoids_splitting_open_fenced_code_block() {
+        let mut buffer = String::from("before\n```sh\necho one\n");
+        let chunk = take_completed_line_chunk(&mut buffer).expect("chunk should exist");
+
+        assert_eq!(chunk, "before\n");
+        assert_eq!(buffer, "```sh\necho one\n");
+    }
+
+    #[test]
+    fn take_completed_line_chunk_flushes_only_completed_fenced_code_blocks() {
+        let mut buffer = String::from("```sh\necho one\n```\n```sh\necho two\n");
+        let chunk = take_completed_line_chunk(&mut buffer).expect("chunk should exist");
+
+        assert_eq!(chunk, "```sh\necho one\n```\n");
+        assert_eq!(buffer, "```sh\necho two\n");
+    }
+
+    #[test]
     fn queue_batching_keeps_sender_attribution() {
         let batch = vec![
             queued("Can you check logs?", Some("alice"), "u1"),
@@ -1013,6 +2428,161 @@ mod tests {
         assert_eq!(options.model.as_deref(), Some("claude-sonnet"));
         assert_eq!(options.sandbox, Some(true));
         assert_eq!(options.timeout_seconds, Some(60));
+    }
+
+    #[test]
+    fn strip_mcp_prefix_removes_namespace() {
+        assert_eq!(strip_mcp_prefix("mcp__run_command"), "run_command");
+        assert_eq!(strip_mcp_prefix("mcp__tools__run_command"), "run_command");
+        assert_eq!(strip_mcp_prefix("run_command"), "run_command");
+    }
+
+    #[test]
+    fn truncate_respects_char_boundaries() {
+        let value = "héllo world";
+        assert_eq!(truncate(value, 3), "hél…");
+    }
+
+    #[test]
+    fn render_run_command_preview_shows_code_block() {
+        let preview = render_tool_preview(
+            "run_command",
+            &serde_json::json!({"command": "kubectl get pods -n staging"}),
+        );
+        assert!(preview.contains("```\nkubectl get pods -n staging\n```"));
+    }
+
+    #[test]
+    fn render_run_command_preview_shows_remote_host() {
+        let preview = render_tool_preview(
+            "run_command",
+            &serde_json::json!({"command": "uptime", "remote": "root@10.0.1.5"}),
+        );
+        assert!(preview.contains("on `root@10.0.1.5`"));
+        assert!(preview.contains("```\nuptime\n```"));
+    }
+
+    #[test]
+    fn render_create_preview_shows_path_and_content() {
+        let preview = render_tool_preview(
+            "create",
+            &serde_json::json!({"path": "/tmp/hello.sh", "file_text": "#!/bin/bash\necho hello"}),
+        );
+        assert!(preview.contains("`/tmp/hello.sh`"));
+        assert!(preview.contains("```\n#!/bin/bash\necho hello\n```"));
+    }
+
+    #[test]
+    fn render_str_replace_preview_shows_diff() {
+        let preview = render_tool_preview(
+            "str_replace",
+            &serde_json::json!({
+                "path": "deploy.yaml",
+                "old_str": "replicas: 1",
+                "new_str": "replicas: 3"
+            }),
+        );
+        assert!(preview.contains("`deploy.yaml`"));
+        assert!(preview.contains("- replicas: 1"));
+        assert!(preview.contains("+ replicas: 3"));
+    }
+
+    #[test]
+    fn render_remove_preview_shows_recursive() {
+        let preview = render_tool_preview(
+            "remove",
+            &serde_json::json!({"path": "/tmp/old", "recursive": true}),
+        );
+        assert_eq!(preview, "`/tmp/old` (recursive)");
+    }
+
+    #[test]
+    fn render_view_preview_shows_grep_and_range() {
+        let preview = render_tool_preview(
+            "view",
+            &serde_json::json!({"path": "src/main.rs", "grep": "TODO", "view_range": [1, 50]}),
+        );
+        assert!(preview.contains("`src/main.rs`"));
+        assert!(preview.contains("grep=`TODO`"));
+        assert!(preview.contains("lines [1,50]"));
+    }
+
+    #[test]
+    fn render_generic_preview_falls_back_to_first_key() {
+        let preview = render_tool_preview(
+            "some_custom_tool",
+            &serde_json::json!({"url": "https://example.com"}),
+        );
+        assert!(preview.contains("`https://example.com`"));
+    }
+
+    #[test]
+    fn allowlist_matches_prefixed_and_unprefixed_names() {
+        let mut allowlist = HashSet::new();
+        allowlist.insert("run_command".to_string());
+
+        assert!(is_allowlisted("run_command", &allowlist));
+        assert!(is_allowlisted("mcp__run_command", &allowlist));
+        assert!(!is_allowlisted("mcp__str_replace", &allowlist));
+    }
+
+    #[test]
+    fn render_approver_display_uses_channel_mentions() {
+        let peer = PeerId("U123".to_string());
+        assert_eq!(render_approver_display("slack", &peer), "<@U123>");
+        assert_eq!(render_approver_display("discord", &peer), "<@U123>");
+        assert_eq!(render_approver_display("telegram", &peer), "U123");
+    }
+
+    #[test]
+    fn render_approval_prompt_includes_tools_and_auto_approved_count() {
+        let tool_calls = vec![
+            ProposedToolCall {
+                id: "tc1".to_string(),
+                name: "mcp__run_command".to_string(),
+                arguments: serde_json::json!({"command": "kubectl get pods -n staging"}),
+                metadata: None,
+            },
+            ProposedToolCall {
+                id: "tc2".to_string(),
+                name: "mcp__str_replace".to_string(),
+                arguments: serde_json::json!({"path": "deploy.yaml", "old_str": "replicas: 1", "new_str": "replicas: 3"}),
+                metadata: None,
+            },
+        ];
+
+        let prompt = render_approval_prompt(&tool_calls, 1);
+        assert!(prompt.contains("2 tools need approval"));
+        assert!(prompt.contains("1. `run_command`"));
+        assert!(prompt.contains("```\nkubectl get pods -n staging\n```"));
+        assert!(prompt.contains("2. `str_replace`"));
+        assert!(prompt.contains("`deploy.yaml`"));
+        assert!(prompt.contains("- replicas: 1"));
+        assert!(prompt.contains("+ replicas: 3"));
+        assert!(prompt.contains("1 tool(s) auto-approved"));
+    }
+
+    #[test]
+    fn remaining_timeout_after_approval_deducts_wait_time() {
+        assert_eq!(
+            remaining_timeout_after_approval(Some(60), Duration::from_secs(55)),
+            Some(5)
+        );
+        assert_eq!(
+            remaining_timeout_after_approval(Some(60), Duration::from_secs(120)),
+            Some(MIN_RESUME_TIMEOUT_SECONDS)
+        );
+        assert_eq!(
+            remaining_timeout_after_approval(None, Duration::from_secs(5)),
+            None
+        );
+    }
+
+    #[test]
+    fn generate_approval_id_is_short_hex() {
+        let id = generate_approval_id();
+        assert_eq!(id.len(), 8);
+        assert!(id.chars().all(|ch| ch.is_ascii_hexdigit()));
     }
 
     #[test]

@@ -12,13 +12,33 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use crate::{
-    channels::{Channel, ChannelTestResult},
+    channels::{ApprovalButton, ButtonStyle, Channel, ChannelTestResult, parse_approval_callback},
     chunking::chunk_text,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
 
 const DISCORD_TEXT_LIMIT: usize = 2000;
 const DISCORD_INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // 37377
+
+const DISCORD_OP_DISPATCH: u8 = 0;
+const DISCORD_OP_HEARTBEAT: u8 = 1;
+const DISCORD_OP_IDENTIFY: u8 = 2;
+const DISCORD_OP_RECONNECT: u8 = 7;
+const DISCORD_OP_INVALID_SESSION: u8 = 9;
+const DISCORD_OP_HELLO: u8 = 10;
+const DISCORD_OP_HEARTBEAT_ACK: u8 = 11;
+
+const DISCORD_INTERACTION_TYPE_COMPONENT: u8 = 3;
+const DISCORD_MESSAGE_TYPE_DEFAULT: u8 = 0;
+const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD: u8 = 11;
+const DISCORD_CHANNEL_TYPE_PRIVATE_THREAD: u8 = 12;
+
+const DISCORD_COMPONENT_TYPE_ACTION_ROW: u8 = 1;
+const DISCORD_COMPONENT_TYPE_BUTTON: u8 = 2;
+const DISCORD_BUTTON_STYLE_SUCCESS: u8 = 3;
+const DISCORD_BUTTON_STYLE_DANGER: u8 = 4;
+
+const DISCORD_INTERACTION_ACK_DEFERRED_UPDATE_MESSAGE: u8 = 6;
 
 pub struct DiscordChannel {
     id: ChannelId,
@@ -145,17 +165,36 @@ impl DiscordChannel {
         Ok(meta)
     }
 
+    async fn response_or_retry_after_rate_limit(
+        response: reqwest::Response,
+    ) -> Option<reqwest::Response> {
+        if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Some(response);
+        }
+
+        let retry = response
+            .json::<DiscordRateLimitResponse>()
+            .await
+            .ok()
+            .map(|value| value.retry_after)
+            .unwrap_or(1.0);
+        tokio::time::sleep(std::time::Duration::from_secs_f64(retry.max(0.1))).await;
+        None
+    }
+
     async fn post_message(
         &self,
         channel_id: &str,
         content: &str,
         reply_to_message_id: Option<&str>,
-    ) -> Result<()> {
+        components: Option<Vec<DiscordComponent>>,
+    ) -> Result<String> {
         let payload = CreateMessage {
             content: content.to_string(),
             message_reference: reply_to_message_id.map(|id| MessageReference {
                 message_id: id.to_string(),
             }),
+            components,
         };
 
         loop {
@@ -170,24 +209,85 @@ impl DiscordChannel {
                 .await
                 .context("discord create message request failed")?;
 
-            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let retry = response
-                    .json::<DiscordRateLimitResponse>()
-                    .await
-                    .ok()
-                    .map(|value| value.retry_after)
-                    .unwrap_or(1.0);
-                tokio::time::sleep(std::time::Duration::from_secs_f64(retry.max(0.1))).await;
+            let Some(response) = Self::response_or_retry_after_rate_limit(response).await else {
                 continue;
-            }
+            };
 
             if !response.status().is_success() {
                 let body = response.text().await.unwrap_or_default();
                 return Err(anyhow!("discord create message failed: {body}"));
             }
 
+            let message: DiscordMessage = response
+                .json()
+                .await
+                .context("discord create message decode failed")?;
+            return Ok(message.id);
+        }
+    }
+
+    async fn patch_message(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        content: &str,
+        components: Vec<DiscordComponent>,
+    ) -> Result<()> {
+        let payload = EditMessage {
+            content: content.to_string(),
+            components,
+        };
+
+        loop {
+            let response = self
+                .http
+                .patch(format!(
+                    "https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}"
+                ))
+                .header("Authorization", self.auth_header())
+                .json(&payload)
+                .send()
+                .await
+                .context("discord edit message request failed")?;
+
+            let Some(response) = Self::response_or_retry_after_rate_limit(response).await else {
+                continue;
+            };
+
+            if !response.status().is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(anyhow!("discord edit message failed: {body}"));
+            }
+
             return Ok(());
         }
+    }
+
+    async fn acknowledge_interaction(
+        &self,
+        interaction_id: &str,
+        interaction_token: &str,
+    ) -> Result<()> {
+        let payload = serde_json::json!({
+            "type": DISCORD_INTERACTION_ACK_DEFERRED_UPDATE_MESSAGE
+        });
+
+        let response = self
+            .http
+            .post(format!(
+                "https://discord.com/api/v10/interactions/{interaction_id}/{interaction_token}/callback"
+            ))
+            .json(&payload)
+            .send()
+            .await
+            .context("discord interaction ack request failed")?;
+
+        if response.status().is_success() {
+            return Ok(());
+        }
+
+        let body = response.text().await.unwrap_or_default();
+        Err(anyhow!("discord interaction ack failed: {body}"))
     }
 
     fn parse_message_reply_id(metadata: &serde_json::Value) -> Option<String> {
@@ -195,6 +295,20 @@ impl DiscordChannel {
             .get("message_id")
             .and_then(value_as_string)
             .or_else(|| metadata.get("id").and_then(value_as_string))
+    }
+
+    fn extract_target(reply: &OutboundReply) -> Result<String> {
+        let channel_id = reply
+            .metadata
+            .get("channel_id")
+            .and_then(value_as_string)
+            .unwrap_or_else(|| reply.peer_id.0.clone());
+
+        if channel_id.is_empty() {
+            return Err(anyhow!("discord reply missing channel_id"));
+        }
+
+        Ok(channel_id)
     }
 }
 
@@ -279,7 +393,7 @@ impl Channel for DiscordChannel {
                             }
                         };
 
-                        if payload.op == 10 {
+                        if payload.op == DISCORD_OP_HELLO {
                             let interval = payload
                                 .d
                                 .as_ref()
@@ -299,7 +413,7 @@ impl Channel for DiscordChannel {
             };
 
             let identify = serde_json::json!({
-                "op": 2,
+                "op": DISCORD_OP_IDENTIFY,
                 "d": {
                     "token": self.token,
                     "intents": DISCORD_INTENTS,
@@ -335,7 +449,8 @@ impl Channel for DiscordChannel {
                         return Ok(());
                     }
                     _ = heartbeat.tick() => {
-                        let heartbeat_payload = serde_json::json!({"op": 1, "d": last_sequence});
+                        let heartbeat_payload =
+                            serde_json::json!({"op": DISCORD_OP_HEARTBEAT, "d": last_sequence});
                         if writer.send(WsMessage::Text(heartbeat_payload.to_string())).await.is_err() {
                             break;
                         }
@@ -368,7 +483,7 @@ impl Channel for DiscordChannel {
                                 }
 
                                 match payload.op {
-                                    0 => {
+                                    DISCORD_OP_DISPATCH => {
                                         let event = payload.t.unwrap_or_default();
                                         if event == "READY" {
                                             if let Ok(ready) = serde_json::from_value::<ReadyEvent>(payload.d.unwrap_or_default())
@@ -376,6 +491,60 @@ impl Channel for DiscordChannel {
                                             {
                                                 *guard = Some(ready.user.id);
                                             }
+                                            continue;
+                                        }
+
+                                        if event == "INTERACTION_CREATE" {
+                                            let interaction: InteractionCreateEvent = match serde_json::from_value(payload.d.unwrap_or_default()) {
+                                                Ok(value) => value,
+                                                Err(error) => {
+                                                    warn!(error = %error, "discord INTERACTION_CREATE decode failed");
+                                                    continue;
+                                                }
+                                            };
+
+                                            if interaction.kind != DISCORD_INTERACTION_TYPE_COMPONENT {
+                                                continue;
+                                            }
+
+                                            let custom_id = interaction
+                                                .data
+                                                .as_ref()
+                                                .and_then(|data| data.custom_id.as_deref())
+                                                .unwrap_or_default();
+
+                                            let Some((approval_id, decision)) = parse_approval_callback(custom_id) else {
+                                                continue;
+                                            };
+
+                                            if let Err(error) = self
+                                                .acknowledge_interaction(&interaction.id, &interaction.token)
+                                                .await
+                                            {
+                                                warn!(error = %error, "failed to acknowledge discord interaction");
+                                                continue;
+                                            }
+
+                                            let inbound = InboundMessage {
+                                                channel: self.id.clone(),
+                                                peer_id: PeerId(interaction.user_id()),
+                                                chat_type: interaction.chat_type(),
+                                                text: String::new(),
+                                                media: Vec::new(),
+                                                metadata: serde_json::json!({
+                                                    "type": "approval_response",
+                                                    "approval_id": approval_id,
+                                                    "decision": decision,
+                                                    "channel_id": interaction.channel_id,
+                                                    "message_id": interaction.message.as_ref().map(|msg| msg.id.clone()),
+                                                }),
+                                                timestamp: Utc::now(),
+                                            };
+
+                                            if inbound_tx.send(inbound).await.is_err() {
+                                                return Ok(());
+                                            }
+
                                             continue;
                                         }
 
@@ -405,7 +574,9 @@ impl Channel for DiscordChannel {
                                             continue;
                                         }
 
-                                        if message_event.kind != 0 || message_event.content.trim().is_empty() {
+                                        if message_event.kind != DISCORD_MESSAGE_TYPE_DEFAULT
+                                            || message_event.content.trim().is_empty()
+                                        {
                                             continue;
                                         }
 
@@ -413,10 +584,17 @@ impl Channel for DiscordChannel {
 
                                         let chat_type = match (&message_event.guild_id, channel_meta) {
                                             (None, _) => ChatType::Direct,
-                                            (Some(_guild_id), Some(meta)) if meta.kind == 11 || meta.kind == 12 => ChatType::Thread {
-                                                group_id: meta.parent_id.unwrap_or_else(|| message_event.channel_id.clone()),
-                                                thread_id: message_event.channel_id.clone(),
-                                            },
+                                            (Some(_guild_id), Some(meta))
+                                                if meta.kind == DISCORD_CHANNEL_TYPE_PUBLIC_THREAD
+                                                    || meta.kind == DISCORD_CHANNEL_TYPE_PRIVATE_THREAD =>
+                                            {
+                                                ChatType::Thread {
+                                                    group_id: meta
+                                                        .parent_id
+                                                        .unwrap_or_else(|| message_event.channel_id.clone()),
+                                                    thread_id: message_event.channel_id.clone(),
+                                                }
+                                            }
                                             (Some(_), _) => ChatType::Group {
                                                 id: message_event.channel_id.clone(),
                                             },
@@ -444,16 +622,23 @@ impl Channel for DiscordChannel {
                                             return Ok(());
                                         }
                                     }
-                                    1 => {
-                                        let heartbeat_payload = serde_json::json!({"op": 1, "d": last_sequence});
-                                        if writer.send(WsMessage::Text(heartbeat_payload.to_string())).await.is_err() {
+                                    DISCORD_OP_HEARTBEAT => {
+                                        let heartbeat_payload = serde_json::json!({
+                                            "op": DISCORD_OP_HEARTBEAT,
+                                            "d": last_sequence
+                                        });
+                                        if writer
+                                            .send(WsMessage::Text(heartbeat_payload.to_string()))
+                                            .await
+                                            .is_err()
+                                        {
                                             break;
                                         }
                                     }
-                                    7 | 9 => {
+                                    DISCORD_OP_RECONNECT | DISCORD_OP_INVALID_SESSION => {
                                         break;
                                     }
-                                    11 => {}
+                                    DISCORD_OP_HEARTBEAT_ACK => {}
                                     _ => {}
                                 }
                             }
@@ -475,16 +660,7 @@ impl Channel for DiscordChannel {
     }
 
     async fn send(&self, reply: OutboundReply) -> Result<()> {
-        let channel_id = reply
-            .metadata
-            .get("channel_id")
-            .and_then(value_as_string)
-            .unwrap_or_else(|| reply.peer_id.0.clone());
-
-        if channel_id.is_empty() {
-            return Err(anyhow!("discord reply missing channel_id"));
-        }
-
+        let channel_id = Self::extract_target(&reply)?;
         let reply_to = Self::parse_message_reply_id(&reply.metadata);
 
         let chunks = chunk_text(&reply.text, DISCORD_TEXT_LIMIT);
@@ -494,10 +670,56 @@ impl Channel for DiscordChannel {
             } else {
                 None
             };
-            self.post_message(&channel_id, chunk, reply_ref).await?;
+            let _ = self
+                .post_message(&channel_id, chunk, reply_ref, None)
+                .await?;
         }
 
         Ok(())
+    }
+
+    async fn send_with_buttons(
+        &self,
+        reply: OutboundReply,
+        buttons: Vec<ApprovalButton>,
+    ) -> Result<String> {
+        let channel_id = Self::extract_target(&reply)?;
+        let row = DiscordActionRow {
+            kind: DISCORD_COMPONENT_TYPE_ACTION_ROW,
+            components: buttons
+                .iter()
+                .map(|button| DiscordButton {
+                    kind: DISCORD_COMPONENT_TYPE_BUTTON,
+                    style: match button.style {
+                        ButtonStyle::Success => DISCORD_BUTTON_STYLE_SUCCESS,
+                        ButtonStyle::Danger => DISCORD_BUTTON_STYLE_DANGER,
+                    },
+                    label: button.label.clone(),
+                    custom_id: button.callback_data.clone(),
+                })
+                .collect(),
+        };
+
+        let reply_to = Self::parse_message_reply_id(&reply.metadata);
+        let message_id = self
+            .post_message(
+                &channel_id,
+                &reply.text,
+                reply_to.as_deref(),
+                Some(vec![DiscordComponent::ActionRow(row)]),
+            )
+            .await?;
+
+        Ok(format!("{channel_id}:{message_id}"))
+    }
+
+    async fn edit_message(&self, message_id: &str, new_text: &str) -> Result<()> {
+        let Some((channel_id, msg_id)) = parse_discord_message_id(message_id) else {
+            return Ok(());
+        };
+
+        self.patch_message(channel_id, msg_id, new_text, Vec::new())
+            .await
     }
 
     async fn test(&self) -> Result<ChannelTestResult> {
@@ -541,6 +763,56 @@ struct MessageCreateEvent {
 }
 
 #[derive(Debug, Deserialize)]
+struct InteractionCreateEvent {
+    id: String,
+    token: String,
+    #[serde(rename = "type")]
+    kind: u8,
+    channel_id: String,
+    #[serde(default)]
+    guild_id: Option<String>,
+    #[serde(default)]
+    member: Option<InteractionMember>,
+    #[serde(default)]
+    user: Option<DiscordUser>,
+    #[serde(default)]
+    data: Option<InteractionData>,
+    #[serde(default)]
+    message: Option<DiscordMessage>,
+}
+
+impl InteractionCreateEvent {
+    fn user_id(&self) -> String {
+        self.member
+            .as_ref()
+            .map(|member| member.user.id.clone())
+            .or_else(|| self.user.as_ref().map(|user| user.id.clone()))
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn chat_type(&self) -> ChatType {
+        if self.guild_id.is_none() {
+            return ChatType::Direct;
+        }
+
+        ChatType::Group {
+            id: self.channel_id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InteractionMember {
+    user: DiscordUser,
+}
+
+#[derive(Debug, Deserialize)]
+struct InteractionData {
+    #[serde(default)]
+    custom_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct DiscordUser {
     id: String,
     username: String,
@@ -568,11 +840,46 @@ struct CreateMessage {
     content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_reference: Option<MessageReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    components: Option<Vec<DiscordComponent>>,
+}
+
+#[derive(Debug, Serialize)]
+struct EditMessage {
+    content: String,
+    components: Vec<DiscordComponent>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum DiscordComponent {
+    ActionRow(DiscordActionRow),
+}
+
+#[derive(Debug, Serialize)]
+struct DiscordActionRow {
+    #[serde(rename = "type")]
+    kind: u8,
+    components: Vec<DiscordButton>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiscordButton {
+    #[serde(rename = "type")]
+    kind: u8,
+    style: u8,
+    label: String,
+    custom_id: String,
 }
 
 #[derive(Debug, Serialize)]
 struct MessageReference {
     message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscordMessage {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -588,9 +895,15 @@ fn value_as_string(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn parse_discord_message_id(message_id: &str) -> Option<(&str, &str)> {
+    message_id.rsplit_once(':')
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GatewayPayload, MessageCreateEvent};
+    use super::{
+        DISCORD_OP_DISPATCH, GatewayPayload, MessageCreateEvent, parse_discord_message_id,
+    };
 
     #[test]
     fn gateway_payload_deserializes() {
@@ -600,7 +913,7 @@ mod tests {
             Err(error) => panic!("failed to parse payload: {error}"),
         };
 
-        assert_eq!(payload.op, 0);
+        assert_eq!(payload.op, DISCORD_OP_DISPATCH);
         assert_eq!(payload.t.as_deref(), Some("READY"));
         assert_eq!(payload.s, Some(1));
     }
@@ -627,5 +940,14 @@ mod tests {
         assert_eq!(event.guild_id.as_deref(), Some("g1"));
         assert_eq!(event.content, "hello");
         assert_eq!(event.kind, 0);
+    }
+
+    #[test]
+    fn parse_discord_message_id_splits_on_last_colon() {
+        assert_eq!(parse_discord_message_id("123:456"), Some(("123", "456")));
+        assert_eq!(
+            parse_discord_message_id("team:123:456"),
+            Some(("team:123", "456"))
+        );
     }
 }

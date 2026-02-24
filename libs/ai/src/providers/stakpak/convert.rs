@@ -97,6 +97,9 @@ fn to_stakpak_messages(msg: &Message) -> Vec<ChatMessage> {
             .into_iter()
             .map(|(tool_call_id, content)| ChatMessage {
                 role: "tool".to_string(),
+                // NOTE: tool_result content is expected to already be provider-compatible
+                // (string content for tool role). Keep passthrough here; normalize at a
+                // shared OpenAI boundary if/when we add one.
                 content: Some(content),
                 name: msg.name.clone(),
                 tool_calls: None,
@@ -149,6 +152,7 @@ fn to_stakpak_messages(msg: &Message) -> Vec<ChatMessage> {
                 }
             }])),
             ContentPart::ToolCall { .. } => None,
+            // NOTE: passthrough by design; see comment above in merged tool_result handling.
             ContentPart::ToolResult { content, .. } => Some(content.clone()),
         }
     } else {
@@ -385,6 +389,56 @@ mod tests {
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "call_abc");
         assert_eq!(tool_calls[0].function.name, "get_weather");
+    }
+
+    #[test]
+    fn test_tool_result_object_content_passthrough() {
+        let tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![ContentPart::tool_result(
+                "call_1",
+                json!({"rejected": "Tool call rejected by user"}),
+            )]),
+            name: None,
+            provider_options: None,
+        };
+
+        let req = make_request(vec![tool_msg]);
+        let result = to_stakpak_request(&req, false);
+
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].role, "tool");
+        assert_eq!(result.messages[0].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(
+            result.messages[0].content,
+            Some(json!({"rejected": "Tool call rejected by user"}))
+        );
+    }
+
+    #[test]
+    fn test_merged_tool_result_objects_passthrough() {
+        let merged_tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![
+                ContentPart::tool_result("call_1", json!({"error": "TOOL_CALL_CANCELLED"})),
+                ContentPart::tool_result("call_2", json!({"rejected": "Tool call rejected"})),
+            ]),
+            name: None,
+            provider_options: None,
+        };
+
+        let req = make_request(vec![merged_tool_msg]);
+        let result = to_stakpak_request(&req, false);
+
+        assert_eq!(result.messages.len(), 2);
+        assert_eq!(
+            result.messages[0].content,
+            Some(json!({"error": "TOOL_CALL_CANCELLED"}))
+        );
+        assert_eq!(
+            result.messages[1].content,
+            Some(json!({"rejected": "Tool call rejected"}))
+        );
     }
 
     #[test]

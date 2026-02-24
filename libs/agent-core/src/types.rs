@@ -89,6 +89,9 @@ const DEFAULT_AUTO_APPROVE_TOOLS: &[&str] = &[
     "wait_for_tasks",
 ];
 
+/// Safe autopilot tools used when no explicit profile allowlist is configured.
+pub const SAFE_AUTOPILOT_TOOLS: &[&str] = DEFAULT_AUTO_APPROVE_TOOLS;
+
 /// Mutating tools that require explicit approval by default.
 const DEFAULT_ASK_TOOLS: &[&str] = &[
     "create",
@@ -121,6 +124,26 @@ impl ToolApprovalPolicy {
         }
     }
 
+    /// Build an unattended policy from an explicit allowlist.
+    ///
+    /// Listed tools are approved. Everything else is denied.
+    pub fn from_allowlist(tools: &[String]) -> Self {
+        let mut rules = HashMap::new();
+
+        for name in tools {
+            let normalized = strip_tool_prefix(name.trim());
+            if normalized.is_empty() {
+                continue;
+            }
+            rules.insert(normalized.to_string(), ToolApprovalAction::Approve);
+        }
+
+        Self::Custom {
+            rules,
+            default: ToolApprovalAction::Deny,
+        }
+    }
+
     /// Layer overrides on top of an existing policy.
     /// Only meaningful for `Custom` — returns `self` unchanged for `None`/`All`.
     pub fn with_overrides(
@@ -150,7 +173,7 @@ impl ToolApprovalPolicy {
 
 /// Strip MCP server prefix from tool name (e.g. "stakpak__run_command" -> "run_command").
 #[allow(clippy::string_slice)] // pos from find("__") on same string, "__" is ASCII
-fn strip_tool_prefix(name: &str) -> &str {
+pub fn strip_tool_prefix(name: &str) -> &str {
     if let Some(pos) = name.find("__")
         && pos + 2 < name.len()
     {
@@ -358,6 +381,62 @@ mod tests {
             policy.action_for("some_unknown_tool"),
             ToolApprovalAction::Ask
         );
+    }
+
+    #[test]
+    fn from_allowlist_approves_listed() {
+        let tools = vec!["view".to_string()];
+        let policy = ToolApprovalPolicy::from_allowlist(&tools);
+        assert_eq!(policy.action_for("view"), ToolApprovalAction::Approve);
+    }
+
+    #[test]
+    fn from_allowlist_denies_unlisted() {
+        let tools = vec!["view".to_string()];
+        let policy = ToolApprovalPolicy::from_allowlist(&tools);
+        assert_eq!(policy.action_for("run_command"), ToolApprovalAction::Deny);
+    }
+
+    #[test]
+    fn from_allowlist_denies_unknown() {
+        let tools = vec!["view".to_string()];
+        let policy = ToolApprovalPolicy::from_allowlist(&tools);
+        assert_eq!(
+            policy.action_for("some_future_tool"),
+            ToolApprovalAction::Deny
+        );
+    }
+
+    #[test]
+    fn from_allowlist_handles_prefix() {
+        let tools = vec!["view".to_string()];
+        let policy = ToolApprovalPolicy::from_allowlist(&tools);
+
+        assert_eq!(
+            policy.action_for("stakpak__view"),
+            ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            policy.action_for("stakpak__run_command"),
+            ToolApprovalAction::Deny
+        );
+    }
+
+    #[test]
+    fn from_allowlist_with_overrides() {
+        let tools = vec!["view".to_string()];
+        let policy = ToolApprovalPolicy::from_allowlist(&tools)
+            .with_overrides([("run_command".to_string(), ToolApprovalAction::Approve)]);
+
+        assert_eq!(
+            policy.action_for("run_command"),
+            ToolApprovalAction::Approve
+        );
+    }
+
+    #[test]
+    fn safe_autopilot_tools_is_complete() {
+        assert_eq!(SAFE_AUTOPILOT_TOOLS, DEFAULT_AUTO_APPROVE_TOOLS);
     }
 
     #[test]

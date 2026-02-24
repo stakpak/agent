@@ -27,6 +27,8 @@ pub use routes::{protected_router, public_router, router};
 pub use sandbox::{SandboxConfig, SandboxedMcpServer};
 pub use session_actor::{build_checkpoint_envelope, build_run_context, spawn_session_actor};
 pub use session_manager::SessionManager;
-pub use stakpak_agent_core::{ToolApprovalAction, ToolApprovalPolicy};
+pub use stakpak_agent_core::{
+    SAFE_AUTOPILOT_TOOLS, ToolApprovalAction, ToolApprovalPolicy, strip_tool_prefix,
+};
 pub use state::AppState;
 pub use types::{SessionHandle, SessionRuntimeState};

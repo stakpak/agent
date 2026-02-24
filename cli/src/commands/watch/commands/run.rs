@@ -716,6 +716,7 @@ async fn handle_schedule_event(
         pause_on_approval: schedule.effective_pause_on_approval(&config.defaults),
         sandbox: schedule.effective_sandbox(&config.defaults),
         caller_context,
+        allowed_tools: server.default_allowed_tools.clone(),
         server: server.clone(),
     };
 

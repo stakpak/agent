@@ -9,7 +9,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use crate::{
-    channels::{Channel, ChannelTestResult},
+    channels::{
+        ApprovalButton, Channel, ChannelTestResult, DeliveryReceipt, parse_approval_callback,
+    },
     chunking::chunk_text,
     types::{ChannelId, ChatType, InboundMessage, OutboundReply, PeerId},
 };
@@ -69,7 +71,7 @@ impl TelegramChannel {
         let payload = GetUpdatesParams {
             offset,
             timeout: 30,
-            allowed_updates: vec!["message".to_string()],
+            allowed_updates: vec!["message".to_string(), "callback_query".to_string()],
         };
 
         let response = self
@@ -104,7 +106,13 @@ impl TelegramChannel {
         }
     }
 
-    async fn send_chunk(&self, chat_id: i64, thread_id: Option<i64>, text: &str) -> Result<()> {
+    async fn send_message(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        text: &str,
+        reply_markup: Option<TgReplyMarkup>,
+    ) -> Result<TgMessage> {
         const MAX_RETRIES: u32 = 5;
 
         let params = SendMessageParams {
@@ -112,6 +120,7 @@ impl TelegramChannel {
             text: text.to_string(),
             reply_to_message_id: None,
             message_thread_id: thread_id,
+            reply_markup,
         };
 
         let mut retries: u32 = 0;
@@ -125,13 +134,15 @@ impl TelegramChannel {
                 .context("telegram sendMessage request failed")?;
 
             let status = response.status();
-            let payload: TgResponse<serde_json::Value> = response
+            let payload: TgResponse<TgMessage> = response
                 .json()
                 .await
                 .context("telegram sendMessage decode failed")?;
 
             if payload.ok {
-                return Ok(());
+                return payload
+                    .result
+                    .ok_or_else(|| anyhow!("telegram sendMessage missing result"));
             }
 
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -161,10 +172,98 @@ impl TelegramChannel {
         }
     }
 
-    fn map_inbound(&self, update: TgUpdate) -> Option<InboundMessage> {
-        let message = update.message?;
-        let text = message.text?;
-        let from = message.from?;
+    async fn answer_callback_query(&self, callback_query_id: &str) -> Result<()> {
+        let payload = serde_json::json!({
+            "callback_query_id": callback_query_id,
+        });
+
+        let response = self
+            .client
+            .post(self.api_url("answerCallbackQuery"))
+            .json(&payload)
+            .send()
+            .await
+            .context("telegram answerCallbackQuery request failed")?;
+
+        let payload: TgResponse<serde_json::Value> = response
+            .json()
+            .await
+            .context("telegram answerCallbackQuery decode failed")?;
+
+        if payload.ok {
+            return Ok(());
+        }
+
+        Err(anyhow!(
+            "telegram answerCallbackQuery error {}: {}",
+            payload.error_code.unwrap_or_default(),
+            payload
+                .description
+                .unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+
+    async fn edit_message_text(&self, chat_id: i64, message_id: i64, text: &str) -> Result<()> {
+        let payload = EditMessageTextParams {
+            chat_id,
+            message_id,
+            text: text.to_string(),
+            reply_markup: Some(TgReplyMarkup {
+                inline_keyboard: Vec::new(),
+            }),
+        };
+
+        let response = self
+            .client
+            .post(self.api_url("editMessageText"))
+            .json(&payload)
+            .send()
+            .await
+            .context("telegram editMessageText request failed")?;
+
+        let payload: TgResponse<serde_json::Value> = response
+            .json()
+            .await
+            .context("telegram editMessageText decode failed")?;
+
+        if payload.ok {
+            return Ok(());
+        }
+
+        Err(anyhow!(
+            "telegram editMessageText error {}: {}",
+            payload.error_code.unwrap_or_default(),
+            payload
+                .description
+                .unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+
+    fn extract_target(reply: &OutboundReply) -> Result<(i64, Option<i64>)> {
+        let chat_id = reply
+            .metadata
+            .get("chat_id")
+            .and_then(parse_i64_value)
+            .or_else(|| reply.peer_id.0.parse::<i64>().ok())
+            .ok_or_else(|| anyhow!("telegram reply missing chat_id in metadata/peer_id"))?;
+
+        let thread_id = reply.metadata.get("thread_id").and_then(parse_i64_value);
+
+        Ok((chat_id, thread_id))
+    }
+
+    fn map_message_inbound(&self, message: TgMessage) -> Option<InboundMessage> {
+        let TgMessage {
+            message_id,
+            from,
+            chat,
+            text,
+            date,
+            message_thread_id,
+        } = message;
+
+        let text = text?;
+        let from = from?;
 
         if from.is_bot {
             return None;
@@ -181,26 +280,8 @@ impl TelegramChannel {
             return None;
         }
 
-        let chat_type = match message.chat.r#type.as_str() {
-            "private" => ChatType::Direct,
-            "group" | "supergroup" | "channel" => {
-                if let Some(thread_id) = message.message_thread_id {
-                    ChatType::Thread {
-                        group_id: message.chat.id.to_string(),
-                        thread_id: thread_id.to_string(),
-                    }
-                } else {
-                    ChatType::Group {
-                        id: message.chat.id.to_string(),
-                    }
-                }
-            }
-            _ => ChatType::Group {
-                id: message.chat.id.to_string(),
-            },
-        };
-
-        let timestamp = DateTime::from_timestamp(message.date, 0).unwrap_or_else(Utc::now);
+        let timestamp = DateTime::from_timestamp(date, 0).unwrap_or_else(Utc::now);
+        let chat_type = chat_type_from_chat(&chat, message_thread_id);
 
         Some(InboundMessage {
             channel: self.id.clone(),
@@ -209,12 +290,53 @@ impl TelegramChannel {
             text,
             media: Vec::new(),
             metadata: serde_json::json!({
-                "chat_id": message.chat.id,
-                "message_id": message.message_id,
-                "thread_id": message.message_thread_id,
-                "chat_title": message.chat.title,
+                "chat_id": chat.id,
+                "message_id": message_id,
+                "thread_id": message_thread_id,
+                "chat_title": chat.title,
+                "username": from.username,
+                "display_name": from.first_name,
             }),
             timestamp,
+        })
+    }
+
+    fn map_callback_inbound(&self, callback_query: TgCallbackQuery) -> Option<InboundMessage> {
+        let data = callback_query.data.as_deref()?;
+        let (approval_id, decision) = parse_approval_callback(data)?;
+
+        let own_bot_id = self
+            .bot_user_id
+            .lock()
+            .ok()
+            .and_then(|guard| *guard)
+            .unwrap_or_default();
+
+        if own_bot_id != 0 && callback_query.from.id == own_bot_id {
+            return None;
+        }
+
+        let message = callback_query.message;
+        let chat_type = message
+            .as_ref()
+            .map(chat_type_from_tg_message)
+            .unwrap_or(ChatType::Direct);
+
+        Some(InboundMessage {
+            channel: self.id.clone(),
+            peer_id: PeerId(callback_query.from.id.to_string()),
+            chat_type,
+            text: String::new(),
+            media: Vec::new(),
+            metadata: serde_json::json!({
+                "type": "approval_response",
+                "approval_id": approval_id,
+                "decision": decision,
+                "chat_id": message.as_ref().map(|value| value.chat.id),
+                "message_id": message.as_ref().map(|value| value.message_id),
+                "thread_id": message.as_ref().and_then(|value| value.message_thread_id),
+            }),
+            timestamp: Utc::now(),
         })
     }
 }
@@ -257,8 +379,29 @@ impl Channel for TelegramChannel {
                     };
 
                     for update in updates {
-                        offset = Some(update.update_id + 1);
-                        if let Some(inbound) = self.map_inbound(update)
+                        let TgUpdate {
+                            update_id,
+                            message,
+                            callback_query,
+                        } = update;
+                        offset = Some(update_id + 1);
+
+                        if let Some(callback_query) = callback_query {
+                            if let Err(error) = self.answer_callback_query(&callback_query.id).await {
+                                warn!(error = %error, "failed to answer telegram callback query");
+                            }
+
+                            if let Some(inbound) = self.map_callback_inbound(callback_query)
+                                && inbound_tx.send(inbound).await.is_err()
+                            {
+                                return Ok(());
+                            }
+
+                            continue;
+                        }
+
+                        if let Some(message) = message
+                            && let Some(inbound) = self.map_message_inbound(message)
                             && inbound_tx.send(inbound).await.is_err()
                         {
                             return Ok(());
@@ -272,24 +415,58 @@ impl Channel for TelegramChannel {
     }
 
     async fn send(&self, reply: OutboundReply) -> Result<()> {
-        let chat_id = reply
-            .metadata
-            .get("chat_id")
-            .and_then(parse_i64_value)
-            .or_else(|| reply.peer_id.0.parse::<i64>().ok())
-            .ok_or_else(|| anyhow!("telegram reply missing chat_id in metadata/peer_id"))?;
+        self.send_with_receipt(reply).await.map(|_| ())
+    }
 
-        let thread_id = reply.metadata.get("thread_id").and_then(parse_i64_value);
+    async fn send_with_receipt(&self, reply: OutboundReply) -> Result<DeliveryReceipt> {
+        let (chat_id, thread_id) = Self::extract_target(&reply)?;
 
         let chunks = chunk_text(&reply.text, TELEGRAM_TEXT_LIMIT);
+        let mut first_message_id: Option<i64> = None;
         for chunk in chunks {
-            if let Err(error) = self.send_chunk(chat_id, thread_id, &chunk).await {
-                warn!(error = %error, "telegram send chunk failed");
-                return Err(error);
+            let message = self.send_message(chat_id, thread_id, &chunk, None).await?;
+            if first_message_id.is_none() {
+                first_message_id = Some(message.message_id);
             }
         }
 
-        Ok(())
+        Ok(DeliveryReceipt {
+            message_id: first_message_id.map(|value| value.to_string()),
+            thread_id: thread_id.map(|value| value.to_string()),
+        })
+    }
+
+    async fn send_with_buttons(
+        &self,
+        reply: OutboundReply,
+        buttons: Vec<ApprovalButton>,
+    ) -> Result<String> {
+        let (chat_id, thread_id) = Self::extract_target(&reply)?;
+        let keyboard_row = buttons
+            .iter()
+            .map(|button| TgInlineKeyboardButton {
+                text: button.label.clone(),
+                callback_data: button.callback_data.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let markup = TgReplyMarkup {
+            inline_keyboard: vec![keyboard_row],
+        };
+
+        let message = self
+            .send_message(chat_id, thread_id, &reply.text, Some(markup))
+            .await?;
+
+        Ok(format!("{chat_id}:{}", message.message_id))
+    }
+
+    async fn edit_message(&self, message_id: &str, new_text: &str) -> Result<()> {
+        let Some((chat_id, msg_id)) = parse_telegram_message_id(message_id) else {
+            return Ok(());
+        };
+
+        self.edit_message_text(chat_id, msg_id, new_text).await
     }
 
     async fn test(&self) -> Result<ChannelTestResult> {
@@ -314,6 +491,38 @@ fn parse_i64_value(value: &serde_json::Value) -> Option<i64> {
     }
 }
 
+fn parse_telegram_message_id(message_id: &str) -> Option<(i64, i64)> {
+    let (chat, message) = message_id.rsplit_once(':')?;
+    let chat_id = chat.parse::<i64>().ok()?;
+    let message_id = message.parse::<i64>().ok()?;
+    Some((chat_id, message_id))
+}
+
+fn chat_type_from_chat(chat: &TgChat, message_thread_id: Option<i64>) -> ChatType {
+    match chat.r#type.as_str() {
+        "private" => ChatType::Direct,
+        "group" | "supergroup" | "channel" => {
+            if let Some(thread_id) = message_thread_id {
+                ChatType::Thread {
+                    group_id: chat.id.to_string(),
+                    thread_id: thread_id.to_string(),
+                }
+            } else {
+                ChatType::Group {
+                    id: chat.id.to_string(),
+                }
+            }
+        }
+        _ => ChatType::Group {
+            id: chat.id.to_string(),
+        },
+    }
+}
+
+fn chat_type_from_tg_message(message: &TgMessage) -> ChatType {
+    chat_type_from_chat(&message.chat, message.message_thread_id)
+}
+
 #[derive(Debug, Serialize)]
 struct GetUpdatesParams {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -336,6 +545,28 @@ struct SendMessageParams {
     reply_to_message_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_thread_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_markup: Option<TgReplyMarkup>,
+}
+
+#[derive(Debug, Serialize)]
+struct EditMessageTextParams {
+    chat_id: i64,
+    message_id: i64,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_markup: Option<TgReplyMarkup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TgReplyMarkup {
+    inline_keyboard: Vec<Vec<TgInlineKeyboardButton>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TgInlineKeyboardButton {
+    text: String,
+    callback_data: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,10 +588,13 @@ struct TgErrorParameters {
 #[derive(Debug, Deserialize)]
 struct TgUpdate {
     update_id: i64,
+    #[serde(default)]
     message: Option<TgMessage>,
+    #[serde(default)]
+    callback_query: Option<TgCallbackQuery>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct TgMessage {
     message_id: i64,
     from: Option<TgUser>,
@@ -371,6 +605,16 @@ struct TgMessage {
 }
 
 #[derive(Debug, Deserialize)]
+struct TgCallbackQuery {
+    id: String,
+    from: TgUser,
+    #[serde(default)]
+    message: Option<TgMessage>,
+    #[serde(default)]
+    data: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct TgUser {
     id: i64,
     #[serde(default)]
@@ -381,7 +625,7 @@ struct TgUser {
     username: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct TgChat {
     id: i64,
     r#type: String,
@@ -391,7 +635,9 @@ struct TgChat {
 
 #[cfg(test)]
 mod tests {
-    use super::{GetUpdatesParams, SendMessageParams, TgResponse, TgUpdate};
+    use super::{
+        GetUpdatesParams, SendMessageParams, TgResponse, TgUpdate, parse_telegram_message_id,
+    };
 
     #[test]
     fn telegram_update_deserialization() {
@@ -428,6 +674,7 @@ mod tests {
             text: "hello".to_string(),
             reply_to_message_id: None,
             message_thread_id: None,
+            reply_markup: None,
         };
 
         let json = serde_json::to_value(&params).expect("failed to serialize SendMessageParams");
@@ -457,6 +704,7 @@ mod tests {
             text: "hello".to_string(),
             reply_to_message_id: Some(42),
             message_thread_id: Some(7),
+            reply_markup: None,
         };
 
         let json = serde_json::to_value(&params).expect("failed to serialize SendMessageParams");
@@ -490,5 +738,15 @@ mod tests {
             "offset should be omitted when None"
         );
         assert_eq!(obj.get("timeout").and_then(|v| v.as_i64()), Some(30));
+    }
+
+    #[test]
+    fn parse_telegram_message_id_splits_correctly() {
+        assert_eq!(parse_telegram_message_id("12345:678"), Some((12345, 678)));
+        assert_eq!(
+            parse_telegram_message_id("-100123:678"),
+            Some((-100123, 678))
+        );
+        assert_eq!(parse_telegram_message_id("invalid"), None);
     }
 }

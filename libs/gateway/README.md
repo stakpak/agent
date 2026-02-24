@@ -179,6 +179,18 @@ Socket Mode also requires an **App-Level Token** (`xapp-*`) with the `connection
 
 ### Slack App Configuration
 
+**Quick setup with manifest** (recommended):
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**
+2. Select your workspace
+3. Paste the contents of [`src/channels/slack-manifest.yaml`](src/channels/slack-manifest.yaml)
+4. Review and create the app
+5. **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope (this is your `xapp-*` token)
+6. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-*`)
+7. Run `stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"`
+
+**Manual setup:**
+
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → select the app
 2. **OAuth & Permissions** → add all Bot Token Scopes listed above
 3. **Socket Mode** → enable (requires App-Level Token / `xapp-*`)
@@ -187,8 +199,9 @@ Socket Mode also requires an **App-Level Token** (`xapp-*`) with the `connection
    - `message.groups` — messages in private channels
    - `message.im` — direct messages
    - `app_mention` — @mentions
-5. **Reinstall the app** to the workspace (scope changes require reinstall)
-6. Update `autopilot.toml` with the new `xoxb-*` bot token (or re-run `stakpak autopilot channel add slack ...`)
+5. **Interactivity & Shortcuts** → enable (required for tool approval buttons)
+6. **Reinstall the app** to the workspace (scope changes require reinstall)
+7. Update `autopilot.toml` with the new `xoxb-*` bot token (or re-run `stakpak autopilot channel add slack ...`)
 
 ### Troubleshooting
 
