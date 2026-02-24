@@ -491,12 +491,12 @@ impl Dispatcher {
         let button_label_suffix = if tool_calls.len() == 1 { "" } else { " All" };
         let buttons = vec![
             ApprovalButton {
-                label: format!("✅ Allow{button_label_suffix}"),
+                label: format!("Allow{button_label_suffix}"),
                 callback_data: format!("a:{approval_id}:allow"),
                 style: ButtonStyle::Success,
             },
             ApprovalButton {
-                label: format!("❌ Deny{button_label_suffix}"),
+                label: format!("Deny{button_label_suffix}"),
                 callback_data: format!("a:{approval_id}:deny"),
                 style: ButtonStyle::Danger,
             },
