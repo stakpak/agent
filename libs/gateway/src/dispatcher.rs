@@ -1745,7 +1745,15 @@ fn render_view_preview(args: &serde_json::Map<String, serde_json::Value>) -> Str
 
 fn render_generic_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
     // Try the old priority-key heuristic for unknown tools.
-    for key in ["command", "path", "query", "file_text", "search", "keywords", "url"] {
+    for key in [
+        "command",
+        "path",
+        "query",
+        "file_text",
+        "search",
+        "keywords",
+        "url",
+    ] {
         if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
             return format!("`{}`", truncate(value, 120));
         }
