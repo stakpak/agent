@@ -481,7 +481,8 @@ pub fn handle_toggle_side_panel(
 ) {
     state.show_side_panel = !state.show_side_panel;
     // Refresh board tasks when showing the side panel
-    if state.show_side_panel && state.board_agent_id.is_some() {
+    // The handler will extract agent_id from messages if not already set
+    if state.show_side_panel {
         let _ = input_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 }

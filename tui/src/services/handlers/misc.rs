@@ -347,7 +347,7 @@ pub fn handle_billing_info_loaded(
     state.billing_info = Some(billing_info);
 }
 
-/// Handle refresh board tasks event - spawns async task to fetch from agent-board
+/// Handle refresh board tasks event - spawns blocking task to fetch from agent-board
 pub fn handle_refresh_board_tasks(
     state: &mut AppState,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
@@ -368,14 +368,14 @@ pub fn handle_refresh_board_tasks(
     }
 
     let tx = input_tx.clone();
-    tokio::spawn(async move {
-        match fetch_tasks_as_todo_items(&agent_id) {
-            Ok(result) => {
-                let _ = tx.send(InputEvent::BoardTasksLoaded(result)).await;
-            }
-            Err(err) => {
-                let _ = tx.send(InputEvent::BoardTasksError(err)).await;
-            }
+    // Use spawn_blocking since fetch_tasks_as_todo_items calls std::process::Command
+    // which is a blocking operation that should not run on the async runtime
+    tokio::task::spawn_blocking(move || match fetch_tasks_as_todo_items(&agent_id) {
+        Ok(result) => {
+            let _ = tx.blocking_send(InputEvent::BoardTasksLoaded(result));
+        }
+        Err(err) => {
+            let _ = tx.blocking_send(InputEvent::BoardTasksError(err));
         }
     });
 }
