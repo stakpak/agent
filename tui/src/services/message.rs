@@ -2453,6 +2453,12 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 }
 
 pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
+    let tool_name = strip_tool_name(&tool_call.function.name);
+
+    if tool_name == "ask_user" {
+        return "Ask user questions...".to_string();
+    }
+
     // First try to parse as valid JSON
     if let Ok(v) = serde_json::from_str::<Value>(&tool_call.function.arguments) {
         return format_json_value(&v);

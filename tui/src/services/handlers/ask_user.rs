@@ -351,6 +351,23 @@ pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender
     handle_ask_user_next_tab(state);
 }
 
+/// Handle pasted text for custom answer (bulk insert, single refresh)
+pub fn handle_ask_user_custom_input_paste(state: &mut AppState, text: &str) {
+    if !state.show_ask_user_popup {
+        return;
+    }
+
+    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+        return;
+    }
+
+    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
+    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
+        state.ask_user_custom_input.push_str(text);
+        refresh_ask_user_block(state);
+    }
+}
+
 /// Handle character input for custom answer
 pub fn handle_ask_user_custom_input_changed(state: &mut AppState, c: char) {
     if !state.show_ask_user_popup {
