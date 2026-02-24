@@ -8,7 +8,7 @@ use serde::Deserialize;
 use std::process::Command;
 
 /// Card data from agent-board JSON output
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct BoardCard {
     pub id: String,
@@ -24,7 +24,7 @@ pub struct BoardCard {
 }
 
 /// Checklist item from agent-board
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct ChecklistItem {
     pub id: String,
@@ -91,6 +91,8 @@ impl TaskProgress {
 
 /// Calculate progress from cards: checked items / total checklist items
 /// Cards without checklists count as 1 item (done if card is done)
+/// When a card with checklists is marked "done", all its checklist items
+/// count as completed regardless of their individual checked state.
 pub fn calculate_progress(cards: &[BoardCard]) -> TaskProgress {
     let mut completed = 0;
     let mut total = 0;
@@ -102,8 +104,12 @@ pub fn calculate_progress(cards: &[BoardCard]) -> TaskProgress {
             if card.status == "done" {
                 completed += 1;
             }
+        } else if card.status == "done" {
+            // Card marked done with checklists: all items count as completed
+            total += card.checklist.len();
+            completed += card.checklist.len();
         } else {
-            // Count checklist items
+            // Card not done: count individual checklist items
             for item in &card.checklist {
                 total += 1;
                 if item.checked {
@@ -134,11 +140,13 @@ pub fn cards_to_todo_items(cards: &[BoardCard]) -> Vec<TodoItem> {
         items.push(TodoItem::new(card.name.clone()).with_status(status));
 
         // Process checklist items with smart collapsing
+        // When card is done, treat all checklist items as done
+        let card_is_done = card.status == "done";
         let checklist_items: Vec<_> = card
             .checklist
             .iter()
             .map(|item| {
-                let checklist_status = if item.checked {
+                let checklist_status = if card_is_done || item.checked {
                     TodoStatus::Done
                 } else {
                     TodoStatus::Pending
@@ -271,6 +279,7 @@ pub fn extract_board_agent_id_from_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::changeset::TodoItemType;
 
     #[test]
     fn test_cards_to_todo_items_empty() {
@@ -413,5 +422,264 @@ mod tests {
         assert_eq!(items[2].text, "Item 2"); // last done
         assert_eq!(items[3].text, "Card 2 - In Progress");
         assert_eq!(items[4].text, "Item 3"); // pending
+    }
+
+    #[test]
+    fn test_progress_card_done_with_unchecked_items() {
+        // Bug fix: card marked "done" should count all checklist items as completed
+        // even when individual items are not checked
+        let cards = vec![BoardCard {
+            id: "card_1".to_string(),
+            board_id: "board_1".to_string(),
+            name: "Done Card".to_string(),
+            description: None,
+            status: "done".to_string(),
+            assigned_to: None,
+            tags: vec![],
+            checklist: vec![
+                ChecklistItem {
+                    id: "1".to_string(),
+                    text: "Item 1".to_string(),
+                    checked: false,
+                },
+                ChecklistItem {
+                    id: "2".to_string(),
+                    text: "Item 2".to_string(),
+                    checked: false,
+                },
+                ChecklistItem {
+                    id: "3".to_string(),
+                    text: "Item 3".to_string(),
+                    checked: false,
+                },
+            ],
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        }];
+
+        let progress = calculate_progress(&cards);
+        assert_eq!(
+            progress.completed, 3,
+            "All items should count as completed when card is done"
+        );
+        assert_eq!(progress.total, 3);
+    }
+
+    #[test]
+    fn test_progress_mixed_cards_done_and_in_progress() {
+        let cards = vec![
+            // Card 1: done with unchecked items
+            BoardCard {
+                id: "card_1".to_string(),
+                board_id: "board_1".to_string(),
+                name: "Done Card".to_string(),
+                description: None,
+                status: "done".to_string(),
+                assigned_to: None,
+                tags: vec![],
+                checklist: vec![
+                    ChecklistItem {
+                        id: "1".to_string(),
+                        text: "A".to_string(),
+                        checked: false,
+                    },
+                    ChecklistItem {
+                        id: "2".to_string(),
+                        text: "B".to_string(),
+                        checked: false,
+                    },
+                ],
+                created_at: "".to_string(),
+                updated_at: "".to_string(),
+            },
+            // Card 2: in progress with 1/3 checked
+            BoardCard {
+                id: "card_2".to_string(),
+                board_id: "board_1".to_string(),
+                name: "WIP Card".to_string(),
+                description: None,
+                status: "in_progress".to_string(),
+                assigned_to: None,
+                tags: vec![],
+                checklist: vec![
+                    ChecklistItem {
+                        id: "3".to_string(),
+                        text: "C".to_string(),
+                        checked: true,
+                    },
+                    ChecklistItem {
+                        id: "4".to_string(),
+                        text: "D".to_string(),
+                        checked: false,
+                    },
+                    ChecklistItem {
+                        id: "5".to_string(),
+                        text: "E".to_string(),
+                        checked: false,
+                    },
+                ],
+                created_at: "".to_string(),
+                updated_at: "".to_string(),
+            },
+        ];
+
+        let progress = calculate_progress(&cards);
+        // Card 1: 2/2 (done card), Card 2: 1/3 (in progress) = 3/5
+        assert_eq!(progress.completed, 3);
+        assert_eq!(progress.total, 5);
+    }
+
+    #[test]
+    fn test_todo_items_card_done_shows_all_checked() {
+        // When a card is done, all its checklist items should display as Done
+        let card = BoardCard {
+            id: "card_1".to_string(),
+            board_id: "board_1".to_string(),
+            name: "Done Card".to_string(),
+            description: None,
+            status: "done".to_string(),
+            assigned_to: None,
+            tags: vec![],
+            checklist: vec![
+                ChecklistItem {
+                    id: "1".to_string(),
+                    text: "Item 1".to_string(),
+                    checked: false,
+                },
+                ChecklistItem {
+                    id: "2".to_string(),
+                    text: "Item 2".to_string(),
+                    checked: false,
+                },
+            ],
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        let items = cards_to_todo_items(&[card]);
+        // All checklist items should have Done status when card is done
+        for item in &items {
+            if item.item_type == TodoItemType::ChecklistItem {
+                assert_eq!(
+                    item.status,
+                    TodoStatus::Done,
+                    "Checklist item '{}' should be Done when card is done",
+                    item.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_progress_card_in_progress_respects_individual_checks() {
+        // When a card is NOT done, only individually checked items count
+        let cards = vec![BoardCard {
+            id: "card_1".to_string(),
+            board_id: "board_1".to_string(),
+            name: "WIP Card".to_string(),
+            description: None,
+            status: "in_progress".to_string(),
+            assigned_to: None,
+            tags: vec![],
+            checklist: vec![
+                ChecklistItem {
+                    id: "1".to_string(),
+                    text: "Done item".to_string(),
+                    checked: true,
+                },
+                ChecklistItem {
+                    id: "2".to_string(),
+                    text: "Pending item".to_string(),
+                    checked: false,
+                },
+                ChecklistItem {
+                    id: "3".to_string(),
+                    text: "Another pending".to_string(),
+                    checked: false,
+                },
+            ],
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        }];
+
+        let progress = calculate_progress(&cards);
+        assert_eq!(progress.completed, 1);
+        assert_eq!(progress.total, 3);
+    }
+
+    #[test]
+    fn test_card_done_with_mixed_checked_unchecked() {
+        // Done card where some items were checked and some weren't
+        // All should count as completed and display as Done
+        let card = BoardCard {
+            id: "card_1".to_string(),
+            board_id: "board_1".to_string(),
+            name: "Done Card".to_string(),
+            description: None,
+            status: "done".to_string(),
+            assigned_to: None,
+            tags: vec![],
+            checklist: vec![
+                ChecklistItem {
+                    id: "1".to_string(),
+                    text: "Checked".to_string(),
+                    checked: true,
+                },
+                ChecklistItem {
+                    id: "2".to_string(),
+                    text: "Unchecked".to_string(),
+                    checked: false,
+                },
+                ChecklistItem {
+                    id: "3".to_string(),
+                    text: "Also checked".to_string(),
+                    checked: true,
+                },
+                ChecklistItem {
+                    id: "4".to_string(),
+                    text: "Also unchecked".to_string(),
+                    checked: false,
+                },
+            ],
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        // Progress: all 4 should count as completed
+        let progress = calculate_progress(&[card.clone()]);
+        assert_eq!(progress.completed, 4);
+        assert_eq!(progress.total, 4);
+
+        // Display: all checklist items should show as Done
+        let items = cards_to_todo_items(&[card]);
+        for item in &items {
+            if item.item_type == TodoItemType::ChecklistItem {
+                assert_eq!(
+                    item.status,
+                    TodoStatus::Done,
+                    "Item '{}' should be Done when card is done",
+                    item.text
+                );
+            }
+        }
+
+        // Collapsing: all items are done, so all but last should collapse
+        // Expected: Card + collapsed(3) + last item
+        let checklist_items: Vec<_> = items
+            .iter()
+            .filter(|i| i.item_type == TodoItemType::ChecklistItem)
+            .collect();
+        assert_eq!(
+            checklist_items.len(),
+            1,
+            "Only last done item should be visible"
+        );
+
+        let collapsed: Vec<_> = items
+            .iter()
+            .filter(|i| i.item_type == TodoItemType::CollapsedIndicator)
+            .collect();
+        assert_eq!(collapsed.len(), 1);
+        assert_eq!(collapsed[0].text, "(3 completed)");
     }
 }
