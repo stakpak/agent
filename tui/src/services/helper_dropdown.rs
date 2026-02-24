@@ -9,14 +9,12 @@ use ratatui::{
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
     let input = state.input().trim();
-    let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
+    let show = input.starts_with('/') && !state.filtered_helpers.is_empty();
     if state.show_helper_dropdown && show {
-        // Get the commands to show
-        let commands_to_show = if state.input() == "/" {
-            &state.helpers
-        } else {
-            &state.filtered_helpers
-        };
+        // filtered_helpers is maintained synchronously by filter_helpers_sync():
+        // - When input is just "/", it contains all commands
+        // - When input is "/foo", it contains only matching commands
+        let commands_to_show = &state.filtered_helpers;
 
         if commands_to_show.is_empty() {
             return;

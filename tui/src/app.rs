@@ -457,7 +457,7 @@ impl AppState {
             show_helper_dropdown: false,
             helper_selected: 0,
             helper_scroll: 0,
-            filtered_helpers: helpers,
+            filtered_helpers: Vec::new(),
             filtered_files: Vec::new(),
             show_shortcuts: false,
             is_dialog_open: false,
@@ -861,7 +861,7 @@ impl AppState {
         });
     }
 
-    // --- NEW: Poll file_search results and update state ---
+    // --- Poll file_search results and update state (for @ file completion only) ---
     pub fn poll_file_search_results(&mut self) {
         if let Some(rx) = &mut self.file_search_rx {
             while let Ok(result) = rx.try_recv() {
@@ -878,22 +878,30 @@ impl AppState {
                     None
                 };
 
-                // Update filtered_helpers from async worker
-                self.filtered_helpers = result.filtered_helpers;
+                // NOTE: Slash command filtering (filtered_helpers) is now done synchronously
+                // in handle_input_changed / handle_input_backspace to avoid race conditions
+                // that caused buggy behavior in external terminals (iTerm2, Warp, etc.).
+                // The async worker still computes filtered_helpers but we ignore it here.
 
-                // Reset selection index if it's out of bounds
-                if !self.filtered_helpers.is_empty()
-                    && self.helper_selected >= self.filtered_helpers.len()
+                // Show dropdown for @ file triggers (slash command dropdown is managed synchronously)
+                let has_at_trigger =
+                    find_at_trigger(&result.input, result.cursor_position).is_some();
+                if has_at_trigger && !self.waiting_for_shell_input {
+                    self.show_helper_dropdown = true;
+                }
+                // If we have file results, reset selection if out of bounds
+                if !self.filtered_files.is_empty()
+                    && self.helper_selected >= self.filtered_files.len()
                 {
                     self.helper_selected = 0;
                 }
 
-                // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
-                let has_at_trigger =
-                    find_at_trigger(&result.input, result.cursor_position).is_some();
-                self.show_helper_dropdown = (input_text.trim().starts_with('/'))
-                    || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
-                    || (has_at_trigger && !self.waiting_for_shell_input);
+                // Don't overwrite show_helper_dropdown for slash commands —
+                // that state is already set synchronously by the input handlers.
+                // Only hide if input is completely empty (safety net).
+                if input_text.is_empty() {
+                    self.show_helper_dropdown = false;
+                }
             }
         }
     }
