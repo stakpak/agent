@@ -635,6 +635,9 @@ pub async fn run_tui(
                        }
                    }
 
+                   // Auto-scroll during drag selection when mouse is at viewport edges
+                   crate::services::handlers::tick_selection_auto_scroll(&mut state);
+
                    terminal.draw(|f| view(f, &mut state))?;
                }
            }

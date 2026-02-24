@@ -41,6 +41,9 @@ fn popup_content_col(state: &AppState, terminal_col: u16) -> u16 {
 
 /// Handle mouse drag start - begins text selection in message area, input area, or collapsed popup
 pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
+    // Reset auto-scroll state when starting a new selection
+    state.selection_auto_scroll = 0;
+
     // When collapsed messages popup is open, use popup geometry for selection
     if state.show_collapsed_messages {
         handle_popup_drag_start(state, col, row);
@@ -154,6 +157,47 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
         return;
     }
 
+    // Detect if mouse is at or beyond the message area edges for auto-scroll.
+    // We check for "at the edge" (<=, >=) rather than strictly beyond, because
+    // the message area may start at y=0 where the mouse can never go above it,
+    // and similarly the bottom edge may be at the last terminal row.
+    let msg_top = state.message_area_y as usize;
+    let msg_bottom = msg_top + message_area_height;
+
+    if (row as usize) <= msg_top && state.scroll > 0 {
+        // Mouse is at or above the top edge — trigger auto-scroll up
+        // (only if there's content above to scroll to)
+        state.selection_auto_scroll = -1;
+        // Update selection to the topmost visible line
+        let absolute_line = state.scroll;
+        let rel_col = content_col(state, col);
+        state.selection.end_line = Some(absolute_line);
+        state.selection.end_col = Some(rel_col);
+        return;
+    } else if message_area_height > 0 && (row as usize) >= msg_bottom.saturating_sub(1) {
+        // Mouse is at or below the bottom edge — check if there's content below to scroll to
+        let total_lines = state
+            .assembled_lines_cache
+            .as_ref()
+            .map(|(_, lines, _)| lines.len())
+            .unwrap_or(0);
+        let max_scroll = total_lines.saturating_sub(message_area_height);
+
+        if state.scroll < max_scroll {
+            // There's content below — trigger auto-scroll down
+            state.selection_auto_scroll = 1;
+            // Update selection to the bottommost visible line
+            let absolute_line = state.scroll + message_area_height.saturating_sub(1);
+            let rel_col = content_col(state, col);
+            state.selection.end_line = Some(absolute_line);
+            state.selection.end_col = Some(rel_col);
+            return;
+        }
+    }
+
+    // Mouse is inside the message area — stop auto-scroll
+    state.selection_auto_scroll = 0;
+
     // Clamp row to message area
     // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
     let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
@@ -202,6 +246,9 @@ fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
 /// Handle mouse drag end - extracts text, copies to clipboard, shows toast
 /// Also detects clicks on user messages to show action popup
 pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
+    // Always reset auto-scroll when mouse is released
+    state.selection_auto_scroll = 0;
+
     // When collapsed messages popup is open, use popup-specific logic
     if state.show_collapsed_messages {
         handle_popup_drag_end(state, col, row);
@@ -232,8 +279,10 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
         return;
     }
 
-    // Update final position
+    // Update final position (may re-arm selection_auto_scroll if mouse is at edge)
     handle_drag(state, col, row);
+    // Reset auto-scroll again after handle_drag to ensure it's cleared on mouse release
+    state.selection_auto_scroll = 0;
 
     // Check if this was just a click (no actual drag)
     let is_just_click = match (
@@ -401,4 +450,63 @@ pub fn handle_scroll_during_selection(
             state.selection.end_col = Some(0);
         }
     }
+}
+
+/// Called from the event loop tick to perform auto-scrolling during drag selection.
+///
+/// When the user drags the mouse above or below the message area while selecting text,
+/// `handle_drag` sets `selection_auto_scroll` to -1 (up) or 1 (down). This function is
+/// called periodically (every ~100ms via the spinner tick) to scroll the viewport by one
+/// line and extend the selection accordingly, providing the standard "drag to edge to scroll"
+/// behavior found in text editors.
+pub fn tick_selection_auto_scroll(state: &mut AppState) {
+    // Safety: only auto-scroll when there's an active message area selection
+    if !state.selection.active || state.selection_auto_scroll == 0 {
+        state.selection_auto_scroll = 0;
+        return;
+    }
+
+    // Don't auto-scroll for collapsed popup (it has bounded content and its own scroll)
+    if state.show_collapsed_messages {
+        state.selection_auto_scroll = 0;
+        return;
+    }
+
+    let direction = state.selection_auto_scroll;
+
+    // Get total content lines from cache for bounds checking
+    let total_lines = state
+        .assembled_lines_cache
+        .as_ref()
+        .map(|(_, lines, _)| lines.len())
+        .unwrap_or(0);
+
+    if total_lines == 0 {
+        return;
+    }
+
+    let message_area_height = state.message_area_height as usize;
+    let max_scroll = total_lines.saturating_sub(message_area_height);
+
+    // Perform the scroll
+    if direction < 0 {
+        // Scroll up
+        if state.scroll == 0 {
+            return; // Already at top, nothing to do
+        }
+        state.scroll = state.scroll.saturating_sub(1);
+        state.stay_at_bottom = false;
+    } else {
+        // Scroll down
+        if state.scroll >= max_scroll {
+            return; // Already at bottom, nothing to do
+        }
+        state.scroll = (state.scroll + 1).min(max_scroll);
+        if state.scroll >= max_scroll {
+            state.stay_at_bottom = true;
+        }
+    }
+
+    // Extend the selection to match the new scroll position
+    handle_scroll_during_selection(state, direction, message_area_height);
 }

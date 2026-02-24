@@ -16,6 +16,8 @@ pub mod tool;
 
 // Re-export find_image_file_by_name for use in clipboard_paste
 pub use input::find_image_file_by_name;
+// Re-export tick_selection_auto_scroll for use in event_loop spinner tick
+pub use text_selection::tick_selection_auto_scroll;
 
 use crate::app::{AppState, InputEvent, OutputEvent, PendingUserMessage};
 use ratatui::layout::Size;
