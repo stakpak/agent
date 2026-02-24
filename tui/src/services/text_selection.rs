@@ -84,6 +84,39 @@ fn is_border_char(c: char) -> bool {
     BORDER_CHARS.contains(&c)
 }
 
+/// Calculate the display width of the decorative prefix at the start of a line.
+///
+/// Decorative prefixes are border characters (e.g. `┃`, `│`) optionally followed by a space,
+/// used for user message bars, quote bars, and shell bubble borders. This function returns
+/// how many display columns the prefix occupies so we can strip only the decoration residue
+/// (the trailing space after the border char) without stripping meaningful content indentation.
+///
+/// For example:
+/// - `"┃ some content"` → returns 2 (border char width 1 + space 1)
+/// - `"│ quoted text"` → returns 2
+/// - `"    indented code"` → returns 0 (no border char, so all whitespace is content)
+fn decorative_prefix_width(line: &Line) -> u16 {
+    let mut width: u16 = 0;
+    let mut found_border = false;
+
+    for span in &line.spans {
+        for c in span.content.chars() {
+            if is_border_char(c) {
+                found_border = true;
+                width += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
+            } else if c == ' ' && found_border {
+                // Count one trailing space after border chars as decorative
+                width += 1;
+                return width;
+            } else {
+                // Non-border, non-space char (or space without preceding border): content starts
+                return if found_border { width } else { 0 };
+            }
+        }
+    }
+    if found_border { width } else { 0 }
+}
+
 /// Extract plain text from a Line, excluding border characters
 fn extract_text_from_line(line: &Line, start_col: u16, end_col: u16) -> String {
     let mut result = String::new();
@@ -111,6 +144,47 @@ fn extract_text_from_line(line: &Line, start_col: u16, end_col: u16) -> String {
     }
 
     result
+}
+
+/// Strip only the decorative prefix residue from extracted line text.
+///
+/// After `extract_text_from_line` removes border characters, lines that had a decorative prefix
+/// (e.g. "┃ content") are left with residual whitespace (e.g. " content"). This function strips
+/// only that residual whitespace — the number of spaces equal to `(prefix_width - border_chars_width)`.
+/// For lines without a decorative prefix (e.g. code blocks), all leading whitespace is preserved
+/// since it represents meaningful indentation.
+fn strip_decorative_prefix_residue(line_text: &str, prefix_width: u16, line: &Line) -> String {
+    if prefix_width == 0 {
+        // No decorative prefix — preserve all leading whitespace (code blocks, plain text)
+        return line_text.trim_end().to_string();
+    }
+
+    // Count how many display columns of border chars are in the prefix.
+    // The residual whitespace = prefix_width - border_char_columns.
+    let mut border_char_cols: u16 = 0;
+    'outer: for span in &line.spans {
+        for c in span.content.chars() {
+            if is_border_char(c) {
+                border_char_cols += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
+            } else {
+                break 'outer;
+            }
+        }
+    }
+
+    let residual_spaces = prefix_width.saturating_sub(border_char_cols) as usize;
+
+    // Strip exactly the residual number of leading spaces
+    let mut chars = line_text.chars();
+    let mut stripped = 0;
+    while stripped < residual_spaces {
+        match chars.next() {
+            Some(' ') => stripped += 1,
+            _ => break,
+        }
+    }
+
+    chars.as_str().trim_end().to_string()
 }
 
 /// Extract selected text from a slice of cached lines using the current selection bounds
@@ -143,7 +217,9 @@ fn extract_selected_text_from_lines(selection: &SelectionState, cached_lines: &[
         let line_text = if line_text.trim() == "SPACING_MARKER" {
             String::new()
         } else {
-            line_text
+            // Strip only decorative prefix residue, preserving meaningful indentation
+            let prefix_width = decorative_prefix_width(line);
+            strip_decorative_prefix_residue(&line_text, prefix_width, line)
         };
 
         if !line_text.is_empty() {
@@ -157,13 +233,7 @@ fn extract_selected_text_from_lines(selection: &SelectionState, cached_lines: &[
         }
     }
 
-    // Trim leading whitespace (from border prefixes like "┃ ") and trailing whitespace
-    // but preserve structure
     result
-        .lines()
-        .map(|l| l.trim())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Extract selected text from the assembled lines cache (main message area)
@@ -345,5 +415,221 @@ fn is_light_color(color: Color) -> bool {
         | Color::LightRed
         | Color::Gray => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Style;
+    use ratatui::text::{Line, Span};
+
+    /// Helper: create a selection covering all given lines fully
+    fn full_selection(start_line: usize, end_line: usize, end_col: u16) -> SelectionState {
+        SelectionState {
+            active: true,
+            start_line: Some(start_line),
+            start_col: Some(0),
+            end_line: Some(end_line),
+            end_col: Some(end_col),
+        }
+    }
+
+    // -- decorative_prefix_width tests --
+
+    #[test]
+    fn test_decorative_prefix_width_user_message() {
+        // User message line: "┃ Hello world"
+        let line = Line::from(vec![
+            Span::styled("┃ ", Style::default()),
+            Span::raw("Hello world"),
+        ]);
+        assert_eq!(decorative_prefix_width(&line), 2);
+    }
+
+    #[test]
+    fn test_decorative_prefix_width_quote() {
+        // Quote line: "│ quoted text"
+        let line = Line::from(vec![
+            Span::styled("│ ", Style::default()),
+            Span::raw("quoted text"),
+        ]);
+        assert_eq!(decorative_prefix_width(&line), 2);
+    }
+
+    #[test]
+    fn test_decorative_prefix_width_code_block_no_indent() {
+        // Code block line with no indentation: "fn main() {"
+        let line = Line::from(vec![Span::raw("fn main() {")]);
+        assert_eq!(decorative_prefix_width(&line), 0);
+    }
+
+    #[test]
+    fn test_decorative_prefix_width_code_block_with_indent() {
+        // Code block line with indentation: "    let x = 1;"
+        let line = Line::from(vec![Span::raw("    let x = 1;")]);
+        assert_eq!(decorative_prefix_width(&line), 0);
+    }
+
+    #[test]
+    fn test_decorative_prefix_width_empty_line() {
+        let line = Line::from(vec![Span::raw("")]);
+        assert_eq!(decorative_prefix_width(&line), 0);
+    }
+
+    #[test]
+    fn test_decorative_prefix_width_border_only() {
+        // Line that is just a border char (e.g. part of a box top)
+        let line = Line::from(vec![Span::raw("┃")]);
+        assert_eq!(decorative_prefix_width(&line), 1);
+    }
+
+    // -- strip_decorative_prefix_residue tests --
+
+    #[test]
+    fn test_strip_residue_no_prefix() {
+        // Code block: no decorative prefix, preserve indentation
+        let line = Line::from(vec![Span::raw("    name: Stakpak Dev")]);
+        let extracted = " name: Stakpak Dev"; // after border filter (no borders here, but simulating)
+        let result = strip_decorative_prefix_residue(extracted, 0, &line);
+        assert_eq!(result, " name: Stakpak Dev");
+    }
+
+    #[test]
+    fn test_strip_residue_user_message() {
+        // User message: "┃ Hello" → after border removal → " Hello"
+        let line = Line::from(vec![
+            Span::styled("┃ ", Style::default()),
+            Span::raw("Hello"),
+        ]);
+        let extracted = " Hello"; // border char removed, space remains
+        let result = strip_decorative_prefix_residue(extracted, 2, &line);
+        assert_eq!(result, "Hello");
+    }
+
+    #[test]
+    fn test_strip_residue_preserves_content_indent_after_prefix() {
+        // User message with indented content: "┃   indented" → " indented" after border removal
+        // prefix_width=2 (border+space), border_char_cols=1, residual=1
+        // So strip 1 space → "  indented" (2 spaces of content indent remain)
+        let line = Line::from(vec![
+            Span::styled("┃ ", Style::default()),
+            Span::raw("  indented"),
+        ]);
+        let extracted = "   indented"; // 3 spaces: 1 from prefix + 2 content
+        let result = strip_decorative_prefix_residue(extracted, 2, &line);
+        assert_eq!(result, "  indented");
+    }
+
+    // -- extract_selected_text_from_lines integration tests --
+
+    #[test]
+    fn test_extract_code_block_preserves_indentation() {
+        // Simulate a YAML code block with indentation (no decorative prefix)
+        let lines = vec![
+            Line::from(vec![Span::raw("name: Stakpak Dev")]),
+            Line::from(vec![Span::raw("  description: AI agent")]),
+            Line::from(vec![Span::raw("  features:")]),
+            Line::from(vec![Span::raw("    - infrastructure")]),
+            Line::from(vec![Span::raw("    - kubernetes")]),
+        ];
+        let selection = full_selection(0, 4, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(
+            result,
+            "name: Stakpak Dev\n  description: AI agent\n  features:\n    - infrastructure\n    - kubernetes"
+        );
+    }
+
+    #[test]
+    fn test_extract_user_message_strips_prefix() {
+        // User message with "┃ " prefix
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("┃ ", Style::default()),
+                Span::raw("Hello world"),
+            ]),
+            Line::from(vec![
+                Span::styled("┃ ", Style::default()),
+                Span::raw("How are you?"),
+            ]),
+        ];
+        let selection = full_selection(0, 1, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(result, "Hello world\nHow are you?");
+    }
+
+    #[test]
+    fn test_extract_mixed_code_and_messages() {
+        // Simulates a mix: user message line followed by code block lines
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("┃ ", Style::default()),
+                Span::raw("Here is my config:"),
+            ]),
+            Line::from(vec![Span::raw("server:")]),
+            Line::from(vec![Span::raw("  port: 8080")]),
+            Line::from(vec![Span::raw("  host: localhost")]),
+        ];
+        let selection = full_selection(0, 3, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(
+            result,
+            "Here is my config:\nserver:\n  port: 8080\n  host: localhost"
+        );
+    }
+
+    #[test]
+    fn test_extract_quote_strips_prefix() {
+        // Quote line with "│ " prefix
+        let lines = vec![Line::from(vec![
+            Span::styled("│ ", Style::default()),
+            Span::raw("This is a quote"),
+        ])];
+        let selection = full_selection(0, 0, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(result, "This is a quote");
+    }
+
+    #[test]
+    fn test_extract_preserves_empty_lines_in_code() {
+        let lines = vec![
+            Line::from(vec![Span::raw("fn main() {")]),
+            Line::from(vec![Span::raw("")]),
+            Line::from(vec![Span::raw("    println!(\"hello\");")]),
+            Line::from(vec![Span::raw("}")]),
+        ];
+        let selection = full_selection(0, 3, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(result, "fn main() {\n\n    println!(\"hello\");\n}");
+    }
+
+    #[test]
+    fn test_extract_spacing_marker_treated_as_empty() {
+        let lines = vec![
+            Line::from(vec![Span::raw("some text")]),
+            Line::from(vec![Span::raw("SPACING_MARKER")]),
+            Line::from(vec![Span::raw("more text")]),
+        ];
+        let selection = full_selection(0, 2, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(result, "some text\n\nmore text");
+    }
+
+    #[test]
+    fn test_extract_python_indentation_preserved() {
+        // Python code block — indentation is critical
+        let lines = vec![
+            Line::from(vec![Span::raw("def foo():")]),
+            Line::from(vec![Span::raw("    if True:")]),
+            Line::from(vec![Span::raw("        return 1")]),
+            Line::from(vec![Span::raw("    return 0")]),
+        ];
+        let selection = full_selection(0, 3, 50);
+        let result = extract_selected_text_from_lines(&selection, &lines);
+        assert_eq!(
+            result,
+            "def foo():\n    if True:\n        return 1\n    return 0"
+        );
     }
 }
