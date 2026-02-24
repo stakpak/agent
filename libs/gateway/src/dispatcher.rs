@@ -1562,6 +1562,14 @@ fn render_approver_display(channel_name: &str, resolved_by: &PeerId) -> String {
     }
 }
 
+/// Maximum characters for the entire approval prompt text.
+/// Slack mrkdwn section blocks allow 3000 chars; Discord messages 2000.
+/// We target the lower bound with some headroom for the header/footer.
+const MAX_APPROVAL_PROMPT_CHARS: usize = 1800;
+
+/// Maximum characters for a single tool preview body (code block content, etc.).
+const MAX_TOOL_PREVIEW_CHARS: usize = 500;
+
 fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) -> String {
     let mut text = if tool_calls.len() == 1 {
         "🔧 Tool approval required\n\n".to_string()
@@ -1571,8 +1579,16 @@ fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) ->
 
     for (index, tool_call) in tool_calls.iter().enumerate() {
         let name = strip_mcp_prefix(&tool_call.name);
-        let preview = render_args_preview(&tool_call.arguments, 80);
-        text.push_str(&format!("{}. `{}`: {}\n", index + 1, name, preview));
+        let preview = render_tool_preview(name, &tool_call.arguments);
+        text.push_str(&format!("{}. `{}`\n{}\n", index + 1, name, preview));
+
+        if text.len() > MAX_APPROVAL_PROMPT_CHARS {
+            let remaining = tool_calls.len() - index - 1;
+            if remaining > 0 {
+                text.push_str(&format!("_…and {remaining} more tool(s)_\n"));
+            }
+            break;
+        }
     }
 
     if auto_count > 0 {
@@ -1580,6 +1596,131 @@ fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) ->
     }
 
     text
+}
+
+fn render_tool_preview(tool_name: &str, args: &serde_json::Value) -> String {
+    let object = match args.as_object() {
+        Some(obj) => obj,
+        None => return format!("`{}`", truncate(&args.to_string(), 80)),
+    };
+
+    match tool_name {
+        "run_command" | "run_command_task" => render_run_command_preview(object),
+        "create" => render_create_preview(object),
+        "str_replace" => render_str_replace_preview(object),
+        "remove" => render_remove_preview(object),
+        "view" => render_view_preview(object),
+        _ => render_generic_preview(object),
+    }
+}
+
+fn render_run_command_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(no command)");
+    let remote = args.get("remote").and_then(|v| v.as_str());
+
+    let mut out = String::new();
+    if let Some(host) = remote {
+        out.push_str(&format!("on `{host}`\n"));
+    }
+    out.push_str(&format!(
+        "```\n{}\n```",
+        truncate(command, MAX_TOOL_PREVIEW_CHARS)
+    ));
+    out
+}
+
+fn render_create_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let file_text = args.get("file_text").and_then(|v| v.as_str());
+
+    let mut out = format!("`{path}`\n");
+    if let Some(content) = file_text {
+        out.push_str(&format!(
+            "```\n{}\n```",
+            truncate(content, MAX_TOOL_PREVIEW_CHARS)
+        ));
+    }
+    out
+}
+
+fn render_str_replace_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let old_str = args.get("old_str").and_then(|v| v.as_str());
+    let new_str = args.get("new_str").and_then(|v| v.as_str());
+
+    let half_budget = MAX_TOOL_PREVIEW_CHARS / 2;
+    let mut out = format!("`{path}`\n");
+    if let Some(old) = old_str {
+        out.push_str(&format!("```\n- {}\n```\n", truncate(old, half_budget)));
+    }
+    if let Some(new) = new_str {
+        out.push_str(&format!("```\n+ {}\n```", truncate(new, half_budget)));
+    }
+    out
+}
+
+fn render_remove_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let recursive = args
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if recursive {
+        format!("`{path}` (recursive)")
+    } else {
+        format!("`{path}`")
+    }
+}
+
+fn render_view_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown path)");
+    let grep = args.get("grep").and_then(|v| v.as_str());
+    let range = args.get("view_range");
+
+    let mut out = format!("`{path}`");
+    if let Some(pattern) = grep {
+        out.push_str(&format!(" grep=`{}`", truncate(pattern, 60)));
+    }
+    if let Some(r) = range {
+        out.push_str(&format!(" lines {r}"));
+    }
+    out
+}
+
+fn render_generic_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    // Try the old priority-key heuristic for unknown tools.
+    for key in ["command", "path", "query", "file_text", "search", "keywords", "url"] {
+        if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+            return format!("`{}`", truncate(value, 120));
+        }
+    }
+
+    // Fall back to showing the first key=value pair.
+    if let Some((key, value)) = args.iter().next() {
+        let display = value
+            .as_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        return format!("{key}=`{}`", truncate(&display, 100));
+    }
+
+    "(no arguments)".to_string()
 }
 
 fn generate_approval_id() -> String {
@@ -1602,26 +1743,6 @@ fn strip_mcp_prefix(name: &str) -> &str {
     }
 
     name
-}
-
-fn render_args_preview(args: &serde_json::Value, max_chars: usize) -> String {
-    if let Some(object) = args.as_object() {
-        for key in ["command", "path", "query", "file_text", "search"] {
-            if let Some(value) = object.get(key).and_then(|value| value.as_str()) {
-                return truncate(value, max_chars);
-            }
-        }
-
-        if let Some((key, value)) = object.iter().next() {
-            let value = value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| value.to_string());
-            return format!("{key}={}", truncate(&value, max_chars));
-        }
-    }
-
-    truncate(&args.to_string(), max_chars)
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
@@ -2275,12 +2396,76 @@ mod tests {
     }
 
     #[test]
-    fn render_args_preview_prefers_useful_keys() {
-        let args = serde_json::json!({"command": "kubectl get pods -n staging"});
-        assert_eq!(
-            render_args_preview(&args, 80),
-            "kubectl get pods -n staging"
+    fn render_run_command_preview_shows_code_block() {
+        let preview = render_tool_preview(
+            "run_command",
+            &serde_json::json!({"command": "kubectl get pods -n staging"}),
         );
+        assert!(preview.contains("```\nkubectl get pods -n staging\n```"));
+    }
+
+    #[test]
+    fn render_run_command_preview_shows_remote_host() {
+        let preview = render_tool_preview(
+            "run_command",
+            &serde_json::json!({"command": "uptime", "remote": "root@10.0.1.5"}),
+        );
+        assert!(preview.contains("on `root@10.0.1.5`"));
+        assert!(preview.contains("```\nuptime\n```"));
+    }
+
+    #[test]
+    fn render_create_preview_shows_path_and_content() {
+        let preview = render_tool_preview(
+            "create",
+            &serde_json::json!({"path": "/tmp/hello.sh", "file_text": "#!/bin/bash\necho hello"}),
+        );
+        assert!(preview.contains("`/tmp/hello.sh`"));
+        assert!(preview.contains("```\n#!/bin/bash\necho hello\n```"));
+    }
+
+    #[test]
+    fn render_str_replace_preview_shows_diff() {
+        let preview = render_tool_preview(
+            "str_replace",
+            &serde_json::json!({
+                "path": "deploy.yaml",
+                "old_str": "replicas: 1",
+                "new_str": "replicas: 3"
+            }),
+        );
+        assert!(preview.contains("`deploy.yaml`"));
+        assert!(preview.contains("- replicas: 1"));
+        assert!(preview.contains("+ replicas: 3"));
+    }
+
+    #[test]
+    fn render_remove_preview_shows_recursive() {
+        let preview = render_tool_preview(
+            "remove",
+            &serde_json::json!({"path": "/tmp/old", "recursive": true}),
+        );
+        assert_eq!(preview, "`/tmp/old` (recursive)");
+    }
+
+    #[test]
+    fn render_view_preview_shows_grep_and_range() {
+        let preview = render_tool_preview(
+            "view",
+            &serde_json::json!({"path": "src/main.rs", "grep": "TODO", "view_range": [1, 50]}),
+        );
+        assert!(preview.contains("`src/main.rs`"));
+        assert!(preview.contains("grep=`TODO`"));
+        assert!(preview.contains("lines [1,50]"));
+    }
+
+    #[test]
+    fn render_generic_preview_falls_back_to_first_key() {
+        let preview = render_tool_preview(
+            "some_custom_tool",
+            &serde_json::json!({"url": "https://example.com"}),
+        );
+        assert!(preview.contains("`https://example.com`"));
     }
 
     #[test]
@@ -2313,15 +2498,19 @@ mod tests {
             ProposedToolCall {
                 id: "tc2".to_string(),
                 name: "mcp__str_replace".to_string(),
-                arguments: serde_json::json!({"path": "deploy.yaml"}),
+                arguments: serde_json::json!({"path": "deploy.yaml", "old_str": "replicas: 1", "new_str": "replicas: 3"}),
                 metadata: None,
             },
         ];
 
         let prompt = render_approval_prompt(&tool_calls, 1);
         assert!(prompt.contains("2 tools need approval"));
-        assert!(prompt.contains("1. `run_command`: kubectl get pods -n staging"));
-        assert!(prompt.contains("2. `str_replace`: deploy.yaml"));
+        assert!(prompt.contains("1. `run_command`"));
+        assert!(prompt.contains("```\nkubectl get pods -n staging\n```"));
+        assert!(prompt.contains("2. `str_replace`"));
+        assert!(prompt.contains("`deploy.yaml`"));
+        assert!(prompt.contains("- replicas: 1"));
+        assert!(prompt.contains("+ replicas: 3"));
         assert!(prompt.contains("1 tool(s) auto-approved"));
     }
 
