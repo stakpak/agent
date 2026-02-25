@@ -596,7 +596,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
                     .iter()
                     .map(|tc| tc.function.name.as_str())
                     .collect();
-
                 if auto_approve_config.any_requires_approval(&tool_names) {
                     // PAUSE: tools require approval
                     let pending: Vec<PendingToolCall> =
