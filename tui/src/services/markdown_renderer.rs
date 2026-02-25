@@ -1,13 +1,26 @@
+use std::sync::LazyLock;
+use std::time::Instant;
+
 use crate::services::detect_term::{AdaptiveColors, ThemeColors};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 use regex::Regex;
-use std::time::Instant;
 
 use crate::services::syntax_highlighter;
 use crossterm;
+
+/// Cached regex for matching XML opening tags (used in `xml_tags_to_markdown_headers`).
+static XML_TAG_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"<([a-zA-Z_][a-zA-Z0-9_-]*)[^>]*>").ok());
+
+/// Cached regex for matching XML closing tags (used in `xml_tags_to_markdown_headers`).
+static XML_CLOSING_TAG_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"</([a-zA-Z_][a-zA-Z0-9_-]*)>").ok());
+
+/// Cached `MarkdownStyle` — theme is detected once at startup and never changes mid-session.
+static MARKDOWN_STYLE: LazyLock<MarkdownStyle> = LazyLock::new(MarkdownStyle::adaptive);
 
 // Simplified component enum with all the variants you mentioned
 #[derive(Debug, Clone)]
@@ -1752,7 +1765,7 @@ pub fn render_markdown_to_lines(
 ) -> Result<Vec<Line<'static>>, Box<dyn std::error::Error>> {
     let parsed_content = xml_tags_to_markdown_headers(markdown_content);
 
-    let style = MarkdownStyle::adaptive(); // Use adaptive styling
+    let style = MARKDOWN_STYLE.clone();
     let renderer = MarkdownRenderer::new(style);
     let components = renderer.parse_markdown(parsed_content.as_str())?;
     let lines = renderer.render_to_lines(components);
@@ -1767,7 +1780,7 @@ pub fn render_markdown_to_lines_with_width(
 ) -> Result<Vec<Line<'static>>, Box<dyn std::error::Error>> {
     let parsed_content = xml_tags_to_markdown_headers(markdown_content);
 
-    let style = MarkdownStyle::adaptive();
+    let style = MARKDOWN_STYLE.clone();
     let renderer = MarkdownRenderer::with_width(style, width);
     let components = renderer.parse_markdown(parsed_content.as_str())?;
     let lines = renderer.render_to_lines(components);
@@ -1775,15 +1788,15 @@ pub fn render_markdown_to_lines_with_width(
 }
 
 fn xml_tags_to_markdown_headers(input: &str) -> String {
-    // Use match to handle regex compilation errors gracefully
-    let tag_regex = match Regex::new(r"<([a-zA-Z_][a-zA-Z0-9_-]*)[^>]*>") {
-        Ok(regex) => regex,
-        Err(_) => return input.to_string(), // Return original input if regex fails
+    // Use cached regexes — compiled once on first call, then reused.
+    let tag_regex = match XML_TAG_REGEX.as_ref() {
+        Some(regex) => regex,
+        None => return input.to_string(), // Return original input if regex failed to compile
     };
 
-    let closing_tag_regex = match Regex::new(r"</([a-zA-Z_][a-zA-Z0-9_-]*)>") {
-        Ok(regex) => regex,
-        Err(_) => return input.to_string(), // Return original input if regex fails
+    let closing_tag_regex = match XML_CLOSING_TAG_REGEX.as_ref() {
+        Some(regex) => regex,
+        None => return input.to_string(), // Return original input if regex failed to compile
     };
 
     let mut result = input.to_string();

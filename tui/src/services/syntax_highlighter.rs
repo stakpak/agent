@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
@@ -5,7 +7,13 @@ use syntect::highlighting::{Color as SyntectColor, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-use crate::services::detect_term::{ThemeColors, is_light_mode, should_use_rgb_colors};
+use crate::services::detect_term::{is_light_mode, should_use_rgb_colors, ThemeColors};
+
+/// Cached syntax definitions — deserialized once from embedded binary data.
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+
+/// Cached syntax-highlighting themes — deserialized once from embedded binary data.
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 fn syntect_color_to_ratatui_color(syntect_color: SyntectColor) -> Color {
     if should_use_rgb_colors() {
@@ -18,8 +26,8 @@ fn syntect_color_to_ratatui_color(syntect_color: SyntectColor) -> Color {
 
 //  apply_syntax_highlighting -> takes string and optional extension and returns highlighted ratatui lines
 pub fn apply_syntax_highlighting(text: &str, extension: Option<&str>) -> Vec<Line<'static>> {
-    let syntax_set = SyntaxSet::load_defaults_newlines();
-    let theme_set = ThemeSet::load_defaults();
+    let syntax_set = &*SYNTAX_SET;
+    let theme_set = &*THEME_SET;
 
     // Select theme based on terminal background color
     // base16-ocean.light has darker colors suitable for light backgrounds
@@ -42,7 +50,7 @@ pub fn apply_syntax_highlighting(text: &str, extension: Option<&str>) -> Vec<Lin
 
     for line in LinesWithEndings::from(text) {
         let ranges = highlighter
-            .highlight_line(line, &syntax_set)
+            .highlight_line(line, syntax_set)
             .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
         let mut spans = Vec::new();
 
