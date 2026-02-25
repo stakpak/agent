@@ -464,15 +464,18 @@ impl ProfileConfig {
             self.recent_models = migrated;
         }
 
-        // Ensure the config model is in recent_models (at the end, not overriding order)
+        // Ensure the config model is in recent_models (at the end, not overriding order).
+        // Make room first so the config model isn't immediately truncated away.
         if let Some(ref model_str) = self.model {
             let (provider, model_id) = model_str
                 .split_once('/')
                 .unwrap_or((default_provider, model_str));
             let recent_id = format_recent_model_id(provider, model_id);
             if !self.recent_models.contains(&recent_id) {
+                // Truncate to MAX-1 so there's guaranteed room for the config model
+                self.recent_models
+                    .truncate(Self::MAX_RECENT_MODELS.saturating_sub(1));
                 self.recent_models.push(recent_id);
-                self.recent_models.truncate(Self::MAX_RECENT_MODELS);
                 changed = true;
             }
         }

@@ -252,6 +252,10 @@ impl AppConfig {
                 profile.migrate_model_fields();
                 any_migrated = true;
             }
+            // Normalize old-format recent_models entries and persist to disk
+            if profile.migrate_recent_models() {
+                any_migrated = true;
+            }
         }
 
         // Ensure editor setting has a default value

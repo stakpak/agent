@@ -912,9 +912,10 @@ pub fn ensure_custom_models_in_available(state: &mut AppState) {
         .iter()
         .filter(|recent_id| {
             // Check if any available model matches this recent ID when normalized
-            !state.available_models.iter().any(|m| {
-                format_recent_model_id(&m.provider, &m.id) == **recent_id
-            })
+            !state
+                .available_models
+                .iter()
+                .any(|m| format_recent_model_id(&m.provider, &m.id) == **recent_id)
         })
         .map(|recent_id| {
             // Parse "provider/short_name" format
