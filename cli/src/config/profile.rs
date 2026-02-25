@@ -413,6 +413,72 @@ impl ProfileConfig {
         // Truncate to max size
         self.recent_models.truncate(Self::MAX_RECENT_MODELS);
     }
+
+    /// Migrate old-format `recent_models` entries to normalized `"provider/short_name"` format.
+    ///
+    /// Old entries may be bare model names like `"glm-4.6"` or `"claude-sonnet-4-6"` without
+    /// a provider prefix. Bare entries whose short name already appears in a prefixed entry
+    /// are dropped (they're duplicates). Remaining bare entries are prefixed with the
+    /// config `model` field's provider, or `"stakpak"` as a fallback.
+    ///
+    /// Also ensures the config `model` field is represented in `recent_models`.
+    /// Returns true if any entries were modified.
+    pub fn migrate_recent_models(&mut self) -> bool {
+        let mut changed = false;
+
+        // Determine default provider from the config model field (e.g., "z/glm-4.6" -> "z")
+        let default_provider = self
+            .model
+            .as_deref()
+            .and_then(|m| m.find('/').map(|idx| &m[..idx]))
+            .unwrap_or("stakpak");
+
+        // Collect the short names that already have a prefixed entry
+        let prefixed_short_names: Vec<String> = self
+            .recent_models
+            .iter()
+            .filter(|id| id.contains('/'))
+            .filter_map(|id| id.rsplit('/').next().map(|s| s.to_string()))
+            .collect();
+
+        // Normalize: drop bare entries that duplicate a prefixed one,
+        // prefix remaining bare entries with the default provider
+        let migrated: Vec<String> = self
+            .recent_models
+            .iter()
+            .filter_map(|id| {
+                if id.contains('/') {
+                    Some(id.clone())
+                } else if prefixed_short_names.iter().any(|s| s == id) {
+                    // Bare entry duplicates an existing prefixed entry — drop it
+                    changed = true;
+                    None
+                } else {
+                    changed = true;
+                    Some(format!("{}/{}", default_provider, id))
+                }
+            })
+            .collect();
+
+        if changed {
+            self.recent_models = migrated;
+        }
+
+        // Ensure the config model is in recent_models (at the end, not overriding order)
+        if let Some(ref model_str) = self.model {
+            let (provider, model_id) = model_str
+                .split_once('/')
+                .unwrap_or((default_provider, model_str));
+            let recent_id = format_recent_model_id(provider, model_id);
+            if !self.recent_models.contains(&recent_id) {
+                self.recent_models.push(recent_id);
+                self.recent_models.truncate(Self::MAX_RECENT_MODELS);
+                changed = true;
+            }
+        }
+
+        changed
+    }
 }
 
 /// Format a model's provider and ID into the normalized `"provider/short_name"`

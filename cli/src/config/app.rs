@@ -138,6 +138,8 @@ impl AppConfig {
         profile_config.migrate_legacy_providers();
         // Migrate any legacy model fields to unified 'model' field
         profile_config.migrate_model_fields();
+        // Normalize old-format recent_models entries and ensure config model is included
+        profile_config.migrate_recent_models();
 
         AppConfig {
             api_endpoint: std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
