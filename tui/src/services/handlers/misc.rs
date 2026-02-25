@@ -5,14 +5,14 @@
 use crate::app::{AppState, InputEvent};
 use crate::services::bash_block::render_bash_block_rejected;
 use crate::services::board_tasks::{
-    extract_board_agent_id_from_messages, fetch_tasks_as_todo_items, FetchTasksResult,
+    FetchTasksResult, extract_board_agent_id_from_messages, fetch_tasks_as_todo_items,
 };
 use crate::services::commands::list_auto_approved_tools;
 use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{handle_errors, push_error_message, push_styled_message};
-use crate::services::message::get_wrapped_collapsed_message_lines_cached;
 use crate::services::message::Message;
+use crate::services::message::get_wrapped_collapsed_message_lines_cached;
 use ratatui::layout::Size;
 use stakai::Model;
 use uuid::Uuid;
@@ -279,7 +279,7 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
 
     state.sessions = sessions;
     state.session_selected = 0; // Reset selection to first item
-                                // Open unified popup at Sessions tab instead of separate sessions dialog
+    // Open unified popup at Sessions tab instead of separate sessions dialog
     state.show_shortcuts_popup = true;
     state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
 }
