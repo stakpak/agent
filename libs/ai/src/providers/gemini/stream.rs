@@ -160,14 +160,13 @@ fn parse_sse_event_data(event_data: &str) -> Result<Option<GeminiResponse>> {
         return Ok(None);
     }
 
-    serde_json::from_str::<GeminiResponse>(payload)
-        .map(Some)
-        .map_err(|e| {
-            Error::stream_error(format!(
-                "Failed to parse Gemini SSE payload: {}. Payload: {}",
-                e, payload
-            ))
-        })
+    match serde_json::from_str::<GeminiResponse>(payload) {
+        Ok(resp) => Ok(Some(resp)),
+        Err(_) => Err(Error::from_unparseable_chunk(
+            payload,
+            "Failed to parse Gemini SSE payload",
+        )),
+    }
 }
 
 /// Process Gemini response and convert to unified StreamEvent

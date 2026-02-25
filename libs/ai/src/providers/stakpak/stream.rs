@@ -148,8 +148,15 @@ fn parse_chunk(
     accumulated_usage: &mut Option<Usage>,
     tool_calls: &mut std::collections::HashMap<u32, ToolCallState>,
 ) -> Result<Vec<StreamEvent>> {
-    let chunk: StakpakChunk = serde_json::from_str(data)
-        .map_err(|e| Error::invalid_response(format!("Failed to parse chunk: {}", e)))?;
+    let chunk: StakpakChunk = match serde_json::from_str(data) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(Error::from_unparseable_chunk(
+                data,
+                "Failed to parse Stakpak chunk",
+            ));
+        }
+    };
 
     // Capture usage with cache token details
     if let Some(usage) = &chunk.usage {
