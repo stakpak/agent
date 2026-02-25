@@ -518,6 +518,32 @@ impl ScheduleConfig {
         expand_tilde(&self.watch.log_dir)
     }
 
+    /// Inject runtime-generated gateway credentials into the notification config.
+    ///
+    /// The gateway auth token is generated fresh each `stakpak up` and never
+    /// persisted to disk.  Without this patch the scheduler would read a stale
+    /// (or absent) `gateway_token` from `autopilot.toml` and get 401s on every
+    /// `POST /v1/gateway/send` call.
+    ///
+    /// This must be called after every config load (initial *and* hot-reload)
+    /// so that the in-memory config always carries the current runtime token.
+    pub fn apply_runtime_gateway_credentials(&mut self, url: &str, token: &str) {
+        if let Some(ref mut notifications) = self.notifications {
+            // Always override the token — disk value is never authoritative.
+            // Trim to avoid storing whitespace-only tokens that would cause
+            // auth failures downstream (symmetric with the URL path below).
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                notifications.gateway_token = Some(trimmed.to_string());
+            }
+            // Fill the URL only when missing/empty; the user may have set a
+            // custom external gateway URL that should be preserved.
+            if notifications.gateway_url.trim().is_empty() {
+                notifications.gateway_url = url.to_string();
+            }
+        }
+    }
+
     /// True when notifications are configured to local loopback gateway URL.
     pub fn notifications_points_to_local_loopback(&self) -> bool {
         let Some(notifications) = &self.notifications else {
@@ -1002,5 +1028,234 @@ interaction = "silent"
 
         let config = ScheduleConfig::parse(config_str).expect("config should parse");
         assert_eq!(config.schedules[0].interaction, InteractionMode::Silent);
+    }
+
+    // ========================================================================
+    // apply_runtime_gateway_credentials tests
+    // ========================================================================
+
+    fn config_with_notifications(gateway_url: &str, gateway_token: Option<&str>) -> ScheduleConfig {
+        let config_str = format!(
+            r##"
+[notifications]
+gateway_url = "{gateway_url}"
+channel = "slack"
+chat_id = "#ops"
+
+[[schedules]]
+name = "test"
+cron = "0 * * * *"
+prompt = "test"
+"##,
+        );
+        let mut config = ScheduleConfig::parse(&config_str).expect("config should parse");
+        if let Some(ref mut n) = config.notifications {
+            n.gateway_token = gateway_token.map(String::from);
+        }
+        config
+    }
+
+    fn config_without_notifications() -> ScheduleConfig {
+        let config_str = r##"
+[[schedules]]
+name = "test"
+cron = "0 * * * *"
+prompt = "test"
+"##;
+        ScheduleConfig::parse(config_str).expect("config should parse")
+    }
+
+    #[test]
+    fn test_apply_credentials_injects_token_when_missing() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+        assert!(
+            config
+                .notifications
+                .as_ref()
+                .expect("notifications should exist")
+                .gateway_token
+                .is_none()
+        );
+
+        config
+            .apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-secret-token-abc");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-secret-token-abc"),
+            "runtime token should be injected"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_overwrites_stale_disk_token() {
+        let mut config = config_with_notifications(
+            "http://127.0.0.1:4096",
+            Some("stale-token-from-previous-run"),
+        );
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "fresh-runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("fresh-runtime-token"),
+            "stale disk token should be overwritten by runtime token"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_preserves_custom_gateway_url() {
+        let custom_url = "https://gateway.example.com";
+        let mut config = config_with_notifications(custom_url, None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, custom_url,
+            "user-configured external gateway URL should not be overwritten"
+        );
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token"),
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_fills_empty_gateway_url() {
+        let mut config = config_with_notifications("", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:5555", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, "http://127.0.0.1:5555",
+            "empty gateway_url should be filled from runtime"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_fills_whitespace_only_gateway_url() {
+        let config_str = r##"
+[notifications]
+gateway_url = "   "
+channel = "slack"
+chat_id = "#ops"
+
+[[schedules]]
+name = "test"
+cron = "0 * * * *"
+prompt = "test"
+"##;
+        let mut config = ScheduleConfig::parse(config_str).expect("config should parse");
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, "http://127.0.0.1:4096",
+            "whitespace-only gateway_url should be replaced"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_noop_without_notifications_section() {
+        let mut config = config_without_notifications();
+        assert!(config.notifications.is_none());
+
+        // Should not panic or create a notifications section.
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+
+        assert!(
+            config.notifications.is_none(),
+            "should not fabricate a notifications section"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_skips_empty_runtime_token() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", Some("existing-token"));
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("existing-token"),
+            "empty runtime token should not overwrite an existing token"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_skips_whitespace_only_runtime_token() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", Some("existing-token"));
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "   ");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("existing-token"),
+            "whitespace-only runtime token should not overwrite an existing token"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_trims_runtime_token() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "  runtime-token  ");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token"),
+            "stored token should be trimmed"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_skips_empty_runtime_token_when_disk_token_absent() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert!(
+            notifications.gateway_token.is_none(),
+            "empty runtime token should not inject a Some(\"\")"
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_idempotent() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token"),
+        );
+        assert_eq!(notifications.gateway_url, "http://127.0.0.1:4096",);
+    }
+
+    #[test]
+    fn test_apply_credentials_preserves_notification_fields() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4096", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(notifications.channel.as_deref(), Some("slack"));
+        assert_eq!(notifications.chat_id.as_deref(), Some("#ops"));
+        assert!(
+            notifications.notify_on.is_none(),
+            "unrelated fields should not be mutated"
+        );
     }
 }
