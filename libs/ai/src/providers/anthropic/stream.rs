@@ -51,8 +51,8 @@ pub async fn create_stream(mut event_source: EventSource) -> Result<GenerateStre
                                 yield Ok(stream_event);
                             }
                         }
-                        Err(e) => {
-                            yield Err(Error::stream_error(format!("Failed to parse event: {}", e)));
+                        Err(_) => {
+                            yield Err(Error::from_unparseable_chunk(&message.data, "Failed to parse Anthropic event"));
                             break;
                         }
                     }
