@@ -142,8 +142,14 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Backend events (streaming, loading, tool results, etc.) must always reach
+    // their handlers — popup interceptors must never consume them. Skip all popup
+    // interception for these events so the message pipeline keeps flowing even
+    // when a popup (model switcher, file changes, plan review, etc.) is open.
+    let skip_popup_interception = event.is_backend_event();
+
     // Intercept keys for Message Action Popup
-    if state.show_message_action_popup {
+    if state.show_message_action_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_message_action_popup_close(state);
@@ -177,7 +183,7 @@ pub fn update(
     }
 
     // Intercept keys for "existing plan found" modal
-    if state.existing_plan_prompt.is_some() {
+    if state.existing_plan_prompt.is_some() && !skip_popup_interception {
         match event {
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
@@ -212,7 +218,7 @@ pub fn update(
     }
 
     // Intercept keys for Plan Review overlay
-    if state.show_plan_review {
+    if state.show_plan_review && !skip_popup_interception {
         // Sub-intercept: comment modal is open
         if state.plan_review_show_comment_modal {
             match event {
@@ -353,7 +359,7 @@ pub fn update(
     }
 
     // Intercept keys for File Changes Popup
-    if state.show_file_changes_popup {
+    if state.show_file_changes_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_file_changes_popup_cancel(state);
@@ -410,7 +416,7 @@ pub fn update(
     // ↑/↓ navigate options; at boundary they fall through to scroll.
     // ←/→ switch question tabs (except in custom input).
     // Enter selects/toggles. Esc cancels.
-    if state.show_ask_user_popup {
+    if state.show_ask_user_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc | InputEvent::AskUserCancel => {
                 ask_user::handle_ask_user_cancel(state, output_tx);
@@ -542,7 +548,7 @@ pub fn update(
     }
 
     // Intercept keys for Model Switcher Popup
-    if state.show_model_switcher {
+    if state.show_model_switcher && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_model_switcher_cancel(state);
