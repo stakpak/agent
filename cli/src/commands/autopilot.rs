@@ -223,7 +223,7 @@ pub enum AutopilotChannelCommands {
 
     /// Add a channel
     #[command(
-        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add Bot Token Scopes:\n       app_mentions:read, channels:history, channels:read, chat:write,\n       groups:history, groups:read, im:history, im:read,\n       mpim:history, mpim:read, reactions:read, reactions:write\n    4. Event Subscriptions → subscribe to bot events:\n       message.channels, message.groups, message.im, app_mention\n    5. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/chat_id for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
+        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n\n    RECOMMENDED: Use the app manifest for quick setup:\n    1. Go to https://api.slack.com/apps → Create New App → From an app manifest\n    2. Paste the manifest from: https://github.com/stakpak/agent/blob/main/libs/gateway/src/channels/slack-manifest.yaml\n    3. Basic Information → App-Level Tokens → generate token with connections:write scope (xapp-...)\n    4. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n    Manual setup (if you already have an app):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add Bot Token Scopes:\n       app_mentions:read, channels:history, channels:read, chat:write,\n       groups:history, groups:read, im:history, im:read,\n       mpim:history, mpim:read, reactions:read, reactions:write\n    4. Event Subscriptions → subscribe to bot events:\n       message.channels, message.groups, message.im, app_mention\n    5. Interactivity & Shortcuts → enable\n    6. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/chat_id for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
     )]
     Add {
         /// Channel type (slack, telegram, discord)
@@ -747,6 +747,11 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
             println!();
             println!("Channels let autopilot talk to you on Slack, Telegram, or Discord.");
             println!("You can add them now or later with: stakpak autopilot channel add");
+            println!();
+            println!("  Slack quick setup: use the app manifest at");
+            println!(
+                "  https://github.com/stakpak/agent/blob/main/libs/gateway/src/channels/slack-manifest.yaml"
+            );
             println!();
         }
     }

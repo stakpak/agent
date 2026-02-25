@@ -461,6 +461,67 @@ stakpak autopilot channel add telegram --token $TELEGRAM_BOT_TOKEN
 stakpak autopilot channel add discord --token $DISCORD_BOT_TOKEN
 ```
 
+### Slack App Setup (recommended: use manifest)
+When helping users set up a Slack channel, **always recommend the manifest-based approach** — it's faster and less error-prone than manual scope/event configuration.
+
+**Steps to guide users through:**
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**
+2. Select the target workspace
+3. Paste the following Slack App Manifest YAML:
+
+```yaml
+display_information:
+  name: Stakpak
+  description: AI agent for infrastructure operations
+  background_color: "#1a1a2e"
+
+features:
+  bot_user:
+    display_name: Stakpak
+    always_online: true
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - reactions:read
+      - reactions:write
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - app_mentions:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - app_mention
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+4. Review and create the app
+5. **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope → this is the `xapp-*` token
+6. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-*`)
+7. Run: `stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"`
+8. Verify: `stakpak autopilot channel test`
+
+**If the user already has a Slack app** and just needs to fix permissions, direct them to add the missing scopes under OAuth & Permissions and re-install the app.
+
 **IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
 
 **Production trust model:** When setting up autopilot on production servers, recommend starting with **read-only IAM permissions** (e.g., `ReadOnlyAccess`, `ViewOnlyAccess`, or equivalent). This lets the user build confidence in autopilot's behavior before granting write access. Escalate permissions only after the user explicitly requests mutating actions (e.g., auto-remediation, scaling).
