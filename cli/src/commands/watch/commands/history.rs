@@ -50,10 +50,10 @@ pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Re
     }
 
     println!(
-        "{:<6} {:<20} {:<20} {:<12} {:<20} SESSION",
-        "ID", "SCHEDULE", "STARTED", "STATUS", "FINISHED"
+        "{:<6} {:<20} {:<20} {:<12} {:<8} {:<20} SESSION",
+        "ID", "SCHEDULE", "STARTED", "STATUS", "SANDBOX", "FINISHED"
     );
-    println!("{}", "-".repeat(100));
+    println!("{}", "-".repeat(108));
 
     for run in runs {
         let status_str = format_status(&run.status);
@@ -67,12 +67,21 @@ pub async fn show_history(schedule_name: Option<&str>, limit: Option<u32>) -> Re
             .map(|s| truncate(s, 20))
             .unwrap_or_else(|| "-".to_string());
 
+        // Look up the schedule config to determine if sandbox was enabled
+        let sandbox_enabled = config
+            .schedules
+            .iter()
+            .find(|s| s.name == run.schedule_name)
+            .map(|s| s.effective_sandbox(&config.defaults))
+            .unwrap_or(false);
+
         println!(
-            "{:<6} {:<20} {:<20} {:<12} {:<20} {}",
+            "{:<6} {:<20} {:<20} {:<12} {:<8} {:<20} {}",
             run.id,
             truncate(&run.schedule_name, 20),
             format_datetime(&run.started_at),
             status_str,
+            if sandbox_enabled { "yes" } else { "no" },
             finished_str,
             session_str
         );
@@ -114,6 +123,14 @@ pub async fn show_run(run_id: i64) -> Result<(), String> {
     println!("\x1b[1mRun #{}\x1b[0m", run.id);
     println!();
     println!("Schedule:   {}", run.schedule_name);
+    // Show whether this schedule runs in sandbox mode
+    let sandbox_enabled = config
+        .schedules
+        .iter()
+        .find(|s| s.name == run.schedule_name)
+        .map(|s| s.effective_sandbox(&config.defaults))
+        .unwrap_or(false);
+    println!("Sandbox:    {}", if sandbox_enabled { "yes" } else { "no" });
     println!("Status:     {}", format_status(&run.status));
     println!("Started:    {}", format_datetime(&run.started_at));
     if let Some(finished) = run.finished_at {

@@ -293,6 +293,7 @@ impl AutopilotCommands {
                         from_service,
                         non_interactive: args.non_interactive,
                         force: args.force,
+                        sandbox_mode: stakpak_server::SandboxMode::default(),
                     },
                 )
                 .await
@@ -325,6 +326,7 @@ struct StartOptions {
     from_service: bool,
     non_interactive: bool,
     force: bool,
+    sandbox_mode: stakpak_server::SandboxMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -347,6 +349,10 @@ struct AutopilotServerConfig {
     model: Option<String>,
     #[serde(default)]
     auto_approve_all: bool,
+    /// Controls sandbox container lifecycle: "ephemeral" (default) spawns a new
+    /// container per session; "persistent" spawns once at startup and reuses it.
+    #[serde(default)]
+    sandbox_mode: stakpak_server::SandboxMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,6 +386,7 @@ impl Default for AutopilotServerConfig {
             no_auth: false,
             model: None,
             auto_approve_all: false,
+            sandbox_mode: stakpak_server::SandboxMode::default(),
         }
     }
 }
@@ -570,6 +577,7 @@ impl StartOptions {
         self.no_auth = server.no_auth;
         self.model = server.model.clone();
         self.auto_approve_all = server.auto_approve_all;
+        self.sandbox_mode = server.sandbox_mode.clone();
         self
     }
 
@@ -584,12 +592,21 @@ impl StartOptions {
 
 impl AutopilotServerConfig {
     fn from_start_options(options: &StartOptions) -> Self {
+        // Load existing config to preserve fields that are only set via config
+        // file (not CLI flags). CLI flags at their default value should NOT
+        // overwrite explicitly-set config values.
+        let existing = AutopilotConfigFile::load_or_default()
+            .map(|c| c.server)
+            .unwrap_or_default();
         Self {
             listen: options.bind.clone(),
             show_token: options.show_token,
             no_auth: options.no_auth,
             model: options.model.clone(),
-            auto_approve_all: options.auto_approve_all,
+            // Preserve auto_approve_all from config when CLI flag is at default (false).
+            // Only override if the user explicitly passed --auto-approve-all.
+            auto_approve_all: options.auto_approve_all || existing.auto_approve_all,
+            sandbox_mode: existing.sandbox_mode,
         }
     }
 }
@@ -605,6 +622,7 @@ struct AutopilotStatusJson {
     service: ServiceStatusJson,
     server: EndpointStatusJson,
     gateway: EndpointStatusJson,
+    sandbox: SandboxStatusJson,
     scheduler: SchedulerStatusJson,
     schedules: Vec<AutopilotScheduleStatusJson>,
     channels: Vec<AutopilotChannelStatusJson>,
@@ -622,6 +640,16 @@ struct EndpointStatusJson {
     expected_enabled: bool,
     reachable: bool,
     url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SandboxStatusJson {
+    mode: String,
+    healthy: Option<bool>,
+    consecutive_ok: Option<u64>,
+    consecutive_failures: Option<u64>,
+    last_ok: Option<String>,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -653,6 +681,7 @@ struct AutopilotScheduleStatusJson {
     name: String,
     cron: String,
     enabled: bool,
+    sandbox: bool,
     next_run: Option<String>,
 }
 
@@ -791,6 +820,58 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
     }
 
     start_autopilot_service()?;
+
+    // Wait for the server (and persistent sandbox if configured) to be ready
+    // before printing the status summary. This ensures `stakpak up` only returns
+    // once the autopilot is fully operational.
+    let base_url = format!("http://{}", effective_server.listen);
+    let health_url = format!("{base_url}/v1/health");
+    let expects_sandbox = effective_server.sandbox_mode == stakpak_server::SandboxMode::Persistent;
+    let max_wait = std::time::Duration::from_secs(90);
+    let poll_interval = std::time::Duration::from_millis(500);
+    let start = std::time::Instant::now();
+
+    print!("  Waiting for autopilot to be ready...");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+    let ready = loop {
+        if start.elapsed() > max_wait {
+            break false;
+        }
+        tokio::time::sleep(poll_interval).await;
+
+        let Ok(resp) = reqwest::get(&health_url).await else {
+            continue;
+        };
+        let Ok(body) = resp.json::<serde_json::Value>().await else {
+            continue;
+        };
+
+        if expects_sandbox {
+            // Persistent sandbox is required — wait until it reports healthy
+            if let Some(sandbox) = body.get("sandbox")
+                && sandbox.get("healthy").and_then(|v| v.as_bool()) == Some(true)
+            {
+                break true;
+            }
+            // Sandbox not yet reported or not healthy — keep waiting
+            continue;
+        }
+
+        // No sandbox expected — server health is enough
+        break true;
+    };
+
+    if ready {
+        println!(" ready ✓");
+    } else {
+        println!(" timed out waiting for autopilot to become healthy");
+        println!();
+        println!("  Troubleshoot:");
+        println!("    stakpak autopilot logs -c server    View server logs");
+        println!("    stakpak autopilot status            Check component health");
+        println!("    docker ps                           Verify sandbox container");
+    }
 
     // Clean post-start status summary
     let schedule_count = saved_config.schedules.len();
@@ -1069,13 +1150,29 @@ async fn start_foreground_runtime(
     let volumes = crate::commands::warden::prepare_volumes(config, false);
     // Pre-create named volumes to prevent race conditions when parallel sandboxes start
     stakpak_shared::container::ensure_named_volumes_exist();
+
+    let sandbox_mode = &options.sandbox_mode;
+
     let sandbox_config = stakpak_server::SandboxConfig {
         warden_path,
         image: stakpak_image.clone(),
         volumes,
+        mode: sandbox_mode.clone(),
     };
-    tracing::info!(image = %stakpak_image, warden = %sandbox_config.warden_path, "Sandbox config initialized");
-    let app_state = app_state.with_sandbox(sandbox_config);
+    tracing::info!(image = %stakpak_image, mode = %sandbox_mode, warden = %sandbox_config.warden_path, "Sandbox config initialized");
+    let app_state = app_state.with_sandbox(sandbox_config.clone());
+
+    // If persistent mode, spawn the sandbox now so sessions get near-zero startup overhead.
+    // This is a hard requirement — if the sandbox fails to start, the server cannot operate.
+    let app_state = if *sandbox_mode == stakpak_server::SandboxMode::Persistent {
+        tracing::info!("Persistent sandbox mode: spawning sandbox at startup");
+        let persistent = stakpak_server::PersistentSandbox::spawn(&sandbox_config)
+            .await
+            .map_err(|e| format!("Failed to spawn persistent sandbox: {e}. The server requires a healthy sandbox to operate. Check Docker is running and the image is available."))?;
+        app_state.with_persistent_sandbox(persistent)
+    } else {
+        app_state
+    };
 
     // --- 2. Loopback connection for schedule + gateway runtimes ---
     let loopback_url = loopback_server_url(listener_addr);
@@ -1242,6 +1339,11 @@ async fn start_foreground_runtime(
         }
         if let Some(tx) = shutdown_state.mcp_proxy_shutdown_tx.as_ref() {
             let _ = tx.send(());
+        }
+
+        // Kill the persistent sandbox container (if one is running)
+        if let Some(ref sandbox) = shutdown_state.persistent_sandbox {
+            sandbox.kill().await;
         }
     };
 
@@ -1451,55 +1553,41 @@ fn expand_gateway_approval_allowlist(tools: &[String]) -> Vec<String> {
 async fn stop_autopilot() -> Result<(), String> {
     let mut stopped = false;
 
-    // Stop and uninstall the system service
-    if autopilot_service_installed() {
-        // Ignore errors from stop — service might not be running
-        let _ = stop_autopilot_service();
-        uninstall_autopilot_service()?;
-        stopped = true;
-        println!("✓ Autopilot service stopped and uninstalled");
-    }
-
-    // Also kill any foreground process via PID file
+    // First, gracefully stop the process via PID file. This triggers the
+    // shutdown handler which tears down warden + Docker containers cleanly.
+    // We do this BEFORE uninstalling the service to avoid launchctl/systemd
+    // force-killing the process tree before cleanup finishes.
     if let Some(pid) = is_autopilot_running() {
         #[cfg(unix)]
         {
-            // Send SIGTERM to the entire process group to kill child processes too
-            // Try negative PID first (process group), fall back to single PID
-            let pgid_result = std::process::Command::new("kill")
+            // Send SIGTERM to the autopilot process only (not the process group).
+            // The autopilot's graceful shutdown handler will SIGTERM warden, which
+            // in turn cleans up its Docker containers before exiting. Killing the
+            // whole process group would race warden's cleanup.
+            let _ = std::process::Command::new("kill")
                 .arg("-TERM")
-                .arg(format!("-{}", pid))
+                .arg(pid.to_string())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
-
-            // If process group kill failed (e.g., not a group leader), kill the process directly
-            if pgid_result.is_err() || !pgid_result.unwrap_or_default().success() {
-                let _ = std::process::Command::new("kill")
-                    .arg("-TERM")
-                    .arg(pid.to_string())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-            }
         }
         #[cfg(windows)]
         {
-            // /T flag kills the process tree (parent + children)
             let _ = std::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T"])
+                .args(["/PID", &pid.to_string()])
                 .status();
         }
 
-        // Wait briefly for process to exit
-        for _ in 0..10 {
+        // Wait for the process to exit — give enough time for the graceful
+        // shutdown handler to tear down warden + Docker containers (~10s).
+        for _ in 0..50 {
             if !crate::commands::watch::is_process_running(pid) {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
 
-        // If still running after SIGTERM, force kill
+        // If still running after SIGTERM, force kill the process group
         if crate::commands::watch::is_process_running(pid) {
             #[cfg(unix)]
             {
@@ -1538,10 +1626,23 @@ async fn stop_autopilot() -> Result<(), String> {
             }
         }
 
-        if !stopped {
-            println!("✓ Autopilot process stopped (PID {})", pid);
-        }
         stopped = true;
+    }
+
+    // Now that the process has exited cleanly, uninstall the system service.
+    // This is safe because the process is already gone — launchctl/systemd
+    // won't force-kill anything.
+    if autopilot_service_installed() {
+        // stop_autopilot_service is a no-op if the process is already gone,
+        // but call it for completeness (systemd may need it).
+        let _ = stop_autopilot_service();
+        uninstall_autopilot_service()?;
+        if !stopped {
+            stopped = true;
+        }
+        println!("✓ Autopilot service stopped and uninstalled");
+    } else if stopped {
+        println!("✓ Autopilot process stopped");
     }
 
     if !stopped {
@@ -1952,15 +2053,15 @@ async fn list_schedules() -> Result<(), String> {
     }
 
     println!(
-        "{:<20} {:<16} {:<10} {:<24}",
-        "NAME", "CRON", "STATUS", "NEXT RUN"
+        "{:<20} {:<16} {:<10} {:<8} {:<24}",
+        "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN"
     );
 
     for schedule in &config.schedules {
         let next_run =
             next_run_for_cron(&schedule.cron, schedule.enabled).unwrap_or_else(|| "-".to_string());
         println!(
-            "{:<20} {:<16} {:<10} {:<24}",
+            "{:<20} {:<16} {:<10} {:<8} {:<24}",
             truncate_text(&schedule.name, 20),
             truncate_text(&schedule.cron, 16),
             if schedule.enabled {
@@ -1968,6 +2069,7 @@ async fn list_schedules() -> Result<(), String> {
             } else {
                 "disabled"
             },
+            if schedule.sandbox { "yes" } else { "no" },
             truncate_text(&next_run, 24)
         );
     }
@@ -2202,11 +2304,50 @@ async fn status_autopilot(
     };
 
     let server_url = format!("{}/v1/health", base_url);
-    let server_reachable = if let Some(client) = probe_client.as_ref() {
-        endpoint_ok(client, &server_url).await
+    let (server_reachable, sandbox_health) = if let Some(client) = probe_client.as_ref() {
+        match client.get(&server_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                // Try to parse sandbox health from the response body
+                let sandbox = resp
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| v.get("sandbox").cloned())
+                    .and_then(|s| {
+                        Some(SandboxStatusJson {
+                            mode: s.get("mode")?.as_str()?.to_string(),
+                            healthy: s.get("healthy")?.as_bool(),
+                            consecutive_ok: s.get("consecutive_ok")?.as_u64(),
+                            consecutive_failures: s.get("consecutive_failures")?.as_u64(),
+                            last_ok: s.get("last_ok").and_then(|v| v.as_str()).map(String::from),
+                            last_error: s
+                                .get("last_error")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                        })
+                    });
+                (true, sandbox)
+            }
+            _ => (false, None),
+        }
     } else {
-        false
+        (false, None)
     };
+
+    // Build sandbox status: use live health data if available, otherwise fall back to config
+    let sandbox = sandbox_health.unwrap_or(SandboxStatusJson {
+        mode: server_config.sandbox_mode.to_string(),
+        healthy: None,
+        consecutive_ok: None,
+        consecutive_failures: None,
+        last_ok: None,
+        last_error: if server_reachable {
+            None
+        } else {
+            Some("Server unreachable — cannot determine sandbox health".to_string())
+        },
+    });
+
     let server = EndpointStatusJson {
         expected_enabled: true,
         reachable: server_reachable,
@@ -2238,6 +2379,7 @@ async fn status_autopilot(
             service,
             server,
             gateway,
+            sandbox,
             scheduler,
             schedules,
             channels,
@@ -2281,6 +2423,17 @@ async fn status_autopilot(
         "  Tools           {}",
         describe_tool_policy(&resolved_tool_policy)
     );
+    // Sandbox status
+    let sandbox_display = match (sandbox.healthy, sandbox.mode.as_str()) {
+        (Some(true), mode) => format!("✓ healthy ({mode})"),
+        (Some(false), mode) => {
+            let err = sandbox.last_error.as_deref().unwrap_or("unknown error");
+            format!("✗ unhealthy ({mode}) — {err}")
+        }
+        (None, mode) if server_reachable => format!("- {mode} (no health data)"),
+        (None, mode) => format!("- {mode} (server unreachable)"),
+    };
+    println!("  Sandbox         {sandbox_display}");
 
     // Scheduler status
     let config_exists = AutopilotConfigFile::path().exists();
@@ -2310,12 +2463,12 @@ async fn status_autopilot(
         println!();
         println!("  Schedules:");
         println!(
-            "    {:<20} {:<16} {:<10} {:<20}",
-            "NAME", "CRON", "STATUS", "NEXT RUN"
+            "    {:<20} {:<16} {:<10} {:<8} {:<20}",
+            "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN"
         );
         for schedule in &schedules {
             println!(
-                "    {:<20} {:<16} {:<10} {:<20}",
+                "    {:<20} {:<16} {:<10} {:<8} {:<20}",
                 truncate_text(&schedule.name, 20),
                 truncate_text(&schedule.cron, 16),
                 if schedule.enabled {
@@ -2323,6 +2476,7 @@ async fn status_autopilot(
                 } else {
                     "disabled"
                 },
+                if schedule.sandbox { "yes" } else { "no" },
                 schedule.next_run.as_deref().unwrap_or("-")
             );
         }
@@ -2741,6 +2895,7 @@ fn build_schedule_statuses(
             name: schedule.name.clone(),
             cron: schedule.cron.clone(),
             enabled: schedule.enabled,
+            sandbox: schedule.sandbox,
             next_run: next_run_for_cron(&schedule.cron, schedule.enabled),
         })
         .collect()
@@ -3870,6 +4025,14 @@ app_token = "xapp-test"
                 reachable: false,
                 url: "http://127.0.0.1:4096/v1/gateway/status".to_string(),
             },
+            sandbox: SandboxStatusJson {
+                mode: "persistent".to_string(),
+                healthy: Some(true),
+                consecutive_ok: Some(42),
+                consecutive_failures: Some(0),
+                last_ok: Some("2026-01-01T00:00:00Z".to_string()),
+                last_error: None,
+            },
             scheduler: SchedulerStatusJson {
                 expected_enabled: true,
                 config_path: "/tmp/autopilot.toml".to_string(),
@@ -3893,6 +4056,7 @@ app_token = "xapp-test"
                 name: "health-check".to_string(),
                 cron: "*/5 * * * *".to_string(),
                 enabled: true,
+                sandbox: false,
                 next_run: Some("2026-01-01 00:05".to_string()),
             }],
             channels: vec![AutopilotChannelStatusJson {
@@ -3917,9 +4081,22 @@ app_token = "xapp-test"
             assert!(value.get("service").is_some());
             assert!(value.get("server").is_some());
             assert!(value.get("gateway").is_some());
+            assert!(value.get("sandbox").is_some());
             assert!(value.get("scheduler").is_some());
             assert!(value.get("schedules").is_some());
             assert!(value.get("channels").is_some());
+
+            // Verify sandbox fields
+            let sandbox = value.get("sandbox").expect("sandbox field");
+            assert_eq!(
+                sandbox.get("mode").and_then(|v| v.as_str()),
+                Some("persistent")
+            );
+            assert_eq!(sandbox.get("healthy").and_then(|v| v.as_bool()), Some(true));
+            assert_eq!(
+                sandbox.get("consecutive_ok").and_then(|v| v.as_u64()),
+                Some(42)
+            );
 
             let scheduler_runs = value
                 .get("scheduler")

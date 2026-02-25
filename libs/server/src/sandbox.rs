@@ -1,4 +1,4 @@
-//! Per-session sandboxed MCP server management.
+//! Sandboxed MCP server management.
 //!
 //! When sandbox mode is enabled for a session, a `stakpak mcp start` server
 //! is spawned inside a warden container. The host-side proxy connects to it
@@ -6,7 +6,18 @@
 //! containerized server — executing `run_command`, file I/O, etc. inside the
 //! sandbox.
 //!
-//! **mTLS key exchange** — each side generates its own identity independently:
+//! ## Sandbox Modes
+//!
+//! - **Ephemeral** (default): A new sandbox container is spawned for each session
+//!   and destroyed when the session ends. Maximum isolation, ~5-10s startup overhead.
+//!
+//! - **Persistent**: A single sandbox container is spawned at process startup and
+//!   reused across all sessions. Near-zero per-session overhead, slightly less
+//!   isolation (sessions share the same container filesystem).
+//!
+//! ## mTLS key exchange
+//!
+//! Each side generates its own identity independently:
 //!
 //! 1. Host generates a client identity (CA + leaf cert + key, all in memory)
 //! 2. Host passes the client **CA cert** (public only) to the container via env var
@@ -16,6 +27,7 @@
 //!
 //! Private keys never leave their respective processes.
 
+use serde::{Deserialize, Serialize};
 use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
@@ -26,10 +38,36 @@ use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 use tokio::net::TcpListener;
 use tokio::process::Child;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 /// Environment variable used to pass the client CA cert PEM to the container.
 const TRUSTED_CLIENT_CA_ENV: &str = "STAKPAK_MCP_CLIENT_CA";
+
+// ── Sandbox mode ────────────────────────────────────────────────────────────
+
+/// Controls how sandbox containers are managed across sessions.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxMode {
+    /// Spawn a new sandbox container for each session and destroy it when the
+    /// session ends. Maximum isolation, ~5-10s startup overhead per session.
+    Ephemeral,
+    /// Spawn a single sandbox container at process startup and reuse it for all
+    /// sessions. Near-zero per-session overhead, shared container filesystem.
+    #[default]
+    Persistent,
+}
+
+impl std::fmt::Display for SandboxMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SandboxMode::Ephemeral => write!(f, "ephemeral"),
+            SandboxMode::Persistent => write!(f, "persistent"),
+        }
+    }
+}
+
+// ── Sandbox config ──────────────────────────────────────────────────────────
 
 /// Configuration for spawning sandboxed MCP servers.
 #[derive(Clone, Debug)]
@@ -40,6 +78,267 @@ pub struct SandboxConfig {
     pub image: String,
     /// Volume mounts for the container (e.g., `["./:/agent:ro"]`).
     pub volumes: Vec<String>,
+    /// How sandbox containers are managed across sessions.
+    pub mode: SandboxMode,
+}
+
+// ── Sandbox health ──────────────────────────────────────────────────────────
+
+/// Health status of a persistent sandbox, updated by the background monitor.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SandboxHealth {
+    /// Whether the last health check succeeded.
+    pub healthy: bool,
+    /// Number of consecutive successful health checks.
+    pub consecutive_ok: u64,
+    /// Number of consecutive failed health checks.
+    pub consecutive_failures: u64,
+    /// ISO 8601 timestamp of the last successful health check.
+    pub last_ok: Option<String>,
+    /// Error message from the last failed health check, if any.
+    pub last_error: Option<String>,
+    /// Total number of respawn attempts since the sandbox was started.
+    pub total_respawn_attempts: u64,
+}
+
+impl Default for SandboxHealth {
+    fn default() -> Self {
+        Self {
+            healthy: true,
+            consecutive_ok: 0,
+            consecutive_failures: 0,
+            last_ok: None,
+            last_error: None,
+            total_respawn_attempts: 0,
+        }
+    }
+}
+
+/// Interval between health checks for persistent sandboxes.
+const HEALTH_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Number of consecutive failures before attempting a respawn.
+const RESPAWN_THRESHOLD: u64 = 3;
+
+/// Maximum number of total respawn attempts before giving up and shutting down.
+const MAX_RESPAWN_ATTEMPTS: u64 = 5;
+
+// ── Persistent sandbox ──────────────────────────────────────────────────────
+
+/// A long-lived sandbox that persists across sessions.
+///
+/// Spawned once at process startup (when `SandboxMode::Persistent` is configured)
+/// and shared by all sessions. Includes a background health monitor that
+/// periodically pings the sandbox and attempts to respawn it on failure.
+pub struct PersistentSandbox {
+    inner: Arc<tokio::sync::RwLock<SandboxedMcpServer>>,
+    config: SandboxConfig,
+    health_rx: watch::Receiver<SandboxHealth>,
+    /// Handle to the background health monitor task.
+    monitor_handle: tokio::task::JoinHandle<()>,
+}
+
+impl PersistentSandbox {
+    /// Spawn a persistent sandbox with a background health monitor.
+    pub async fn spawn(config: &SandboxConfig) -> Result<Self, String> {
+        tracing::info!(image = %config.image, "Spawning persistent sandbox container");
+        let inner = SandboxedMcpServer::spawn(config).await?;
+        tracing::info!("Persistent sandbox ready");
+
+        let initial_health = SandboxHealth {
+            healthy: true,
+            consecutive_ok: 1,
+            consecutive_failures: 0,
+            last_ok: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            total_respawn_attempts: 0,
+        };
+        let (health_tx, health_rx) = watch::channel(initial_health);
+
+        let inner = Arc::new(tokio::sync::RwLock::new(inner));
+        let monitor_inner = inner.clone();
+        let monitor_config = config.clone();
+
+        let monitor_handle = tokio::spawn(async move {
+            health_monitor_loop(monitor_inner, monitor_config, health_tx).await;
+        });
+
+        Ok(Self {
+            inner,
+            config: config.clone(),
+            health_rx,
+            monitor_handle,
+        })
+    }
+
+    /// Get the MCP client for routing tool calls through this sandbox.
+    pub async fn client(&self) -> Arc<McpClient> {
+        self.inner.read().await.client.clone()
+    }
+
+    /// Get the tools available from this sandbox.
+    pub async fn tools(&self) -> Vec<stakai::Tool> {
+        self.inner.read().await.tools.clone()
+    }
+
+    /// Get the current health status (non-blocking snapshot).
+    pub fn health(&self) -> SandboxHealth {
+        self.health_rx.borrow().clone()
+    }
+
+    /// Get the sandbox mode from the config.
+    pub fn mode(&self) -> &SandboxMode {
+        &self.config.mode
+    }
+
+    /// Shut down the persistent sandbox and its health monitor.
+    pub async fn shutdown(self) {
+        tracing::info!("Shutting down persistent sandbox");
+        self.monitor_handle.abort();
+        // Try to take exclusive ownership of the inner sandbox for clean shutdown.
+        // If other sessions still hold references, the RwLock + Arc will be dropped
+        // when all references are gone; the container process will be cleaned up by
+        // the OS when the host process exits.
+        if let Ok(inner) = Arc::try_unwrap(self.inner) {
+            let sandbox = inner.into_inner();
+            sandbox.shutdown().await;
+        } else {
+            tracing::warn!(
+                "Other references to persistent sandbox still exist; container will be cleaned up on process exit"
+            );
+        }
+    }
+
+    /// Force-kill the sandbox container and abort the health monitor.
+    ///
+    /// Unlike `shutdown(self)`, this works through a shared reference so it can
+    /// be called from the graceful-shutdown handler where only `Arc<Self>` is
+    /// available. The container process is killed via the write lock.
+    pub async fn kill(&self) {
+        tracing::warn!(
+            "Killing persistent sandbox container — in-flight sessions using this sandbox will fail"
+        );
+        self.monitor_handle.abort();
+        self.inner.write().await.teardown().await;
+        tracing::info!("Persistent sandbox container killed");
+    }
+}
+
+/// Background loop that periodically health-checks the persistent sandbox
+/// and attempts to respawn it after consecutive failures.
+async fn health_monitor_loop(
+    inner: Arc<tokio::sync::RwLock<SandboxedMcpServer>>,
+    config: SandboxConfig,
+    health_tx: watch::Sender<SandboxHealth>,
+) {
+    let mut health = SandboxHealth::default();
+
+    loop {
+        tokio::time::sleep(HEALTH_CHECK_INTERVAL).await;
+
+        let check_result = {
+            let sandbox = inner.read().await;
+            // Use list_tools as a health probe — it exercises the full
+            // mTLS → proxy → container → MCP server path.
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                stakpak_mcp_client::get_tools(&sandbox.client),
+            )
+            .await
+        };
+
+        match check_result {
+            Ok(Ok(_tools)) => {
+                health.healthy = true;
+                health.consecutive_ok = health.consecutive_ok.saturating_add(1);
+                health.consecutive_failures = 0;
+                health.last_ok = Some(chrono::Utc::now().to_rfc3339());
+                health.last_error = None;
+                tracing::debug!(
+                    consecutive_ok = health.consecutive_ok,
+                    "Persistent sandbox health check passed"
+                );
+            }
+            Ok(Err(e)) => {
+                let err_msg = format!("MCP error: {e}");
+                health.healthy = false;
+                health.consecutive_ok = 0;
+                health.consecutive_failures = health.consecutive_failures.saturating_add(1);
+                health.last_error = Some(err_msg.clone());
+                tracing::warn!(
+                    consecutive_failures = health.consecutive_failures,
+                    error = %err_msg,
+                    "Persistent sandbox health check failed"
+                );
+            }
+            Err(_timeout) => {
+                health.healthy = false;
+                health.consecutive_ok = 0;
+                health.consecutive_failures = health.consecutive_failures.saturating_add(1);
+                health.last_error = Some("Health check timed out (10s)".to_string());
+                tracing::warn!(
+                    consecutive_failures = health.consecutive_failures,
+                    "Persistent sandbox health check timed out"
+                );
+            }
+        }
+
+        // Attempt respawn after RESPAWN_THRESHOLD consecutive failures
+        if health.consecutive_failures >= RESPAWN_THRESHOLD {
+            health.total_respawn_attempts = health.total_respawn_attempts.saturating_add(1);
+
+            if health.total_respawn_attempts > MAX_RESPAWN_ATTEMPTS {
+                tracing::error!(
+                    total_attempts = health.total_respawn_attempts,
+                    "Persistent sandbox exceeded maximum respawn attempts ({}) — giving up. \
+                     The server cannot operate without a healthy sandbox. Shutting down.",
+                    MAX_RESPAWN_ATTEMPTS
+                );
+                health.last_error = Some(format!(
+                    "Exceeded max respawn attempts ({}); sandbox permanently failed",
+                    MAX_RESPAWN_ATTEMPTS
+                ));
+                let _ = health_tx.send(health);
+                // Exit the monitor loop — the sandbox is unrecoverable.
+                // The server health endpoint will report unhealthy, and operators
+                // should investigate and restart the autopilot.
+                return;
+            }
+
+            tracing::error!(
+                failures = health.consecutive_failures,
+                attempt = health.total_respawn_attempts,
+                max_attempts = MAX_RESPAWN_ATTEMPTS,
+                "Persistent sandbox unhealthy — attempting respawn"
+            );
+
+            // Take write lock to replace the sandbox
+            let mut sandbox = inner.write().await;
+
+            // Shut down the old one (best-effort)
+            sandbox.teardown().await;
+
+            match SandboxedMcpServer::spawn(&config).await {
+                Ok(new_sandbox) => {
+                    *sandbox = new_sandbox;
+                    health.healthy = true;
+                    health.consecutive_ok = 1;
+                    health.consecutive_failures = 0;
+                    health.last_ok = Some(chrono::Utc::now().to_rfc3339());
+                    health.last_error = None;
+                    tracing::info!("Persistent sandbox respawned successfully");
+                }
+                Err(e) => {
+                    health.last_error = Some(format!("Respawn failed: {e}"));
+                    tracing::error!(error = %e, "Failed to respawn persistent sandbox");
+                    // Don't reset consecutive_failures — next iteration will try again
+                }
+            }
+        }
+
+        // Publish updated health (ignore error if all receivers dropped)
+        let _ = health_tx.send(health.clone());
+    }
 }
 
 /// A running sandboxed MCP server with its associated proxy and client.
@@ -172,10 +471,43 @@ impl SandboxedMcpServer {
 
     /// Shut down the sandbox: stop the proxy and kill the container.
     pub async fn shutdown(mut self) {
+        self.teardown().await;
+    }
+
+    /// Stop the proxy and gracefully shut down the warden container process.
+    ///
+    /// Sends SIGINT (not SIGTERM) because warden listens for `ctrl_c` (SIGINT)
+    /// to trigger its cleanup — stopping the user container and sidecar.
+    /// Waits up to 10s for warden to finish, then force-kills.
+    pub async fn teardown(&mut self) {
         let _ = self.proxy_shutdown_tx.send(());
 
-        let _ = self.container_process.kill().await;
-        let _ = self.container_process.wait().await;
+        // Send SIGINT so warden's `signal::ctrl_c()` handler fires and runs
+        // its container cleanup (stop_user_container + cleanup sidecar).
+        #[cfg(unix)]
+        if let Some(pid) = self.container_process.id() {
+            let _ = tokio::process::Command::new("kill")
+                .args(["-INT", &pid.to_string()])
+                .output()
+                .await;
+        }
+
+        // Give warden up to 10s to stop containers and exit cleanly.
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.container_process.wait(),
+        )
+        .await
+        {
+            Ok(Ok(status)) => {
+                tracing::debug!(exit_status = ?status, "Warden process exited gracefully");
+            }
+            _ => {
+                tracing::warn!("Warden process did not exit in 10s — force killing");
+                let _ = self.container_process.kill().await;
+                let _ = self.container_process.wait().await;
+            }
+        }
     }
 }
 
@@ -363,6 +695,9 @@ async fn find_available_binding(purpose: &str) -> Result<ProxyBinding, String> {
     })
 }
 
+// TODO: TOCTOU race — between dropping the listener and Docker binding the port,
+// another process could claim it. Consider retrying with a different port on bind
+// failure, or passing the listener fd directly if Docker supports it.
 async fn find_free_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -535,5 +870,52 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
                 "host_part={host_part:?} expected named={expected}"
             );
         }
+    }
+
+    #[test]
+    fn sandbox_mode_default_is_persistent() {
+        assert_eq!(
+            super::SandboxMode::default(),
+            super::SandboxMode::Persistent
+        );
+    }
+
+    #[test]
+    fn sandbox_mode_serde_roundtrip() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Wrapper {
+            #[serde(default)]
+            mode: super::SandboxMode,
+        }
+
+        // Explicit persistent
+        let json = serde_json::json!({"mode": "persistent"});
+        let w: Wrapper = serde_json::from_value(json).expect("deserialize persistent");
+        assert_eq!(w.mode, super::SandboxMode::Persistent);
+
+        // Explicit ephemeral
+        let json = serde_json::json!({"mode": "ephemeral"});
+        let w: Wrapper = serde_json::from_value(json).expect("deserialize ephemeral");
+        assert_eq!(w.mode, super::SandboxMode::Ephemeral);
+
+        // Missing field → default (persistent)
+        let json = serde_json::json!({});
+        let w: Wrapper = serde_json::from_value(json).expect("deserialize default");
+        assert_eq!(w.mode, super::SandboxMode::Persistent);
+
+        // Display
+        assert_eq!(super::SandboxMode::Persistent.to_string(), "persistent");
+        assert_eq!(super::SandboxMode::Ephemeral.to_string(), "ephemeral");
+    }
+
+    #[test]
+    fn sandbox_health_default_is_healthy() {
+        let h = super::SandboxHealth::default();
+        assert!(h.healthy);
+        assert_eq!(h.consecutive_ok, 0);
+        assert_eq!(h.consecutive_failures, 0);
+        assert!(h.last_ok.is_none());
+        assert!(h.last_error.is_none());
+        assert_eq!(h.total_respawn_attempts, 0);
     }
 }
