@@ -44,6 +44,7 @@ type ClientTaskResult = Result<
         Option<Uuid>,
         Option<AppConfig>,
         LLMTokenUsage,
+        String, // resolved model display: "provider/name"
     ),
     String,
 >;
@@ -344,6 +345,8 @@ pub async fn run_interactive(
                     .await
                     .map_err(|e| format!("Failed to create client: {}", e))?,
             );
+
+            model = super::helpers::resolve_model_from_provider(model, client.as_ref()).await;
 
             let mcp_init_config = mcp_init::McpInitConfig {
                 redact_secrets,
@@ -1128,6 +1131,7 @@ pub async fn run_interactive(
                             current_session_id,
                             Some(new_config),
                             total_session_usage,
+                            format!("{}/{}", model.provider, model.name),
                         ));
                     }
                     OutputEvent::RequestRulebookUpdate(selected_uris) => {
@@ -1507,6 +1511,7 @@ pub async fn run_interactive(
                 current_session_id,
                 None,
                 total_session_usage.clone(),
+                format!("{}/{}", model.provider, model.name),
             ))
         });
 
@@ -1514,7 +1519,13 @@ pub async fn run_interactive(
         let (client_res, _, _) = tokio::try_join!(client_handle, tui_handle, mcp_progress_handle)
             .map_err(|e| e.to_string())?;
 
-        let (final_messages, final_session_id, profile_switch_config, final_usage) = client_res?;
+        let (
+            final_messages,
+            final_session_id,
+            profile_switch_config,
+            final_usage,
+            final_model_name,
+        ) = client_res?;
 
         // Check if profile switch was requested
         if let Some(new_config) = profile_switch_config {
@@ -1632,7 +1643,10 @@ pub async fn run_interactive(
         // Display token usage stats
         if final_usage.total_tokens > 0 {
             let renderer = OutputRenderer::new(OutputFormat::Text, false);
-            println!("{}", renderer.render_token_usage_stats(&final_usage));
+            println!(
+                "{}",
+                renderer.render_token_usage_stats(&final_usage, Some(&final_model_name))
+            );
         }
 
         let username = client

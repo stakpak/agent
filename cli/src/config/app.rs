@@ -891,7 +891,14 @@ impl AppConfig {
                 let (prefix, rest) = model_str.split_at(idx);
                 (prefix, &rest[1..])
             } else {
-                ("anthropic", model_str) // Default to anthropic
+                // Default to stakpak (which can resolve arbitrary model names)
+                // if the user has a Stakpak key; otherwise fall back to anthropic
+                let default_provider = if has_stakpak_key {
+                    "stakpak"
+                } else {
+                    "anthropic"
+                };
+                (default_provider, model_str)
             };
 
             stakpak_api::Model::custom(model_id.to_string(), provider)
