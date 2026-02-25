@@ -297,10 +297,15 @@ async fn main() {
             if matches!(cli.command, None | Some(Commands::Init)) {
                 // Initialize theme detection early, before any color code runs (e.g. onboarding).
                 // This ensures --theme flag takes effect for CLI colors too.
-                let theme_override = match cli.theme.to_lowercase().as_str() {
-                    "light" => Some(stakpak_shared::terminal_theme::Theme::Light),
-                    "dark" => Some(stakpak_shared::terminal_theme::Theme::Dark),
-                    _ => None,
+                // In async mode, skip terminal detection (no TTY) — default to Dark.
+                let theme_override = if cli.r#async || cli.print {
+                    Some(stakpak_shared::terminal_theme::Theme::Dark)
+                } else {
+                    match cli.theme.to_lowercase().as_str() {
+                        "light" => Some(stakpak_shared::terminal_theme::Theme::Light),
+                        "dark" => Some(stakpak_shared::terminal_theme::Theme::Dark),
+                        _ => None,
+                    }
                 };
                 stakpak_shared::terminal_theme::init_theme(theme_override);
 
