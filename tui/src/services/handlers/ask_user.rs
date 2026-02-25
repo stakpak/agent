@@ -29,6 +29,13 @@ pub fn handle_show_ask_user_popup(
         return;
     }
 
+    // Clean up the pending border block (created by the approval bar flow) before
+    // showing the interactive ask_user UI. Without this, both blocks coexist and
+    // the user sees a confusing duplicate "Ask User" placeholder.
+    if let Some(pending_id) = state.pending_bash_message_id.take() {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+
     state.show_ask_user_popup = true;
     state.ask_user_focused = true;
     state.ask_user_questions = questions.clone();

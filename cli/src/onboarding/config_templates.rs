@@ -58,7 +58,7 @@ use crate::config::ProviderType;
 use stakpak_shared::models::llm::ProviderConfig;
 
 /// Default model for all new profiles
-pub const DEFAULT_MODEL: &str = "claude-opus-4-5";
+pub const DEFAULT_MODEL: &str = "claude-opus-4-6";
 
 /// Generate OpenAI profile configuration (credentials stored separately in config.toml auth field)
 pub fn generate_openai_profile() -> ProfileConfig {

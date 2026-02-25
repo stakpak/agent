@@ -76,4 +76,33 @@ impl Error {
     pub fn stream_error(msg: impl Into<String>) -> Self {
         Self::StreamError(msg.into())
     }
+
+    /// Try to parse raw stream data as a provider error response.
+    ///
+    /// When an upstream provider (Claude, OpenAI, Gemini, etc.) is down or
+    /// overloaded, it may send an error JSON like
+    /// `{"error": {"type": "...", "message": "..."}}` instead of a normal
+    /// streaming chunk. This helper detects that pattern and returns a
+    /// [`ProviderError`](Error::ProviderError). If the data isn't a
+    /// recognized error format, it falls back to `fallback_label` with a
+    /// 200-char preview of the raw data.
+    pub fn from_unparseable_chunk(data: &str, fallback_label: &str) -> Self {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
+            && let Some(error) = json.get("error")
+        {
+            let message = error
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            let error_type = error
+                .get("type")
+                .or_else(|| error.get("status"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown");
+            return Self::ProviderError(format!("{}: {}", error_type, message));
+        }
+
+        let preview: String = data.chars().take(200).collect();
+        Self::StreamError(format!("{}: {}", fallback_label, preview))
+    }
 }

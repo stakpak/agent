@@ -99,9 +99,16 @@ fn parse_payload_part(part: &PayloadPart) -> Result<Option<AnthropicStreamEvent>
         return Ok(None);
     }
 
-    serde_json::from_slice::<AnthropicStreamEvent>(json_bytes)
-        .map(Some)
-        .map_err(|e| Error::stream_error(format!("Failed to parse Bedrock event: {}", e)))
+    match serde_json::from_slice::<AnthropicStreamEvent>(json_bytes) {
+        Ok(event) => Ok(Some(event)),
+        Err(_) => {
+            let data = String::from_utf8_lossy(json_bytes);
+            Err(Error::from_unparseable_chunk(
+                &data,
+                "Failed to parse Bedrock event",
+            ))
+        }
+    }
 }
 
 /// Process a Bedrock stream event (which is an Anthropic-format event)

@@ -277,8 +277,11 @@ pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<Inp
         }
         state.show_helper_dropdown = true;
         state.helper_scroll = 0;
+        // Synchronously filter slash commands — no async race condition
+        filter_helpers_sync(state);
     }
 
+    // Send input to async file_search worker for @ file completion only
     if let Some(tx) = &state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
@@ -327,6 +330,8 @@ pub fn handle_input_backspace(state: &mut AppState) {
         }
         state.show_helper_dropdown = true;
         state.helper_scroll = 0;
+        // Synchronously filter slash commands — no async race condition
+        filter_helpers_sync(state);
     }
 
     // Hide dropdown if input is empty
@@ -468,12 +473,14 @@ fn handle_input_submitted(
         state.show_helper_dropdown = false;
     }
 
-    // Check if input starts with a known command that takes arguments
-    // This runs regardless of show_helper_dropdown state to handle cases like:
-    // - User types "/editor path/to/file" manually
-    // - User selects a file via @ dropdown, resulting in "/editor filename"
+    // Defense-in-depth: if the input starts with '/' try to match it as a slash command,
+    // even if the dropdown wasn't showing (e.g. text was pasted, or dropdown state got out
+    // of sync). This prevents slash commands from being sent as user messages.
     {
         let input = state.input().to_string();
+        let input_trimmed = input.trim();
+
+        // First check commands that take arguments
         let command_with_args: Option<&str> = if input.starts_with("/editor ") {
             Some("/editor")
         } else if input.starts_with("/toggle_auto_approve ") {
@@ -492,6 +499,27 @@ fn handle_input_submitted(
                 push_error_message(state, &e, None);
             }
             return;
+        }
+
+        // Then check if input exactly matches a known slash command (no args)
+        if input_trimmed.starts_with('/') {
+            let matched_command = state
+                .helpers
+                .iter()
+                .find(|h| h.command == input_trimmed)
+                .map(|h| h.command);
+
+            if let Some(command_id) = matched_command {
+                let ctx = CommandContext {
+                    state,
+                    input_tx,
+                    output_tx,
+                };
+                if let Err(e) = execute_command(command_id, ctx) {
+                    push_error_message(state, &e, None);
+                }
+                return;
+            }
         }
     }
 
@@ -851,6 +879,23 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
         state.text_area.insert_str(&redacted_pasted);
     }
 
+    // After paste, update slash command filtering synchronously so dropdown reflects
+    // pasted content (e.g. pasting "/model" should show the dropdown immediately)
+    if state.input().starts_with('/') {
+        if state.file_search.is_active() {
+            state.file_search.reset();
+        }
+        state.show_helper_dropdown = true;
+        state.helper_scroll = 0;
+        filter_helpers_sync(state);
+    } else {
+        // Input doesn't start with '/' (or is empty) — dismiss slash command dropdown
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.helper_selected = 0;
+        state.helper_scroll = 0;
+    }
+
     true
 }
 
@@ -999,12 +1044,29 @@ fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, fo
 pub fn handle_input_delete(state: &mut AppState) {
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
+    state.filtered_helpers.clear();
+    state.helper_selected = 0;
+    state.helper_scroll = 0;
 }
 
 /// Handle input delete word
 pub fn handle_input_delete_word(state: &mut AppState) {
     state.text_area.delete_backward_word();
-    state.show_helper_dropdown = false;
+    // Re-evaluate slash command state after word deletion
+    if state.input().starts_with('/') {
+        state.show_helper_dropdown = true;
+        state.helper_scroll = 0;
+        filter_helpers_sync(state);
+    } else {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.helper_selected = 0;
+        state.helper_scroll = 0;
+    }
+    // Send to async file search worker so @ file completion also updates
+    if let Some(tx) = &state.file_search_tx {
+        let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
+    }
 }
 
 /// Handle cursor move to start of line
@@ -1402,4 +1464,27 @@ fn convert_path_to_placeholder(
     }
 
     true
+}
+
+/// Synchronously filter slash commands based on current input.
+/// This is intentionally synchronous (not async) because the helpers list is small (~15 items)
+/// and substring matching is instantaneous. Running this synchronously eliminates the race
+/// condition where the async worker returns stale filtered results, which caused the dropdown
+/// to show unfiltered commands in external terminals (iTerm2, Warp, etc.).
+fn filter_helpers_sync(state: &mut AppState) {
+    let input = state.input().to_string();
+    if input.starts_with('/') && input.len() > 1 {
+        let query = input[1..].to_lowercase();
+        state.filtered_helpers = state
+            .helpers
+            .iter()
+            .filter(|h| h.command.to_lowercase().contains(&query))
+            .cloned()
+            .collect();
+    } else {
+        // Input is just "/" — show all commands
+        state.filtered_helpers = state.helpers.clone();
+    }
+    // Always reset selection when filter changes to avoid pointing at wrong command
+    state.helper_selected = 0;
 }

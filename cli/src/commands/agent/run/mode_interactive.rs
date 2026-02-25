@@ -128,6 +128,39 @@ fn find_nth_user_message_index(messages: &[ChatMessage], n: usize) -> Option<usi
     None
 }
 
+/// Send the next tool call from the queue to the TUI.
+/// If the tool is `ask_user`, auto-approve it by sending `ShowAskUserPopup` directly
+/// (bypassing the approval bar). This eliminates the async gap where the user sees
+/// a dead "Ask User" placeholder and Enter does nothing.
+async fn send_next_tool_from_queue(
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+    tool_call: &ToolCall,
+) -> Result<(), String> {
+    let tool_name = tool_call
+        .function
+        .name
+        .strip_prefix("stakpak__")
+        .unwrap_or(&tool_call.function.name);
+
+    // Auto-approve ask_user — show popup directly, skip the approval bar.
+    // If parsing fails, fall through to normal approval flow.
+    if tool_name == "ask_user"
+        && let Ok(request) = serde_json::from_str::<
+            stakpak_shared::models::integrations::openai::AskUserRequest,
+        >(&tool_call.function.arguments)
+    {
+        send_input_event(
+            input_tx,
+            InputEvent::ShowAskUserPopup(tool_call.clone(), request.questions),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    send_tool_call(input_tx, tool_call).await?;
+    Ok(())
+}
+
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub session_id: Option<String>,
@@ -394,7 +427,7 @@ pub async fn run_interactive(
                     send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
                         .await?;
                     let initial_tool_call = tools_queue.remove(0);
-                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                    send_next_tool_from_queue(&input_tx, &initial_tool_call).await?;
                 }
 
                 messages.extend(chat_messages);
@@ -429,7 +462,7 @@ pub async fn run_interactive(
                     send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
                         .await?;
                     let initial_tool_call = tools_queue.remove(0);
-                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                    send_next_tool_from_queue(&input_tx, &initial_tool_call).await?;
                 }
 
                 messages.extend(chat_messages);
@@ -766,10 +799,8 @@ pub async fn run_interactive(
 
                         // Process next tool in queue if available
                         if !tools_queue.is_empty() {
-                            // Don't re-send MessageToolCalls - tools were already sent when AI returned them
-                            // Just send the next individual tool call to process
                             let next_tool_call = tools_queue.remove(0);
-                            send_tool_call(&input_tx, &next_tool_call).await?;
+                            send_next_tool_from_queue(&input_tx, &next_tool_call).await?;
                             continue;
                         }
 
@@ -785,7 +816,7 @@ pub async fn run_interactive(
                         ));
                         if !tools_queue.is_empty() {
                             let tool_call = tools_queue.remove(0);
-                            send_tool_call(&input_tx, &tool_call).await?;
+                            send_next_tool_from_queue(&input_tx, &tool_call).await?;
                             continue;
                         }
                         if should_stop {
@@ -890,7 +921,8 @@ pub async fn run_interactive(
                                         )
                                         .await?;
                                         let initial_tool_call = tools_queue.remove(0);
-                                        send_tool_call(&input_tx, &initial_tool_call).await?;
+                                        send_next_tool_from_queue(&input_tx, &initial_tool_call)
+                                            .await?;
                                     }
                                     send_input_event(
                                         &input_tx,
@@ -965,7 +997,8 @@ pub async fn run_interactive(
                                     )
                                     .await?;
                                     let initial_tool_call = tools_queue.remove(0);
-                                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                                    send_next_tool_from_queue(&input_tx, &initial_tool_call)
+                                        .await?;
                                 }
                                 send_input_event(
                                     &input_tx,
@@ -1014,9 +1047,8 @@ pub async fn run_interactive(
                         }
 
                         if !tools_queue.is_empty() {
-                            // Don't re-send MessageToolCalls - just process next tool
                             let tool_call = tools_queue.remove(0);
-                            send_tool_call(&input_tx, &tool_call).await?;
+                            send_next_tool_from_queue(&input_tx, &tool_call).await?;
                             continue;
                         }
                     }
@@ -1221,7 +1253,14 @@ pub async fn run_interactive(
                         send_input_event(&input_tx, InputEvent::ToolResult(tool_call_result))
                             .await?;
 
-                        // Continue to send to API
+                        // Process next tool in queue if available
+                        if !tools_queue.is_empty() {
+                            let tool_call = tools_queue.remove(0);
+                            send_next_tool_from_queue(&input_tx, &tool_call).await?;
+                            continue;
+                        }
+
+                        // No more queued tools — fall through to send to API
                     }
                 }
 
@@ -1449,35 +1488,10 @@ pub async fn run_interactive(
                             tools_queue.extend(tool_calls.clone());
 
                             // Send the first tool call to show in UI
-                            // But auto-approve ask_user tool
+                            // Auto-approve ask_user tool (bypass approval bar)
                             if !tools_queue.is_empty() {
                                 let tool_call = tools_queue.remove(0);
-                                let tool_name = tool_call
-                                    .function
-                                    .name
-                                    .strip_prefix("stakpak__")
-                                    .unwrap_or(&tool_call.function.name);
-
-                                if tool_name == "ask_user" {
-                                    // Auto-approve ask_user - parse and show popup directly
-                                    if let Ok(request) = serde_json::from_str::<
-                                        stakpak_shared::models::integrations::openai::AskUserRequest,
-                                    >(
-                                        &tool_call.function.arguments
-                                    ) {
-                                        send_input_event(
-                                            &input_tx,
-                                            InputEvent::ShowAskUserPopup(
-                                                tool_call.clone(),
-                                                request.questions,
-                                            ),
-                                        )
-                                        .await?;
-                                        continue;
-                                    }
-                                    // If parsing failed, fall through to normal flow
-                                }
-                                send_tool_call(&input_tx, &tool_call).await?;
+                                send_next_tool_from_queue(&input_tx, &tool_call).await?;
                                 continue;
                             }
                         }

@@ -48,8 +48,13 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
     print_banner();
 
     // Load and validate configuration
-    let config =
+    let mut config =
         ScheduleConfig::load_default().map_err(|e| format!("Failed to load config: {}", e))?;
+
+    // Inject the runtime-generated gateway token so the scheduler can
+    // authenticate against the co-hosted gateway API (/v1/gateway/send).
+    // The token is ephemeral (generated each `stakpak up`) and never persisted.
+    config.apply_runtime_gateway_credentials(&server.url, &server.token);
 
     info!(
         schedules = config.schedules.len(),
@@ -287,6 +292,7 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
                             &config_clone2,
                             &snapshot_clone2,
                             &config_path_clone,
+                            &server_clone2,
                         )
                         .await;
                         if success {
@@ -316,6 +322,7 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
                         &config_clone2,
                         &snapshot_clone2,
                         &config_path_clone,
+                        &server_clone2,
                     )
                     .await;
                 }
@@ -412,8 +419,9 @@ async fn trigger_config_reload(
     config: &Arc<RwLock<Arc<ScheduleConfig>>>,
     snapshot: &Arc<Mutex<ScheduleSnapshot>>,
     config_path: &Path,
+    server: &AgentServerConnection,
 ) -> bool {
-    trigger_config_reload_with_loader(scheduler, config, snapshot, || {
+    trigger_config_reload_with_loader(scheduler, config, snapshot, server, || {
         ScheduleConfig::load(config_path)
     })
     .await
@@ -423,18 +431,23 @@ async fn trigger_config_reload_with_loader<F>(
     scheduler: &Arc<Mutex<Scheduler>>,
     config: &Arc<RwLock<Arc<ScheduleConfig>>>,
     snapshot: &Arc<Mutex<ScheduleSnapshot>>,
+    server: &AgentServerConnection,
     load_config: F,
 ) -> bool
 where
     F: Fn() -> Result<ScheduleConfig, crate::commands::watch::config::ConfigError>,
 {
-    let new_config = match load_config() {
+    let mut new_config = match load_config() {
         Ok(config) => config,
         Err(error) => {
             warn!(error = %error, "Config reload failed (keeping current schedules)");
             return false;
         }
     };
+
+    // Re-apply runtime gateway credentials — disk values are never authoritative
+    // for the ephemeral token generated at `stakpak up` time.
+    new_config.apply_runtime_gateway_credentials(&server.url, &server.token);
 
     let current_db_path = {
         let config_guard = config.read().await;
@@ -1571,6 +1584,15 @@ mod tests {
     use tempfile::tempdir;
     use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc};
 
+    fn dummy_server() -> AgentServerConnection {
+        AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "test-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+        }
+    }
+
     fn escape_toml_string(value: &Path) -> String {
         value.to_string_lossy().replace('\\', "\\\\")
     }
@@ -1695,14 +1717,20 @@ mod tests {
         );
 
         let loader_path = config_path.clone();
-        trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-            ScheduleConfig::load(&loader_path)
-        })
+        let server = dummy_server();
+        trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
         .await;
 
         let snapshot_guard = snapshot.lock().await;
         assert_eq!(snapshot_guard.registered.len(), 2);
         assert!(snapshot_guard.registered.contains_key("alpha"));
+
         assert!(snapshot_guard.registered.contains_key("beta"));
         drop(snapshot_guard);
 
@@ -1732,11 +1760,15 @@ mod tests {
         let mut changed_config = config.clone();
         changed_config.watch.db_path = changed_db_path.to_string_lossy().to_string();
 
-        let success =
-            trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-                Ok(changed_config.clone())
-            })
-            .await;
+        let server = dummy_server();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || Ok(changed_config.clone()),
+        )
+        .await;
         assert!(!success, "db_path change should be rejected");
 
         let snapshot_guard = snapshot.lock().await;
@@ -1770,13 +1802,19 @@ mod tests {
         let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
         let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
 
-        let success =
-            trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, || {
+        let server = dummy_server();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            || {
                 Err(crate::commands::watch::config::ConfigError::ReadError(
                     std::io::Error::new(std::io::ErrorKind::NotFound, "simulated read failure"),
                 ))
-            })
-            .await;
+            },
+        )
+        .await;
         assert!(!success, "parse failure should return false");
 
         // State unchanged.
@@ -1813,11 +1851,15 @@ mod tests {
         write_autopilot_config(&config_path, &db_path, &[("alpha", "*/10 * * * *", true)]);
 
         let loader_path = config_path.clone();
-        let success =
-            trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-                ScheduleConfig::load(&loader_path)
-            })
-            .await;
+        let server = dummy_server();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
         assert!(success);
 
         let snapshot_guard = snapshot.lock().await;
@@ -1866,11 +1908,15 @@ mod tests {
         );
 
         let loader_path = config_path.clone();
-        let success =
-            trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-                ScheduleConfig::load(&loader_path)
-            })
-            .await;
+        let server = dummy_server();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
         assert!(success);
 
         let snapshot_guard = snapshot.lock().await;
@@ -1918,9 +1964,14 @@ mod tests {
             ],
         );
         let loader_path = config_path.clone();
-        trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-            ScheduleConfig::load(&loader_path)
-        })
+        let server = dummy_server();
+        trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
         .await;
 
         let snapshot_guard = snapshot.lock().await;
@@ -1937,11 +1988,14 @@ mod tests {
             ],
         );
         let loader_path2 = config_path.clone();
-        let success =
-            trigger_config_reload_with_loader(&scheduler, &config_state, &snapshot, move || {
-                ScheduleConfig::load(&loader_path2)
-            })
-            .await;
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path2),
+        )
+        .await;
         assert!(success);
 
         let snapshot_guard = snapshot.lock().await;
@@ -2148,5 +2202,409 @@ auto_approve = []
             overrides.auto_approve,
             Some(stakpak_gateway::client::AutoApproveOverride::AllowList(ref tools)) if tools.is_empty()
         ));
+    }
+
+    // ========================================================================
+    // Gateway credential injection integration tests
+    // ========================================================================
+
+    /// Write a config with a [notifications] section. The gateway_token field
+    /// is intentionally omitted (or stale) to simulate what's on disk.
+    fn write_autopilot_config_with_notifications(
+        path: &Path,
+        db_path: &Path,
+        schedules: &[(&str, &str, bool)],
+        gateway_url: &str,
+        gateway_token: Option<&str>,
+    ) {
+        let log_dir = db_path.parent().unwrap_or(Path::new(".")).join("logs");
+
+        let mut content = String::new();
+        content.push_str("[watch]\n");
+        content.push_str(&format!("db_path = \"{}\"\n", escape_toml_string(db_path)));
+        content.push_str(&format!(
+            "log_dir = \"{}\"\n\n",
+            escape_toml_string(&log_dir)
+        ));
+
+        content.push_str("[notifications]\n");
+        content.push_str(&format!("gateway_url = \"{}\"\n", gateway_url));
+        if let Some(token) = gateway_token {
+            content.push_str(&format!("gateway_token = \"{}\"\n", token));
+        }
+        content.push_str("channel = \"slack\"\n");
+        content.push_str("chat_id = \"#ops\"\n\n");
+
+        for (name, cron, enabled) in schedules {
+            content.push_str("[[schedules]]\n");
+            content.push_str(&format!("name = \"{}\"\n", name));
+            content.push_str(&format!("cron = \"{}\"\n", cron));
+            content.push_str("prompt = \"test prompt\"\n");
+            content.push_str(&format!("enabled = {}\n\n", enabled));
+        }
+
+        std::fs::write(path, content).expect("failed to write autopilot config");
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_preserves_runtime_gateway_token() {
+        // Simulates: disk config has no gateway_token, runtime injects one,
+        // then a hot-reload from disk should re-inject the runtime token.
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            None, // no token on disk — the real-world default
+        );
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "ephemeral-runtime-token-42".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        // Reload from disk (simulates mtime change trigger).
+        let loader_path = config_path.clone();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
+        assert!(success, "reload should succeed");
+
+        // Verify the in-memory config has the runtime token injected.
+        let config_guard = config_state.read().await;
+        let notifications = config_guard
+            .notifications
+            .as_ref()
+            .expect("notifications should exist after reload");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("ephemeral-runtime-token-42"),
+            "runtime gateway token must survive config reload from disk"
+        );
+        assert_eq!(
+            notifications.gateway_url, "http://127.0.0.1:4096",
+            "gateway URL should be preserved"
+        );
+        drop(config_guard);
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_overwrites_stale_disk_token() {
+        // Simulates: someone manually wrote a gateway_token into the TOML
+        // (perhaps from a previous run). The reload must replace it with the
+        // current runtime token.
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            Some("stale-token-from-yesterday"), // stale on disk
+        );
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "todays-fresh-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        let loader_path = config_path.clone();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
+        assert!(success);
+
+        let config_guard = config_state.read().await;
+        let notifications = config_guard
+            .notifications
+            .as_ref()
+            .expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("todays-fresh-token"),
+            "stale disk token must be replaced by runtime token after reload"
+        );
+        drop(config_guard);
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_preserves_custom_external_gateway_url() {
+        // Users may point notifications at an external gateway (not loopback).
+        // The reload must preserve their custom URL, only injecting the token.
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "https://gateway.prod.example.com",
+            None,
+        );
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "runtime-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        let loader_path = config_path.clone();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
+        assert!(success);
+
+        let config_guard = config_state.read().await;
+        let notifications = config_guard
+            .notifications
+            .as_ref()
+            .expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, "https://gateway.prod.example.com",
+            "custom external gateway URL must not be overwritten by loopback URL"
+        );
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token"),
+        );
+        drop(config_guard);
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_without_notifications_section_is_safe() {
+        // Config has no [notifications] at all. Reload should not fabricate one.
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config(&config_path, &db_path, &[("alpha", "*/10 * * * *", true)]);
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "runtime-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        let loader_path = config_path.clone();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
+        assert!(success);
+
+        let config_guard = config_state.read().await;
+        assert!(
+            config_guard.notifications.is_none(),
+            "should not create a notifications section when none exists on disk"
+        );
+        drop(config_guard);
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
+    }
+
+    #[tokio::test]
+    async fn test_consecutive_reloads_always_carry_runtime_token() {
+        // Simulates multiple hot-reloads in succession (schedule edits).
+        // Each reload reads disk (no token) but the runtime token must persist.
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            None,
+        );
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4096".to_string(),
+            token: "stable-runtime-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        // Reload #1: add a schedule
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[
+                ("alpha", "*/10 * * * *", true),
+                ("beta", "*/5 * * * *", true),
+            ],
+            "http://127.0.0.1:4096",
+            None, // disk still has no token
+        );
+
+        let loader_path1 = config_path.clone();
+        trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path1),
+        )
+        .await;
+
+        {
+            let guard = config_state.read().await;
+            let n = guard
+                .notifications
+                .as_ref()
+                .expect("notifications should exist");
+            assert_eq!(n.gateway_token.as_deref(), Some("stable-runtime-token"));
+            assert_eq!(guard.schedules.len(), 2);
+        }
+
+        // Reload #2: remove a schedule
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            None, // still no token
+        );
+
+        let loader_path2 = config_path.clone();
+        trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path2),
+        )
+        .await;
+
+        {
+            let guard = config_state.read().await;
+            let n = guard
+                .notifications
+                .as_ref()
+                .expect("notifications should exist");
+            assert_eq!(
+                n.gateway_token.as_deref(),
+                Some("stable-runtime-token"),
+                "runtime token must survive consecutive reloads from disk"
+            );
+            assert_eq!(guard.schedules.len(), 1);
+        }
+
+        // Reload #3: someone writes a different token to disk (should be overridden)
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            Some("someone-wrote-a-token-to-disk"),
+        );
+
+        let loader_path3 = config_path.clone();
+        trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path3),
+        )
+        .await;
+
+        {
+            let guard = config_state.read().await;
+            let n = guard
+                .notifications
+                .as_ref()
+                .expect("notifications should exist");
+            assert_eq!(
+                n.gateway_token.as_deref(),
+                Some("stable-runtime-token"),
+                "disk token must always be overridden by runtime token"
+            );
+        }
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
     }
 }

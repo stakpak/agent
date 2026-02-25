@@ -114,8 +114,15 @@ fn parse_chunk(
     accumulated_usage: &mut Option<Usage>,
     tool_calls: &mut std::collections::HashMap<u32, ToolCallState>,
 ) -> Result<Vec<StreamEvent>> {
-    let chunk: ChatCompletionChunk = serde_json::from_str(data)
-        .map_err(|e| Error::invalid_response(format!("Failed to parse chunk: {}", e)))?;
+    let chunk: ChatCompletionChunk = match serde_json::from_str(data) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(Error::from_unparseable_chunk(
+                data,
+                "Failed to parse chat completion chunk",
+            ));
+        }
+    };
 
     // Capture usage if present (OpenAI sends this in the final chunk when stream_options.include_usage is true)
     if let Some(chat_usage) = &chunk.usage {

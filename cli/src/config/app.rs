@@ -878,7 +878,7 @@ impl AppConfig {
         // Priority: cli_override > model > default
         let model_str = cli_override
             .or(self.model.as_deref())
-            .unwrap_or("claude-opus-4-5");
+            .unwrap_or("claude-opus-4-6");
 
         // Extract explicit provider prefix if present (e.g., "amazon-bedrock/claude-sonnet-4-5")
         let explicit_provider = model_str.find('/').map(|idx| &model_str[..idx]);
