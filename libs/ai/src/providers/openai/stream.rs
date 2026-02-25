@@ -119,7 +119,7 @@ fn parse_chunk(
         Err(_) => {
             return Err(Error::from_unparseable_chunk(
                 data,
-                "Failed to parse OpenAI chunk",
+                "Failed to parse chat completion chunk",
             ));
         }
     };
