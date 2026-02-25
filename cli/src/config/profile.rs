@@ -400,16 +400,32 @@ impl ProfileConfig {
     ///
     /// The model is added to the front of the list. If the model already exists,
     /// it's moved to the front. The list is truncated to MAX_RECENT_MODELS entries.
-    pub fn add_recent_model(&mut self, model_id: &str) {
+    ///
+    /// The `recent_id` should already be in normalized `"provider/short_name"` format
+    /// (see [`format_recent_model_id`]).
+    pub fn add_recent_model(&mut self, recent_id: &str) {
         // Remove if already exists (we'll re-add at front)
-        self.recent_models.retain(|id| id != model_id);
+        self.recent_models.retain(|id| id != recent_id);
 
         // Add to front
-        self.recent_models.insert(0, model_id.to_string());
+        self.recent_models.insert(0, recent_id.to_string());
 
         // Truncate to max size
         self.recent_models.truncate(Self::MAX_RECENT_MODELS);
     }
+}
+
+/// Format a model's provider and ID into the normalized `"provider/short_name"`
+/// format used for `recent_models` storage.
+///
+/// The short name is the last segment of the model ID (after the last `/`),
+/// which strips long upstream paths like `"fireworks-ai/accounts/fireworks/models/glm-5"`
+/// down to just `"glm-5"`. Combined with the provider, this produces clean entries
+/// like `"stakpak/glm-5"`, `"anthropic/claude-sonnet-4-5"`, or `"z.ai/glm-4.6"`.
+pub fn format_recent_model_id(provider: &str, model_id: &str) -> String {
+    // Take only the last segment after "/" to get the short model name
+    let short_name = model_id.rsplit('/').next().unwrap_or(model_id);
+    format!("{}/{}", provider, short_name)
 }
 
 impl From<OldAppConfig> for ProfileConfig {

@@ -15,6 +15,15 @@ use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use tokio::sync::mpsc::Sender;
 
+/// Format a model's provider and ID into normalized `"provider/short_name"` for recent_models.
+///
+/// Strips long upstream paths (e.g., `"fireworks-ai/accounts/fireworks/models/glm-5"`)
+/// down to just the last segment, producing clean entries like `"stakpak/glm-5"`.
+fn format_recent_model_id(provider: &str, model_id: &str) -> String {
+    let short_name = model_id.rsplit('/').next().unwrap_or(model_id);
+    format!("{}/{}", provider, short_name)
+}
+
 /// Filter rulebooks based on search input
 fn filter_rulebooks(state: &mut AppState) {
     if state.rulebook_search_input.is_empty() {
@@ -889,9 +898,10 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
 /// Add custom models from recent_models to available_models.
 ///
 /// Custom models are those in recent_models but not in available_models.
-/// The provider is inferred from:
-/// 1. The model ID prefix if it has a "/" (e.g., "litellm/glm-4.6" -> provider "litellm")
-/// 2. Otherwise, use the same provider as the configured default model (state.model)
+/// Recent model IDs use normalized `"provider/short_name"` format.
+/// Matching against available_models compares the normalized form so that
+/// `"stakpak/glm-5"` matches a catalog model with
+/// `id: "fireworks-ai/accounts/fireworks/models/glm-5", provider: "stakpak"`.
 pub fn ensure_custom_models_in_available(state: &mut AppState) {
     // Get the default provider from the configured model
     let default_provider = state.model.provider.clone();
@@ -900,17 +910,19 @@ pub fn ensure_custom_models_in_available(state: &mut AppState) {
     let to_add: Vec<Model> = state
         .recent_models
         .iter()
-        .filter(|recent_id| !state.available_models.iter().any(|m| &m.id == *recent_id))
+        .filter(|recent_id| {
+            // Check if any available model matches this recent ID when normalized
+            !state.available_models.iter().any(|m| {
+                format_recent_model_id(&m.provider, &m.id) == **recent_id
+            })
+        })
         .map(|recent_id| {
-            // Try to infer provider from model ID prefix (e.g., "litellm/glm-4.6" -> "litellm")
-            // split('/').next() is safe for UTF-8; find('/') + slice would also work since '/' is ASCII
-            let provider = recent_id
-                .split('/')
-                .next()
-                .filter(|prefix| !prefix.is_empty() && *prefix != recent_id)
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| default_provider.clone());
-            Model::custom(recent_id.clone(), provider)
+            // Parse "provider/short_name" format
+            let (provider, short_name) = recent_id
+                .split_once('/')
+                .map(|(p, n)| (p.to_string(), n.to_string()))
+                .unwrap_or_else(|| (default_provider.clone(), recent_id.clone()));
+            Model::custom(short_name, provider)
         })
         .collect();
 
@@ -941,39 +953,37 @@ pub fn handle_available_models_loaded(
     // Add custom models from recent_models that aren't in available_models
     ensure_custom_models_in_available(state);
 
-    // Add the current/default model to recent_models if not already there
-    // This ensures the initial model appears in Recent section
-    let model_to_add = if let Some(current) = &state.current_model {
-        // Use current_model if set (from previous switch)
-        Some(current.id.clone())
+    // Add the current/default model to recent_models if not already there.
+    // Always use normalized "provider/short_name" format for storage.
+    let recent_id_to_add = if let Some(current) = &state.current_model {
+        Some(format_recent_model_id(&current.provider, &current.id))
     } else {
         // Use the configured default model (state.model)
-        // Try to find matching model in available_models first (for correct ID format)
+        // Try to find matching model in available_models first (for correct provider)
         let default_model_id = &state.model.id;
         if let Some(matched) = state.available_models.iter().find(|m| {
-            // Match by ID or by final segment after "/" (for Stakpak routing:
-            // "anthropic/claude-..." matches "claude-...")
             m.id == *default_model_id
                 || m.id
                     .split('/')
                     .next_back()
                     .is_some_and(|last| last == default_model_id.as_str())
         }) {
-            Some(matched.id.clone())
+            Some(format_recent_model_id(&matched.provider, &matched.id))
         } else if !default_model_id.is_empty() {
-            // For local providers with custom models not in available_models,
-            // use the configured model ID directly
-            Some(default_model_id.clone())
+            Some(format_recent_model_id(
+                &state.model.provider,
+                default_model_id,
+            ))
         } else {
             None
         }
     };
 
-    if let Some(model_id) = model_to_add
-        && !state.recent_models.contains(&model_id)
+    if let Some(recent_id) = recent_id_to_add
+        && !state.recent_models.contains(&recent_id)
     {
         // Add to front of recent list
-        state.recent_models.insert(0, model_id);
+        state.recent_models.insert(0, recent_id);
         // Keep max 5
         state.recent_models.truncate(5);
 

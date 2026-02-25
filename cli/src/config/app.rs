@@ -875,8 +875,12 @@ impl AppConfig {
     pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
         let has_stakpak_key = self.get_stakpak_api_key().is_some();
 
-        // Priority: cli_override > model > default
+        // Priority: cli_override > recent_models[0] > model > default
+        // The most recently used model takes precedence over the static config model,
+        // so re-opening stakpak continues with the last model you were using.
+        let most_recent = self.recent_models.first().map(|s| s.as_str());
         let model_str = cli_override
+            .or(most_recent)
             .or(self.model.as_deref())
             .unwrap_or("claude-opus-4-5");
 

@@ -241,7 +241,6 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
     // Resolve short model names (e.g., "GLM-5") against the provider's model catalog.
-    // The Stakpak API needs the full prefixed ID (e.g., "fireworks-ai/.../glm-5").
     config.model = super::helpers::resolve_model_from_provider(config.model, &client).await;
 
     let mut current_session_id: Option<Uuid> = None;

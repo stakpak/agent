@@ -526,8 +526,12 @@ pub async fn run_interactive(
                         if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
                             && let Some(profile) = config_file.profiles.get_mut(&profile_name)
                         {
-                            // Use the original model ID (before Stakpak transform)
-                            profile.add_recent_model(&new_model.id);
+                            // Store in normalized "provider/short_name" format
+                            let recent_id = crate::config::format_recent_model_id(
+                                &new_model.provider,
+                                &new_model.id,
+                            );
+                            profile.add_recent_model(&recent_id);
                             // Clone recent models before saving (to avoid borrow conflict)
                             let updated_recent_models = profile.recent_models.clone();
                             // Best-effort save - don't fail the switch if save fails

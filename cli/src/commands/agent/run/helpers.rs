@@ -7,7 +7,6 @@ use uuid::Uuid;
 ///
 /// When the user passes `--model GLM-5` (a short, unprefixed name) and the model
 /// gets assigned `provider: "stakpak"`, the Stakpak API still needs the full
-/// prefixed model ID (e.g., `"fireworks-ai/accounts/fireworks/models/glm-5"`)
 /// to route the request to the correct upstream provider.
 ///
 /// This function fetches the available models from the provider and tries to find
@@ -40,7 +39,6 @@ pub async fn resolve_model_from_provider(
     }
 
     // 2. Case-insensitive match on the last segment of the ID (after last "/")
-    //    e.g., "fireworks-ai/accounts/fireworks/models/glm-5" -> "glm-5"
     if let Some(matched) = available_models.iter().find(|m| {
         m.id.rsplit('/')
             .next()
