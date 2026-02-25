@@ -1590,6 +1590,8 @@ mod tests {
             token: "test-token".to_string(),
             model: None,
             default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: String::new(),
         }
     }
 
