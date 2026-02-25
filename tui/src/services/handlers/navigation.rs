@@ -11,13 +11,9 @@ use crate::services::message::{
 
 /// Updates helper dropdown scroll position to keep selected item visible
 fn update_helper_dropdown_scroll(state: &mut AppState) {
-    let commands_to_show = if state.input() == "/" {
-        &state.helpers
-    } else {
-        &state.filtered_helpers
-    };
-
-    let total_commands = commands_to_show.len();
+    // filtered_helpers is maintained synchronously and already contains all
+    // commands when input is just "/", so no special-case needed
+    let total_commands = state.filtered_helpers.len();
     if total_commands == 0 {
         return;
     }
@@ -94,16 +90,11 @@ pub fn handle_dropdown_down(state: &mut AppState) {
                 state.helper_selected += 1;
             }
         } else {
-            // Regular helper mode
-            let commands_to_show = if state.input() == "/" {
-                &state.helpers
-            } else {
-                &state.filtered_helpers
-            };
-
-            if !commands_to_show.is_empty()
+            // Regular helper mode — filtered_helpers is maintained synchronously
+            // and already contains all commands when input is just "/"
+            if !state.filtered_helpers.is_empty()
                 && state.input().starts_with('/')
-                && state.helper_selected + 1 < commands_to_show.len()
+                && state.helper_selected + 1 < state.filtered_helpers.len()
             {
                 state.helper_selected += 1;
                 update_helper_dropdown_scroll(state);
