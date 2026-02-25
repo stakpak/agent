@@ -7,7 +7,7 @@ use syntect::highlighting::{Color as SyntectColor, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-use crate::services::detect_term::{is_light_mode, should_use_rgb_colors, ThemeColors};
+use crate::services::detect_term::{ThemeColors, is_light_mode, should_use_rgb_colors};
 
 /// Cached syntax definitions — deserialized once from embedded binary data.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);

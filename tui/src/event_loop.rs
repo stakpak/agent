@@ -372,6 +372,68 @@ pub async fn run_tui(
                        continue;
                    }
 
+                   // Batch streaming chunks: drain all pending StreamAssistantMessage events
+                   // from the channel and process them before a single draw. This prevents
+                   // per-token full markdown re-parse + re-render when the LLM streams fast.
+                   // Same pattern as scroll event batching on internal_rx (see below).
+                   if matches!(event, InputEvent::StreamAssistantMessage(_, _)) {
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1)
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
+                       let input_height: u16 = 3;
+                       let margin_height: u16 = 2;
+                       let dropdown_showing = state.show_helper_dropdown
+                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.filtered_files.is_empty());
+                       let dropdown_height: u16 = if dropdown_showing {
+                           state.filtered_helpers.len() as u16
+                       } else {
+                           0
+                       };
+                       let hint_height = if dropdown_showing { 0 } else { margin_height };
+                       let outer_chunks = ratatui::layout::Layout::default()
+                           .direction(ratatui::layout::Direction::Vertical)
+                           .constraints([
+                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Length(1),
+                               ratatui::layout::Constraint::Length(input_height),
+                               ratatui::layout::Constraint::Length(dropdown_height),
+                               ratatui::layout::Constraint::Length(hint_height),
+                           ])
+                           .split(term_rect);
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
+                       let message_area_height = outer_chunks[0].height as usize;
+
+                       // Process the first streaming event
+                       crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+
+                       // Drain all additional pending streaming chunks (non-blocking)
+                       let mut deferred_event: Option<InputEvent> = None;
+                       while let Ok(next_event) = input_rx.try_recv() {
+                           if matches!(next_event, InputEvent::StreamAssistantMessage(_, _)) {
+                               crate::services::update::update(&mut state, next_event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                           } else {
+                               // Non-streaming event — save it and stop draining
+                               deferred_event = Some(next_event);
+                               break;
+                           }
+                       }
+
+                       // Process any non-streaming event that was encountered during drain
+                       if let Some(other) = deferred_event {
+                           crate::services::update::update(&mut state, other, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                       }
+
+                       // Single draw for the entire batch
+                       state.poll_file_search_results();
+                       state.update_session_empty_status();
+                       terminal.draw(|f| view(f, &mut state))?;
+                       continue;
+                   }
+
                    if let InputEvent::Quit = event {
                        should_quit = true;
                    }
