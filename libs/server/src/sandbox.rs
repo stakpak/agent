@@ -8,12 +8,12 @@
 //!
 //! ## Sandbox Modes
 //!
-//! - **Ephemeral** (default): A new sandbox container is spawned for each session
-//!   and destroyed when the session ends. Maximum isolation, ~5-10s startup overhead.
-//!
-//! - **Persistent**: A single sandbox container is spawned at process startup and
+//! - **Persistent** (default): A single sandbox container is spawned at process startup and
 //!   reused across all sessions. Near-zero per-session overhead, slightly less
 //!   isolation (sessions share the same container filesystem).
+//!
+//! - **Ephemeral**: A new sandbox container is spawned for each session
+//!   and destroyed when the session ends. Maximum isolation, ~5-10s startup overhead.
 //!
 //! ## mTLS key exchange
 //!

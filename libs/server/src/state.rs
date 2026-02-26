@@ -116,7 +116,7 @@ impl AppState {
         self
     }
 
-    /// Returns the sandbox mode from the current config, defaulting to `Ephemeral`.
+    /// Returns the sandbox mode from the current config, defaulting to `Persistent`.
     pub fn sandbox_mode(&self) -> SandboxMode {
         self.sandbox_config
             .as_ref()

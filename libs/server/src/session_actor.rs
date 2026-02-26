@@ -122,7 +122,7 @@ async fn run_session_actor(
 
     // If sandbox is requested, determine how to provide it based on the configured mode:
     // - Persistent: reuse the pre-spawned sandbox from AppState (no per-session overhead)
-    // - Ephemeral: spawn a new sandbox container for this session (current default)
+    // - Ephemeral: spawn a new sandbox container for this session
     //
     // `ephemeral_sandbox` holds the owned sandbox for ephemeral mode so we can
     // shut it down at the end. Persistent sandboxes are not owned by the session.

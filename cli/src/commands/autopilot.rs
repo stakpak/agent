@@ -349,8 +349,8 @@ struct AutopilotServerConfig {
     model: Option<String>,
     #[serde(default)]
     auto_approve_all: bool,
-    /// Controls sandbox container lifecycle: "ephemeral" (default) spawns a new
-    /// container per session; "persistent" spawns once at startup and reuses it.
+    /// Controls sandbox container lifecycle: "persistent" (default) spawns once
+    /// at startup and reuses it; "ephemeral" spawns a new container per session.
     #[serde(default)]
     sandbox_mode: stakpak_server::SandboxMode,
 }
