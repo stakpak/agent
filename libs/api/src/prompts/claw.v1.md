@@ -48,17 +48,7 @@
 
 ### Telegram Bot Setup (BotFather)
 
-This process is used TWICE if user picks Telegram for both OpenClaw and Stakpak alerts.
-Each bot needs its own unique token.
-
-1. Open Telegram, message `@BotFather`
-2. Send `/newbot`
-3. Choose a display name (e.g. "My OpenClaw" for the gateway, "Stakpak Alerts" for monitoring)
-4. Choose a username (must end in `bot`)
-5. Copy the token from BotFather's reply
-6. Send `/setprivacy` → `Disable` (required for group messages without @mention)
-7. Validate: `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"` must return `"ok": true`
-8. **Send the bot a message** (e.g. "hi") — this creates the chat so it can send you alerts
+Used twice if Telegram for both OpenClaw and Stakpak. @BotFather → `/newbot` → token → `/setprivacy` Disable → validate `curl "https://api.telegram.org/bot<TOKEN>/getMe"` → **message the bot first** to create the chat.
 
 ### Stakpak Autopilot LLM Provider
 
@@ -161,13 +151,7 @@ Container runs as UID 1000. Host dirs MUST be `chown -R 1000:1000` before first 
 
 Use the `simple-deployment-on-vm` skill or your standard AWS VM provisioning workflow.
 
-**Requirements for the EC2 instance:**
-* Instance type: `t3.small` minimum (2 vCPU / 2GB RAM)
-* OS: Amazon Linux 2023 (x86_64)
-* EBS: 30GB gp3, encrypted
-* Security group: SSH (port 22) from your IP only. Add 80/443 later if configuring TLS in Phase 4
-* Elastic IP: assign one to avoid IP drift on stop/start
-* IMDSv2: enforce `HttpTokens=required`
+**EC2**: t3.small, AL2023, 30GB gp3 encrypted, SG 22 from your IP (80/443 if TLS), Elastic IP, IMDSv2 required.
 
 **User data bootstrap**: Provision t3.small with Docker, fail2ban, 2GB swap, create `openclaw` user (UID 1000), `mkdir -p /opt/openclaw/{config,workspace,data,checks,logs}` owned by openclaw.
 
@@ -181,14 +165,7 @@ Write bootstrap script locally, SCP and execute (never SSH heredoc — see Core 
 
 #### 2.1 Fix Volume Permissions
 
-```bash
-# Remote:
-ssh -i $SSH_KEY $SSH_USER@$PUBLIC_IP \
-  'sudo chown -R 1000:1000 /opt/openclaw/config /opt/openclaw/workspace /opt/openclaw/data'
-
-# Local:
-mkdir -p ~/openclaw/{config,workspace,data}
-```
+Remote: `chown -R 1000:1000 /opt/openclaw/{config,workspace,data}`. Local: `mkdir -p ~/openclaw/{config,workspace,data}`.
 
 #### 2.2 Generate Gateway Token
 
@@ -235,12 +212,7 @@ services:
 
 #### 2.4 Pull Image & Start
 
-```bash
-docker pull ghcr.io/openclaw/openclaw:latest
-docker compose up -d
-# Wait 20s, then verify:
-docker compose ps   # Must show (healthy)
-```
+`docker pull ghcr.io/openclaw/openclaw:latest && docker compose up -d`. Wait 20s; `docker compose ps` must show (healthy).
 
 #### 2.5 Set Gateway Mode & Write LLM Auth
 
@@ -315,11 +287,7 @@ docker exec openclaw-gateway node dist/index.js config set logging.file "/data/l
 
 #### 5.2 File Permissions
 
-```bash
-chmod 700 /opt/openclaw/config
-chmod 600 /opt/openclaw/config/openclaw.json
-chmod 600 /opt/openclaw/.env
-```
+`chmod 700 /opt/openclaw/config`; `chmod 600` openclaw.json and .env.
 
 #### 5.3 SSH Hardening (EC2/VPS only)
 
@@ -327,8 +295,7 @@ Standard SSH hardening: no root login, MaxAuthTries 3.
 
 #### 5.4 AWS Hardening (EC2 only)
 
-* Enforce IMDSv2: `aws ec2 modify-instance-metadata-options --instance-id $INSTANCE_ID --http-tokens required --http-endpoint enabled --region $REGION`
-* Ensure EBS is encrypted (should already be if provisioned with `--encrypted` in Phase 1.1). For existing unencrypted volumes, use the standard snapshot → encrypted copy → volume swap procedure.
+IMDSv2 required; EBS encrypted. Standard procedures for existing unencrypted volumes.
 
 #### 5.5 Security Checklist (OpenClaw-specific)
 
@@ -404,16 +371,7 @@ stakpak autopilot channel add telegram --token <STAKPAK_TELEGRAM_BOT_TOKEN> --ta
 
 **Option B: Discord**
 
-1. Go to https://discord.com/developers/applications
-2. Click "New Application" → name it (e.g. "Stakpak Alerts")
-3. Go to "Bot" → "Add Bot" → copy the bot token
-4. Go to "OAuth2" → "URL Generator" → select `bot` scope → select `Send Messages` permission
-5. Copy the generated URL → open it → invite the bot to your server
-6. Add the channel to Stakpak:
-
-```bash
-stakpak autopilot channel add discord --token <DISCORD_BOT_TOKEN>
-```
+Create app → Bot → OAuth2 invite → `stakpak autopilot channel add discord --token <TOKEN>`
 
 ##### Verify Channel
 
@@ -456,20 +414,7 @@ Runs checks on cron; on failure: LLM investigates via SSH, sends results to aler
 
 Each script should exit 0 on success, exit 1 on failure, and print a human-readable status line.
 
-**Example — health.sh** (gateway process health):
-```bash
-#!/bin/bash
-RESPONSE=$(docker exec openclaw-gateway node dist/index.js health --json 2>&1)
-if [ $? -ne 0 ]; then
-  echo "FAIL: Gateway health check failed"
-  echo "Response: $RESPONSE"
-  echo "Container: $(docker inspect --format='{{.State.Status}}' openclaw-gateway 2>&1)"
-  exit 1
-fi
-echo "OK: Gateway healthy"
-```
-
-Follow this pattern for all checks in the schedule table below. Each check script should:
+**Example — health.sh**: `docker exec openclaw-gateway node dist/index.js health --json`; exit 1 on failure, echo status. Pattern: `docker exec` for CLI, `docker inspect` for container, `df`/`free`/`du` for resources. Each check script should:
 * Use `docker exec openclaw-gateway node dist/index.js <command>` for OpenClaw CLI checks
 * Use `docker inspect` for container status checks
 * Use standard Linux tools (`df`, `free`, `du`) for resource checks
