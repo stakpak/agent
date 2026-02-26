@@ -2446,8 +2446,7 @@ pub fn render_ask_user_block(
 
         for q in questions {
             let review_label_width = max_content_width.saturating_sub(2);
-            let wrapped_review_label =
-                wrap_text_by_word(&q.label, review_label_width.max(1));
+            let wrapped_review_label = wrap_text_by_word(&q.label, review_label_width.max(1));
             for review_line in &wrapped_review_label {
                 let line_width = calculate_display_width(review_line);
                 let line_padding = max_content_width.saturating_sub(line_width);
@@ -2661,10 +2660,8 @@ pub fn render_ask_user_block(
             // and align with the text start (after bracket + space).
             let bracket_display_width = calculate_display_width(&bracket);
             let label_indent_width = bracket_display_width + 1; // "[›] " prefix
-            let label_available_width =
-                max_content_width.saturating_sub(label_indent_width);
-            let wrapped_label =
-                wrap_text_by_word(&opt.label, label_available_width.max(1));
+            let label_available_width = max_content_width.saturating_sub(label_indent_width);
+            let wrapped_label = wrap_text_by_word(&opt.label, label_available_width.max(1));
 
             for (li, label_line) in wrapped_label.iter().enumerate() {
                 if li == 0 {
@@ -2684,8 +2681,7 @@ pub fn render_ask_user_block(
                     let indent = " ".repeat(label_indent_width);
                     let line_text = format!("{}{}", indent, label_line);
                     let line_width = calculate_display_width(&line_text);
-                    let line_padding =
-                        max_content_width.saturating_sub(line_width);
+                    let line_padding = max_content_width.saturating_sub(line_width);
                     formatted_lines.push(Line::from(vec![
                         Span::styled("│", Style::default().fg(border_color)),
                         Span::from(" "),
@@ -2705,16 +2701,12 @@ pub fn render_ask_user_block(
                 };
                 // Align description with label text start
                 let desc_indent = " ".repeat(label_indent_width);
-                let desc_available_width =
-                    max_content_width.saturating_sub(label_indent_width);
-                let wrapped_desc =
-                    wrap_text_by_word(desc, desc_available_width.max(1));
+                let desc_available_width = max_content_width.saturating_sub(label_indent_width);
+                let wrapped_desc = wrap_text_by_word(desc, desc_available_width.max(1));
                 for desc_line in &wrapped_desc {
-                    let desc_text =
-                        format!("{}{}", desc_indent, desc_line);
+                    let desc_text = format!("{}{}", desc_indent, desc_line);
                     let desc_width = calculate_display_width(&desc_text);
-                    let desc_padding =
-                        max_content_width.saturating_sub(desc_width);
+                    let desc_padding = max_content_width.saturating_sub(desc_width);
                     formatted_lines.push(Line::from(vec![
                         Span::styled("│", Style::default().fg(border_color)),
                         Span::from(" "),
@@ -2779,8 +2771,7 @@ pub fn render_ask_user_block(
                     let bracket_display_width = calculate_display_width(&bracket);
                     let prefix_width = bracket_display_width + 1; // bracket + space
                     // Reserve 1 char for cursor on last line
-                    let available_text_width =
-                        max_content_width.saturating_sub(prefix_width + 1);
+                    let available_text_width = max_content_width.saturating_sub(prefix_width + 1);
                     let wrapped_input =
                         wrap_text_by_word(custom_input, available_text_width.max(1));
                     let total_lines = wrapped_input.len();
@@ -2791,11 +2782,9 @@ pub fn render_ask_user_block(
 
                         if is_first {
                             let cursor_part = if is_last { "│" } else { "" };
-                            let text =
-                                format!("{} {}{}", bracket, input_line, cursor_part);
+                            let text = format!("{} {}{}", bracket, input_line, cursor_part);
                             let text_width = calculate_display_width(&text);
-                            let text_padding =
-                                max_content_width.saturating_sub(text_width);
+                            let text_padding = max_content_width.saturating_sub(text_width);
                             let mut spans = vec![
                                 Span::styled("│", Style::default().fg(border_color)),
                                 Span::from(" "),
@@ -2815,18 +2804,15 @@ pub fn render_ask_user_block(
                                 ));
                             }
                             spans.push(Span::from(" ".repeat(text_padding)));
-                            spans
-                                .push(Span::styled(" │", Style::default().fg(border_color)));
+                            spans.push(Span::styled(" │", Style::default().fg(border_color)));
                             formatted_lines.push(Line::from(spans));
                         } else {
                             // Continuation lines: indent to align with text above
                             let indent = " ".repeat(prefix_width);
                             let cursor_part = if is_last { "│" } else { "" };
-                            let text =
-                                format!("{}{}{}", indent, input_line, cursor_part);
+                            let text = format!("{}{}{}", indent, input_line, cursor_part);
                             let text_width = calculate_display_width(&text);
-                            let text_padding =
-                                max_content_width.saturating_sub(text_width);
+                            let text_padding = max_content_width.saturating_sub(text_width);
                             let mut spans = vec![
                                 Span::styled("│", Style::default().fg(border_color)),
                                 Span::from(" "),
@@ -2845,8 +2831,7 @@ pub fn render_ask_user_block(
                                 ));
                             }
                             spans.push(Span::from(" ".repeat(text_padding)));
-                            spans
-                                .push(Span::styled(" │", Style::default().fg(border_color)));
+                            spans.push(Span::styled(" │", Style::default().fg(border_color)));
                             formatted_lines.push(Line::from(spans));
                         }
                     }
@@ -2855,10 +2840,8 @@ pub fn render_ask_user_block(
                 // Wrap long answered custom text to fit within the bordered block.
                 let bracket_display_width = calculate_display_width(&bracket);
                 let prefix_width = bracket_display_width + 1;
-                let available_text_width =
-                    max_content_width.saturating_sub(prefix_width);
-                let wrapped_answer =
-                    wrap_text_by_word(&answer.answer, available_text_width.max(1));
+                let available_text_width = max_content_width.saturating_sub(prefix_width);
+                let wrapped_answer = wrap_text_by_word(&answer.answer, available_text_width.max(1));
 
                 for (line_idx, answer_line) in wrapped_answer.iter().enumerate() {
                     let is_first = line_idx == 0;
@@ -2866,8 +2849,7 @@ pub fn render_ask_user_block(
                     if is_first {
                         let text = format!("{} {}", bracket, answer_line);
                         let text_width = calculate_display_width(&text);
-                        let text_padding =
-                            max_content_width.saturating_sub(text_width);
+                        let text_padding = max_content_width.saturating_sub(text_width);
                         formatted_lines.push(Line::from(vec![
                             Span::styled("│", Style::default().fg(border_color)),
                             Span::from(" "),
@@ -2884,8 +2866,7 @@ pub fn render_ask_user_block(
                         let indent = " ".repeat(prefix_width);
                         let text = format!("{}{}", indent, answer_line);
                         let text_width = calculate_display_width(&text);
-                        let text_padding =
-                            max_content_width.saturating_sub(text_width);
+                        let text_padding = max_content_width.saturating_sub(text_width);
                         formatted_lines.push(Line::from(vec![
                             Span::styled("│", Style::default().fg(border_color)),
                             Span::from(" "),
