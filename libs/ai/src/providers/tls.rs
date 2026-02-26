@@ -24,7 +24,13 @@ pub fn create_platform_tls_client() -> Result<Client> {
 
     Client::builder()
         .use_preconfigured_tls(tls_config)
-        .timeout(std::time::Duration::from_secs(300))
+        // Use read_timeout instead of timeout: read_timeout only fires when no
+        // data arrives for the given duration (idle timeout), while timeout caps
+        // the *entire* request lifecycle. SSE streams can legitimately run for
+        // many minutes during long tool calls, so a total timeout causes
+        // spurious "Transport error: TimedOut" failures.
+        .read_timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| Error::provider_error(format!("Failed to create TLS HTTP client: {}", e)))
 }
