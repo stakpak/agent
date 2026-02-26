@@ -1,7 +1,7 @@
 use crate::{
     context::{ContextFile, EnvironmentContext, ProjectContext, SessionContextBuilder},
     message_bridge,
-    sandbox::{SandboxConfig, SandboxedMcpServer},
+    sandbox::{SandboxConfig, SandboxMode, SandboxedMcpServer},
     state::AppState,
     types::SessionHandle,
 };
@@ -120,27 +120,48 @@ async fn run_session_actor(
             }
         };
 
-    // If sandbox is requested, spawn a sandboxed MCP server for this session.
-    // Otherwise, use the shared in-process MCP client.
-    let sandbox = if let Some(sandbox_config) = sandbox_config {
-        tracing::info!(session_id = %session_id, image = %sandbox_config.image, "Spawning sandbox container for session");
-        Some(
-            SandboxedMcpServer::spawn(&sandbox_config)
-                .await
-                .map_err(|e| format!("Failed to start sandbox for session {session_id}: {e}"))?,
-        )
-    } else {
-        None
-    };
+    // If sandbox is requested, determine how to provide it based on the configured mode:
+    // - Persistent: reuse the pre-spawned sandbox from AppState (no per-session overhead)
+    // - Ephemeral: spawn a new sandbox container for this session
+    //
+    // `ephemeral_sandbox` holds the owned sandbox for ephemeral mode so we can
+    // shut it down at the end. Persistent sandboxes are not owned by the session.
+    let mut ephemeral_sandbox: Option<SandboxedMcpServer> = None;
 
     let (run_tools, tool_executor): (Vec<stakai::Tool>, Box<dyn ToolExecutor + Send + Sync>) =
-        if let Some(ref sandbox) = sandbox {
-            (
-                sandbox.tools.clone(),
-                Box::new(SandboxedToolExecutor {
-                    mcp_client: sandbox.client.clone(),
-                }),
-            )
+        if let Some(ref sandbox_cfg) = sandbox_config {
+            if let Some(ref persistent) = state.persistent_sandbox {
+                // Persistent mode: reuse the pre-spawned sandbox
+                tracing::info!(session_id = %session_id, "Using persistent sandbox for session");
+                (
+                    persistent.tools().await,
+                    Box::new(SandboxedToolExecutor {
+                        mcp_client: persistent.client().await,
+                    }),
+                )
+            } else if sandbox_cfg.mode == SandboxMode::Persistent {
+                // Persistent mode was configured but the sandbox is not available.
+                // This should not happen because the server hard-fails on startup
+                // if the persistent sandbox cannot be spawned. Fail explicitly rather
+                // than silently falling back to ephemeral mode.
+                return Err(format!(
+                    "Sandbox mode is 'persistent' but no persistent sandbox is available for session {session_id}. \
+                     This indicates the server started without a healthy sandbox. Restart the autopilot to fix."
+                ));
+            } else {
+                // Ephemeral mode: spawn a new sandbox for this session
+                tracing::info!(session_id = %session_id, image = %sandbox_cfg.image, "Spawning ephemeral sandbox container for session");
+                let sandbox = SandboxedMcpServer::spawn(sandbox_cfg).await.map_err(|e| {
+                    format!("Failed to start sandbox for session {session_id}: {e}")
+                })?;
+                let tools = sandbox.tools.clone();
+                let client = sandbox.client.clone();
+                ephemeral_sandbox = Some(sandbox);
+                (
+                    tools,
+                    Box::new(SandboxedToolExecutor { mcp_client: client }),
+                )
+            }
         } else {
             (
                 state.current_mcp_tools().await,
@@ -266,8 +287,9 @@ async fn run_session_actor(
     periodic_checkpoint_cancel.cancel();
     let _ = periodic_task.await;
 
-    // Shut down sandbox container if one was started
-    if let Some(sandbox) = sandbox {
+    // Shut down ephemeral sandbox container if one was started.
+    // Persistent sandboxes are NOT shut down here — they live for the process lifetime.
+    if let Some(sandbox) = ephemeral_sandbox {
         sandbox.shutdown().await;
     }
 

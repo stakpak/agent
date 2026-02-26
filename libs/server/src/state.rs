@@ -1,6 +1,10 @@
 use crate::{
-    checkpoint_store::CheckpointStore, context::ContextBudget, context::ContextFile,
-    event_log::EventLog, idempotency::IdempotencyStore, sandbox::SandboxConfig,
+    checkpoint_store::CheckpointStore,
+    context::ContextBudget,
+    context::ContextFile,
+    event_log::EventLog,
+    idempotency::IdempotencyStore,
+    sandbox::{PersistentSandbox, SandboxConfig, SandboxMode},
     session_manager::SessionManager,
 };
 use stakpak_agent_core::{ProposedToolCall, ToolApprovalPolicy};
@@ -35,6 +39,9 @@ pub struct AppState {
     pub mcp_server_shutdown_tx: Option<broadcast::Sender<()>>,
     pub mcp_proxy_shutdown_tx: Option<broadcast::Sender<()>>,
     pub sandbox_config: Option<SandboxConfig>,
+    /// Pre-spawned persistent sandbox (when `SandboxMode::Persistent` is configured).
+    /// Shared across all sessions — avoids per-session container startup overhead.
+    pub persistent_sandbox: Option<Arc<PersistentSandbox>>,
     pub base_system_prompt: Option<String>,
     pub context_budget: ContextBudget,
     /// Base directory for project context discovery (AGENTS.md, APPS.md).
@@ -74,6 +81,7 @@ impl AppState {
             mcp_server_shutdown_tx: None,
             mcp_proxy_shutdown_tx: None,
             sandbox_config: None,
+            persistent_sandbox: None,
             base_system_prompt: None,
             context_budget: ContextBudget::default(),
             project_dir: None,
@@ -99,6 +107,21 @@ impl AppState {
     pub fn with_sandbox(mut self, sandbox_config: SandboxConfig) -> Self {
         self.sandbox_config = Some(sandbox_config);
         self
+    }
+
+    /// Attach a pre-spawned persistent sandbox to the app state.
+    /// Sessions will reuse this sandbox instead of spawning ephemeral ones.
+    pub fn with_persistent_sandbox(mut self, sandbox: PersistentSandbox) -> Self {
+        self.persistent_sandbox = Some(Arc::new(sandbox));
+        self
+    }
+
+    /// Returns the sandbox mode from the current config, defaulting to `Persistent`.
+    pub fn sandbox_mode(&self) -> SandboxMode {
+        self.sandbox_config
+            .as_ref()
+            .map(|c| c.mode.clone())
+            .unwrap_or_default()
     }
 
     pub fn with_base_system_prompt(mut self, prompt: Option<String>) -> Self {
