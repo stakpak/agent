@@ -378,7 +378,7 @@ stakpak auth login  # Select provider (Anthropic, OpenAI, DeepSeek, etc.), enter
 
 Required for alerts. Without it, checks run silently.
 
-**Option A: Telegram** (recommended if you already use Telegram) (recommended if you already use Telegram)
+**Option A: Telegram** (recommended if you already use Telegram)
 
 You need a **SECOND** Telegram bot — separate from the OpenClaw bot. Two processes cannot poll the same bot token (causes 409 Conflict).
 
@@ -448,7 +448,11 @@ Runs checks on cron; on failure: LLM investigates via SSH, sends results to aler
 
 #### 6.1 Check Scripts
 
-**Two-step flow**: (1) Write and deploy remote check scripts to `/opt/openclaw/checks/` (write locally, SCP — never SSH heredoc). (2) Create local SSH wrappers in `~/.stakpak/checks/` that invoke those remote scripts.
+**Order matters** — do Step 1 first, then Step 2. Wrappers call remote scripts; remote scripts must exist before wrappers work.
+
+**Step 1**: Write check scripts locally (one per schedule in 6.3), SCP each to `/opt/openclaw/checks/<name>.sh` on the remote host. Never create via SSH heredoc.
+
+**Step 2**: Create local SSH wrappers in `~/.stakpak/checks/` that invoke those remote scripts.
 
 Each script should exit 0 on success, exit 1 on failure, and print a human-readable status line.
 
@@ -471,7 +475,7 @@ Follow this pattern for all checks in the schedule table below. Each check scrip
 * Use standard Linux tools (`df`, `free`, `du`) for resource checks
 * Grep for failure keywords in output and exit 1 on match
 
-For remote targets, after deploying scripts to `/opt/openclaw/checks/`, create SSH wrapper scripts in `~/.stakpak/checks/`:
+**Step 2** (remote targets only): After Step 1 is done, create SSH wrapper scripts in `~/.stakpak/checks/`:
 ```bash
 mkdir -p ~/.stakpak/checks
 for NAME in health service channels models auth-cooldown resources cron-status heartbeat queue workspace-disk orphaned-sandbox compaction presence memory-search sandbox-image security-audit version; do
