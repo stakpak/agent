@@ -7,7 +7,6 @@
 * Connect Telegram as the primary messaging channel with DM pairing security
 * Harden the deployment for production (fail-closed auth, loopback binding, OS-level security)
 * Configure Stakpak Autopilot for continuous health monitoring with Telegram or Discord alerts
-* Produce a deployment that any agent can reproduce from this skill alone
 
 ## Core Principles
 
@@ -569,9 +568,9 @@ stakpak autopilot status
 
 #### 6.1 Check Scripts
 
-Write each script to the deployment host. For remote targets, write locally then SCP — never create via SSH heredoc.
+Write bash check scripts for each schedule. Each script should exit 0 on success, exit 1 on failure, and print a human-readable status line. Deploy to `/opt/openclaw/checks/` on the remote host (write locally, SCP — never SSH heredoc).
 
-**health.sh** — Gateway process health:
+**Example — health.sh** (gateway process health):
 ```bash
 #!/bin/bash
 RESPONSE=$(docker exec openclaw-gateway node dist/index.js health --json 2>&1)
@@ -584,244 +583,13 @@ fi
 echo "OK: Gateway healthy"
 ```
 
-**service.sh** — Gateway service status (systemd/process):
-```bash
-#!/bin/bash
-# For Docker deployments:
-STATUS=$(docker inspect --format='{{.State.Status}}' openclaw-gateway 2>/dev/null)
-HEALTH=$(docker inspect --format='{{.State.Health.Status}}' openclaw-gateway 2>/dev/null)
-if [ "$STATUS" != "running" ]; then
-  echo "FAIL: Container status=$STATUS"; exit 1
-fi
-if [ "$HEALTH" = "unhealthy" ]; then
-  echo "FAIL: Container running but unhealthy"; exit 1
-fi
-# Check for restart loop
-RESTARTS=$(docker inspect --format='{{.RestartCount}}' openclaw-gateway 2>/dev/null)
-if [ "${RESTARTS:-0}" -gt 5 ]; then
-  echo "WARN: Container has restarted $RESTARTS times"; exit 1
-fi
-echo "OK: Container $STATUS, health=$HEALTH, restarts=$RESTARTS"
-```
+Follow this pattern for all checks in the schedule table below. Each check script should:
+* Use `docker exec openclaw-gateway node dist/index.js <command>` for OpenClaw CLI checks
+* Use `docker inspect` for container status checks
+* Use standard Linux tools (`df`, `free`, `du`) for resource checks
+* Grep for failure keywords in output and exit 1 on match
 
-**channels.sh** — Channel connectivity:
-```bash
-#!/bin/bash
-RESULT=$(docker exec openclaw-gateway node dist/index.js channels status --probe 2>&1)
-if [ $? -ne 0 ] || echo "$RESULT" | grep -qi "disconnected\|error\|failed\|loggedOut"; then
-  echo "FAIL: Channel issue"; echo "$RESULT"; exit 1
-fi
-echo "OK: Channels healthy"
-```
-
-**models.sh** — LLM auth credentials:
-```bash
-#!/bin/bash
-RESULT=$(docker exec openclaw-gateway node dist/index.js models status --check 2>&1)
-EXIT=$?
-if [ $EXIT -eq 1 ]; then
-  echo "FAIL: Model credentials expired or missing"; echo "$RESULT"; exit 1
-elif [ $EXIT -eq 2 ]; then
-  echo "WARN: Model credentials expiring within 24h"; echo "$RESULT"; exit 1
-fi
-echo "OK: Model auth valid"
-```
-
-**auth-cooldown.sh** — Auth profile cooldown/billing detection:
-```bash
-#!/bin/bash
-AUTH_FILE="/opt/openclaw/config/agents/main/agent/auth-profiles.json"
-if [ ! -f "$AUTH_FILE" ]; then
-  AUTH_FILE=$(docker exec openclaw-gateway find /home/node/.openclaw/agents -name "auth-profiles.json" 2>/dev/null | head -1)
-fi
-COOLDOWNS=$(docker exec openclaw-gateway cat /home/node/.openclaw/agents/main/agent/auth-profiles.json 2>/dev/null | grep -c "cooldownUntil\|disabledReason")
-if [ "${COOLDOWNS:-0}" -gt 0 ]; then
-  echo "WARN: $COOLDOWNS auth profiles in cooldown or disabled"; exit 1
-fi
-echo "OK: No auth profiles in cooldown"
-```
-
-**resources.sh** — Disk, memory, container health:
-```bash
-#!/bin/bash
-ERRORS=0
-DISK_PCT=$(df /opt/openclaw | tail -1 | awk '{print $5}' | tr -d '%')
-[ "$DISK_PCT" -gt 85 ] && echo "FAIL: Disk ${DISK_PCT}%" && ERRORS=$((ERRORS+1))
-FREE_MB=$(free -m | awk '/^Mem:/{print $7}')
-[ "$FREE_MB" -lt 200 ] && echo "FAIL: Memory ${FREE_MB}MB" && ERRORS=$((ERRORS+1))
-STATUS=$(docker inspect --format='{{.State.Health.Status}}' openclaw-gateway 2>/dev/null)
-[ "$STATUS" != "healthy" ] && echo "FAIL: Container $STATUS" && ERRORS=$((ERRORS+1))
-# Check Docker daemon
-docker info > /dev/null 2>&1 || { echo "FAIL: Docker daemon unreachable"; ERRORS=$((ERRORS+1)); }
-[ $ERRORS -gt 0 ] && exit 1
-echo "OK: disk=${DISK_PCT}%, mem=${FREE_MB}MB, container=$STATUS"
-```
-
-**cron-status.sh** — Cron scheduler health:
-```bash
-#!/bin/bash
-STATUS_OUT=$(docker exec openclaw-gateway node dist/index.js cron status 2>&1)
-if echo "$STATUS_OUT" | grep -qi "disabled\|error"; then
-  echo "FAIL: Cron scheduler issue"; echo "$STATUS_OUT"; exit 1
-fi
-LIST_OUT=$(docker exec openclaw-gateway node dist/index.js cron list 2>&1)
-FAILED=$(echo "$LIST_OUT" | grep -ci "failed\|error")
-if [ "$FAILED" -gt 0 ]; then
-  echo "WARN: $FAILED cron jobs with errors"; echo "$LIST_OUT"; exit 1
-fi
-echo "OK: Cron scheduler healthy"
-```
-
-**heartbeat.sh** — Heartbeat delivery:
-```bash
-#!/bin/bash
-RESULT=$(docker exec openclaw-gateway node dist/index.js system heartbeat last 2>&1)
-if echo "$RESULT" | grep -qi "requests-in-flight\|alerts-disabled\|unknown-accountId\|delivery.*fail"; then
-  echo "WARN: Heartbeat issue"; echo "$RESULT"; exit 1
-fi
-echo "OK: Heartbeat delivering"
-```
-
-**queue.sh** — Message queue overflow:
-```bash
-#!/bin/bash
-DROPS=$(docker logs openclaw-gateway --since 10m 2>&1 | grep -ci "drop\|overflow\|queued for")
-if [ "$DROPS" -gt 3 ]; then
-  echo "WARN: $DROPS queue drop/overflow events in last 10min"; exit 1
-fi
-echo "OK: Queue healthy"
-```
-
-**workspace-disk.sh** — Workspace disk growth:
-```bash
-#!/bin/bash
-WORKSPACE_MB=$(du -sm /opt/openclaw/workspace/ 2>/dev/null | awk '{print $1}')
-AGENTS_MB=$(du -sm /opt/openclaw/config/agents/ 2>/dev/null | awk '{print $1}')
-TOTAL=$((${WORKSPACE_MB:-0} + ${AGENTS_MB:-0}))
-if [ "$TOTAL" -gt 5120 ]; then
-  echo "FAIL: OpenClaw data usage ${TOTAL}MB (>5GB)"; exit 1
-fi
-echo "OK: OpenClaw data usage ${TOTAL}MB"
-```
-
-**orphaned-sandbox.sh** — Orphaned sandbox containers:
-```bash
-#!/bin/bash
-ORPHANS=$(docker ps -a --filter name=openclaw-sandbox --filter status=exited --format "{{.Names}}" | wc -l)
-if [ "$ORPHANS" -gt 10 ]; then
-  echo "WARN: $ORPHANS orphaned sandbox containers"; exit 1
-fi
-echo "OK: $ORPHANS orphaned containers"
-```
-
-**security-audit.sh** — Config permissions, DM policy, linger, runtime:
-```bash
-#!/bin/bash
-ERRORS=0
-PERMS=$(docker exec openclaw-gateway stat -c "%a" /home/node/.openclaw/openclaw.json 2>/dev/null)
-[ "$PERMS" != "600" ] && echo "WARN: openclaw.json perms=$PERMS (should be 600)" && ERRORS=$((ERRORS+1))
-DOCTOR=$(docker exec openclaw-gateway node dist/index.js doctor --non-interactive 2>&1)
-echo "$DOCTOR" | grep -qi "open DM policy\|no allowlist" && echo "WARN: Open DM policy detected" && ERRORS=$((ERRORS+1))
-echo "$DOCTOR" | grep -qi "bun\|nvm\|fnm\|volta\|asdf" && echo "WARN: Non-standard Node runtime" && ERRORS=$((ERRORS+1))
-# Check linger (VPS only)
-LINGER=$(loginctl show-user $(whoami) 2>/dev/null | grep -i linger)
-[ "$LINGER" = "Linger=no" ] && echo "WARN: systemd linger disabled" && ERRORS=$((ERRORS+1))
-[ $ERRORS -gt 0 ] && exit 1
-echo "OK: Security audit passed"
-```
-
-**version.sh** — Version drift:
-```bash
-#!/bin/bash
-RUNNING=$(docker exec openclaw-gateway node -e "console.log(require('./package.json').version)" 2>/dev/null)
-LATEST=$(curl -sf "https://api.github.com/repos/openclaw/openclaw/releases/latest" \
-  | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
-[ -z "$RUNNING" ] || [ -z "$LATEST" ] && echo "WARN: versions unknown" && exit 0
-[ "$RUNNING" != "$LATEST" ] && echo "UPDATE: $RUNNING → $LATEST" && exit 1
-echo "OK: $RUNNING"
-```
-
-**compaction.sh** — Context compaction frequency:
-```bash
-#!/bin/bash
-TODAY=$(date +%Y-%m-%d)
-LOG_FILE="/opt/openclaw/data/logs/openclaw.log"
-if [ ! -f "$LOG_FILE" ]; then
-  LOG_FILE=$(docker logs openclaw-gateway --since 1h 2>&1)
-  COUNT=$(echo "$LOG_FILE" | grep -ci "compaction complete\|auto-compact")
-else
-  COUNT=$(grep "$TODAY" "$LOG_FILE" 2>/dev/null | grep -ci "compaction complete\|auto-compact")
-fi
-if [ "${COUNT:-0}" -gt 10 ]; then
-  echo "WARN: $COUNT compactions today (>10 threshold). Sessions burning tokens on context compaction."
-  echo "Fix: enable agents.defaults.contextPruning.mode = cache-ttl"; exit 1
-fi
-echo "OK: $COUNT compactions today"
-```
-
-**presence.sh** — Connected clients snapshot (informational):
-```bash
-#!/bin/bash
-# Informational audit check — presence tracks all WebSocket clients
-# (CLI sessions, Web UI, macOS app, mobile nodes). Entries expire after
-# 5 minutes of inactivity (TTL-based, max 200 entries).
-RESULT=$(docker exec openclaw-gateway node dist/index.js status --all 2>&1)
-echo "INFO: Connected clients snapshot"
-echo "$RESULT" | grep -i "presence\|client\|connected" || echo "No presence data"
-# Alert only if unexpected clients detected (more than expected count)
-CLIENT_COUNT=$(echo "$RESULT" | grep -ci "connected\|client")
-if [ "${CLIENT_COUNT:-0}" -gt 10 ]; then
-  echo "WARN: Unusually high client count ($CLIENT_COUNT). Audit for unauthorized connections."
-  echo "Fix: rotate gateway token — config set gateway.auth.token \"\$(openssl rand -hex 32)\""
-  exit 1
-fi
-echo "OK"
-```
-
-**memory-search.sh** — Memory search index health:
-```bash
-#!/bin/bash
-# Memory search builds a vector index over memory files for semantic recall.
-# If the embedding provider API key expires, the local model path is missing,
-# or QMD binary is not on PATH, memory search silently falls back to disabled.
-RESULT=$(docker exec openclaw-gateway node dist/index.js status --all 2>&1)
-if echo "$RESULT" | grep -qi "memory.*error\|memory.*disabled\|embedding.*fail\|qmd.*missing"; then
-  echo "WARN: Memory search degraded or disabled"
-  echo "$RESULT" | grep -i "memory"
-  echo "Fix: check embedding provider key or set agents.defaults.memorySearch.provider openai"
-  exit 1
-fi
-echo "OK: Memory search healthy"
-```
-
-**sandbox-image.sh** — Sandbox Docker image present:
-```bash
-#!/bin/bash
-# When agent sandboxing is enabled (scope: "session"), the gateway requires
-# the openclaw-sandbox:bookworm-slim image. If missing after Docker cleanup,
-# every sandboxed tool call fails silently.
-IMAGE=$(docker images openclaw-sandbox --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | head -1)
-if [ -z "$IMAGE" ]; then
-  echo "FAIL: Sandbox image missing. Run scripts/sandbox-setup.sh"; exit 1
-fi
-echo "OK: Sandbox image present ($IMAGE)"
-```
-
-Deploy to remote host:
-
-```bash
-scp -i $SSH_KEY /tmp/openclaw-checks/*.sh $SSH_USER@$PUBLIC_IP:/tmp/
-ssh -i $SSH_KEY $SSH_USER@$PUBLIC_IP 'sudo bash -c "
-mv /tmp/*.sh /opt/openclaw/checks/
-chown openclaw:openclaw /opt/openclaw/checks/*.sh
-chmod +x /opt/openclaw/checks/*.sh
-"'
-```
-
-> **Note**: Write each check script to `/tmp/openclaw-checks/` locally (e.g. `/tmp/openclaw-checks/health.sh`), then SCP the batch. Never create scripts via SSH heredoc.
-
-#### 6.2 Create Local SSH Wrapper Scripts
-
+For remote targets, create SSH wrapper scripts in `~/.stakpak/checks/`:
 ```bash
 mkdir -p ~/.stakpak/checks
 for NAME in health service channels models auth-cooldown resources cron-status heartbeat queue workspace-disk orphaned-sandbox compaction presence memory-search sandbox-image security-audit version; do
@@ -834,7 +602,7 @@ EOF
 done
 ```
 
-#### 6.3 Verify Alert Channel
+#### 6.2 Verify Alert Channel
 
 > If you haven't configured the alert channel yet, go back to **Phase 6.0**.
 
@@ -843,119 +611,42 @@ stakpak autopilot channel test
 stakpak autopilot channel list
 ```
 
-#### 6.4 Add Schedules
+#### 6.3 Add Schedules
 
-Every schedule MUST include `--channel $ALERT_CHANNEL`.
+Every schedule MUST include `--channel $ALERT_CHANNEL`. Use `stakpak autopilot schedule add` for each row in the table below.
 
+**Example:**
 ```bash
-# CRITICAL — every 2-5 min
 stakpak autopilot schedule add openclaw-health \
   --cron '*/5 * * * *' \
   --check ~/.stakpak/checks/openclaw-health.sh \
   --trigger-on failure --channel $ALERT_CHANNEL --max-steps 20 \
-  --prompt "OpenClaw gateway health failed on $PUBLIC_IP. SSH in and investigate: docker logs openclaw-gateway --tail 100, docker ps. Restart if needed: cd /opt/openclaw && docker compose restart. Check: df -h && free -m."
-
-stakpak autopilot schedule add openclaw-service \
-  --cron '*/5 * * * *' \
-  --check ~/.stakpak/checks/openclaw-service.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 15 \
-  --prompt "OpenClaw container issue on $PUBLIC_IP. Check docker compose ps, docker logs --tail 100. If restart loop, check for OOM or stale lock: rm -f /data/gateway.*.lock."
-
-stakpak autopilot schedule add openclaw-channels \
-  --cron '*/5 * * * *' \
-  --check ~/.stakpak/checks/openclaw-channels.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 15 \
-  --prompt "OpenClaw channel probe failed on $PUBLIC_IP. Check: docker exec openclaw-gateway node dist/index.js channels status --probe. For Telegram loggedOut: re-add token. For WhatsApp: QR re-scan needed."
-
-stakpak autopilot schedule add openclaw-models \
-  --cron '*/15 * * * *' \
-  --check ~/.stakpak/checks/openclaw-models.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "OpenClaw model auth failed on $PUBLIC_IP. Check: docker exec openclaw-gateway node dist/index.js models status --check. Exit 1=expired, 2=expiring. Update auth-profiles.json if needed."
-
-# HIGH — every 30min-1hr
-stakpak autopilot schedule add openclaw-auth-cooldown \
-  --cron '*/30 * * * *' \
-  --check ~/.stakpak/checks/openclaw-auth-cooldown.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Auth profiles in cooldown or billing-disabled on $PUBLIC_IP. Check auth-profiles.json for cooldownUntil or disabledReason. Top up provider if billing issue."
-
-stakpak autopilot schedule add openclaw-resources \
-  --cron '0 */2 * * *' \
-  --check ~/.stakpak/checks/openclaw-resources.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 15 \
-  --prompt "Resource check failed on $PUBLIC_IP. Investigate disk, memory, container health, Docker daemon. Clean logs if full. Restart if unhealthy."
-
-# MEDIUM — every 15min-6hr
-stakpak autopilot schedule add openclaw-cron \
-  --cron '*/15 * * * *' \
-  --check ~/.stakpak/checks/openclaw-cron-status.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "OpenClaw cron issue on $PUBLIC_IP. Check: cron status, cron list. Run cron runs --id <jobId> for error details."
-
-stakpak autopilot schedule add openclaw-heartbeat \
-  --cron '*/30 * * * *' \
-  --check ~/.stakpak/checks/openclaw-heartbeat.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Heartbeat delivery issue on $PUBLIC_IP. Check system heartbeat last for skip reason. Verify channel connectivity and delivery target."
-
-stakpak autopilot schedule add openclaw-queue \
-  --cron '*/10 * * * *' \
-  --check ~/.stakpak/checks/openclaw-queue.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Message queue overflow on $PUBLIC_IP. Messages being dropped. Consider increasing messages.queue.cap or agents.defaults.maxConcurrent."
-
-stakpak autopilot schedule add openclaw-workspace \
-  --cron '0 */6 * * *' \
-  --check ~/.stakpak/checks/openclaw-workspace-disk.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Workspace disk usage high on $PUBLIC_IP. Check du -sh workspace/ agents/. Archive old session JSONL files: find sessions/ -name '*.jsonl' -mtime +30 | xargs gzip."
-
-stakpak autopilot schedule add openclaw-sandbox \
-  --cron '0 */1 * * *' \
-  --check ~/.stakpak/checks/openclaw-orphaned-sandbox.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Orphaned sandbox containers accumulating on $PUBLIC_IP. Clean: docker rm \$(docker ps -a --filter name=openclaw-sandbox --filter status=exited -q)."
-
-stakpak autopilot schedule add openclaw-compaction \
-  --cron '0 */1 * * *' \
-  --check ~/.stakpak/checks/openclaw-compaction.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Context compaction running >10 times/day on $PUBLIC_IP. Sessions burning tokens. Enable agents.defaults.contextPruning.mode = cache-ttl. Send /compact or /new in affected chats."
-
-stakpak autopilot schedule add openclaw-sandbox-image \
-  --cron '0 */6 * * *' \
-  --check ~/.stakpak/checks/openclaw-sandbox-image.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Sandbox Docker image missing on $PUBLIC_IP. Every sandboxed tool call is failing. Run scripts/sandbox-setup.sh to rebuild."
-
-# LOW — daily/weekly
-stakpak autopilot schedule add openclaw-security \
-  --cron '0 9 * * *' \
-  --check ~/.stakpak/checks/openclaw-security-audit.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Security audit found issues on $PUBLIC_IP. Check config permissions, DM policy, linger, runtime. Run: doctor --non-interactive."
-
-stakpak autopilot schedule add openclaw-version \
-  --cron '0 9 * * 1' \
-  --check ~/.stakpak/checks/openclaw-version.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "New OpenClaw version available on $PUBLIC_IP. Report current vs latest. Check CHANGELOG. Do NOT auto-update."
-
-stakpak autopilot schedule add openclaw-presence \
-  --cron '0 */1 * * *' \
-  --check ~/.stakpak/checks/openclaw-presence.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 5 \
-  --prompt "Unusually high client count on $PUBLIC_IP. Audit for unauthorized WebSocket connections. If unexpected, rotate gateway token: config set gateway.auth.token."
-
-stakpak autopilot schedule add openclaw-memory-search \
-  --cron '0 */6 * * *' \
-  --check ~/.stakpak/checks/openclaw-memory-search.sh \
-  --trigger-on failure --channel $ALERT_CHANNEL --max-steps 10 \
-  --prompt "Memory search degraded or disabled on $PUBLIC_IP. Agent cannot recall past notes. Check embedding provider API key or QMD binary. Set agents.defaults.memorySearch.provider if needed."
+  --prompt "OpenClaw gateway health failed on $PUBLIC_IP. SSH in and investigate: docker logs openclaw-gateway --tail 100, docker ps. Restart if needed: cd /opt/openclaw && docker compose restart."
 ```
 
-#### 6.5 Start & Verify Autopilot
+Create all schedules from this table following the same pattern. The `--prompt` should describe the failure and suggest investigation steps relevant to the check:
+
+| ID | Name | Cron | Steps | Check target | Prompt hint |
+|----|------|------|-------|-------------|-------------|
+| C1 | openclaw-health | `*/5 * * * *` | 20 | `health --json` | Gateway health, restart if needed |
+| C2 | openclaw-service | `*/5 * * * *` | 15 | `docker inspect` container status + restart count | Container status, OOM, stale lock files |
+| C3 | openclaw-channels | `*/5 * * * *` | 15 | `channels status --probe` | Channel disconnected/loggedOut, re-add token |
+| C4 | openclaw-models | `*/15 * * * *` | 10 | `models status --check` (exit 1=expired, 2=expiring) | Model auth expired, update auth-profiles.json |
+| H1 | openclaw-auth-cooldown | `*/30 * * * *` | 10 | grep auth-profiles.json for cooldownUntil/disabledReason | Auth cooldown or billing disabled |
+| H2 | openclaw-resources | `0 */2 * * *` | 15 | disk >85%, memory <200MB, container unhealthy, Docker daemon | Disk/memory/container/Docker health |
+| H3 | openclaw-sandbox-image | `0 */6 * * *` | 10 | `docker images openclaw-sandbox` exists | Sandbox image missing, run setup script |
+| M1 | openclaw-cron | `*/15 * * * *` | 10 | `cron status` + `cron list` for errors | Cron scheduler disabled or job errors |
+| M2 | openclaw-heartbeat | `*/30 * * * *` | 10 | `system heartbeat last` for skip reasons | Heartbeat delivery skipped |
+| M3 | openclaw-queue | `*/10 * * * *` | 10 | grep recent logs for drop/overflow | Queue overflow, increase cap |
+| M4 | openclaw-workspace | `0 */6 * * *` | 10 | `du -sm` workspace + agents >5GB | Workspace disk growth, archive old JSONL |
+| M5 | openclaw-sandbox | `0 */1 * * *` | 10 | count exited openclaw-sandbox containers >10 | Orphaned sandbox containers |
+| M6 | openclaw-compaction | `0 */1 * * *` | 10 | grep logs for compaction >10/day | Context compaction burning tokens |
+| L1 | openclaw-security | `0 9 * * *` | 10 | file perms, `doctor`, DM policy, linger, runtime | Security audit, run doctor |
+| L2 | openclaw-version | `0 9 * * 1` | 10 | compare running vs latest GitHub release | Version drift, do NOT auto-update |
+| L3 | openclaw-presence | `0 */1 * * *` | 5 | `status --all` client count >10 | Unauthorized connections, rotate gateway token |
+| L4 | openclaw-memory-search | `0 */6 * * *` | 10 | `status --all` grep memory errors | Memory search disabled, check embedding key |
+
+#### 6.4 Start & Verify Autopilot
 
 ```bash
 # If not already running from Phase 6.0:
@@ -968,27 +659,9 @@ stakpak autopilot schedule trigger openclaw-health --dry-run
 
 > Dry-run executes the check script, runs LLM investigation if it fails, but does NOT send a notification. Use it to verify checks work before going live.
 
-#### 6.6 Complete Schedule Reference
+#### 6.5 Complete Schedule Reference
 
-| ID | Schedule | Cron | Tier | Purpose |
-|----|----------|------|------|---------|
-| C1 | openclaw-health | `*/5 * * * *` | Critical | Gateway process health (WS probe) |
-| C2 | openclaw-service | `*/5 * * * *` | Critical | Container status, restart loops |
-| C3 | openclaw-channels | `*/5 * * * *` | Critical | Channel auth — loggedOut, disconnected |
-| C4 | openclaw-models | `*/15 * * * *` | Critical | LLM auth — expired/missing credentials |
-| H1 | openclaw-auth-cooldown | `*/30 * * * *` | High | Auth profile cooldown / billing disabled |
-| H2 | openclaw-resources | `0 */2 * * *` | High | Disk, memory, container, Docker daemon |
-| H3 | openclaw-sandbox-image | `0 */6 * * *` | High | Sandbox Docker image present |
-| M1 | openclaw-cron | `*/15 * * * *` | Medium | Cron scheduler disabled or job errors |
-| M2 | openclaw-heartbeat | `*/30 * * * *` | Medium | Heartbeat delivery skipped |
-| M3 | openclaw-queue | `*/10 * * * *` | Medium | Message queue overflow / drops |
-| M4 | openclaw-workspace | `0 */6 * * *` | Medium | Workspace disk growth |
-| M5 | openclaw-sandbox | `0 */1 * * *` | Medium | Orphaned sandbox containers |
-| M6 | openclaw-compaction | `0 */1 * * *` | Medium | Context compaction frequency (>10/day) |
-| L1 | openclaw-security | `0 9 * * *` | Low | Permissions, DM policy, linger, runtime |
-| L2 | openclaw-version | `0 9 * * 1` | Low | Version drift |
-| L3 | openclaw-presence | `0 */1 * * *` | Low | Connected clients snapshot (audit) |
-| L4 | openclaw-memory-search | `0 */6 * * *` | Low | Memory search index health |
+Already covered in the table above (section 6.3).
 
 ### Phase 7: Validation
 
@@ -1093,7 +766,6 @@ docker compose restart
 | Health checks | https://docs.openclaw.ai/gateway/health |
 | Model authentication | https://docs.openclaw.ai/gateway/authentication |
 | Channel pairing | https://docs.openclaw.ai/channels/pairing |
-| Stakpak CLI | https://github.com/stakpak/agent |
 | Autopilot docs | https://stakpak.gitbook.io/docs |
 | Telegram Bot API | https://core.telegram.org/bots/api |
 | Discord Developer Portal | https://discord.com/developers/applications |
