@@ -561,8 +561,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
         }
 
         "/claw" => {
-            const CLAW_PROMPT: &str =
-                include_str!("../../../libs/api/src/prompts/claw.v1.md");
+            const CLAW_PROMPT: &str = include_str!("../../../libs/api/src/prompts/claw.v1.md");
             let prompt = CLAW_PROMPT.to_string();
 
             ctx.state.messages.push(Message::user(prompt.clone(), None));
