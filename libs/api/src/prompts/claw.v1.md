@@ -32,17 +32,7 @@
 >
 > Store the user's choice as `$DEPLOY_TARGET` — used throughout.
 
-### Mandatory User Prompt: Stakpak Alert Channel
-
-> **ASK THE USER**: "Which channel for Stakpak autopilot alerts — Telegram or Discord?"
->
-> * **Telegram** — requires a SECOND Telegram bot (separate from OpenClaw). Simpler if user already uses Telegram.
-> * **Discord** — requires a Discord bot. Better if user wants separation between chat and monitoring.
->
-> **CRITICAL**: If user picks Telegram, they MUST create a separate bot from the OpenClaw one.
-> Two processes cannot poll the same Telegram bot token — causes 409 Conflict errors.
-
-Store the user's choice as `$ALERT_CHANNEL` (`telegram` or `discord`).
+> **Defer alert channel choice** to Phase 6. Only the deployment target is needed upfront.
 
 ### Required Tokens — Collect All Before Starting
 
@@ -51,7 +41,7 @@ Store the user's choice as `$ALERT_CHANNEL` (`telegram` or `discord`).
 | Anthropic API key | https://console.anthropic.com/settings/keys | `sk-ant-api03-...` | 2 |
 | **OpenClaw Telegram bot token** | Telegram → `@BotFather` → `/newbot` | `123456789:ABCdef...` | 3 |
 | Telegram user ID | Telegram → `@userinfobot` → send any message | Numeric | 3 |
-| **Stakpak alert channel token** | See alert channel choice above | Varies | 6 |
+| **Stakpak alert channel token** | See Phase 6 — ask when configuring autopilot | Varies | 6 |
 | AWS credentials (EC2 only) | IAM console or `aws configure` | Access key + secret | 1 |
 | SSH access (VPS only) | Hosting provider | `user@host` + key | 1 |
 | Domain name (optional) | DNS provider | FQDN | 4 |
@@ -80,7 +70,7 @@ Each bot needs its own unique token.
 
 ### What OpenClaw Is
 
-OpenClaw is a **single-user** multi-channel AI assistant gateway. It routes messages from 20+ messaging platforms to an AI agent. It is NOT multi-tenant.
+OpenClaw is a **single-user** multi-channel AI assistant gateway. It routes messages from 36+ messaging platforms to an AI agent. It is NOT multi-tenant.
 
 * **Docker image**: `ghcr.io/openclaw/openclaw` (multi-arch amd64+arm64)
 * **Default port**: 18789 (WebSocket gateway), 18790 (bridge)
@@ -179,58 +169,13 @@ Use the `simple-deployment-on-vm` skill or your standard AWS VM provisioning wor
 * Elastic IP: assign one to avoid IP drift on stop/start
 * IMDSv2: enforce `HttpTokens=required`
 
-**User data bootstrap** — install on the instance after launch:
-```bash
-dnf update -y
-dnf install -y docker git fail2ban yum-cron
-systemctl enable docker && systemctl start docker
-systemctl enable --now fail2ban
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
-useradd -m -s /bin/bash openclaw
-usermod -aG docker openclaw
-mkdir -p /opt/openclaw/{config,workspace,data,checks,logs}
-chown -R openclaw:openclaw /opt/openclaw
-```
+**User data bootstrap**: Provision t3.small with Docker, fail2ban, 2GB swap, create `openclaw` user (UID 1000), `mkdir -p /opt/openclaw/{config,workspace,data,checks,logs}` owned by openclaw.
 
 #### 1.2 Prepare Existing VPS
 
 > For `$DEPLOY_TARGET` = "Existing VPS" — start here.
 
-Write the bootstrap script locally, then SCP and execute (never use SSH heredoc — see Core Principles).
-
-Create `/tmp/openclaw-vps-bootstrap.sh` locally:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-apt-get update && apt-get install -y docker.io docker-compose-plugin fail2ban ufw unattended-upgrades || \
-dnf install -y docker docker-compose-plugin fail2ban yum-cron
-
-systemctl enable --now docker fail2ban
-
-if ! swapon --show | grep -q /swapfile; then
-  fallocate -l 2G /swapfile && chmod 600 /swapfile
-  mkswap /swapfile && swapon /swapfile
-  echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
-fi
-
-useradd -m -s /bin/bash openclaw 2>/dev/null || true
-usermod -aG docker openclaw
-mkdir -p /opt/openclaw/{config,workspace,data,checks,logs}
-chown -R openclaw:openclaw /opt/openclaw
-```
-
-Deploy and run:
-
-```bash
-scp -i $SSH_KEY /tmp/openclaw-vps-bootstrap.sh $SSH_USER@$PUBLIC_IP:/tmp/
-ssh -i $SSH_KEY $SSH_USER@$PUBLIC_IP 'sudo bash /tmp/openclaw-vps-bootstrap.sh'
-```
+Write bootstrap script locally, SCP and execute (never SSH heredoc — see Core Principles). Same requirements as EC2: install Docker + fail2ban, 2GB swap, create `openclaw` user (UID 1000), `mkdir -p /opt/openclaw/{config,workspace,data,checks,logs}` owned by openclaw.
 
 ### Phase 2: Docker & OpenClaw Setup
 
@@ -247,32 +192,11 @@ mkdir -p ~/openclaw/{config,workspace,data}
 
 #### 2.2 Generate Gateway Token
 
-Write the token generation script locally, then SCP and execute:
-
-Create `/tmp/openclaw-gen-token.sh` locally:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-GATEWAY_TOKEN=$(openssl rand -hex 32)
-echo "OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN" > /opt/openclaw/.env
-echo "$GATEWAY_TOKEN" > /opt/openclaw/config/gateway-token
-chmod 600 /opt/openclaw/.env /opt/openclaw/config/gateway-token
-```
-
-```bash
-# Remote:
-scp -i $SSH_KEY /tmp/openclaw-gen-token.sh $SSH_USER@$PUBLIC_IP:/tmp/
-ssh -i $SSH_KEY $SSH_USER@$PUBLIC_IP 'sudo -u openclaw bash /tmp/openclaw-gen-token.sh'
-
-# Local:
-GATEWAY_TOKEN=$(openssl rand -hex 32)
-echo "OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN" > ~/openclaw/.env
-echo "$GATEWAY_TOKEN" > ~/openclaw/config/gateway-token
-chmod 600 ~/openclaw/.env ~/openclaw/config/gateway-token
-```
+Generate 32-byte hex token with `openssl rand -hex 32`, store in `.env` as `OPENCLAW_GATEWAY_TOKEN=...`, `chmod 600` the `.env` file. Write script locally and SCP to remote; never SSH heredoc.
 
 #### 2.3 Create Docker Compose File
+
+> **Standalone production compose**: This differs from OpenClaw's repo `docker-setup.sh` — we create a minimal production compose with healthcheck, logging, and explicit state dir. Use this when you need a hardened deploy without the repo's onboarding flow.
 
 ```yaml
 services:
@@ -280,6 +204,7 @@ services:
     image: ghcr.io/openclaw/openclaw:latest
     container_name: openclaw-gateway
     restart: unless-stopped
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789", "--allow-unconfigured"]
     ports:
       - "127.0.0.1:18789:18789"
       - "127.0.0.1:18790:18790"
@@ -294,6 +219,7 @@ services:
       - NODE_OPTIONS=--max-old-space-size=1536
       - OPENCLAW_GATEWAY_BIND=lan
       - OPENCLAW_GATEWAY_PORT=18789
+      - OPENCLAW_STATE_DIR=/data
     healthcheck:
       test: ["CMD", "node", "dist/index.js", "health", "--json"]
       interval: 30s
@@ -322,13 +248,21 @@ docker compose ps   # Must show (healthy)
 docker exec openclaw-gateway node dist/index.js config set gateway.mode "local"
 ```
 
-Write the LLM auth profile per https://docs.openclaw.ai/gateway/authentication or run `doctor` for guidance.
+**OpenClaw auth store format** — the LLM cannot infer this; it is proprietary. Write `auth-profiles.json` to `/home/node/.openclaw/agents/main/agent/auth-profiles.json` inside the container (or to the host path that maps to it). Example:
 
-```bash
-docker exec openclaw-gateway node dist/index.js models status
-# Must show provider status as ok.
-docker compose restart
+```json
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": {
+      "provider": "anthropic",
+      "apiKey": "<ANTHROPIC_API_KEY>"
+    }
+  }
+}
 ```
+
+For other providers: `openai:default`, `gemini:default`, etc. Use `docker exec` to write or `docker cp` from host. Verify: `docker exec openclaw-gateway node dist/index.js models status` must show `ok`. Restart: `docker compose restart`.
 
 ### Phase 3: Telegram Integration
 
@@ -365,35 +299,7 @@ docker exec openclaw-gateway node dist/index.js config set channels.telegram.all
 
 > Skip if no domain name. Only for EC2/VPS targets.
 
-```bash
-# Install Caddy:
-sudo dnf copr enable -y @caddy/caddy && sudo dnf install -y caddy   # RHEL/AL2023
-# Or: sudo apt install -y caddy                                       # Debian/Ubuntu
-```
-
-Write `/etc/caddy/Caddyfile`:
-
-```
-<DOMAIN> {
-    reverse_proxy 127.0.0.1:18789
-    @websocket {
-        header Connection *Upgrade*
-        header Upgrade websocket
-    }
-    reverse_proxy @websocket 127.0.0.1:18789
-    header {
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        Referrer-Policy strict-origin-when-cross-origin
-        -Server
-    }
-}
-```
-
-```bash
-sudo systemctl enable caddy && sudo systemctl start caddy
-curl -I https://<DOMAIN>
-```
+Set up Caddy as reverse proxy to 127.0.0.1:18789 with websocket upgrade support and standard security headers.
 
 ### Phase 5: Security Hardening
 
@@ -413,23 +319,18 @@ docker exec openclaw-gateway node dist/index.js config set logging.file "/data/l
 chmod 700 /opt/openclaw/config
 chmod 600 /opt/openclaw/config/openclaw.json
 chmod 600 /opt/openclaw/.env
-chmod 600 /opt/openclaw/config/gateway-token
 ```
 
 #### 5.3 SSH Hardening (EC2/VPS only)
 
-```bash
-sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-sudo systemctl restart sshd
-```
+Standard SSH hardening: no root login, MaxAuthTries 3.
 
 #### 5.4 AWS Hardening (EC2 only)
 
 * Enforce IMDSv2: `aws ec2 modify-instance-metadata-options --instance-id $INSTANCE_ID --http-tokens required --http-endpoint enabled --region $REGION`
 * Ensure EBS is encrypted (should already be if provisioned with `--encrypted` in Phase 1.1). For existing unencrypted volumes, use the standard snapshot → encrypted copy → volume swap procedure.
 
-#### 5.5 Security Checklist
+#### 5.5 Security Checklist (OpenClaw-specific)
 
 * [ ] Gateway token set (32-byte hex, fail-closed)
 * [ ] `auth-profiles.json` valid (`models status` shows `ok`)
@@ -437,14 +338,6 @@ sudo systemctl restart sshd
 * [ ] File permissions: config dir = 700, openclaw.json = 600, .env = 600
 * [ ] mDNS disabled, log redaction enabled
 * [ ] Telegram DM policy = pairing, group policy = allowlist
-* [ ] SSH key-only auth, root login disabled, MaxAuthTries = 3
-* [ ] fail2ban installed and running
-* [ ] Security group: only port 22 (your IP) — 80/443 only if Caddy configured
-* [ ] Elastic IP assigned (EC2) — no IP drift on stop/start
-* [ ] IMDSv2 enforced (EC2)
-* [ ] EBS encrypted (EC2)
-* [ ] 2GB swap configured
-* [ ] Automatic OS updates enabled
 * [ ] `gateway.mode` = `local`
 * [ ] systemd linger enabled (VPS with systemd user service)
 * [ ] Node runtime is system Node, not Bun or version-manager path
@@ -472,25 +365,20 @@ stakpak --version
 
 ##### Configure LLM Provider
 
-Autopilot needs an LLM provider to investigate failures. Without this, every schedule fails silently with `Provider not found`.
+Required for failure investigation. Without it: `Provider not found`.
 
 ```bash
-# Check if a provider is already configured:
-stakpak auth list
-
-# If empty — configure one:
-stakpak auth login
+stakpak auth list   # If empty:
+stakpak auth login  # Select provider (Anthropic, OpenAI, DeepSeek, etc.), enter API key. Stored in ~/.stakpak/
 ```
 
-The `auth login` flow will prompt you to select a provider (Anthropic, OpenAI, DeepSeek, etc.) and enter your API key. The key is stored locally in `~/.stakpak/`.
-
-> **Tip**: DeepSeek or Qwen work great for autopilot investigation at a fraction of the cost. You don't need Opus for monitoring.
+> **Tip**: DeepSeek or Qwen work well for monitoring at lower cost.
 
 ##### Configure Alert Channel
 
-Autopilot needs a notification channel to alert you when checks fail. Without a channel, it runs checks and investigates silently — you'll never know something broke.
+Required for alerts. Without it, checks run silently.
 
-**Option A: Telegram** (recommended if you already use Telegram)
+**Option A: Telegram** (recommended if you already use Telegram) (recommended if you already use Telegram)
 
 You need a **SECOND** Telegram bot — separate from the OpenClaw bot. Two processes cannot poll the same bot token (causes 409 Conflict).
 
@@ -531,9 +419,10 @@ stakpak autopilot channel add discord --token <DISCORD_BOT_TOKEN>
 
 ```bash
 stakpak autopilot channel test
+stakpak autopilot channel list
 ```
 
-This sends a test message to your configured channel. If it fails:
+If test fails:
 
 | Symptom | Fix |
 |---------|-----|
@@ -542,11 +431,6 @@ This sends a test message to your configured channel. If it fails:
 | `400 Bad Request` (Discord) | Bot token format is wrong, or bot wasn't invited to the server |
 | `409 Conflict` (Telegram) | Another process is polling this bot token. Use a different bot |
 | No message received | For Telegram: did you message the bot first? The chat must exist before Stakpak can send to it |
-
-```bash
-# Verify channel is configured:
-stakpak autopilot channel list
-```
 
 ##### Start Autopilot Daemon
 
@@ -558,17 +442,15 @@ stakpak up --non-interactive
 stakpak autopilot status
 ```
 
-`stakpak up` starts the autopilot daemon that:
-- Runs all scheduled checks on their cron intervals
-- On check failure: triggers an LLM investigation (SSH into server, read logs, diagnose)
-- Sends investigation results + recommended fix to your alert channel
-- `--non-interactive` skips confirmation prompts (safe for scripts/automation)
+Runs checks on cron; on failure: LLM investigates via SSH, sends results to alert channel. `--non-interactive` skips prompts.
 
-> **If `stakpak up` fails**: check `stakpak auth list` (provider configured?) and `stakpak autopilot channel list` (channel configured?). Both are required.
+> **If `stakpak up` fails**: `stakpak auth list` and `stakpak autopilot channel list` — both provider and channel must be configured.
 
 #### 6.1 Check Scripts
 
-Write bash check scripts for each schedule. Each script should exit 0 on success, exit 1 on failure, and print a human-readable status line. Deploy to `/opt/openclaw/checks/` on the remote host (write locally, SCP — never SSH heredoc).
+**Two-step flow**: (1) Write and deploy remote check scripts to `/opt/openclaw/checks/` (write locally, SCP — never SSH heredoc). (2) Create local SSH wrappers in `~/.stakpak/checks/` that invoke those remote scripts.
+
+Each script should exit 0 on success, exit 1 on failure, and print a human-readable status line.
 
 **Example — health.sh** (gateway process health):
 ```bash
@@ -589,7 +471,7 @@ Follow this pattern for all checks in the schedule table below. Each check scrip
 * Use standard Linux tools (`df`, `free`, `du`) for resource checks
 * Grep for failure keywords in output and exit 1 on match
 
-For remote targets, create SSH wrapper scripts in `~/.stakpak/checks/`:
+For remote targets, after deploying scripts to `/opt/openclaw/checks/`, create SSH wrapper scripts in `~/.stakpak/checks/`:
 ```bash
 mkdir -p ~/.stakpak/checks
 for NAME in health service channels models auth-cooldown resources cron-status heartbeat queue workspace-disk orphaned-sandbox compaction presence memory-search sandbox-image security-audit version; do
@@ -613,6 +495,12 @@ stakpak autopilot channel list
 
 #### 6.3 Add Schedules
 
+> **ASK THE USER** at the start of Phase 6: "Which channel for Stakpak autopilot alerts — Telegram or Discord?" Store as `$ALERT_CHANNEL`. Use a **separate** Telegram bot from OpenClaw (409 Conflict if shared). See Phase 6.0 for channel setup.
+
+**Two tiers** — Quick start first, then extend:
+* **Quick start (4 checks)**: openclaw-health, openclaw-channels, openclaw-models, openclaw-resources — get alerts in ~30 min
+* **Extended monitoring (remaining 13)**: add incrementally after the system is running
+
 Every schedule MUST include `--channel $ALERT_CHANNEL`. Use `stakpak autopilot schedule add` for each row in the table below.
 
 **Example:**
@@ -624,7 +512,7 @@ stakpak autopilot schedule add openclaw-health \
   --prompt "OpenClaw gateway health failed on $PUBLIC_IP. SSH in and investigate: docker logs openclaw-gateway --tail 100, docker ps. Restart if needed: cd /opt/openclaw && docker compose restart."
 ```
 
-Create all schedules from this table following the same pattern. The `--prompt` should describe the failure and suggest investigation steps relevant to the check:
+`--prompt` should describe the failure and suggest investigation steps:
 
 | ID | Name | Cron | Steps | Check target | Prompt hint |
 |----|------|------|-------|-------------|-------------|
@@ -657,11 +545,7 @@ stakpak autopilot status
 stakpak autopilot schedule trigger openclaw-health --dry-run
 ```
 
-> Dry-run executes the check script, runs LLM investigation if it fails, but does NOT send a notification. Use it to verify checks work before going live.
-
-#### 6.5 Complete Schedule Reference
-
-Already covered in the table above (section 6.3).
+> Dry-run: runs check + LLM investigation if it fails, but does NOT send a notification.
 
 ### Phase 7: Validation
 
@@ -713,28 +597,23 @@ docker compose restart
 | 4 | Config key rejected | Key name changed between versions | Check configuration-reference docs |
 | 5 | `gateway.mode is unset` | Not configured | `config set gateway.mode "local"` |
 | 6 | `Connection reset by peer` on health | Fail-closed auth | Use CLI health check inside container |
-| 7 | Old AMI doesn't exist | Hardcoded AMI ID | Query latest AL2023 AMI dynamically |
-| 8 | `yum: command not found` | AL2023 uses dnf | Use `dnf`, not `yum` |
-| 9 | Broken scripts via SSH heredoc | Shell escaping corruption | Write locally, SCP to host |
-| 10 | Telegram 409 Conflict | Two processes polling same bot | Separate bots for OpenClaw and Stakpak |
-| 11 | `Provider not found` in autopilot | No LLM provider configured | Run `stakpak auth login` |
-| 12 | Discord `400 Bad Request` loop | Invalid Discord bot token | Regenerate at Discord Developer Portal |
-| 13 | `database is locked` warnings | High-frequency schedules | Use `*/5` minimum; warnings are non-fatal |
-| 14 | Schedule runs but no notification | Missing `--channel` flag | Always pass `--channel` |
-| 15 | `missing gateway notifications config` | Channel added without `--target` | Re-add with `--target <CHAT_ID>` |
-| 16 | IP changes after EC2 stop/start | No Elastic IP | Allocate EIP in Phase 1.5 |
-| 17 | OOM kills container | No swap on 2GB instance | Add 2GB swap |
-| 18 | SSH timeout after IP change | SG has old IP | Update SG ingress rule |
-| 19 | Stale gateway lock file | SIGKILL/OOM left lock file | `rm -f /data/gateway.*.lock` |
-| 20 | Heartbeat silently skipped | Queue saturated or delivery target missing | Check `logs --follow \| grep heartbeat` |
-| 21 | Messages silently dropped | Queue overflow (cap: 20/session) | Increase `messages.queue.cap` or `maxConcurrent` |
-| 22 | Context compaction burning tokens | Sessions accumulating large tool outputs | Enable `contextPruning.mode = "cache-ttl"` |
-| 23 | Memory search silently disabled | Embedding API key expired or QMD binary missing | Check `status --all \| grep memory` |
-| 24 | Gateway stops after SSH logout | systemd linger disabled | `loginctl enable-linger $USER` |
-| 25 | Orphaned sandbox containers | Crash during sandboxed session | `docker rm $(docker ps -a --filter name=openclaw-sandbox --filter status=exited -q)` |
-| 26 | Auth profile in exponential cooldown | Rate limits or billing failure | Wait for cooldown or top up provider account |
-| 27 | Node runtime on Bun/version-manager | Wrong binary in service path | `doctor --repair` or reinstall with system Node |
-| 28 | Sandbox image missing | Docker cleanup removed it | Re-run `scripts/sandbox-setup.sh` |
+| 7 | Broken scripts via SSH heredoc | Shell escaping corruption | Write locally, SCP to host |
+| 8 | Telegram 409 Conflict | Two processes polling same bot | Separate bots for OpenClaw and Stakpak |
+| 9 | `Provider not found` in autopilot | No LLM provider configured | Run `stakpak auth login` |
+| 10 | Discord `400 Bad Request` loop | Invalid Discord bot token | Regenerate at Discord Developer Portal |
+| 11 | `database is locked` warnings | High-frequency schedules | Use `*/5` minimum; warnings are non-fatal |
+| 12 | Schedule runs but no notification | Missing `--channel` flag | Always pass `--channel` |
+| 13 | `missing gateway notifications config` | Channel added without `--target` | Re-add with `--target <CHAT_ID>` |
+| 14 | Stale gateway lock file | SIGKILL/OOM left lock file | `rm -f /data/gateway.*.lock` |
+| 15 | Heartbeat silently skipped | Queue saturated or delivery target missing | Check `logs --follow \| grep heartbeat` |
+| 16 | Messages silently dropped | Queue overflow (cap: 20/session) | Increase `messages.queue.cap` or `maxConcurrent` |
+| 17 | Context compaction burning tokens | Sessions accumulating large tool outputs | Enable `contextPruning.mode = "cache-ttl"` |
+| 18 | Memory search silently disabled | Embedding API key expired or QMD binary missing | Check `status --all \| grep memory` |
+| 19 | Gateway stops after SSH logout | systemd linger disabled | `loginctl enable-linger $USER` |
+| 20 | Orphaned sandbox containers | Crash during sandboxed session | `docker rm $(docker ps -a --filter name=openclaw-sandbox --filter status=exited -q)` |
+| 21 | Auth profile in exponential cooldown | Rate limits or billing failure | Wait for cooldown or top up provider account |
+| 22 | Node runtime on Bun/version-manager | Wrong binary in service path | `doctor --repair` or reinstall with system Node |
+| 23 | Sandbox image missing | Docker cleanup removed it | Re-run `scripts/sandbox-setup.sh` |
 
 ## Success Criteria
 
@@ -744,13 +623,9 @@ docker compose restart
 * [ ] First user paired and can chat
 * [ ] Port 18789 bound to 127.0.0.1 only
 * [ ] `doctor` reports no critical issues
-* [ ] Elastic IP assigned (EC2)
-* [ ] fail2ban active, root SSH disabled, MaxAuthTries = 3
-* [ ] 2GB swap configured and active
-* [ ] EBS encrypted (EC2)
 * [ ] systemd linger enabled (VPS)
 * [ ] Node runtime is system Node, not Bun/nvm/fnm
-* [ ] Stakpak autopilot running with all 17 schedules
+* [ ] Stakpak autopilot running (Quick start: 4 schedules minimum; extend to all 17 as needed)
 * [ ] Autopilot notifications delivering (not silent mode)
 * [ ] `schedule trigger --dry-run` shows checks passing
 * [ ] All credentials stored with 600 permissions
