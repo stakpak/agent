@@ -2445,20 +2445,25 @@ pub fn render_ask_user_block(
         ]));
 
         for q in questions {
-            let label_width = calculate_display_width(&q.label);
-            let label_padding = max_content_width.saturating_sub(label_width);
-            formatted_lines.push(Line::from(vec![
-                Span::styled("│", Style::default().fg(border_color)),
-                Span::from(" "),
-                Span::styled(
-                    q.label.clone(),
-                    Style::default()
-                        .fg(ThemeColors::title_primary())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::from(" ".repeat(label_padding)),
-                Span::styled(" │", Style::default().fg(border_color)),
-            ]));
+            let review_label_width = max_content_width.saturating_sub(2);
+            let wrapped_review_label =
+                wrap_text_by_word(&q.label, review_label_width.max(1));
+            for review_line in &wrapped_review_label {
+                let line_width = calculate_display_width(review_line);
+                let line_padding = max_content_width.saturating_sub(line_width);
+                formatted_lines.push(Line::from(vec![
+                    Span::styled("│", Style::default().fg(border_color)),
+                    Span::from(" "),
+                    Span::styled(
+                        review_line.clone(),
+                        Style::default()
+                            .fg(ThemeColors::title_primary())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::from(" ".repeat(line_padding)),
+                    Span::styled(" │", Style::default().fg(border_color)),
+                ]));
+            }
 
             if let Some(answer) = answers.get(&q.label) {
                 // Collect display labels for the answer(s)
@@ -2652,18 +2657,45 @@ pub fn render_ask_user_block(
                 Style::default().fg(ThemeColors::muted())
             };
 
-            let opt_text = format!("{} {}", bracket, opt.label);
-            let opt_width = calculate_display_width(&opt_text);
-            let opt_padding = max_content_width.saturating_sub(opt_width);
-            formatted_lines.push(Line::from(vec![
-                Span::styled("│", Style::default().fg(border_color)),
-                Span::from(" "),
-                Span::styled(bracket.clone(), bracket_style),
-                Span::raw(" "),
-                Span::styled(opt.label.clone(), label_style),
-                Span::from(" ".repeat(opt_padding)),
-                Span::styled(" │", Style::default().fg(border_color)),
-            ]));
+            // Pre-wrap option label so continuation lines keep borders
+            // and align with the text start (after bracket + space).
+            let bracket_display_width = calculate_display_width(&bracket);
+            let label_indent_width = bracket_display_width + 1; // "[›] " prefix
+            let label_available_width =
+                max_content_width.saturating_sub(label_indent_width);
+            let wrapped_label =
+                wrap_text_by_word(&opt.label, label_available_width.max(1));
+
+            for (li, label_line) in wrapped_label.iter().enumerate() {
+                if li == 0 {
+                    let opt_text = format!("{} {}", bracket, label_line);
+                    let opt_width = calculate_display_width(&opt_text);
+                    let opt_padding = max_content_width.saturating_sub(opt_width);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::styled(bracket.clone(), bracket_style),
+                        Span::raw(" "),
+                        Span::styled(label_line.clone(), label_style),
+                        Span::from(" ".repeat(opt_padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+                } else {
+                    let indent = " ".repeat(label_indent_width);
+                    let line_text = format!("{}{}", indent, label_line);
+                    let line_width = calculate_display_width(&line_text);
+                    let line_padding =
+                        max_content_width.saturating_sub(line_width);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::raw(indent),
+                        Span::styled(label_line.clone(), label_style),
+                        Span::from(" ".repeat(line_padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+                }
+            }
 
             if let Some(desc) = &opt.description {
                 let desc_style = if is_cursor || is_checked {
@@ -2671,16 +2703,26 @@ pub fn render_ask_user_block(
                 } else {
                     Style::default().fg(ThemeColors::dark_gray())
                 };
-                let desc_text = format!("       {}", desc);
-                let desc_width = calculate_display_width(&desc_text);
-                let desc_padding = max_content_width.saturating_sub(desc_width);
-                formatted_lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(border_color)),
-                    Span::from(" "),
-                    Span::styled(desc_text, desc_style),
-                    Span::from(" ".repeat(desc_padding)),
-                    Span::styled(" │", Style::default().fg(border_color)),
-                ]));
+                // Align description with label text start
+                let desc_indent = " ".repeat(label_indent_width);
+                let desc_available_width =
+                    max_content_width.saturating_sub(label_indent_width);
+                let wrapped_desc =
+                    wrap_text_by_word(desc, desc_available_width.max(1));
+                for desc_line in &wrapped_desc {
+                    let desc_text =
+                        format!("{}{}", desc_indent, desc_line);
+                    let desc_width = calculate_display_width(&desc_text);
+                    let desc_padding =
+                        max_content_width.saturating_sub(desc_width);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::styled(desc_text, desc_style),
+                        Span::from(" ".repeat(desc_padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+                }
             }
         }
 
@@ -2730,41 +2772,133 @@ pub fn render_ask_user_block(
                         Span::styled(" │", Style::default().fg(border_color)),
                     ]));
                 } else {
-                    let text = format!("{} {}│", bracket, custom_input);
-                    let text_width = calculate_display_width(&text);
-                    let text_padding = max_content_width.saturating_sub(text_width);
-                    formatted_lines.push(Line::from(vec![
-                        Span::styled("│", Style::default().fg(border_color)),
-                        Span::from(" "),
-                        Span::styled(bracket, bracket_style),
-                        Span::raw(" "),
-                        Span::styled(
-                            custom_input.to_string(),
-                            Style::default()
-                                .fg(ThemeColors::title_primary())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled("│", Style::default().fg(ThemeColors::accent())),
-                        Span::from(" ".repeat(text_padding)),
-                        Span::styled(" │", Style::default().fg(border_color)),
-                    ]));
+                    // Wrap long custom input text to fit within the bordered block.
+                    // Layout per line: "│" + " " + prefix + text + cursor(last line only) + padding + " │"
+                    // First line prefix: "[›] " (bracket + space)
+                    // Continuation prefix: "    " (same-width indent)
+                    let bracket_display_width = calculate_display_width(&bracket);
+                    let prefix_width = bracket_display_width + 1; // bracket + space
+                    // Reserve 1 char for cursor on last line
+                    let available_text_width =
+                        max_content_width.saturating_sub(prefix_width + 1);
+                    let wrapped_input =
+                        wrap_text_by_word(custom_input, available_text_width.max(1));
+                    let total_lines = wrapped_input.len();
+
+                    for (line_idx, input_line) in wrapped_input.iter().enumerate() {
+                        let is_last = line_idx == total_lines - 1;
+                        let is_first = line_idx == 0;
+
+                        if is_first {
+                            let cursor_part = if is_last { "│" } else { "" };
+                            let text =
+                                format!("{} {}{}", bracket, input_line, cursor_part);
+                            let text_width = calculate_display_width(&text);
+                            let text_padding =
+                                max_content_width.saturating_sub(text_width);
+                            let mut spans = vec![
+                                Span::styled("│", Style::default().fg(border_color)),
+                                Span::from(" "),
+                                Span::styled(bracket.clone(), bracket_style),
+                                Span::raw(" "),
+                                Span::styled(
+                                    input_line.clone(),
+                                    Style::default()
+                                        .fg(ThemeColors::title_primary())
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                            ];
+                            if is_last {
+                                spans.push(Span::styled(
+                                    "│",
+                                    Style::default().fg(ThemeColors::accent()),
+                                ));
+                            }
+                            spans.push(Span::from(" ".repeat(text_padding)));
+                            spans
+                                .push(Span::styled(" │", Style::default().fg(border_color)));
+                            formatted_lines.push(Line::from(spans));
+                        } else {
+                            // Continuation lines: indent to align with text above
+                            let indent = " ".repeat(prefix_width);
+                            let cursor_part = if is_last { "│" } else { "" };
+                            let text =
+                                format!("{}{}{}", indent, input_line, cursor_part);
+                            let text_width = calculate_display_width(&text);
+                            let text_padding =
+                                max_content_width.saturating_sub(text_width);
+                            let mut spans = vec![
+                                Span::styled("│", Style::default().fg(border_color)),
+                                Span::from(" "),
+                                Span::raw(indent),
+                                Span::styled(
+                                    input_line.clone(),
+                                    Style::default()
+                                        .fg(ThemeColors::title_primary())
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                            ];
+                            if is_last {
+                                spans.push(Span::styled(
+                                    "│",
+                                    Style::default().fg(ThemeColors::accent()),
+                                ));
+                            }
+                            spans.push(Span::from(" ".repeat(text_padding)));
+                            spans
+                                .push(Span::styled(" │", Style::default().fg(border_color)));
+                            formatted_lines.push(Line::from(spans));
+                        }
+                    }
                 }
             } else if is_custom_answered && let Some(answer) = previous_answer {
-                let text = format!("{} {}", bracket, answer.answer);
-                let text_width = calculate_display_width(&text);
-                let text_padding = max_content_width.saturating_sub(text_width);
-                formatted_lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(border_color)),
-                    Span::from(" "),
-                    Span::styled(bracket, bracket_style),
-                    Span::raw(" "),
-                    Span::styled(
-                        answer.answer.clone(),
-                        Style::default().fg(ThemeColors::accent()),
-                    ),
-                    Span::from(" ".repeat(text_padding)),
-                    Span::styled(" │", Style::default().fg(border_color)),
-                ]));
+                // Wrap long answered custom text to fit within the bordered block.
+                let bracket_display_width = calculate_display_width(&bracket);
+                let prefix_width = bracket_display_width + 1;
+                let available_text_width =
+                    max_content_width.saturating_sub(prefix_width);
+                let wrapped_answer =
+                    wrap_text_by_word(&answer.answer, available_text_width.max(1));
+
+                for (line_idx, answer_line) in wrapped_answer.iter().enumerate() {
+                    let is_first = line_idx == 0;
+
+                    if is_first {
+                        let text = format!("{} {}", bracket, answer_line);
+                        let text_width = calculate_display_width(&text);
+                        let text_padding =
+                            max_content_width.saturating_sub(text_width);
+                        formatted_lines.push(Line::from(vec![
+                            Span::styled("│", Style::default().fg(border_color)),
+                            Span::from(" "),
+                            Span::styled(bracket.clone(), bracket_style),
+                            Span::raw(" "),
+                            Span::styled(
+                                answer_line.clone(),
+                                Style::default().fg(ThemeColors::accent()),
+                            ),
+                            Span::from(" ".repeat(text_padding)),
+                            Span::styled(" │", Style::default().fg(border_color)),
+                        ]));
+                    } else {
+                        let indent = " ".repeat(prefix_width);
+                        let text = format!("{}{}", indent, answer_line);
+                        let text_width = calculate_display_width(&text);
+                        let text_padding =
+                            max_content_width.saturating_sub(text_width);
+                        formatted_lines.push(Line::from(vec![
+                            Span::styled("│", Style::default().fg(border_color)),
+                            Span::from(" "),
+                            Span::raw(indent),
+                            Span::styled(
+                                answer_line.clone(),
+                                Style::default().fg(ThemeColors::accent()),
+                            ),
+                            Span::from(" ".repeat(text_padding)),
+                            Span::styled(" │", Style::default().fg(border_color)),
+                        ]));
+                    }
+                }
             } else {
                 let text = format!("{} Other...", bracket);
                 let text_width = calculate_display_width(&text);
