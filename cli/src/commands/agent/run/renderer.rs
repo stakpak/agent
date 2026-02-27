@@ -591,7 +591,11 @@ fn truncate_yaml_value(value: &Value, max_length: usize) -> Value {
 }
 
 impl OutputRenderer {
-    pub fn render_token_usage_stats(&self, usage: &LLMTokenUsage) -> String {
+    pub fn render_token_usage_stats(
+        &self,
+        usage: &LLMTokenUsage,
+        model_name: Option<&str>,
+    ) -> String {
         match &self.format {
             OutputFormat::Json => {
                 serde_json::to_string_pretty(usage).unwrap_or_else(|_| "{}".to_string())
@@ -607,6 +611,11 @@ impl OutputRenderer {
 
                 // Header (no border, no gap - flows directly after time saved stats)
                 output.push_str(&format!("{}\n\n", "Session Usage".with(cyan).bold()));
+
+                // Model name
+                if let Some(name) = model_name {
+                    output.push_str(&format!(" Model              {}\n", name.with(green)));
+                }
 
                 // Format numbers with thousands separator
                 let format_num = |n: u32| {

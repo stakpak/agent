@@ -18,6 +18,13 @@ use ratatui::{
 };
 use stakai::Model;
 
+/// Check if a model matches a recent_models entry (normalized "provider/short_name" format).
+fn matches_recent_id(model: &Model, recent_id: &str) -> bool {
+    let short_name = model.id.rsplit('/').next().unwrap_or(&model.id);
+    let normalized = format!("{}/{}", model.provider, short_name);
+    normalized == recent_id
+}
+
 /// Filter models based on mode and search query
 /// Returns indices into the original available_models vec that match the filter
 pub fn filter_models(models: &[Model], mode: ModelSwitcherMode, search: &str) -> Vec<usize> {
@@ -61,7 +68,7 @@ pub fn get_navigation_order(state: &AppState, filtered_indices: &[usize]) -> Vec
         if let Some(idx) = state
             .available_models
             .iter()
-            .position(|m| m.id == *recent_id)
+            .position(|m| matches_recent_id(m, recent_id))
             && filtered_indices.contains(&idx)
             && !nav_order.contains(&idx)
         {
@@ -363,7 +370,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
             state
                 .available_models
                 .iter()
-                .position(|m| m.id == *recent_id)
+                .position(|m| matches_recent_id(m, recent_id))
         })
         .filter(|idx| filtered_indices.contains(idx))
         .collect();

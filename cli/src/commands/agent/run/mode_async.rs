@@ -178,7 +178,7 @@ impl AsyncAutoApproveConfig {
     }
 }
 
-pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOutcome, String> {
+pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<AsyncOutcome, String> {
     let start_time = Instant::now();
     let mut llm_response_time = std::time::Duration::new(0, 0);
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
@@ -239,6 +239,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
     let client = AgentClient::new(client_config)
         .await
         .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    // Resolve short model names (e.g., "GLM-5") against the provider's model catalog.
+    config.model = super::helpers::resolve_model_from_provider(config.model, &client).await;
 
     let mut current_session_id: Option<Uuid> = None;
     let mut current_checkpoint_id: Option<Uuid> = None;
@@ -878,7 +881,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<AsyncOu
         println!();
 
         // Print token usage at the end
-        print!("{}", renderer.render_token_usage_stats(&total_usage));
+        let model_display = format!("{}/{}", config.model.provider, config.model.name);
+        print!(
+            "{}",
+            renderer.render_token_usage_stats(&total_usage, Some(&model_display))
+        );
     }
 
     // Save conversation to file

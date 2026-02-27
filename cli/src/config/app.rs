@@ -138,6 +138,8 @@ impl AppConfig {
         profile_config.migrate_legacy_providers();
         // Migrate any legacy model fields to unified 'model' field
         profile_config.migrate_model_fields();
+        // Normalize old-format recent_models entries and ensure config model is included
+        profile_config.migrate_recent_models();
 
         AppConfig {
             api_endpoint: std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
@@ -248,6 +250,10 @@ impl AppConfig {
             // Migrate legacy model fields (smart_model, eco_model, recovery_model -> model)
             if profile.needs_model_migration() {
                 profile.migrate_model_fields();
+                any_migrated = true;
+            }
+            // Normalize old-format recent_models entries and persist to disk
+            if profile.migrate_recent_models() {
                 any_migrated = true;
             }
         }
@@ -875,8 +881,12 @@ impl AppConfig {
     pub fn get_default_model(&self, cli_override: Option<&str>) -> stakpak_api::Model {
         let has_stakpak_key = self.get_stakpak_api_key().is_some();
 
-        // Priority: cli_override > model > default
+        // Priority: cli_override > recent_models[0] > model > default
+        // The most recently used model takes precedence over the static config model,
+        // so re-opening stakpak continues with the last model you were using.
+        let most_recent = self.recent_models.first().map(|s| s.as_str());
         let model_str = cli_override
+            .or(most_recent)
             .or(self.model.as_deref())
             .unwrap_or("claude-opus-4-6");
 
@@ -891,7 +901,14 @@ impl AppConfig {
                 let (prefix, rest) = model_str.split_at(idx);
                 (prefix, &rest[1..])
             } else {
-                ("anthropic", model_str) // Default to anthropic
+                // Default to stakpak (which can resolve arbitrary model names)
+                // if the user has a Stakpak key; otherwise fall back to anthropic
+                let default_provider = if has_stakpak_key {
+                    "stakpak"
+                } else {
+                    "anthropic"
+                };
+                (default_provider, model_str)
             };
 
             stakpak_api::Model::custom(model_id.to_string(), provider)
