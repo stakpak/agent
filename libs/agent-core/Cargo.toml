@@ -17,6 +17,9 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+shell-parser = { workspace = true }
+globset = { workspace = true }
+regex = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]

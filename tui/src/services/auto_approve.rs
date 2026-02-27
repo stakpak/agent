@@ -8,12 +8,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum AutoApprovePolicy {
-    Auto,
+    /// Least restrictive — auto-approve.
+    Auto = 0,
+    /// Prompt the user.
     #[default]
-    Prompt,
-    Never,
+    Prompt = 1,
+    /// Most restrictive — hard reject.
+    Never = 2,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +62,7 @@ impl Default for AutoApproveConfig {
         AutoApproveConfig {
             enabled: true,
             default_policy: AutoApprovePolicy::Prompt,
-            tools,
+            tools,           
             command_patterns: CommandPatterns::default(),
         }
     }
@@ -204,6 +207,15 @@ impl AutoApproveManager {
     pub fn get_policy_for_tool(&self, tool_call: &ToolCall) -> AutoApprovePolicy {
         let binding = tool_call.function.name.clone();
         let tool_name = strip_tool_name(&binding);
+
+        // For shell commands, resolve hierarchical scope keys
+        if tool_name == "run_command" || tool_name == "run_command_task" {
+            if let Some(action) =
+                resolve_shell_scope(tool_call, &self.config.tools, &self.config.default_policy)
+            {
+                return action;
+            }
+        }
 
         // Check if there's a specific policy for this tool
         if let Some(policy) = self.config.tools.get(tool_name) {
@@ -364,6 +376,92 @@ impl AutoApproveManager {
         }
 
         config
+    }
+}
+
+/// Resolve hierarchical shell scope for a tool call.
+///
+/// Parses the shell command string from the tool call arguments, then resolves
+/// each parsed command against scope keys in the rules map.
+/// Returns the most restrictive policy across all commands, or `None` if the
+/// command string cannot be extracted or parsed.
+fn resolve_shell_scope(
+    tool_call: &ToolCall,
+    rules: &HashMap<String, AutoApprovePolicy>,
+    default: &AutoApprovePolicy,
+) -> Option<AutoApprovePolicy> {
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
+    let command_str = args.get("command")?.as_str()?;
+
+    let parsed_commands = shell_parser::parse(command_str);
+    if parsed_commands.is_empty() {
+        return None;
+    }
+
+    parsed_commands
+        .iter()
+        .map(|cmd| resolve_command_policy(cmd, rules, default))
+        .max()
+}
+
+/// Resolve the approval policy for a single parsed command against scope rules.
+///
+/// 1. Base policy: `rules["run_command::<name>"]` -> `rules["run_command"]` -> `default`
+/// 2. Argument-level: for each rule key `"run_command::<name>::<pattern>"`,
+///    if any arg matches the pattern, include the policy as a candidate.
+/// 3. Aggregate: most restrictive wins (Never > Prompt > Auto).
+fn resolve_command_policy(
+    cmd: &shell_parser::ParsedCommand,
+    rules: &HashMap<String, AutoApprovePolicy>,
+    default: &AutoApprovePolicy,
+) -> AutoApprovePolicy {
+    let Some(name) = &cmd.name else {
+        // Variable-expansion command ($CMD) — only the global fallback applies.
+        return rules
+            .get("run_command")
+            .cloned()
+            .unwrap_or_else(|| default.clone());
+    };
+
+    // 1. Base policy: command-level -> global -> default
+    let command_key = format!("run_command::{name}");
+    let base = rules
+        .get(&command_key)
+        .or_else(|| rules.get("run_command"))
+        .cloned()
+        .unwrap_or_else(|| default.clone());
+
+    // 2. Argument-level matches
+    let arg_prefix = format!("run_command::{name}::");
+    let arg_policies = rules.iter().filter_map(|(key, policy)| {
+        let pattern = key.strip_prefix(&arg_prefix)?;
+        let matched = cmd.args.iter().any(|arg| matches_pattern(pattern, arg));
+        matched.then_some(policy.clone())
+    });
+
+    // 3. Aggregate: base + matched arg policies, take the most restrictive
+    std::iter::once(base)
+        .chain(arg_policies)
+        .max()
+        .unwrap_or_else(|| default.clone())
+}
+
+/// Match a scope-key pattern against a single argument.
+///
+/// - `re:<regex>` — regex match
+/// - Contains `*`, `?`, or `[` — glob match
+/// - Otherwise — exact string equality
+fn matches_pattern(pattern: &str, arg: &str) -> bool {
+    if let Some(re_pattern) = pattern.strip_prefix("re:") {
+        regex::Regex::new(re_pattern)
+            .map(|re| re.is_match(arg))
+            .unwrap_or(false)
+    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        globset::Glob::new(pattern)
+            .map(|g| g.compile_matcher().is_match(arg))
+            .unwrap_or(false)
+    } else {
+        pattern == arg
     }
 }
 

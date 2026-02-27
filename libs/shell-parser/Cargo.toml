@@ -1,0 +1,17 @@
+[package]
+name = "shell-parser"
+version = { workspace = true }
+edition = "2024"
+description = "Shell command parsing and hierarchical scope resolution for tool approval"
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+globset = { workspace = true }
+regex = { workspace = true }
+tree-sitter = "0.26.6"
+tree-sitter-bash = "0.25.1"
+
+[lints.clippy]
+string_slice = "deny"

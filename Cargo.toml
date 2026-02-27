@@ -12,6 +12,7 @@ members = [
   "libs/mcp/client",
   "libs/mcp/server",
   "libs/mcp/proxy",
+  "libs/shell-parser",
 ]
 default-members = ["cli"]
 
@@ -36,6 +37,7 @@ stakpak-gateway = { path = "libs/gateway", version = "0.3.66" }
 stakpak-server = { path = "libs/server", version = "0.3.66" }
 stakpak-tui = { path = "tui", version = "0.3.66" }
 stakpak-shared = { path = "libs/shared", version = "0.3.66" }
+shell-parser = { path = "libs/shell-parser", version = "0.3.61" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
