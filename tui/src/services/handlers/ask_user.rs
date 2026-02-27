@@ -118,7 +118,14 @@ fn refresh_ask_user_block(state: &mut AppState) {
                 break;
             }
         }
-        crate::services::message::invalidate_message_lines_cache(state);
+        // Force-invalidate all caches unconditionally. The normal invalidate_message_lines_cache
+        // skips invalidation when stay_at_bottom=false && is_streaming=true (to prevent
+        // jitter during streaming). But ask_user refreshes are user-driven interactions
+        // that must always be reflected visually.
+        state.assembled_lines_cache = None;
+        state.visible_lines_cache = None;
+        state.message_lines_cache = None;
+        state.collapsed_message_lines_cache = None;
     }
 }
 

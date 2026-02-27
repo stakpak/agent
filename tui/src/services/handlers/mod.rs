@@ -142,8 +142,14 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Backend events (streaming, loading, tool results, etc.) must always reach
+    // their handlers — popup interceptors must never consume them. Skip all popup
+    // interception for these events so the message pipeline keeps flowing even
+    // when a popup (model switcher, file changes, plan review, etc.) is open.
+    let skip_popup_interception = event.is_backend_event();
+
     // Intercept keys for Message Action Popup
-    if state.show_message_action_popup {
+    if state.show_message_action_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_message_action_popup_close(state);
@@ -177,7 +183,7 @@ pub fn update(
     }
 
     // Intercept keys for "existing plan found" modal
-    if state.existing_plan_prompt.is_some() {
+    if state.existing_plan_prompt.is_some() && !skip_popup_interception {
         match event {
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
@@ -212,7 +218,7 @@ pub fn update(
     }
 
     // Intercept keys for Plan Review overlay
-    if state.show_plan_review {
+    if state.show_plan_review && !skip_popup_interception {
         // Sub-intercept: comment modal is open
         if state.plan_review_show_comment_modal {
             match event {
@@ -353,7 +359,7 @@ pub fn update(
     }
 
     // Intercept keys for File Changes Popup
-    if state.show_file_changes_popup {
+    if state.show_file_changes_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_file_changes_popup_cancel(state);
@@ -407,10 +413,11 @@ pub fn update(
 
     // Intercept keys for Ask User inline block
     // Always active while visible — no focus mode.
-    // ↑/↓ navigate options; at boundary they fall through to scroll.
+    // ↑/↓ always navigate options (clamped at boundaries, never scroll).
+    // Mouse wheel (ScrollUp/ScrollDown) scrolls the viewport.
     // ←/→ switch question tabs (except in custom input).
     // Enter selects/toggles. Esc cancels.
-    if state.show_ask_user_popup {
+    if state.show_ask_user_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc | InputEvent::AskUserCancel => {
                 ask_user::handle_ask_user_cancel(state, output_tx);
@@ -426,20 +433,16 @@ pub fn update(
         let is_custom = ask_user::is_custom_input_selected(state);
 
         match event {
-            // --- Option navigation: ↑/↓ with scroll-on-boundary ---
-            // Only navigate options when at the bottom of chat (block is in view).
-            // If the user has scrolled up, arrows always scroll.
+            // --- Option navigation: ↑/↓ always navigate options ---
+            // Arrows are captured unconditionally while the popup is active.
+            // Mouse wheel (ScrollUp/ScrollDown) still scrolls the viewport.
             InputEvent::Up | InputEvent::AskUserPrevOption => {
-                if state.stay_at_bottom && ask_user::handle_ask_user_prev_option(state) {
-                    return; // Moved — consume the event
-                }
-                // At top boundary or scrolled up — fall through to scroll
+                ask_user::handle_ask_user_prev_option(state);
+                return; // Always consume — clamps at top boundary
             }
             InputEvent::Down | InputEvent::AskUserNextOption => {
-                if state.stay_at_bottom && ask_user::handle_ask_user_next_option(state) {
-                    return; // Moved — consume the event
-                }
-                // At bottom boundary or scrolled up — fall through to scroll
+                ask_user::handle_ask_user_next_option(state);
+                return; // Always consume — clamps at bottom boundary
             }
 
             // --- Question tab navigation: ←/→ (always work, no scroll conflict) ---
@@ -519,7 +522,7 @@ pub fn update(
                 return;
             }
 
-            // --- Scroll events always pass through ---
+            // --- Scroll events always pass through (mouse wheel scrolls viewport) ---
             InputEvent::ScrollUp
             | InputEvent::ScrollDown
             | InputEvent::PageUp
@@ -542,7 +545,7 @@ pub fn update(
     }
 
     // Intercept keys for Model Switcher Popup
-    if state.show_model_switcher {
+    if state.show_model_switcher && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_model_switcher_cancel(state);
@@ -1857,7 +1860,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_user_boundary_scroll_passthrough() {
+    async fn ask_user_arrows_always_navigate_options() {
         use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
 
         let mut state = build_state();
@@ -1896,7 +1899,7 @@ mod tests {
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
 
-        // stay_at_bottom defaults to true — arrows navigate options
+        // stay_at_bottom defaults to true
         assert!(state.stay_at_bottom);
 
         // Down navigates from option 0 → 1
@@ -1916,7 +1919,7 @@ mod tests {
             "Down should navigate to option 1"
         );
 
-        // Down at bottom boundary — falls through to scroll, may unset stay_at_bottom
+        // Down at bottom boundary — clamped, does NOT fall through to scroll
         update(
             &mut state,
             InputEvent::Down,
@@ -1930,12 +1933,13 @@ mod tests {
         );
         assert_eq!(
             state.ask_user_selected_option, 1,
-            "Down at bottom should not change option"
+            "Down at bottom should clamp at last option"
         );
-
-        // After boundary scroll, stay_at_bottom may be false.
-        // Scroll back to bottom so arrows navigate again.
-        state.stay_at_bottom = true;
+        // stay_at_bottom is unchanged — arrows no longer affect scroll state
+        assert!(
+            state.stay_at_bottom,
+            "Down at boundary should NOT affect stay_at_bottom"
+        );
 
         // Up navigates from option 1 → 0
         update(
@@ -1954,7 +1958,7 @@ mod tests {
             "Up should navigate to option 0"
         );
 
-        // Up at top boundary — falls through to scroll (sets stay_at_bottom = false)
+        // Up at top boundary — clamped, does NOT fall through to scroll
         update(
             &mut state,
             InputEvent::Up,
@@ -1968,14 +1972,15 @@ mod tests {
         );
         assert_eq!(
             state.ask_user_selected_option, 0,
-            "Up at top should not change option"
+            "Up at top should clamp at first option"
         );
         assert!(
-            !state.stay_at_bottom,
-            "Scrolling up should unset stay_at_bottom"
+            state.stay_at_bottom,
+            "Up at boundary should NOT affect stay_at_bottom"
         );
 
-        // Now arrows pass through to scroll (don't navigate options)
+        // Even when stay_at_bottom is false, arrows still navigate options
+        state.stay_at_bottom = false;
         update(
             &mut state,
             InputEvent::Down,
@@ -1988,8 +1993,8 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 0,
-            "Down while scrolled up should scroll, not navigate"
+            state.ask_user_selected_option, 1,
+            "Down should navigate even when scrolled up"
         );
     }
 }

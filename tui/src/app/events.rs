@@ -215,6 +215,53 @@ pub enum InputEvent {
     AskUserCancel,
 }
 
+impl InputEvent {
+    /// Returns true for events sent by the backend (stream, CLI) that must never be
+    /// consumed by popup interceptors. These events drive the message pipeline and
+    /// blocking them causes the TUI to get stuck in a loading state.
+    ///
+    /// **Important:** When adding new `InputEvent` variants that originate from the
+    /// backend (mode_interactive, stream, helpers, etc.), add them here too —
+    /// otherwise they'll be silently dropped when any popup is open.
+    pub fn is_backend_event(&self) -> bool {
+        matches!(
+            self,
+            InputEvent::StreamAssistantMessage(_, _)
+                | InputEvent::AssistantMessage(_)
+                | InputEvent::StartLoadingOperation(_)
+                | InputEvent::EndLoadingOperation(_)
+                | InputEvent::StreamUsage(_)
+                | InputEvent::StreamModel(_)
+                | InputEvent::StreamToolCallProgress(_)
+                | InputEvent::StreamToolResult(_)
+                | InputEvent::HasUserMessage
+                | InputEvent::Error(_)
+                | InputEvent::RunToolCall(_)
+                | InputEvent::ToolResult(_)
+                | InputEvent::MessageToolCalls(_)
+                | InputEvent::ShowConfirmationDialog(_)
+                | InputEvent::AddUserMessage(_)
+                | InputEvent::PlanModeChanged(_)
+                | InputEvent::BoardTasksLoaded(_)
+                | InputEvent::BoardTasksError(_)
+                | InputEvent::ShowAskUserPopup(_, _)
+                | InputEvent::ExistingPlanFound(_)
+                | InputEvent::SetSessions(_)
+                | InputEvent::GetStatus(_)
+                | InputEvent::BillingInfoLoaded(_)
+                | InputEvent::TotalUsage(_)
+                | InputEvent::ProfileSwitchProgress(_)
+                | InputEvent::ProfileSwitchComplete(_)
+                | InputEvent::ProfileSwitchFailed(_)
+                | InputEvent::ProfilesLoaded(_, _)
+                | InputEvent::AvailableModelsLoaded(_)
+                | InputEvent::RecentModelsUpdated(_)
+                | InputEvent::RulebooksLoaded(_)
+                | InputEvent::CurrentRulebooksLoaded(_)
+        )
+    }
+}
+
 #[derive(Debug)]
 pub enum OutputEvent {
     /// User message with optional tool call results, image parts, and revert index

@@ -23,7 +23,7 @@ mod tests;
 pub use app::AppConfig;
 pub use file::ConfigFile;
 pub use models_cache::ModelsCache;
-pub use profile::ProfileConfig;
+pub use profile::{ProfileConfig, format_recent_model_id};
 pub use types::ProviderType;
 
 // Re-export for internal use (used by tests and submodules)

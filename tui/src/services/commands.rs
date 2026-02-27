@@ -287,6 +287,10 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
             command: "/init",
             description: "Analyze your infrastructure setup",
         },
+        HelperCommand {
+            command: "/claw",
+            description: "Deploy & monitor OpenClaw gateway with Stakpak Autopilot",
+        },
     ]
 }
 
@@ -548,6 +552,24 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
                 ctx.state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
                 None,       // No revert index
+            ));
+            ctx.state.shell_tool_calls = None;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            crate::services::message::invalidate_message_lines_cache(ctx.state);
+            Ok(())
+        }
+
+        "/claw" => {
+            const CLAW_PROMPT: &str = include_str!("../../../libs/api/src/prompts/claw.v1.md");
+            let prompt = CLAW_PROMPT.to_string();
+
+            ctx.state.messages.push(Message::user(prompt.clone(), None));
+            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+                prompt,
+                ctx.state.shell_tool_calls.clone(),
+                Vec::new(),
+                None,
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");

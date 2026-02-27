@@ -24,7 +24,9 @@ pub use event_log::{EventEnvelope, EventLog, EventSubscription, GapDetected};
 pub use idempotency::{IdempotencyRequest, IdempotencyStore, LookupResult, StoredResponse};
 pub use openapi::generate_openapi;
 pub use routes::{protected_router, public_router, router};
-pub use sandbox::{SandboxConfig, SandboxedMcpServer};
+pub use sandbox::{
+    PersistentSandbox, SandboxConfig, SandboxHealth, SandboxMode, SandboxedMcpServer,
+};
 pub use session_actor::{build_checkpoint_envelope, build_run_context, spawn_session_actor};
 pub use session_manager::SessionManager;
 pub use stakpak_agent_core::{

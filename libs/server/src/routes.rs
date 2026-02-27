@@ -32,6 +32,18 @@ struct HealthResponse {
     status: &'static str,
     version: &'static str,
     uptime_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox: Option<SandboxStatusResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct SandboxStatusResponse {
+    mode: String,
+    healthy: bool,
+    consecutive_ok: u64,
+    consecutive_failures: u64,
+    last_ok: Option<String>,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -292,10 +304,23 @@ pub fn protected_router(auth: AuthConfig) -> Router<AppState> {
 }
 
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
+    let sandbox = state.persistent_sandbox.as_ref().map(|ps| {
+        let h = ps.health();
+        SandboxStatusResponse {
+            mode: ps.mode().to_string(),
+            healthy: h.healthy,
+            consecutive_ok: h.consecutive_ok,
+            consecutive_failures: h.consecutive_failures,
+            last_ok: h.last_ok,
+            last_error: h.last_error,
+        }
+    });
+
     Json(HealthResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
         uptime_seconds: state.uptime_seconds(),
+        sandbox,
     })
 }
 

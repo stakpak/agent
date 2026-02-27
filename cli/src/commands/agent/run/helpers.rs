@@ -3,6 +3,62 @@ use stakpak_shared::models::integrations::openai::{
 };
 use uuid::Uuid;
 
+/// Resolve a short model name against the provider's model catalog.
+///
+/// When the user passes `--model GLM-5` (a short, unprefixed name) and the model
+/// gets assigned `provider: "stakpak"`, the Stakpak API still needs the full
+/// to route the request to the correct upstream provider.
+///
+/// This function fetches the available models from the provider and tries to find
+/// a match by:
+/// 1. Exact match on the full model ID
+/// 2. Case-insensitive match on the last segment of the model ID (after the last `/`)
+/// 3. Case-insensitive match on the model name
+///
+/// Returns the resolved model if found, or the original model unchanged.
+pub async fn resolve_model_from_provider(
+    model: stakai::Model,
+    client: &dyn stakpak_api::AgentProvider,
+) -> stakai::Model {
+    // Only resolve for Stakpak provider with short names (no "/" means it's not
+    // already a full provider-prefixed ID like "anthropic/claude-sonnet-4-5")
+    if model.provider != "stakpak" || model.id.contains('/') {
+        return model;
+    }
+
+    let available_models = client.list_models().await;
+    if available_models.is_empty() {
+        return model;
+    }
+
+    let short_name = model.id.to_lowercase();
+
+    // 1. Exact match on full ID
+    if let Some(matched) = available_models.iter().find(|m| m.id == model.id) {
+        return matched.clone();
+    }
+
+    // 2. Case-insensitive match on the last segment of the ID (after last "/")
+    if let Some(matched) = available_models.iter().find(|m| {
+        m.id.rsplit('/')
+            .next()
+            .is_some_and(|last| last.to_lowercase() == short_name)
+    }) {
+        return matched.clone();
+    }
+
+    // 3. Case-insensitive match on the model display name
+    if let Some(matched) = available_models
+        .iter()
+        .find(|m| m.name.to_lowercase() == short_name)
+    {
+        return matched.clone();
+    }
+
+    // No match found — return as-is and let the API return its own error
+    model
+}
+
 /// Build a CLI resume command string, preferring session ID over checkpoint ID.
 pub fn build_resume_command(
     session_id: Option<Uuid>,
