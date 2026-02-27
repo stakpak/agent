@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use stakpak_shared::utils::normalize_optional_string;
 use thiserror::Error;
 
 use crate::router::{Binding, BindingMatch, DmScope, PeerMatch, PeerMatchKind, RouterConfig};
@@ -739,17 +740,6 @@ fn append_channel_deprecation_warnings(
             "channels.{channel_name}: inline model/auto_approve is deprecated; use profile = \"name\" instead"
         ));
     }
-}
-
-fn normalize_optional_string(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
 }
 
 fn normalize_allowlist(list: Option<Vec<String>>) -> Option<Vec<String>> {

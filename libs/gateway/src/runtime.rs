@@ -10,7 +10,7 @@ use crate::{
     channels::{Channel, discord::DiscordChannel, slack::SlackChannel, telegram::TelegramChannel},
     client::StakpakClient,
     config::GatewayConfig,
-    dispatcher::{Dispatcher, RunOverrideResolver},
+    dispatcher::{Dispatcher, RunOverrideResolver, noop_run_override_resolver},
     store::GatewayStore,
 };
 
@@ -20,15 +20,6 @@ pub struct Gateway {
     channels: HashMap<String, Arc<dyn Channel>>,
     dispatcher: Arc<Dispatcher>,
     api_state: Arc<GatewayApiState>,
-}
-
-#[derive(Default)]
-struct NoopRunOverrideResolver;
-
-impl RunOverrideResolver for NoopRunOverrideResolver {
-    fn resolve_run_overrides(&self, _profile_name: &str) -> Option<crate::client::RunOverrides> {
-        None
-    }
 }
 
 #[derive(Clone)]
@@ -51,7 +42,7 @@ impl DispatcherProfileOverrides {
     pub fn none() -> Self {
         Self {
             channel_profiles: HashMap::new(),
-            override_resolver: Arc::new(NoopRunOverrideResolver),
+            override_resolver: noop_run_override_resolver(),
         }
     }
 }

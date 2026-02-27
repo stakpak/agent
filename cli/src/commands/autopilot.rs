@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use stakpak_api::AgentProvider;
+use stakpak_shared::utils::normalize_optional_string;
 
 use crate::{
     config::{AppConfig, profile_resolver::resolve_profile_run_overrides},
@@ -1973,17 +1974,6 @@ fn require_non_empty_token(token: String, error_message: &str) -> Result<String,
         return Err(error_message.to_string());
     }
     Ok(trimmed.to_string())
-}
-
-fn normalize_optional_string(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
 }
 
 fn validate_profile_reference(profile_name: &str, config: &AppConfig) -> Result<(), String> {

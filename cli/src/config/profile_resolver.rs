@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use stakpak_shared::utils::normalize_optional_string;
+
 use super::AppConfig;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,17 +58,6 @@ fn normalize_tool_list(tools: Option<Vec<String>>) -> Option<Vec<String>> {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect()
-    })
-}
-
-fn normalize_optional_string(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
     })
 }
 

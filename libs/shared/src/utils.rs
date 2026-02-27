@@ -205,6 +205,20 @@ pub fn generate_password(length: usize, no_symbols: bool) -> String {
     password_chars.into_iter().take(length).collect()
 }
 
+/// Normalize an optional string by trimming leading/trailing whitespace.
+///
+/// Returns `None` when the input is `None` or the trimmed value is empty.
+pub fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
 /// Sanitize text output by removing control characters while preserving essential whitespace
 pub fn sanitize_text_output(text: &str) -> String {
     text.chars()
@@ -348,6 +362,16 @@ mod password_tests {
 #[cfg(test)]
 mod truncate_tests {
     use super::*;
+
+    #[test]
+    fn normalize_optional_string_trims_and_drops_empty() {
+        assert_eq!(
+            normalize_optional_string(Some("  hello  ".to_string())),
+            Some("hello".to_string())
+        );
+        assert_eq!(normalize_optional_string(Some("   ".to_string())), None);
+        assert_eq!(normalize_optional_string(None), None);
+    }
 
     #[test]
     fn truncate_chars_with_ellipsis_exact_boundary_keeps_value() {

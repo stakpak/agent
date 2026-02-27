@@ -41,6 +41,10 @@ impl RunOverrideResolver for NoopRunOverrideResolver {
     }
 }
 
+pub fn noop_run_override_resolver() -> Arc<dyn RunOverrideResolver> {
+    Arc::new(NoopRunOverrideResolver)
+}
+
 pub struct Dispatcher {
     client: StakpakClient,
     channels: HashMap<String, Arc<dyn Channel>>,
