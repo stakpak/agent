@@ -824,6 +824,15 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         println!("✓ Installed autopilot service");
     }
 
+    // Ensure the sandbox container image is available locally before starting the
+    // service. Pulling inside the service process produces no visible output — the
+    // user just sees a frozen "waiting" message. By pulling here we inherit
+    // stdout/stderr so Docker's progress bars are visible. This applies to both
+    // persistent and ephemeral modes since both need the image.
+    ensure_sandbox_image_available()?;
+
+    let expects_sandbox = effective_server.sandbox_mode == stakpak_server::SandboxMode::Persistent;
+
     start_autopilot_service()?;
 
     // Wait for the server (and persistent sandbox if configured) to be ready
@@ -831,13 +840,14 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
     // once the autopilot is fully operational.
     let base_url = format!("http://{}", effective_server.listen);
     let health_url = format!("{base_url}/v1/health");
-    let expects_sandbox = effective_server.sandbox_mode == stakpak_server::SandboxMode::Persistent;
-    let max_wait = std::time::Duration::from_secs(90);
+    let max_wait = std::time::Duration::from_secs(120);
     let poll_interval = std::time::Duration::from_millis(500);
     let start = std::time::Instant::now();
 
-    print!("  Waiting for autopilot to be ready...");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
+    // Spinner frames for the waiting animation
+    const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let mut spinner_idx: usize = 0;
+    let mut last_phase = String::new();
 
     let ready = loop {
         if start.elapsed() > max_wait {
@@ -845,37 +855,63 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         }
         tokio::time::sleep(poll_interval).await;
 
-        let Ok(resp) = reqwest::get(&health_url).await else {
-            continue;
-        };
-        let Ok(body) = resp.json::<serde_json::Value>().await else {
-            continue;
+        // Determine current phase for display
+        let phase = match reqwest::get(&health_url).await {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(body) => {
+                    if expects_sandbox {
+                        if let Some(sandbox) = body.get("sandbox")
+                            && sandbox.get("healthy").and_then(|v| v.as_bool()) == Some(true)
+                        {
+                            // Clear the spinner line and break
+                            print!("\r\x1b[2K");
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                            break true;
+                        }
+                        "Starting sandbox container...".to_string()
+                    } else {
+                        // Server is up and no sandbox needed — done
+                        print!("\r\x1b[2K");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        break true;
+                    }
+                }
+                Err(_) => "Starting server...".to_string(),
+            },
+            Err(_) => "Starting server...".to_string(),
         };
 
-        if expects_sandbox {
-            // Persistent sandbox is required — wait until it reports healthy
-            if let Some(sandbox) = body.get("sandbox")
-                && sandbox.get("healthy").and_then(|v| v.as_bool()) == Some(true)
-            {
-                break true;
-            }
-            // Sandbox not yet reported or not healthy — keep waiting
-            continue;
+        // Update spinner on every tick
+        let elapsed = start.elapsed().as_secs();
+        let frame = SPINNER[spinner_idx % SPINNER.len()];
+        spinner_idx += 1;
+
+        // Only log phase transitions (avoid spamming the same message)
+        if phase != last_phase {
+            last_phase.clone_from(&phase);
         }
 
-        // No sandbox expected — server health is enough
-        break true;
+        print!("\r\x1b[2K  {frame} {phase} ({elapsed}s)");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     };
 
     if ready {
-        println!(" ready ✓");
+        println!("  Autopilot ready ✓");
     } else {
-        println!(" timed out waiting for autopilot to become healthy");
+        // Clear spinner line before printing error
+        print!("\r\x1b[2K");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        println!(
+            "  ✗ Timed out waiting for autopilot to become healthy ({}s)",
+            max_wait.as_secs()
+        );
         println!();
         println!("  Troubleshoot:");
         println!("    stakpak autopilot logs -c server    View server logs");
         println!("    stakpak autopilot status            Check component health");
-        println!("    docker ps                           Verify sandbox container");
+        if expects_sandbox {
+            println!("    docker ps                           Verify sandbox container");
+        }
     }
 
     // Clean post-start status summary
@@ -2977,6 +3013,34 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 fn bounded_history_limit(limit: u32) -> u32 {
     limit.clamp(1, 1000)
+}
+
+/// Ensure the sandbox container image is available locally before starting the
+/// autopilot service. If the image isn't cached, runs `docker pull` with
+/// inherited stdout/stderr so the user sees Docker's native progress bars
+/// (layer downloads, extraction, etc.) instead of a silent wait.
+fn ensure_sandbox_image_available() -> Result<(), String> {
+    let image = crate::commands::warden::stakpak_agent_image();
+
+    if stakpak_shared::container::warden_image_exists_locally(&image) {
+        return Ok(());
+    }
+
+    println!("  Pulling sandbox image: {image}");
+    println!();
+
+    stakpak_shared::container::pull_warden_image(&image).map_err(|e| {
+        format!(
+            "{e}\n\n\
+             Troubleshoot:\n  \
+             docker pull --platform linux/amd64 {image}    Pull manually\n  \
+             STAKPAK_AGENT_IMAGE=<img>                     Override image"
+        )
+    })?;
+
+    println!();
+    println!("  ✓ Sandbox image ready");
+    Ok(())
 }
 
 fn build_probe_http_client() -> Option<reqwest::Client> {
