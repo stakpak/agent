@@ -62,7 +62,7 @@ impl Default for AutoApproveConfig {
         AutoApproveConfig {
             enabled: true,
             default_policy: AutoApprovePolicy::Prompt,
-            tools,           
+            tools,
             command_patterns: CommandPatterns::default(),
         }
     }
@@ -209,12 +209,11 @@ impl AutoApproveManager {
         let tool_name = strip_tool_name(&binding);
 
         // For shell commands, resolve hierarchical scope keys
-        if tool_name == "run_command" || tool_name == "run_command_task" {
-            if let Some(action) =
+        if (tool_name == "run_command" || tool_name == "run_command_task")
+            && let Some(action) =
                 resolve_shell_scope(tool_call, &self.config.tools, &self.config.default_policy)
-            {
-                return action;
-            }
+        {
+            return action;
         }
 
         // Check if there's a specific policy for this tool

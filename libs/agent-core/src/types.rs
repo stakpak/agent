@@ -169,18 +169,17 @@ impl ToolApprovalPolicy {
             Self::None => ToolApprovalAction::Ask,
             Self::All => ToolApprovalAction::Approve,
             Self::Custom { rules, default } => {
-                if stripped == "run_command" || stripped == "run_command_task" {
-                    if let Some(command_str) =
+                if (stripped == "run_command" || stripped == "run_command_task")
+                    && let Some(command_str) =
                         tool_arguments.get("command").and_then(|v| v.as_str())
-                    {
-                        let parsed_commands = shell_parser::parse(command_str);
-                        if !parsed_commands.is_empty() {
-                            return parsed_commands
-                                .iter()
-                                .map(|cmd| resolve_command_action(cmd, rules, *default))
-                                .max()
-                                .unwrap_or(*default);
-                        }
+                {
+                    let parsed_commands = shell_parser::parse(command_str);
+                    if !parsed_commands.is_empty() {
+                        return parsed_commands
+                            .iter()
+                            .map(|cmd| resolve_command_action(cmd, rules, *default))
+                            .max()
+                            .unwrap_or(*default);
                     }
                 }
 

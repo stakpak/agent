@@ -4467,11 +4467,11 @@ api_key = "monitoring-key"
         let policy = resolve_server_tool_policy(None, None, false);
 
         assert_eq!(
-            policy.action_for("view",&json!({})),
+            policy.action_for("view", &json!({})),
             stakpak_server::ToolApprovalAction::Approve
         );
         assert_eq!(
-            policy.action_for("run_command",&json!({})),
+            policy.action_for("run_command", &json!({})),
             stakpak_server::ToolApprovalAction::Ask
         );
     }
