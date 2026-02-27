@@ -135,6 +135,48 @@ pub fn image_exists_locally(image: &str) -> Result<bool, String> {
     }
 }
 
+/// The platform warden uses for all containers.
+/// Warden hardcodes `--platform linux/amd64` on every `docker run` / `docker create`,
+/// so all image operations must target the same platform for consistency.
+pub const WARDEN_PLATFORM: &str = "linux/amd64";
+
+/// Checks if a Docker image for the warden platform (linux/amd64) exists locally.
+///
+/// Unlike [`image_exists_locally`], this uses `docker image inspect --platform`
+/// to verify the correct architecture variant is cached. On Apple Silicon a plain
+/// `docker images -q` would match a cached arm64 image, giving a false positive.
+pub fn warden_image_exists_locally(image: &str) -> bool {
+    Command::new("docker")
+        .args(["image", "inspect", "--platform", WARDEN_PLATFORM, image])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Pull a Docker image for the warden platform (linux/amd64) with visible progress.
+///
+/// Inherits stdout/stderr so the caller sees Docker's native progress bars
+/// (layer downloads, extraction, etc.). Returns an error if the pull fails.
+pub fn pull_warden_image(image: &str) -> Result<(), String> {
+    let status = Command::new("docker")
+        .args(["pull", "--platform", WARDEN_PLATFORM, image])
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| format!("Failed to run docker pull: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Failed to pull image '{image}' for platform {WARDEN_PLATFORM}. \
+             Check your network connection and that the image exists."
+        ))
+    }
+}
+
 pub fn run_container_detached(config: ContainerConfig) -> Result<String, String> {
     let mut cmd = Command::new("docker");
 
