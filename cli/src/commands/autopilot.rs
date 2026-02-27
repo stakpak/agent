@@ -13,7 +13,7 @@ use std::sync::Arc;
 use stakpak_api::AgentProvider;
 
 use crate::{
-    config::AppConfig,
+    config::{AppConfig, profile_resolver::resolve_profile_run_overrides},
     onboarding::{OnboardingMode, run_onboarding},
     utils::server_context::{load_remote_skills_context, startup_project_dir},
 };
@@ -160,6 +160,10 @@ pub enum AutopilotScheduleCommands {
         #[arg(long)]
         channel: Option<String>,
 
+        /// Profile from config.toml used for this schedule's sessions
+        #[arg(long)]
+        profile: Option<String>,
+
         /// Require approval before acting
         #[arg(long, default_value_t = false)]
         pause_on_approval: bool,
@@ -245,6 +249,10 @@ pub enum AutopilotChannelCommands {
         /// Default notification target (Slack channel, Telegram chat_id, Discord channel_id)
         #[arg(long)]
         target: Option<String>,
+
+        /// Profile from config.toml used for sessions started from this channel
+        #[arg(long)]
+        profile: Option<String>,
     },
 
     /// Remove a channel
@@ -308,8 +316,8 @@ impl AutopilotCommands {
                 component,
             } => logs_autopilot(follow, lines, component).await,
             AutopilotCommands::Restart => restart_autopilot().await,
-            AutopilotCommands::Schedule(command) => run_schedule_command(command).await,
-            AutopilotCommands::Channel(command) => run_channel_command(command).await,
+            AutopilotCommands::Schedule(command) => run_schedule_command(command, &config).await,
+            AutopilotCommands::Channel(command) => run_channel_command(command, &config).await,
             AutopilotCommands::Doctor => doctor_autopilot(&config).await,
         }
     }
@@ -370,6 +378,8 @@ struct AutopilotScheduleConfig {
     max_steps: u32,
     #[serde(default)]
     channel: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
     #[serde(default)]
     pause_on_approval: bool,
     #[serde(default)]
@@ -750,7 +760,7 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
                     require_mention: false,
                     model: None,
                     auto_approve: None,
-                    profile: None,
+                    profile: Some(config.profile_name.clone()),
                 });
             }
             if let Some(token) = discord_token {
@@ -759,7 +769,7 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
                     guilds: Vec::new(),
                     model: None,
                     auto_approve: None,
-                    profile: None,
+                    profile: Some(config.profile_name.clone()),
                 });
             }
             if let (Some(bot_token), Some(app_token)) = (slack_bot_token, slack_app_token) {
@@ -768,7 +778,7 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
                     app_token,
                     model: None,
                     auto_approve: None,
-                    profile: None,
+                    profile: Some(config.profile_name.clone()),
                 });
             }
 
@@ -1244,16 +1254,24 @@ async fn start_foreground_runtime(
     let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(config_path.as_path(), &gateway_cli)
         .unwrap_or_default();
 
-    resolve_gateway_channel_profiles(
-        &mut gateway_cfg,
-        &config.profile_name,
-        config.config_path.as_str(),
-    );
+    for warning in gateway_cfg.check_deprecations() {
+        tracing::warn!("{}", warning);
+    }
 
     apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &resolved_tool_policy);
 
+    let gateway_profile_overrides = stakpak_gateway::runtime::DispatcherProfileOverrides::new(
+        gateway_cfg.channels.profiles_map(),
+        Arc::new(ProfileRunOverrideResolver::new(config.config_path.clone())),
+    );
+
     let gateway_runtime = if gateway_cfg.has_channels() {
-        match stakpak_gateway::Gateway::new(gateway_cfg).await {
+        match stakpak_gateway::Gateway::new_with_profile_overrides(
+            gateway_cfg,
+            gateway_profile_overrides,
+        )
+        .await
+        {
             Ok(gw) => Some(Arc::new(gw)),
             Err(e) => {
                 eprintln!(
@@ -1502,76 +1520,39 @@ fn resolve_server_tool_policy(
     policy
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ResolvedProfileOverrides {
-    pub model: Option<String>,
-    pub auto_approve: Option<Vec<String>>,
-    pub allowed_tools: Option<Vec<String>>,
+#[derive(Debug, Clone)]
+struct ProfileRunOverrideResolver {
+    config_path: String,
 }
 
-pub(crate) fn resolve_profile_to_overrides(
-    profile_name: &str,
-    boot_profile: &str,
-    config_path: Option<&str>,
-) -> Option<ResolvedProfileOverrides> {
-    if profile_name == boot_profile {
-        return None;
+impl ProfileRunOverrideResolver {
+    fn new(config_path: String) -> Self {
+        Self { config_path }
     }
+}
 
-    let config = match AppConfig::load(profile_name, config_path.map(Path::new)) {
-        Ok(config) => config,
-        Err(_) => return None,
-    };
+impl stakpak_gateway::dispatcher::RunOverrideResolver for ProfileRunOverrideResolver {
+    fn resolve_run_overrides(
+        &self,
+        profile_name: &str,
+    ) -> Option<stakpak_gateway::client::RunOverrides> {
+        let resolved =
+            resolve_profile_run_overrides(profile_name, Some(self.config_path.as_str()))?;
 
-    let model = config.model.and_then(|value| {
-        if value.trim().is_empty() {
+        let overrides = stakpak_gateway::client::RunOverrides {
+            model: resolved.model,
+            auto_approve: resolved
+                .auto_approve
+                .map(stakpak_gateway::client::AutoApproveOverride::AllowList),
+            system_prompt: resolved.system_prompt,
+            max_turns: resolved.max_turns,
+        };
+
+        if overrides.is_empty() {
             None
         } else {
-            Some(value)
+            Some(overrides)
         }
-    });
-
-    let auto_approve = config.auto_approve.map(|tools| {
-        tools
-            .into_iter()
-            .filter_map(|tool| {
-                let normalized = stakpak_server::strip_tool_prefix(&tool).trim().to_string();
-                if normalized.is_empty() {
-                    None
-                } else {
-                    Some(normalized)
-                }
-            })
-            .collect()
-    });
-
-    let allowed_tools = config.allowed_tools.map(|tools| {
-        tools
-            .into_iter()
-            .filter_map(|tool| {
-                let normalized = stakpak_server::strip_tool_prefix(&tool).trim().to_string();
-                if normalized.is_empty() {
-                    None
-                } else {
-                    Some(normalized)
-                }
-            })
-            .collect()
-    });
-
-    let resolved = ResolvedProfileOverrides {
-        model,
-        auto_approve,
-        allowed_tools,
-    };
-
-    if resolved.model.is_none()
-        && resolved.auto_approve.is_none()
-        && resolved.allowed_tools.is_none()
-    {
-        None
-    } else {
-        Some(resolved)
     }
 }
 
@@ -1652,78 +1633,6 @@ fn apply_gateway_policy_from_resolved_tools(
                 expand_gateway_approval_allowlist(&approved_tools_from_policy(policy));
         }
         stakpak_server::ToolApprovalPolicy::None => {}
-    }
-}
-
-fn resolve_gateway_channel_profiles(
-    gateway_cfg: &mut stakpak_gateway::GatewayConfig,
-    boot_profile: &str,
-    config_path: &str,
-) {
-    if let Some(telegram) = gateway_cfg.channels.telegram.as_mut() {
-        apply_profile_to_channel(
-            &mut telegram.profile,
-            &mut telegram.model,
-            &mut telegram.auto_approve,
-            boot_profile,
-            config_path,
-        );
-    }
-
-    if let Some(discord) = gateway_cfg.channels.discord.as_mut() {
-        apply_profile_to_channel(
-            &mut discord.profile,
-            &mut discord.model,
-            &mut discord.auto_approve,
-            boot_profile,
-            config_path,
-        );
-    }
-
-    if let Some(slack) = gateway_cfg.channels.slack.as_mut() {
-        apply_profile_to_channel(
-            &mut slack.profile,
-            &mut slack.model,
-            &mut slack.auto_approve,
-            boot_profile,
-            config_path,
-        );
-    }
-}
-
-fn apply_profile_to_channel(
-    profile: &mut Option<String>,
-    model: &mut Option<String>,
-    auto_approve: &mut Option<Vec<String>>,
-    boot_profile: &str,
-    config_path: &str,
-) {
-    // Preserve the configured profile name in-memory to avoid accidental config
-    // loss if this GatewayConfig is ever persisted later.
-    let Some(profile_name) = profile.as_deref() else {
-        return;
-    };
-
-    let Some(resolved) =
-        resolve_profile_to_overrides(profile_name, boot_profile, Some(config_path))
-    else {
-        return;
-    };
-
-    let model_is_missing = model
-        .as_ref()
-        .map(|value| value.trim().is_empty())
-        .unwrap_or(true);
-    if model_is_missing {
-        *model = resolved.model;
-    }
-
-    let allowlist_is_missing = auto_approve
-        .as_ref()
-        .map(|tools| tools.iter().all(|tool| tool.trim().is_empty()))
-        .unwrap_or(true);
-    if allowlist_is_missing {
-        *auto_approve = resolved.auto_approve;
     }
 }
 
@@ -1912,7 +1821,10 @@ async fn restart_autopilot() -> Result<(), String> {
     Ok(())
 }
 
-async fn run_schedule_command(command: AutopilotScheduleCommands) -> Result<(), String> {
+async fn run_schedule_command(
+    command: AutopilotScheduleCommands,
+    config: &AppConfig,
+) -> Result<(), String> {
     match command {
         AutopilotScheduleCommands::List => list_schedules().await,
         AutopilotScheduleCommands::Add {
@@ -1924,11 +1836,17 @@ async fn run_schedule_command(command: AutopilotScheduleCommands) -> Result<(), 
             // workdir,
             max_steps,
             channel,
+            profile,
             pause_on_approval,
             sandbox,
             enabled,
         } => {
-            let mut config = AutopilotConfigFile::load_or_default_async().await?;
+            let mut autopilot_config = AutopilotConfigFile::load_or_default_async().await?;
+            let profile = normalize_optional_string(profile);
+            if let Some(profile_name) = profile.as_deref() {
+                validate_profile_reference(profile_name, config)?;
+            }
+
             let schedule = AutopilotScheduleConfig {
                 name: name.clone(),
                 cron,
@@ -1938,12 +1856,13 @@ async fn run_schedule_command(command: AutopilotScheduleCommands) -> Result<(), 
                 // workdir,
                 max_steps,
                 channel,
+                profile,
                 pause_on_approval,
                 sandbox,
                 enabled,
             };
-            add_schedule_in_config(&mut config, schedule)?;
-            config.save()?;
+            add_schedule_in_config(&mut autopilot_config, schedule)?;
+            autopilot_config.save()?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "added", signaled);
@@ -2056,6 +1975,56 @@ fn require_non_empty_token(token: String, error_message: &str) -> Result<String,
     Ok(trimmed.to_string())
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn validate_profile_reference(profile_name: &str, config: &AppConfig) -> Result<(), String> {
+    let profile_name = profile_name.trim();
+    if profile_name.is_empty() {
+        return Err("Profile name cannot be empty".to_string());
+    }
+
+    if profile_name == "all" {
+        return Err("Profile name 'all' is reserved and cannot be selected directly".to_string());
+    }
+
+    let config_file = AppConfig::load_config_file(Path::new(&config.config_path))
+        .map_err(|error| format!("Failed to load config.toml: {error}"))?;
+
+    if config_file.profiles.contains_key(profile_name) {
+        return Ok(());
+    }
+
+    let mut available: Vec<String> = config_file
+        .profiles
+        .keys()
+        .filter(|name| name.as_str() != "all")
+        .cloned()
+        .collect();
+    available.sort();
+
+    if available.is_empty() {
+        return Err(format!(
+            "Profile '{}' not found in config.toml",
+            profile_name
+        ));
+    }
+
+    Err(format!(
+        "Profile '{}' not found in config.toml. Available: {}",
+        profile_name,
+        available.join(", ")
+    ))
+}
+
 fn add_channel_with_optional_target(
     config_path: &Path,
     channel_type: ChannelType,
@@ -2063,6 +2032,7 @@ fn add_channel_with_optional_target(
     bot_token: Option<String>,
     app_token: Option<String>,
     target: Option<String>,
+    profile: Option<String>,
 ) -> Result<Option<String>, String> {
     let had_target = target.is_some();
     let normalized_target = target
@@ -2072,6 +2042,8 @@ fn add_channel_with_optional_target(
     if had_target && normalized_target.is_none() {
         return Err("Target cannot be empty".to_string());
     }
+
+    let normalized_profile = normalize_optional_string(profile);
 
     let mut root = load_toml_root_table(config_path)?;
 
@@ -2091,6 +2063,12 @@ fn add_channel_with_optional_target(
                 let mut telegram = toml::value::Table::new();
                 telegram.insert("token".to_string(), toml::Value::String(tok));
                 telegram.insert("require_mention".to_string(), toml::Value::Boolean(false));
+                if let Some(profile_name) = normalized_profile.as_ref() {
+                    telegram.insert(
+                        "profile".to_string(),
+                        toml::Value::String(profile_name.clone()),
+                    );
+                }
                 channels.insert("telegram".to_string(), toml::Value::Table(telegram));
             }
             ChannelType::Discord => {
@@ -2105,6 +2083,12 @@ fn add_channel_with_optional_target(
                 let mut discord = toml::value::Table::new();
                 discord.insert("token".to_string(), toml::Value::String(tok));
                 discord.insert("guilds".to_string(), toml::Value::Array(Vec::new()));
+                if let Some(profile_name) = normalized_profile.as_ref() {
+                    discord.insert(
+                        "profile".to_string(),
+                        toml::Value::String(profile_name.clone()),
+                    );
+                }
                 channels.insert("discord".to_string(), toml::Value::Table(discord));
             }
             ChannelType::Slack => {
@@ -2126,6 +2110,12 @@ fn add_channel_with_optional_target(
                 let mut slack = toml::value::Table::new();
                 slack.insert("bot_token".to_string(), toml::Value::String(bot));
                 slack.insert("app_token".to_string(), toml::Value::String(app));
+                if let Some(profile_name) = normalized_profile.as_ref() {
+                    slack.insert(
+                        "profile".to_string(),
+                        toml::Value::String(profile_name.clone()),
+                    );
+                }
                 channels.insert("slack".to_string(), toml::Value::Table(slack));
             }
             _ => return Err(format!("{:?} is not supported yet", channel_type)),
@@ -2162,7 +2152,10 @@ fn remove_channel(config_path: &Path, channel_type: ChannelType) -> Result<(), S
     Ok(())
 }
 
-async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), String> {
+async fn run_channel_command(
+    command: AutopilotChannelCommands,
+    config: &AppConfig,
+) -> Result<(), String> {
     let config_path = AutopilotConfigFile::path();
     match command {
         AutopilotChannelCommands::List => {
@@ -2195,7 +2188,22 @@ async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), St
             bot_token,
             app_token,
             target,
+            profile,
         } => {
+            let explicit_profile = normalize_optional_string(profile);
+            let default_profile = normalize_optional_string(Some(config.profile_name.clone()));
+            let requested_profile = explicit_profile.clone().or(default_profile);
+
+            if let Some(profile_name) = requested_profile.as_deref() {
+                validate_profile_reference(profile_name, config)?;
+                if explicit_profile.is_none() {
+                    println!(
+                        "ℹ Using profile '{}' (override with --profile)",
+                        profile_name
+                    );
+                }
+            }
+
             let saved_target = add_channel_with_optional_target(
                 config_path.as_path(),
                 channel_type.clone(),
@@ -2203,6 +2211,7 @@ async fn run_channel_command(command: AutopilotChannelCommands) -> Result<(), St
                 bot_token,
                 app_token,
                 target,
+                requested_profile,
             )?;
 
             if let Some(target_value) = saved_target {
@@ -2297,6 +2306,12 @@ fn validate_schedule(schedule: &AutopilotScheduleConfig) -> Result<(), String> {
 
     if schedule.prompt.trim().is_empty() {
         return Err("Schedule prompt cannot be empty".to_string());
+    }
+
+    if let Some(profile_name) = schedule.profile.as_deref()
+        && profile_name.trim().is_empty()
+    {
+        return Err("Schedule profile cannot be empty".to_string());
     }
 
     Ok(())
@@ -2854,6 +2869,10 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
                 println!("✓ No channels configured (add with: stakpak autopilot channel add)");
             } else {
                 println!("✓ Channel config valid (channels: {})", channels.join(", "));
+            }
+
+            for warning in cfg.check_deprecations() {
+                println!("⚠ {}", warning);
             }
         }
         Err(e) => {
@@ -3683,6 +3702,31 @@ mod tests {
         assert!(write_result.is_ok());
     }
 
+    fn test_app_config(config_path: &Path) -> AppConfig {
+        AppConfig {
+            api_endpoint: "https://test".to_string(),
+            api_key: None,
+            provider: crate::config::ProviderType::Remote,
+            mcp_server_host: None,
+            machine_name: None,
+            auto_append_gitignore: None,
+            profile_name: String::new(),
+            config_path: config_path.to_string_lossy().to_string(),
+            allowed_tools: None,
+            auto_approve: None,
+            rulebooks: None,
+            warden: None,
+            providers: std::collections::HashMap::new(),
+            model: None,
+            system_prompt: None,
+            max_turns: None,
+            anonymous_id: None,
+            collect_telemetry: None,
+            editor: None,
+            recent_models: Vec::new(),
+        }
+    }
+
     #[test]
     fn config_roundtrip_save_load() {
         let path = temp_file_path("autopilot-config");
@@ -3733,6 +3777,7 @@ mod tests {
             // workdir: None,
             max_steps: 50,
             channel: None,
+            profile: None,
             pause_on_approval: false,
             sandbox: false,
             enabled: true,
@@ -3936,6 +3981,7 @@ prompt = "Check system health"
             Some("xoxb-test".to_string()),
             Some("xapp-test".to_string()),
             Some("#eng".to_string()),
+            None,
         );
         assert!(add_result.is_ok());
         assert_eq!(add_result.ok(), Some(Some("#eng".to_string())));
@@ -3982,6 +4028,7 @@ prompt = "Check system health"
             Some("xoxb-test".to_string()),
             Some("xapp-test".to_string()),
             Some("   ".to_string()),
+            None,
         );
         assert!(add_result.is_err());
 
@@ -4010,6 +4057,7 @@ prompt = "Check system health"
             None,
             None,
             None,
+            None,
         );
         assert!(empty_telegram_result.is_err());
 
@@ -4017,6 +4065,7 @@ prompt = "Check system health"
             path.as_path(),
             ChannelType::Discord,
             Some("   ".to_string()),
+            None,
             None,
             None,
             None,
@@ -4030,6 +4079,7 @@ prompt = "Check system health"
             Some("   ".to_string()),
             Some("xapp-test".to_string()),
             None,
+            None,
         );
         assert!(empty_bot_result.is_err());
 
@@ -4039,6 +4089,7 @@ prompt = "Check system health"
             None,
             Some("xoxb-test".to_string()),
             Some("   ".to_string()),
+            None,
             None,
         );
         assert!(empty_app_result.is_err());
@@ -4088,6 +4139,7 @@ app_token = "xapp-test"
             // workdir: None,
             max_steps: 50,
             channel: None,
+            profile: None,
             pause_on_approval: false,
             sandbox: false,
             enabled: true,
@@ -4119,17 +4171,131 @@ app_token = "xapp-test"
     #[tokio::test]
     async fn channel_add_requires_token() {
         // Channel add without token should fail with a helpful message
-        let result = run_channel_command(AutopilotChannelCommands::Add {
-            channel_type: ChannelType::Telegram,
-            token: None,
-            bot_token: None,
-            app_token: None,
-            target: None,
-        })
+        let profile_path = temp_file_path("autopilot-channel-token-required-profile");
+        write_profile_config(
+            &profile_path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+"#,
+        );
+
+        let app_config = test_app_config(&profile_path);
+        let result = run_channel_command(
+            AutopilotChannelCommands::Add {
+                channel_type: ChannelType::Telegram,
+                token: None,
+                bot_token: None,
+                app_token: None,
+                target: None,
+                profile: None,
+            },
+            &app_config,
+        )
         .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Telegram token required"));
+
+        let _ = std::fs::remove_file(profile_path);
+    }
+
+    #[test]
+    fn validate_profile_reference_accepts_existing_profile() {
+        let profile_path = temp_file_path("autopilot-validate-profile-existing");
+        write_profile_config(
+            &profile_path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+
+[profiles.ops]
+api_key = "ops-key"
+"#,
+        );
+
+        let app_config = test_app_config(&profile_path);
+        let result = validate_profile_reference("ops", &app_config);
+        assert!(result.is_ok());
+
+        let _ = std::fs::remove_file(profile_path);
+    }
+
+    #[test]
+    fn validate_profile_reference_rejects_reserved_all() {
+        let app_config = test_app_config(Path::new("/tmp/non-existent-config.toml"));
+        let result = validate_profile_reference("all", &app_config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .expect_err("expected reserved profile error")
+                .contains("reserved")
+        );
+    }
+
+    #[test]
+    fn validate_profile_reference_rejects_empty_name() {
+        let app_config = test_app_config(Path::new("/tmp/non-existent-config.toml"));
+        let result = validate_profile_reference("   ", &app_config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .expect_err("expected empty profile name error")
+                .contains("cannot be empty")
+        );
+    }
+
+    #[test]
+    fn validate_profile_reference_lists_available_profiles_on_missing() {
+        let profile_path = temp_file_path("autopilot-validate-profile-missing");
+        write_profile_config(
+            &profile_path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+
+[profiles.ops]
+api_key = "ops-key"
+
+[profiles.monitoring]
+api_key = "monitoring-key"
+"#,
+        );
+
+        let app_config = test_app_config(&profile_path);
+        let result = validate_profile_reference("missing", &app_config);
+        assert!(result.is_err());
+
+        let message = result.expect_err("expected missing profile error");
+        assert!(message.contains("missing"));
+        assert!(message.contains("default"));
+        assert!(message.contains("monitoring"));
+        assert!(message.contains("ops"));
+
+        let _ = std::fs::remove_file(profile_path);
+    }
+
+    #[test]
+    fn validate_profile_reference_surfaces_config_load_errors() {
+        let missing_path = temp_file_path("autopilot-validate-profile-missing-config");
+        let app_config = test_app_config(&missing_path);
+        let result = validate_profile_reference("default", &app_config);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .expect_err("expected config load error")
+                .contains("Failed to load config.toml")
+        );
     }
 
     #[test]
@@ -4188,13 +4354,7 @@ app_token = "xapp-test"
     }
 
     #[test]
-    fn resolve_profile_to_overrides_returns_none_for_boot_profile() {
-        let resolved = resolve_profile_to_overrides("default", "default", None);
-        assert!(resolved.is_none());
-    }
-
-    #[test]
-    fn resolve_profile_to_overrides_loads_profile_values() {
+    fn resolve_profile_run_overrides_loads_profile_values() {
         let path = temp_file_path("profile-overrides");
         write_profile_config(
             &path,
@@ -4211,14 +4371,13 @@ api_key = "prod-key"
 model = "anthropic/claude-sonnet-4-5"
 allowed_tools = ["stakpak__view", ""]
 auto_approve = ["stakpak__run_command", "  "]
+system_prompt = "production prompt"
+max_turns = 32
 "#,
         );
 
-        let resolved = resolve_profile_to_overrides(
-            "production",
-            "default",
-            Some(path.to_string_lossy().as_ref()),
-        );
+        let resolved =
+            resolve_profile_run_overrides("production", Some(path.to_string_lossy().as_ref()));
         assert!(resolved.is_some());
 
         if let Some(resolved) = resolved {
@@ -4228,13 +4387,15 @@ auto_approve = ["stakpak__run_command", "  "]
             );
             assert_eq!(resolved.allowed_tools, Some(vec!["view".to_string()]));
             assert_eq!(resolved.auto_approve, Some(vec!["run_command".to_string()]));
+            assert_eq!(resolved.system_prompt.as_deref(), Some("production prompt"));
+            assert_eq!(resolved.max_turns, Some(32));
         }
 
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn resolve_profile_to_overrides_preserves_explicit_empty_tool_lists() {
+    fn resolve_profile_run_overrides_preserves_explicit_empty_tool_lists() {
         let path = temp_file_path("profile-overrides-empty-tools");
         write_profile_config(
             &path,
@@ -4252,8 +4413,7 @@ auto_approve = []
 "#,
         );
 
-        let resolved =
-            resolve_profile_to_overrides("ops", "default", Some(path.to_string_lossy().as_ref()));
+        let resolved = resolve_profile_run_overrides("ops", Some(path.to_string_lossy().as_ref()));
 
         assert!(resolved.is_some());
         if let Some(resolved) = resolved {
@@ -4265,7 +4425,7 @@ auto_approve = []
     }
 
     #[test]
-    fn resolve_gateway_channel_profiles_applies_profile_defaults() {
+    fn profile_run_override_resolver_maps_runtime_fields() {
         let path = temp_file_path("gateway-channel-profile");
         write_profile_config(
             &path,
@@ -4280,9 +4440,32 @@ api_key = "default-key"
 api_key = "ops-key"
 model = "anthropic/claude-opus-4-5"
 auto_approve = ["view"]
+system_prompt = "ops prompt"
+max_turns = 12
 "#,
         );
 
+        let resolver = ProfileRunOverrideResolver::new(path.to_string_lossy().to_string());
+        let resolved = stakpak_gateway::dispatcher::RunOverrideResolver::resolve_run_overrides(
+            &resolver, "ops",
+        );
+        assert!(resolved.is_some());
+
+        if let Some(resolved) = resolved {
+            assert_eq!(resolved.model.as_deref(), Some("anthropic/claude-opus-4-5"));
+            assert!(matches!(
+                resolved.auto_approve,
+                Some(stakpak_gateway::client::AutoApproveOverride::AllowList(ref tools)) if tools == &vec!["view".to_string()]
+            ));
+            assert_eq!(resolved.system_prompt.as_deref(), Some("ops prompt"));
+            assert_eq!(resolved.max_turns, Some(12));
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn channel_profiles_map_reads_explicit_profiles() {
         let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
         gateway_cfg.channels.slack = Some(stakpak_gateway::config::SlackConfig {
             bot_token: "xoxb-token".to_string(),
@@ -4292,21 +4475,9 @@ auto_approve = ["view"]
             profile: Some("ops".to_string()),
         });
 
-        resolve_gateway_channel_profiles(
-            &mut gateway_cfg,
-            "default",
-            path.to_string_lossy().as_ref(),
-        );
-
-        let slack = gateway_cfg.channels.slack.as_ref();
-        assert!(slack.is_some());
-        if let Some(slack) = slack {
-            assert_eq!(slack.model.as_deref(), Some("anthropic/claude-opus-4-5"));
-            assert_eq!(slack.auto_approve, Some(vec!["view".to_string()]));
-            assert_eq!(slack.profile.as_deref(), Some("ops"));
-        }
-
-        let _ = std::fs::remove_file(path);
+        let profiles = gateway_cfg.channels.profiles_map();
+        assert_eq!(profiles.get("slack").map(String::as_str), Some("ops"));
+        assert!(!profiles.contains_key("telegram"));
     }
 
     #[test]

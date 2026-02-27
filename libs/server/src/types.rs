@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use stakpak_agent_core::ToolApprovalPolicy;
+pub use stakpak_shared::models::overrides::{AutoApproveOverride, RunOverrides};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -23,37 +23,6 @@ impl SessionHandle {
         cancel: CancellationToken,
     ) -> Self {
         Self { command_tx, cancel }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum AutoApproveOverride {
-    /// "all" | "none"
-    Mode(String),
-    /// Explicit allowlist for auto-approval.
-    AllowList(Vec<String>),
-}
-
-/// Per-request run overrides merged with `AppState` defaults.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RunOverrides {
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub auto_approve: Option<AutoApproveOverride>,
-    #[serde(default)]
-    pub system_prompt: Option<String>,
-    #[serde(default)]
-    pub max_turns: Option<usize>,
-}
-
-impl RunOverrides {
-    pub fn is_empty(&self) -> bool {
-        self.model.is_none()
-            && self.auto_approve.is_none()
-            && self.system_prompt.is_none()
-            && self.max_turns.is_none()
     }
 }
 

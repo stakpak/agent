@@ -80,6 +80,14 @@ pub struct ProfileConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_models: Vec<String>,
 
+    /// System prompt override for sessions using this profile.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+
+    /// Maximum agent turns per session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<usize>,
+
     // =========================================================================
     // Legacy model fields - kept for backward compatibility during migration
     // These are read but deprecated (will migrate to 'model' field)
@@ -116,8 +124,10 @@ impl ProfileConfig {
                 providers: default.providers.clone(),
                 // Copy unified model field only (legacy fields are not copied)
                 model: default.model.clone(),
-                // Copy recent models
+                // Copy recent models + runtime overrides
                 recent_models: default.recent_models.clone(),
+                system_prompt: default.system_prompt.clone(),
+                max_turns: default.max_turns,
                 // Enable warden for readonly sandboxed execution
                 warden: Some(WardenConfig::readonly_profile()),
                 // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
@@ -386,11 +396,35 @@ impl ProfileConfig {
                     .map(|config| config.recent_models.clone())
                     .unwrap_or_default()
             },
+            system_prompt: self
+                .system_prompt
+                .clone()
+                .or_else(|| other.and_then(|config| config.system_prompt.clone())),
+            max_turns: self
+                .max_turns
+                .or_else(|| other.and_then(|config| config.max_turns)),
             // Legacy fields - kept for reading only, not merged
             eco_model: None,
             smart_model: None,
             recovery_model: None,
         }
+    }
+
+    /// Validate profile-specific constraints.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(max_turns) = self.max_turns
+            && !(1..=256).contains(&max_turns)
+        {
+            return Err(format!("max_turns must be 1-256, got {max_turns}"));
+        }
+
+        if let Some(system_prompt) = self.system_prompt.as_ref()
+            && system_prompt.chars().count() > 32 * 1024
+        {
+            return Err("system_prompt exceeds 32KB character limit".to_string());
+        }
+
+        Ok(())
     }
 
     /// Maximum number of recent models to store

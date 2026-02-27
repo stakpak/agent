@@ -50,6 +50,10 @@ pub struct AppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     /// User's preferred model (unified field, replaces smart/eco/recovery)
     pub model: Option<String>,
+    /// Optional system prompt override for sessions using this profile.
+    pub system_prompt: Option<String>,
+    /// Optional max turn override for sessions using this profile.
+    pub max_turns: Option<usize>,
     /// Unique ID for anonymous telemetry
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
@@ -162,6 +166,8 @@ impl AppConfig {
             provider: profile_config.provider.unwrap_or(ProviderType::Remote),
             providers: profile_config.providers,
             model: profile_config.model,
+            system_prompt: profile_config.system_prompt,
+            max_turns: profile_config.max_turns,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
@@ -975,6 +981,8 @@ impl From<AppConfig> for ProfileConfig {
             providers: config.providers,
             model: config.model,
             recent_models: config.recent_models,
+            system_prompt: config.system_prompt,
+            max_turns: config.max_turns,
             // Legacy fields - not used in new format
             openai: None,
             anthropic: None,

@@ -10,7 +10,7 @@ use crate::{
     channels::{Channel, discord::DiscordChannel, slack::SlackChannel, telegram::TelegramChannel},
     client::StakpakClient,
     config::GatewayConfig,
-    dispatcher::Dispatcher,
+    dispatcher::{Dispatcher, RunOverrideResolver},
     store::GatewayStore,
 };
 
@@ -22,8 +22,49 @@ pub struct Gateway {
     api_state: Arc<GatewayApiState>,
 }
 
+#[derive(Default)]
+struct NoopRunOverrideResolver;
+
+impl RunOverrideResolver for NoopRunOverrideResolver {
+    fn resolve_run_overrides(&self, _profile_name: &str) -> Option<crate::client::RunOverrides> {
+        None
+    }
+}
+
+#[derive(Clone)]
+pub struct DispatcherProfileOverrides {
+    pub channel_profiles: HashMap<String, String>,
+    pub override_resolver: Arc<dyn RunOverrideResolver>,
+}
+
+impl DispatcherProfileOverrides {
+    pub fn new(
+        channel_profiles: HashMap<String, String>,
+        override_resolver: Arc<dyn RunOverrideResolver>,
+    ) -> Self {
+        Self {
+            channel_profiles,
+            override_resolver,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            channel_profiles: HashMap::new(),
+            override_resolver: Arc::new(NoopRunOverrideResolver),
+        }
+    }
+}
+
 impl Gateway {
     pub async fn new(config: GatewayConfig) -> Result<Self> {
+        Self::new_with_profile_overrides(config, DispatcherProfileOverrides::none()).await
+    }
+
+    pub async fn new_with_profile_overrides(
+        config: GatewayConfig,
+        profile_overrides: DispatcherProfileOverrides,
+    ) -> Result<Self> {
         config.validate()?;
 
         let store = Arc::new(GatewayStore::open(&config.gateway.store_path).await?);
@@ -35,17 +76,23 @@ impl Gateway {
 
         let client = StakpakClient::new(config.server.url.clone(), config.server.token.clone());
 
-        let dispatcher = Arc::new(Dispatcher::new(
-            client.clone(),
-            channels.clone(),
-            store.clone(),
-            config.router_config(),
-            config.gateway.model.clone(),
-            config.gateway.approval_mode.clone(),
-            config.gateway.approval_allowlist.clone(),
-            config.channels.overrides_map(),
-            config.gateway.title_template.clone(),
-        ));
+        let dispatcher = Arc::new(
+            Dispatcher::new(
+                client.clone(),
+                channels.clone(),
+                store.clone(),
+                config.router_config(),
+                config.gateway.model.clone(),
+                config.gateway.approval_mode.clone(),
+                config.gateway.approval_allowlist.clone(),
+                config.channels.overrides_map(),
+                config.gateway.title_template.clone(),
+            )
+            .with_profile_resolution(
+                profile_overrides.channel_profiles,
+                profile_overrides.override_resolver,
+            ),
+        );
 
         let api_state = Arc::new(GatewayApiState {
             channels: channels.clone(),

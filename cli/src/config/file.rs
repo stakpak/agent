@@ -76,7 +76,9 @@ impl ConfigFile {
         profile_name: &str,
     ) -> Result<ProfileConfig, ConfigError> {
         let profile = self.profile_config_ok_or(profile_name)?;
-        Ok(profile.merge(self.profile_config("all")))
+        let merged = profile.merge(self.profile_config("all"));
+        merged.validate().map_err(ConfigError::Message)?;
+        Ok(merged)
     }
 
     /// Insert or update a profile from an AppConfig.

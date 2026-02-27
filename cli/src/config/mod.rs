@@ -12,6 +12,7 @@ mod app;
 mod file;
 pub mod models_cache;
 mod profile;
+pub(crate) mod profile_resolver;
 mod rulebook;
 mod types;
 pub(crate) mod warden;
