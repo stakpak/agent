@@ -901,7 +901,10 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         // Clear spinner line before printing error
         print!("\r\x1b[2K");
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        println!("  ✗ Timed out waiting for autopilot to become healthy ({}s)", max_wait.as_secs());
+        println!(
+            "  ✗ Timed out waiting for autopilot to become healthy ({}s)",
+            max_wait.as_secs()
+        );
         println!();
         println!("  Troubleshoot:");
         println!("    stakpak autopilot logs -c server    View server logs");
