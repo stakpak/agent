@@ -685,10 +685,21 @@ impl Channel for SlackChannel {
                 } else {
                     Some(msg.blocks)
                 };
+                // When blocks is None, Slack renders the `text` field as the
+                // visible message body instead of using it only for
+                // notifications. If the message carries attachments (e.g. a
+                // table) but no top-level blocks, send an empty `text` so the
+                // attachment content isn't duplicated as raw plaintext above
+                // the rendered table.
+                let text = if blocks.is_none() && msg.attachments.is_some() {
+                    String::new()
+                } else {
+                    msg.fallback_text
+                };
                 let ts = self
                     .post_message(
                         &channel,
-                        &msg.fallback_text,
+                        &text,
                         blocks,
                         msg.attachments,
                         thread_ts.as_deref(),

@@ -909,15 +909,39 @@ fn fallback_chunk(fallback: &str, _offset: usize, _block_count: usize) -> String
 // ---------------------------------------------------------------------------
 
 /// Generate plain text from markdown by stripping all formatting.
+///
+/// Table content is omitted from the fallback because Slack renders tables
+/// via attachments. Including the raw cell text would produce an unreadable
+/// wall of concatenated values (e.g. "IDNameAge1Alice30") in notifications.
+/// A short "[table]" placeholder is emitted instead.
 fn generate_fallback_text(text: &str) -> String {
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     let parser = Parser::new_ext(text, options);
 
     let mut output = String::new();
     let mut last_was_block = false;
+    let mut in_table = false;
 
     for event in parser {
         match event {
+            // Skip all content inside tables — they are rendered as
+            // attachments and the raw cell text is unreadable when
+            // concatenated.
+            Event::Start(Tag::Table(_)) => {
+                in_table = true;
+                if !output.is_empty() && !last_was_block {
+                    output.push('\n');
+                }
+                output.push_str("[table]\n");
+                last_was_block = true;
+            }
+            Event::End(TagEnd::Table) => {
+                in_table = false;
+            }
+            _ if in_table => {
+                // Ignore all events inside a table.
+            }
+
             Event::Text(content) => {
                 output.push_str(content.as_ref());
                 last_was_block = false;
@@ -1461,6 +1485,38 @@ mod tests {
         assert!(fallback.contains("code"));
         assert!(!fallback.contains("**"));
         assert!(!fallback.contains("`"));
+    }
+
+    #[test]
+    fn fallback_omits_table_content() {
+        let md = "Here is a table:\n\n| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob   | 25 |\n\nDone.";
+        let fallback = generate_fallback_text(md);
+        // Table cell content should NOT appear in the fallback.
+        assert!(
+            !fallback.contains("Alice"),
+            "table cell text should be omitted"
+        );
+        assert!(
+            !fallback.contains("Bob"),
+            "table cell text should be omitted"
+        );
+        assert!(
+            !fallback.contains("NameAge"),
+            "concatenated header text should be omitted"
+        );
+        // Non-table content should still be present.
+        assert!(fallback.contains("Here is a table:"));
+        assert!(fallback.contains("Done."));
+        // A placeholder should indicate a table was present.
+        assert!(fallback.contains("[table]"));
+    }
+
+    #[test]
+    fn fallback_table_only_message() {
+        let md = "| X | Y |\n|---|---|\n| 1 | 2 |";
+        let fallback = generate_fallback_text(md);
+        assert!(!fallback.contains('1'), "table cell text should be omitted");
+        assert!(fallback.contains("[table]"));
     }
 
     // ---- 10. Edge Cases ----
