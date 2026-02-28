@@ -478,3 +478,18 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
         "clipboard image paste is unsupported on Android".into(),
     ))
 }
+
+/// Copy text to the system clipboard.
+#[cfg(not(target_os = "android"))]
+pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {}", e))?;
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|e| format!("Failed to copy to clipboard: {}", e))
+}
+
+#[cfg(target_os = "android")]
+pub fn copy_to_clipboard(_text: &str) -> Result<(), String> {
+    Err("Clipboard is unsupported on Android".to_string())
+}

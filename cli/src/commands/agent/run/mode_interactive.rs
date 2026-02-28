@@ -75,6 +75,25 @@ async fn end_tool_execution_loading_if_none(
     Ok(())
 }
 
+/// Sets current_session_id and notifies the TUI if it was previously unset.
+async fn set_session_id(
+    current_session_id: &mut Option<Uuid>,
+    new_session_id: Uuid,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) -> Result<(), String> {
+    let was_none = current_session_id.is_none();
+    *current_session_id = Some(new_session_id);
+    if was_none {
+        send_input_event(
+            input_tx,
+            InputEvent::SetSessionId(new_session_id.to_string()),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Returns the IDs of tool_calls from the last assistant message that don't have corresponding tool_results.
 /// This is used to add cancelled tool_results before inserting a user message.
 fn get_unresolved_tool_call_ids(messages: &[ChatMessage]) -> Vec<String> {
@@ -421,7 +440,7 @@ pub async fn run_interactive(
                     resume_session_from_checkpoint(client.as_ref(), &session_id_str, &input_tx)
                         .await?;
 
-                current_session_id = Some(session_id_uuid);
+                set_session_id(&mut current_session_id, session_id_uuid, &input_tx).await?;
                 current_metadata = checkpoint_metadata;
                 should_refresh_skills_on_next_message = true;
                 tools_queue.extend(tool_calls.clone());
@@ -445,7 +464,8 @@ pub async fn run_interactive(
 
                 // Try to get the checkpoint with session info
                 if let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await {
-                    current_session_id = Some(checkpoint.session_id);
+                    set_session_id(&mut current_session_id, checkpoint.session_id, &input_tx)
+                        .await?;
                 }
 
                 let (checkpoint_messages, checkpoint_metadata) =
@@ -904,7 +924,12 @@ pub async fn run_interactive(
                                     checkpoint_metadata,
                                 )) => {
                                     // Track the current session ID
-                                    current_session_id = Some(session_id_uuid);
+                                    set_session_id(
+                                        &mut current_session_id,
+                                        session_id_uuid,
+                                        &input_tx,
+                                    )
+                                    .await?;
                                     current_metadata = checkpoint_metadata;
 
                                     // Mark that we need to refresh skills on the next user message
@@ -980,7 +1005,8 @@ pub async fn run_interactive(
                                 checkpoint_metadata,
                             )) => {
                                 // Track the current session ID
-                                current_session_id = Some(session_id_uuid);
+                                set_session_id(&mut current_session_id, session_id_uuid, &input_tx)
+                                    .await?;
                                 current_metadata = checkpoint_metadata;
 
                                 // Mark that we need to refresh skills on the next user message
@@ -1407,7 +1433,7 @@ pub async fn run_interactive(
                             .and_then(|value| value.as_str())
                             .and_then(|value| Uuid::parse_str(value).ok())
                         {
-                            current_session_id = Some(session_id);
+                            set_session_id(&mut current_session_id, session_id, &input_tx).await?;
                         }
 
                         // Update metadata from checkpoint state so the next
@@ -1480,7 +1506,12 @@ pub async fn run_interactive(
                             && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
                             && let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await
                         {
-                            current_session_id = Some(checkpoint.session_id);
+                            set_session_id(
+                                &mut current_session_id,
+                                checkpoint.session_id,
+                                &input_tx,
+                            )
+                            .await?;
                         }
 
                         // Send tool calls to TUI if present
