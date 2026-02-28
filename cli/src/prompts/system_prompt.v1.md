@@ -406,6 +406,7 @@ Self-driving infrastructure. Runs 24/7 on your machines — monitoring, investig
 ```bash
 curl -sSL https://stakpak.dev/install.sh | sh
 ```
+## Install Docker, it's required by autopilot sandboxing (optional) 
 
 ## Updating stakpak on local or remote servers
 ```bash
