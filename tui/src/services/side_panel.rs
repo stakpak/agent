@@ -44,7 +44,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Calculate section heights
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
+    let footer_height = 7; // Separator, session ID line, empty, version, empty, shortcuts (2 lines)
 
     // Plan section is only visible when plan mode is active
     let plan_active = state.plan_mode_active;
@@ -768,26 +768,69 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer section with version and shortcuts
-fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
+/// Render the footer section with session ID, version, and shortcuts
+fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     let mut lines = Vec::new();
 
-    let version = env!("CARGO_PKG_VERSION");
+    // Separator line
+    let separator_width = area.width.saturating_sub(4) as usize;
+    lines.push(Line::from(vec![Span::styled(
+        format!("{}{}", LEFT_PADDING, "─".repeat(separator_width)),
+        Style::default().fg(Color::DarkGray),
+    )]));
 
-    // Line 1: Version (left)
+    // Session ID line with copy shortcut
+    // Check if we recently copied (within 2 seconds)
+    let recently_copied = state
+        .session_id_copied_at
+        .map(|t| t.elapsed().as_secs() < 2)
+        .unwrap_or(false);
+
+    // Calculate available width for session ID
+    // Fixed parts: LEFT_PADDING (2) + "Session " (8) + suffix + right padding (2)
+    // Use unicode width for suffix since ✓ is multi-byte but displays as 1 char
+    let suffix = if recently_copied { "  ✓" } else { "  ctrl+x" };
+    let suffix_width = unicode_width::UnicodeWidthStr::width(suffix);
+    let fixed_width = LEFT_PADDING.len() + 8 + suffix_width + 2;
+    let available_width = (area.width as usize).saturating_sub(fixed_width);
+
+    let session_display = if state.session_id.is_empty() {
+        "N/A".to_string()
+    } else {
+        truncate_session_id(&state.session_id, available_width)
+    };
+
+    let session_line = if recently_copied {
+        Line::from(vec![
+            Span::styled(LEFT_PADDING, Style::default()),
+            Span::styled("Session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_display, Style::default().fg(Color::Green)),
+            Span::styled(suffix, Style::default().fg(Color::Green)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(LEFT_PADDING, Style::default()),
+            Span::styled("Session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_display, Style::default().fg(Color::White)),
+            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+        ])
+    };
+    lines.push(session_line);
+
+    // Empty line
+    lines.push(Line::from(""));
+
+    // Version
+    let version = env!("CARGO_PKG_VERSION");
     lines.push(Line::from(vec![Span::styled(
         format!("{}v{}", LEFT_PADDING, version),
         Style::default().fg(ThemeColors::dark_gray()),
     )]));
 
-    // Empty line between version/profile and shortcuts
+    // Empty line
     lines.push(Line::from(""));
 
-    // Shortcuts split into lines with colors:
-    // Tab: Select (Cyan)
-    // Enter: toggle (LightMagenta)
-    // Ctrl+b: Hide (Yellow)
-
+    // Shortcuts
     let left_padding_span = Span::styled(
         LEFT_PADDING.to_string(),
         Style::default().fg(ThemeColors::muted()),
@@ -813,6 +856,31 @@ fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+}
+
+/// Truncate a session ID to fit within max_width, keeping last 4 chars and reducing the front
+fn truncate_session_id(id: &str, max_width: usize) -> String {
+    let id_len = id.chars().count();
+
+    // If it fits, return as-is
+    if id_len <= max_width {
+        return id.to_string();
+    }
+
+    // We want to keep last 4 chars + "..." = 7 chars minimum
+    // If max_width < 7, just show what we can from the end
+    if max_width < 7 {
+        // Show just the last max_width chars
+        return id.chars().skip(id_len.saturating_sub(max_width)).collect();
+    }
+
+    // Keep last 4 chars, use remaining space for start chars
+    let end_chars = 4;
+    let start_chars = max_width.saturating_sub(end_chars + 3); // -3 for "..."
+
+    let start: String = id.chars().take(start_chars).collect();
+    let end: String = id.chars().skip(id_len.saturating_sub(end_chars)).collect();
+    format!("{}...{}", start, end)
 }
 
 /// Get the style for a section header - magenta when focused for better visibility

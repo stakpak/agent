@@ -1211,6 +1211,12 @@ pub fn update(
         InputEvent::SidePanelToggleSection => {
             popup::handle_side_panel_toggle_section(state);
         }
+        InputEvent::CopySessionId => {
+            // Legacy event - now handled via FileChangesRevertFile (Ctrl+X)
+        }
+        InputEvent::SetSessionId(session_id) => {
+            state.session_id = session_id;
+        }
 
         // Message handlers
         InputEvent::StreamAssistantMessage(id, s) => {
@@ -1269,7 +1275,17 @@ pub fn update(
             // This match arm exists to satisfy exhaustive pattern matching
         }
         InputEvent::FileChangesRevertFile => {
-            // Handled in file changes popup context above
+            // When file changes popup is open, this is handled above.
+            // When closed, Ctrl+X copies session ID.
+            if !state.session_id.is_empty() {
+                if let Err(e) =
+                    crate::services::clipboard_paste::copy_to_clipboard(&state.session_id)
+                {
+                    log::warn!("Failed to copy session ID: {}", e);
+                } else {
+                    state.session_id_copied_at = Some(std::time::Instant::now());
+                }
+            }
         }
         InputEvent::FileChangesRevertAll => {
             // Handled in file changes popup context above

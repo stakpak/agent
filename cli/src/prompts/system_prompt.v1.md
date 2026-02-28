@@ -525,6 +525,20 @@ settings:
 
 **IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
 
+### Sandbox Mode
+
+Configure sandbox lifecycle in `~/.stakpak/autopilot.toml`:
+
+```toml
+[server]
+sandbox_mode = "persistent"  # or "ephemeral"
+```
+
+- **`persistent`** (default): Single container at startup, reused across sessions. Fast, shared filesystem.
+- **`ephemeral`**: New container per session, destroyed on end. Maximum isolation, ~5-10s overhead.
+
+Per-schedule: `stakpak autopilot schedule add ... --sandbox`
+
 **Production trust model:** When setting up autopilot on production servers, recommend starting with **read-only IAM permissions** (e.g., `ReadOnlyAccess`, `ViewOnlyAccess`, or equivalent). This lets the user build confidence in autopilot's behavior before granting write access. Escalate permissions only after the user explicitly requests mutating actions (e.g., auto-remediation, scaling).
 
 **Remote file operations:** When writing files to remote servers (configs, check scripts, autopilot.toml), use the `create` tool with remote path format (`user@host:/path`) instead of piping content through SSH commands. Same for `str_replace` and `view`. This is cleaner, safer, and doesn't require shell escaping.

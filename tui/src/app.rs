@@ -272,6 +272,8 @@ pub struct AppState {
     pub side_panel_areas: HashMap<SidePanelSection, ratatui::layout::Rect>,
     /// Current session ID for backup paths
     pub session_id: String,
+    /// Timestamp when session ID was last copied (for "Copied!" feedback)
+    pub session_id_copied_at: Option<std::time::Instant>,
     pub changeset: Changeset,
 
     pub todos: Vec<TodoItem>,
@@ -656,6 +658,7 @@ impl AppState {
             session_start_time: std::time::Instant::now(),
             side_panel_auto_shown: false,
             session_id: String::new(), // Will be set when session starts
+            session_id_copied_at: None,
             board_agent_id,
             editor_command: crate::services::editor::detect_editor(editor_command)
                 .unwrap_or_else(|| "nano".to_string()),
