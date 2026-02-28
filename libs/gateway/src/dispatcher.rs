@@ -1650,6 +1650,9 @@ fn render_tool_preview(tool_name: &str, args: &serde_json::Value) -> String {
         "str_replace" => render_str_replace_preview(object),
         "remove" => render_remove_preview(object),
         "view" => render_view_preview(object),
+        "dynamic_subagent_task" => render_subagent_preview(object),
+        "search_docs" => render_search_docs_preview(object),
+        "ask_user" => render_ask_user_preview(object),
         _ => render_generic_preview(object),
     }
 }
@@ -1743,6 +1746,88 @@ fn render_view_preview(args: &serde_json::Map<String, serde_json::Value>) -> Str
     out
 }
 
+fn render_subagent_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unnamed task)");
+    let instructions = args.get("instructions").and_then(|v| v.as_str());
+    let tools = args.get("tools").and_then(|v| v.as_array());
+    let sandbox = args
+        .get("enable_sandbox")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut out = String::new();
+
+    if sandbox {
+        out.push_str(&format!("*{}* (🛡 sandboxed)\n", truncate(description, 80)));
+    } else {
+        out.push_str(&format!("*{}*\n", truncate(description, 80)));
+    }
+
+    if let Some(tool_list) = tools {
+        let names: Vec<&str> = tool_list
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|name| strip_mcp_prefix(name))
+            .collect();
+        if !names.is_empty() {
+            out.push_str(&format!("tools: `{}`\n", names.join("`, `")));
+        }
+    }
+
+    if let Some(inst) = instructions {
+        let trimmed = inst.trim();
+        if !trimmed.is_empty() {
+            out.push_str(&format!(
+                "```\n{}\n```",
+                truncate(trimmed, MAX_TOOL_PREVIEW_CHARS)
+            ));
+        }
+    }
+
+    out
+}
+
+fn render_search_docs_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let keywords = match args.get("keywords") {
+        Some(serde_json::Value::Array(arr)) => {
+            let kws: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+            kws.join(", ")
+        }
+        Some(serde_json::Value::String(s)) => s.clone(),
+        _ => return "(no keywords)".to_string(),
+    };
+    format!("`{}`", truncate(&keywords, 120))
+}
+
+fn render_ask_user_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let questions = match args.get("questions").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return "(no questions)".to_string(),
+    };
+
+    let mut out = String::new();
+    for (i, q) in questions.iter().enumerate() {
+        let label = q
+            .get("label")
+            .and_then(|v| v.as_str())
+            .or_else(|| q.get("question").and_then(|v| v.as_str()))
+            .unwrap_or("?");
+        out.push_str(&format!("{}. {}\n", i + 1, truncate(label, 80)));
+
+        if out.len() > MAX_TOOL_PREVIEW_CHARS {
+            let remaining = questions.len() - i - 1;
+            if remaining > 0 {
+                out.push_str(&format!("_…and {remaining} more_\n"));
+            }
+            break;
+        }
+    }
+    out
+}
+
 fn render_generic_preview(args: &serde_json::Map<String, serde_json::Value>) -> String {
     // Try the old priority-key heuristic for unknown tools.
     for key in [
@@ -1759,7 +1844,38 @@ fn render_generic_preview(args: &serde_json::Map<String, serde_json::Value>) -> 
         }
     }
 
-    // Fall back to showing the first key=value pair.
+    // For multi-param tools, build a compact summary instead of dumping one raw value.
+    if args.len() > 1 {
+        let mut parts = Vec::new();
+        for (key, value) in args.iter() {
+            let display = match value {
+                serde_json::Value::String(s) => {
+                    if s.len() > 60 {
+                        // Long strings get a label + truncated preview.
+                        format!("{key}: {}", truncate(s, 60))
+                    } else {
+                        format!("{key}=`{s}`")
+                    }
+                }
+                serde_json::Value::Array(arr) => format!("{key}: [{} items]", arr.len()),
+                serde_json::Value::Bool(b) => format!("{key}={b}"),
+                serde_json::Value::Number(n) => format!("{key}={n}"),
+                serde_json::Value::Null => continue,
+                serde_json::Value::Object(obj) => format!("{key}: {{{} keys}}", obj.len()),
+            };
+            parts.push(display);
+            if parts.len() >= 4 {
+                let remaining = args.len() - parts.len();
+                if remaining > 0 {
+                    parts.push(format!("…+{remaining} more"));
+                }
+                break;
+            }
+        }
+        return parts.join(" · ");
+    }
+
+    // Single-param fallback: show key=value.
     if let Some((key, value)) = args.iter().next() {
         let display = value
             .as_str()
@@ -2514,6 +2630,153 @@ mod tests {
             &serde_json::json!({"url": "https://example.com"}),
         );
         assert!(preview.contains("`https://example.com`"));
+    }
+
+    #[test]
+    fn render_subagent_preview_shows_description_and_instructions() {
+        let preview = render_tool_preview(
+            "dynamic_subagent_task",
+            &serde_json::json!({
+                "description": "Enumerate S3 buckets",
+                "instructions": "List all S3 buckets in the account.\nInclude regions and sizes.",
+                "tools": ["view", "run_command", "search_docs"],
+                "enable_sandbox": true
+            }),
+        );
+        assert!(preview.starts_with("*Enumerate S3 buckets* (🛡 sandboxed)\n"));
+        assert!(preview.contains("tools: `view`, `run_command`, `search_docs`"));
+        assert!(preview.contains("```\nList all S3 buckets in the account.\nInclude regions and sizes.\n```"));
+        // tools line appears before the code block
+        let tools_pos = preview.find("tools:").expect("tools line");
+        let code_pos = preview.find("```").expect("code block");
+        assert!(tools_pos < code_pos);
+    }
+
+    #[test]
+    fn render_subagent_preview_trims_instruction_whitespace() {
+        let preview = render_tool_preview(
+            "dynamic_subagent_task",
+            &serde_json::json!({
+                "description": "Trim test",
+                "instructions": "\n  Do the thing\n\n",
+                "tools": []
+            }),
+        );
+        assert!(preview.contains("```\nDo the thing\n```"));
+    }
+
+    #[test]
+    fn render_subagent_preview_without_sandbox() {
+        let preview = render_tool_preview(
+            "dynamic_subagent_task",
+            &serde_json::json!({
+                "description": "Check logs",
+                "instructions": "Tail the last 100 lines of app.log",
+                "tools": ["view"]
+            }),
+        );
+        assert!(!preview.contains("sandboxed"));
+        assert!(preview.starts_with("*Check logs*\n"));
+        assert!(preview.contains("tools: `view`"));
+    }
+
+    #[test]
+    fn render_subagent_preview_strips_tool_prefixes() {
+        let preview = render_tool_preview(
+            "dynamic_subagent_task",
+            &serde_json::json!({
+                "description": "Investigate",
+                "instructions": "Check things",
+                "tools": ["stakpak__view", "stakpak__run_command"]
+            }),
+        );
+        assert!(preview.contains("tools: `view`, `run_command`"));
+    }
+
+    #[test]
+    fn render_subagent_preview_minimal() {
+        let preview = render_tool_preview(
+            "dynamic_subagent_task",
+            &serde_json::json!({"instructions": "do stuff", "tools": []}),
+        );
+        assert!(preview.contains("(unnamed task)"));
+    }
+
+    #[test]
+    fn render_search_docs_preview_array_keywords() {
+        let preview = render_tool_preview(
+            "search_docs",
+            &serde_json::json!({"keywords": ["kubernetes", "ingress", "nginx"]}),
+        );
+        assert!(preview.contains("`kubernetes, ingress, nginx`"));
+    }
+
+    #[test]
+    fn render_search_docs_preview_string_keywords() {
+        let preview = render_tool_preview(
+            "search_docs",
+            &serde_json::json!({"keywords": "terraform aws vpc"}),
+        );
+        assert!(preview.contains("`terraform aws vpc`"));
+    }
+
+    #[test]
+    fn render_ask_user_preview_shows_labels() {
+        let preview = render_tool_preview(
+            "ask_user",
+            &serde_json::json!({
+                "questions": [
+                    {"label": "Region", "question": "Which AWS region?", "options": []},
+                    {"label": "Env", "question": "Which environment?", "options": []}
+                ]
+            }),
+        );
+        assert!(preview.contains("1. Region"));
+        assert!(preview.contains("2. Env"));
+    }
+
+    #[test]
+    fn render_generic_preview_multi_param_compact_summary() {
+        let preview = render_tool_preview(
+            "unknown_tool",
+            &serde_json::json!({
+                "name": "test",
+                "count": 42,
+                "verbose": true,
+                "items": [1, 2, 3]
+            }),
+        );
+        assert!(preview.contains("name=`test`"));
+        assert!(preview.contains("count=42"));
+        assert!(preview.contains("verbose=true"));
+        assert!(preview.contains("items: [3 items]"));
+    }
+
+    #[test]
+    fn render_generic_preview_multi_param_truncates_long_strings() {
+        let long_value = "a".repeat(200);
+        let preview = render_tool_preview(
+            "unknown_tool",
+            &serde_json::json!({
+                "short": "ok",
+                "long_field": long_value
+            }),
+        );
+        assert!(preview.contains("short=`ok`"));
+        assert!(preview.contains("long_field:"));
+        assert!(preview.contains("…"));
+    }
+
+    #[test]
+    fn render_generic_preview_multi_param_caps_at_four() {
+        let preview = render_tool_preview(
+            "unknown_tool",
+            &serde_json::json!({
+                "a": "1", "b": "2", "c": "3", "d": "4", "e": "5", "f": "6"
+            }),
+        );
+        // Should show at most 4 params + "…+N more"
+        assert!(preview.contains("more"));
     }
 
     #[test]
