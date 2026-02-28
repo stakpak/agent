@@ -1308,14 +1308,8 @@ async fn consume_run_events(
                                     }
                                 }
                                 ApprovalMode::AllowAll | ApprovalMode::DenyAll => {
-                                    let tool_names = proposed
-                                        .tool_calls
-                                        .iter()
-                                        .map(|tool_call| tool_call.name.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    if !tool_names.is_empty() {
-                                        let text = format!("🔧 Running: {tool_names}");
+                                    if !proposed.tool_calls.is_empty() {
+                                        let text = render_running_tools_summary(&proposed.tool_calls);
                                         deliver_channel_text(&run_context.channels, &run_context.delivery, text).await;
                                     }
 
@@ -1620,7 +1614,7 @@ fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) ->
     for (index, tool_call) in tool_calls.iter().enumerate() {
         let name = strip_mcp_prefix(&tool_call.name);
         let preview = render_tool_preview(name, &tool_call.arguments);
-        text.push_str(&format!("{}. `{}`\n{}\n", index + 1, name, preview));
+        text.push_str(&format!("**{} · {}**\n{}\n\n", index + 1, name, preview));
 
         if text.len() > MAX_APPROVAL_PROMPT_CHARS {
             let remaining = tool_calls.len() - index - 1;
@@ -1632,7 +1626,31 @@ fn render_approval_prompt(tool_calls: &[ProposedToolCall], auto_count: usize) ->
     }
 
     if auto_count > 0 {
-        text.push_str(&format!("\nℹ️ {auto_count} tool(s) auto-approved\n"));
+        text.push_str(&format!("ℹ️ {auto_count} tool(s) auto-approved\n"));
+    }
+
+    text
+}
+
+fn render_running_tools_summary(tool_calls: &[ProposedToolCall]) -> String {
+    let mut text = if tool_calls.len() == 1 {
+        "🔧 Running tool\n\n".to_string()
+    } else {
+        format!("🔧 Running {} tools\n\n", tool_calls.len())
+    };
+
+    for (index, tool_call) in tool_calls.iter().enumerate() {
+        let name = strip_mcp_prefix(&tool_call.name);
+        let preview = render_tool_preview(name, &tool_call.arguments);
+        text.push_str(&format!("**{} · {}**\n{}\n\n", index + 1, name, preview));
+
+        if text.len() > MAX_APPROVAL_PROMPT_CHARS {
+            let remaining = tool_calls.len() - index - 1;
+            if remaining > 0 {
+                text.push_str(&format!("_…and {remaining} more tool(s)_\n"));
+            }
+            break;
+        }
     }
 
     text
@@ -1761,9 +1779,12 @@ fn render_subagent_preview(args: &serde_json::Map<String, serde_json::Value>) ->
     let mut out = String::new();
 
     if sandbox {
-        out.push_str(&format!("*{}* (🛡 sandboxed)\n", truncate(description, 80)));
+        out.push_str(&format!(
+            "**{}** (🛡 sandboxed)\n",
+            truncate(description, 80)
+        ));
     } else {
-        out.push_str(&format!("*{}*\n", truncate(description, 80)));
+        out.push_str(&format!("**{}**\n", truncate(description, 80)));
     }
 
     if let Some(tool_list) = tools {
@@ -2643,7 +2664,7 @@ mod tests {
                 "enable_sandbox": true
             }),
         );
-        assert!(preview.starts_with("*Enumerate S3 buckets* (🛡 sandboxed)\n"));
+        assert!(preview.starts_with("**Enumerate S3 buckets** (🛡 sandboxed)\n"));
         assert!(preview.contains("tools: `view`, `run_command`, `search_docs`"));
         assert!(
             preview.contains(
@@ -2680,7 +2701,7 @@ mod tests {
             }),
         );
         assert!(!preview.contains("sandboxed"));
-        assert!(preview.starts_with("*Check logs*\n"));
+        assert!(preview.starts_with("**Check logs**\n"));
         assert!(preview.contains("tools: `view`"));
     }
 
@@ -2820,13 +2841,59 @@ mod tests {
 
         let prompt = render_approval_prompt(&tool_calls, 1);
         assert!(prompt.contains("2 tools need approval"));
-        assert!(prompt.contains("1. `run_command`"));
+        assert!(prompt.contains("**1 · run_command**"));
         assert!(prompt.contains("```\nkubectl get pods -n staging\n```"));
-        assert!(prompt.contains("2. `str_replace`"));
+        assert!(prompt.contains("**2 · str_replace**"));
         assert!(prompt.contains("`deploy.yaml`"));
         assert!(prompt.contains("- replicas: 1"));
         assert!(prompt.contains("+ replicas: 3"));
         assert!(prompt.contains("1 tool(s) auto-approved"));
+    }
+
+    #[test]
+    fn render_running_tools_summary_strips_prefixes_and_shows_previews() {
+        let tool_calls = vec![
+            ProposedToolCall {
+                id: "tc1".to_string(),
+                name: "stakpak__run_command".to_string(),
+                arguments: serde_json::json!({"command": "kubectl get pods"}),
+                metadata: None,
+            },
+            ProposedToolCall {
+                id: "tc2".to_string(),
+                name: "mcp__server__view".to_string(),
+                arguments: serde_json::json!({"path": "/etc/config.yaml"}),
+                metadata: None,
+            },
+        ];
+
+        let summary = render_running_tools_summary(&tool_calls);
+        assert!(summary.contains("Running 2 tools"));
+        // Tool names should be stripped and numbered
+        assert!(summary.contains("**1 · run_command**"));
+        assert!(summary.contains("**2 · view**"));
+        // Should NOT contain raw prefixed names
+        assert!(!summary.contains("stakpak__"));
+        assert!(!summary.contains("mcp__"));
+        // Should include tool previews
+        assert!(summary.contains("kubectl get pods"));
+        assert!(summary.contains("/etc/config.yaml"));
+    }
+
+    #[test]
+    fn render_running_tools_summary_single_tool() {
+        let tool_calls = vec![ProposedToolCall {
+            id: "tc1".to_string(),
+            name: "stakpak__create".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/test.txt", "file_text": "hello"}),
+            metadata: None,
+        }];
+
+        let summary = render_running_tools_summary(&tool_calls);
+        assert!(summary.contains("Running tool"));
+        assert!(!summary.contains("Running 1 tools"));
+        assert!(summary.contains("**1 · create**"));
+        assert!(summary.contains("/tmp/test.txt"));
     }
 
     #[test]

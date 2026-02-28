@@ -266,9 +266,14 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
                             tokio::spawn(async move {
                                 info!(schedule = %schedule.name, "Manual schedule fired");
                                 print_event("fire", &schedule.name, "Manual schedule fired");
-                                if let Err(e) =
-                                    handle_schedule_event(&db, config.as_ref(), &schedule, &server)
-                                        .await
+                                if let Err(e) = handle_schedule_event(
+                                    &db,
+                                    config.as_ref(),
+                                    &schedule,
+                                    &server,
+                                    true,
+                                )
+                                .await
                                 {
                                     error!(
                                         schedule = %schedule.name,
@@ -369,7 +374,7 @@ pub async fn run_scheduler(server: AgentServerConnection) -> Result<(), String> 
                         };
                         let server = Arc::clone(&server);
                         tokio::spawn(async move {
-                            if let Err(e) = handle_schedule_event(&db, config.as_ref(), &event.schedule, &server).await {
+                            if let Err(e) = handle_schedule_event(&db, config.as_ref(), &event.schedule, &server, false).await {
                                 error!(schedule = %event.schedule.name, error = %e, "Failed to handle schedule event");
                             }
                         });
@@ -547,6 +552,7 @@ async fn handle_schedule_event(
     config: &ScheduleConfig,
     schedule: &crate::commands::watch::Schedule,
     server: &AgentServerConnection,
+    manual: bool,
 ) -> Result<(), String> {
     // Singleton guard: skip if this schedule already has a running run
     match db.has_running_run(&schedule.name).await {
@@ -685,7 +691,14 @@ async fn handle_schedule_event(
     let caller_context = build_schedule_caller_context(schedule, check_result.as_ref());
 
     if schedule.interaction == InteractionMode::Interactive {
-        match try_start_interactive_session(config, schedule, check_result.as_ref(), &prompt).await
+        match try_start_interactive_session(
+            config,
+            schedule,
+            check_result.as_ref(),
+            &prompt,
+            manual,
+        )
+        .await
         {
             Ok(Some(session_id)) => {
                 db.update_run_interactive_started(run_id, &session_id, INTERACTIVE_DELEGATED_NOTE)
@@ -867,6 +880,7 @@ async fn try_start_interactive_session(
     schedule: &crate::commands::watch::Schedule,
     check_result: Option<&crate::commands::watch::CheckResult>,
     prompt: &str,
+    manual: bool,
 ) -> Result<Option<String>, String> {
     let Some(notifications) = &config.notifications else {
         return Ok(None);
@@ -878,10 +892,11 @@ async fn try_start_interactive_session(
 
     let caller_context = build_interactive_caller_context(schedule, check_result);
     let check_output = normalized_check_output(check_result);
+    let trigger_text = format_trigger_text(&schedule.name, check_result, manual);
     let payload = serde_json::json!({
         "channel": delivery.channel,
         "target": build_gateway_target(&delivery),
-        "text": format!("⚙️ [{}] Schedule fired", schedule.name),
+        "text": trigger_text,
         "context": {
             "schedule": schedule.name,
             "check_output": check_output,
@@ -899,6 +914,28 @@ async fn try_start_interactive_session(
     match post_gateway_send(notifications, &payload).await {
         Ok(response) => Ok(response.session_id),
         Err(error) => Err(error),
+    }
+}
+
+fn format_trigger_text(
+    schedule_name: &str,
+    check_result: Option<&crate::commands::watch::CheckResult>,
+    manual: bool,
+) -> String {
+    if manual {
+        return format!("👤 Schedule **{schedule_name}** manual trigger");
+    }
+
+    match check_result {
+        Some(result) => {
+            let exit_code = result.exit_code.unwrap_or(-1);
+            if result.passed() {
+                format!("⏩ Schedule **{schedule_name}** check passed (exit {exit_code})")
+            } else {
+                format!("⚠️ Schedule **{schedule_name}** check failed (exit {exit_code})")
+            }
+        }
+        None => format!("🕐 Schedule **{schedule_name}** triggered"),
     }
 }
 
