@@ -1770,7 +1770,7 @@ fn render_subagent_preview(args: &serde_json::Map<String, serde_json::Value>) ->
         let names: Vec<&str> = tool_list
             .iter()
             .filter_map(|v| v.as_str())
-            .map(|name| strip_mcp_prefix(name))
+            .map(strip_mcp_prefix)
             .collect();
         if !names.is_empty() {
             out.push_str(&format!("tools: `{}`\n", names.join("`, `")));
@@ -2645,7 +2645,11 @@ mod tests {
         );
         assert!(preview.starts_with("*Enumerate S3 buckets* (🛡 sandboxed)\n"));
         assert!(preview.contains("tools: `view`, `run_command`, `search_docs`"));
-        assert!(preview.contains("```\nList all S3 buckets in the account.\nInclude regions and sizes.\n```"));
+        assert!(
+            preview.contains(
+                "```\nList all S3 buckets in the account.\nInclude regions and sizes.\n```"
+            )
+        );
         // tools line appears before the code block
         let tools_pos = preview.find("tools:").expect("tools line");
         let code_pos = preview.find("```").expect("code block");
