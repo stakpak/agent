@@ -421,6 +421,11 @@ impl ProfileConfig {
     /// are dropped (they're duplicates). Remaining bare entries are prefixed with the
     /// config `model` field's provider, or `"stakpak"` as a fallback.
     ///
+    /// Entries with an unknown provider prefix (not a known cloud provider, not `"stakpak"`,
+    /// and not explicitly configured in the user's `providers` HashMap) are re-mapped to
+    /// `"stakpak/short_name"` so they route through the Stakpak API instead of failing
+    /// with "Provider not found".
+    ///
     /// Also ensures the config `model` field is represented in `recent_models`.
     /// Returns true if any entries were modified.
     pub fn migrate_recent_models(&mut self) -> bool {
@@ -433,6 +438,28 @@ impl ProfileConfig {
             .and_then(|m| m.find('/').map(|idx| &m[..idx]))
             .unwrap_or("stakpak");
 
+        // Providers that are either well-known cloud providers, explicitly configured
+        // by the user, or the provider from the config model field — entries with these
+        // prefixes are kept as-is. Including default_provider ensures bare entries that
+        // were prefixed with it remain stable on subsequent migration runs (idempotency).
+        let known_providers: Vec<&str> = {
+            let mut known: Vec<&str> = vec![
+                "stakpak",
+                "anthropic",
+                "openai",
+                "google",
+                "gemini",
+                "amazon-bedrock",
+            ];
+            if !known.contains(&default_provider) {
+                known.push(default_provider);
+            }
+            for key in self.providers.keys() {
+                known.push(key.as_str());
+            }
+            known
+        };
+
         // Collect the short names that already have a prefixed entry
         let prefixed_short_names: Vec<String> = self
             .recent_models
@@ -442,13 +469,22 @@ impl ProfileConfig {
             .collect();
 
         // Normalize: drop bare entries that duplicate a prefixed one,
-        // prefix remaining bare entries with the default provider
-        let migrated: Vec<String> = self
+        // prefix remaining bare entries with the default provider,
+        // and re-map unknown provider entries to "stakpak/short_name".
+        let mut migrated: Vec<String> = self
             .recent_models
             .iter()
             .filter_map(|id| {
-                if id.contains('/') {
-                    Some(id.clone())
+                if let Some((provider, _rest)) = id.split_once('/') {
+                    if known_providers.contains(&provider) {
+                        // Known provider — keep as-is
+                        Some(id.clone())
+                    } else {
+                        // Unknown provider (e.g., "fireworks-ai/...") — re-map to stakpak
+                        changed = true;
+                        let short_name = id.rsplit('/').next().unwrap_or(id);
+                        Some(format!("stakpak/{}", short_name))
+                    }
                 } else if prefixed_short_names.iter().any(|s| s == id) {
                     // Bare entry duplicates an existing prefixed entry — drop it
                     changed = true;
@@ -461,6 +497,16 @@ impl ProfileConfig {
             .collect();
 
         if changed {
+            // Dedup after normalization (keeps first occurrence, preserving order)
+            let mut seen = Vec::new();
+            migrated.retain(|id| {
+                if seen.contains(id) {
+                    false
+                } else {
+                    seen.push(id.clone());
+                    true
+                }
+            });
             self.recent_models = migrated;
         }
 
