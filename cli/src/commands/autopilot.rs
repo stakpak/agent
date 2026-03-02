@@ -4276,8 +4276,12 @@ api_key = "monitoring-key"
 
     #[test]
     fn validate_profile_reference_surfaces_config_load_errors() {
-        let missing_path = temp_file_path("autopilot-validate-profile-missing-config");
-        let app_config = test_app_config(&missing_path);
+        // Write invalid TOML so load_config_file returns a parse error
+        // (a missing file returns Ok(default_config) with a "default" profile).
+        let bad_path = temp_file_path("autopilot-validate-profile-bad-config");
+        std::fs::write(&bad_path, "{{{{invalid toml!!!!").expect("write bad config");
+
+        let app_config = test_app_config(&bad_path);
         let result = validate_profile_reference("default", &app_config);
 
         assert!(result.is_err());
@@ -4286,6 +4290,8 @@ api_key = "monitoring-key"
                 .expect_err("expected config load error")
                 .contains("Failed to load config.toml")
         );
+
+        let _ = std::fs::remove_file(bad_path);
     }
 
     #[test]
