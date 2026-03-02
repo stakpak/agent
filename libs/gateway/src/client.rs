@@ -10,6 +10,7 @@ pub use stakpak_shared::models::context::{
     CallerContextInput, MAX_CALLER_CONTEXT_CONTENT_CHARS, MAX_CALLER_CONTEXT_ITEMS,
     MAX_CALLER_CONTEXT_NAME_CHARS, validate_caller_context,
 };
+pub use stakpak_shared::models::overrides::{AutoApproveOverride, RunOverrides};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -66,34 +67,6 @@ pub enum MessageType {
     Message,
     Steering,
     FollowUp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum AutoApproveOverride {
-    Mode(String),
-    AllowList(Vec<String>),
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RunOverrides {
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub auto_approve: Option<AutoApproveOverride>,
-    #[serde(default)]
-    pub system_prompt: Option<String>,
-    #[serde(default)]
-    pub max_turns: Option<usize>,
-}
-
-impl RunOverrides {
-    pub fn is_empty(&self) -> bool {
-        self.model.is_none()
-            && self.auto_approve.is_none()
-            && self.system_prompt.is_none()
-            && self.max_turns.is_none()
-    }
 }
 
 #[derive(Debug, Clone)]

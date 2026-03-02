@@ -73,6 +73,23 @@ stakpak autopilot down
 stakpak autopilot doctor
 ```
 
+#### Unified configuration (profiles + autopilot wiring)
+
+- `~/.stakpak/config.toml`: profile behavior (`model`, `allowed_tools`, `auto_approve`, `system_prompt`, `max_turns`, provider credentials)
+- `~/.stakpak/autopilot.toml`: runtime wiring (`schedules`, `channels`, service/server settings)
+
+Use `profile = "name"` on schedules/channels and keep behavior inside profile definitions.
+
+```bash
+# schedule profile
+stakpak autopilot schedule add health --cron '*/5 * * * *' --prompt 'Check health' --profile monitoring
+
+# channel profile
+stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN" --profile ops
+```
+
+Full setup guide: [cli/README.md](cli/README.md)
+
 ## 🔒 Security Hardened
 
 - **Mutual TLS (mTLS)** - End-to-end encrypted MCP
@@ -183,9 +200,8 @@ Create `~/.stakpak/config.toml` with one of these configurations:
 [profiles.byok]
 provider = "local"
 
-# Model names are auto-detected for built-in providers
-smart_model = "claude-sonnet-4-5"
-eco_model = "claude-haiku-4-5"
+# Unified model preference field
+model = "anthropic/claude-sonnet-4-5"
 
 # Built-in providers - credentials can also be set via environment variables
 # (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
@@ -210,8 +226,7 @@ api_key = "..."
 provider = "local"
 
 # Custom provider models use the format: provider_key/model_name
-smart_model = "offline/qwen/qwen3-coder-30b"
-eco_model = "offline/qwen/qwen3-coder-30b"
+model = "offline/qwen/qwen3-coder-30b"
 
 # The provider key "offline" becomes the model prefix
 [profiles.offline.providers.offline]
@@ -227,10 +242,8 @@ api_endpoint = "http://localhost:11434/v1"
 [profiles.hybrid]
 provider = "local"
 
-# Built-in provider - model name auto-detected
-smart_model = "claude-sonnet-4-5"
-# Custom provider - requires provider prefix
-eco_model = "offline/llama3"
+# Unified model field (provider-prefixed)
+model = "anthropic/claude-sonnet-4-5"
 
 [profiles.hybrid.providers.anthropic]
 type = "anthropic"

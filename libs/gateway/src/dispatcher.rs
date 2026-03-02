@@ -28,6 +28,23 @@ use crate::{
     types::{ChatType, DeliveryContext, InboundMessage, OutboundReply, PeerId},
 };
 
+pub trait RunOverrideResolver: Send + Sync {
+    fn resolve_run_overrides(&self, profile_name: &str) -> Option<RunOverrides>;
+}
+
+#[derive(Default)]
+struct NoopRunOverrideResolver;
+
+impl RunOverrideResolver for NoopRunOverrideResolver {
+    fn resolve_run_overrides(&self, _profile_name: &str) -> Option<RunOverrides> {
+        None
+    }
+}
+
+pub fn noop_run_override_resolver() -> Arc<dyn RunOverrideResolver> {
+    Arc::new(NoopRunOverrideResolver)
+}
+
 pub struct Dispatcher {
     client: StakpakClient,
     channels: HashMap<String, Arc<dyn Channel>>,
@@ -46,6 +63,8 @@ pub struct Dispatcher {
     approval_mode: ApprovalMode,
     approval_allowlist: HashSet<String>,
     channel_overrides: HashMap<String, ChannelOverrides>,
+    channel_profiles: HashMap<String, String>,
+    override_resolver: Arc<dyn RunOverrideResolver>,
     title_template: String,
 }
 
@@ -53,6 +72,8 @@ pub struct Dispatcher {
 struct ActiveRun {
     run_id: String,
     cancel: CancellationToken,
+    approval_mode: ApprovalMode,
+    approval_allowlist: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -180,8 +201,20 @@ impl Dispatcher {
             approval_mode,
             approval_allowlist: approval_allowlist.into_iter().collect(),
             channel_overrides,
+            channel_profiles: HashMap::new(),
+            override_resolver: Arc::new(NoopRunOverrideResolver),
             title_template,
         }
+    }
+
+    pub fn with_profile_resolution(
+        mut self,
+        channel_profiles: HashMap<String, String>,
+        override_resolver: Arc<dyn RunOverrideResolver>,
+    ) -> Self {
+        self.channel_profiles = channel_profiles;
+        self.override_resolver = override_resolver;
+        self
     }
 
     pub async fn run(
@@ -848,6 +881,9 @@ impl Dispatcher {
     ) -> Result<(), String> {
         let channel_name = queued.inbound.channel.0.clone();
         let run_overrides = self.build_run_overrides(&channel_name);
+        let (run_approval_mode, run_approval_allowlist) =
+            self.resolve_run_approval(&channel_name, run_overrides.as_ref());
+
         let top_level_model = if run_overrides
             .as_ref()
             .and_then(|overrides| overrides.model.as_ref())
@@ -897,6 +933,8 @@ impl Dispatcher {
                 ActiveRun {
                     run_id: run_id.clone(),
                     cancel: cancel.clone(),
+                    approval_mode: run_approval_mode.clone(),
+                    approval_allowlist: run_approval_allowlist.clone(),
                 },
             );
         }
@@ -910,8 +948,6 @@ impl Dispatcher {
         };
 
         let last_event_id = self.get_cursor(&session_id)?;
-        let (run_approval_mode, run_approval_allowlist) =
-            self.resolve_channel_approval(&channel_name);
         self.spawn_run_consumer(
             run_context,
             last_event_id,
@@ -934,7 +970,7 @@ impl Dispatcher {
         timeout_seconds: Option<u64>,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
-        let cancel = {
+        let (cancel, run_approval_mode, run_approval_allowlist) = {
             let guard = self
                 .active_runs
                 .lock()
@@ -943,7 +979,11 @@ impl Dispatcher {
                 .get(session_id)
                 .and_then(|active| {
                     if active.run_id == run_id {
-                        Some(active.cancel.clone())
+                        Some((
+                            active.cancel.clone(),
+                            active.approval_mode.clone(),
+                            active.approval_allowlist.clone(),
+                        ))
                     } else {
                         None
                     }
@@ -958,9 +998,6 @@ impl Dispatcher {
             run_id: run_id.to_string(),
             timeout_seconds,
         };
-
-        let (run_approval_mode, run_approval_allowlist) =
-            self.resolve_channel_approval(&delivery.channel.0);
 
         self.spawn_run_consumer(
             run_context,
@@ -1188,6 +1225,21 @@ impl Dispatcher {
             .or_else(|| self.default_model.clone())
     }
 
+    fn resolve_run_approval(
+        &self,
+        channel_name: &str,
+        run_overrides: Option<&RunOverrides>,
+    ) -> (ApprovalMode, HashSet<String>) {
+        if let Some(run_overrides) = run_overrides
+            && let Some(override_auto_approve) = run_overrides.auto_approve.as_ref()
+            && let Some(resolved) = resolve_approval_from_override(override_auto_approve)
+        {
+            return resolved;
+        }
+
+        self.resolve_channel_approval(channel_name)
+    }
+
     fn resolve_channel_approval(&self, channel_name: &str) -> (ApprovalMode, HashSet<String>) {
         let Some(overrides) = self.channel_overrides.get(channel_name) else {
             return (self.approval_mode.clone(), self.approval_allowlist.clone());
@@ -1208,6 +1260,13 @@ impl Dispatcher {
     }
 
     fn build_run_overrides(&self, channel_name: &str) -> Option<RunOverrides> {
+        if let Some(profile_name) = self.channel_profiles.get(channel_name)
+            && let Some(overrides) = self.override_resolver.resolve_run_overrides(profile_name)
+            && !overrides.is_empty()
+        {
+            return Some(overrides);
+        }
+
         let channel_overrides = self.channel_overrides.get(channel_name)?;
 
         let auto_approve = channel_overrides
@@ -1225,6 +1284,35 @@ impl Dispatcher {
             None
         } else {
             Some(overrides)
+        }
+    }
+}
+
+fn resolve_approval_from_override(
+    override_value: &AutoApproveOverride,
+) -> Option<(ApprovalMode, HashSet<String>)> {
+    match override_value {
+        AutoApproveOverride::Mode(mode) => match mode.trim().to_ascii_lowercase().as_str() {
+            "all" => Some((ApprovalMode::AllowAll, HashSet::new())),
+            "none" => Some((ApprovalMode::DenyAll, HashSet::new())),
+            _ => {
+                debug!(mode = %mode, "unknown auto_approve override mode; falling back to channel/default approval policy");
+                None
+            }
+        },
+        AutoApproveOverride::AllowList(tools) => {
+            let allowlist = tools
+                .iter()
+                .filter_map(|tool| {
+                    let trimmed = tool.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+                .collect::<HashSet<_>>();
+            Some((ApprovalMode::Allowlist, allowlist))
         }
     }
 }
@@ -2397,6 +2485,8 @@ mod tests {
                 ActiveRun {
                     run_id: run_id.clone(),
                     cancel: CancellationToken::new(),
+                    approval_mode: ApprovalMode::Allowlist,
+                    approval_allowlist: HashSet::new(),
                 },
             );
 
@@ -3030,6 +3120,17 @@ mod tests {
         assert!(context.is_empty());
     }
 
+    #[derive(Default)]
+    struct StaticOverrideResolver {
+        overrides: HashMap<String, RunOverrides>,
+    }
+
+    impl RunOverrideResolver for StaticOverrideResolver {
+        fn resolve_run_overrides(&self, profile_name: &str) -> Option<RunOverrides> {
+            self.overrides.get(profile_name).cloned()
+        }
+    }
+
     #[tokio::test]
     async fn channel_overrides_affect_model_approval_and_server_overrides() {
         let store = Arc::new(
@@ -3077,5 +3178,96 @@ mod tests {
             overrides.auto_approve,
             Some(AutoApproveOverride::AllowList(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn profile_resolver_overrides_inline_channel_overrides() {
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("open in-memory gateway store"),
+        );
+
+        let resolver = StaticOverrideResolver {
+            overrides: HashMap::from([(
+                "ops".to_string(),
+                RunOverrides {
+                    model: Some("anthropic/claude-opus-4-5".to_string()),
+                    auto_approve: Some(AutoApproveOverride::AllowList(vec!["view".to_string()])),
+                    system_prompt: Some("ops prompt".to_string()),
+                    max_turns: Some(16),
+                },
+            )]),
+        };
+
+        let dispatcher = Dispatcher::new(
+            StakpakClient::new("http://127.0.0.1:4096".to_string(), String::new()),
+            HashMap::new(),
+            store,
+            RouterConfig::default(),
+            None,
+            ApprovalMode::AllowAll,
+            Vec::new(),
+            HashMap::from([(
+                "slack".to_string(),
+                ChannelOverrides {
+                    model: Some("openai/gpt-4o-mini".to_string()),
+                    approval_mode: Some(ApprovalMode::Allowlist),
+                    approval_allowlist: Some(vec!["search_docs".to_string()]),
+                },
+            )]),
+            "{channel}-{peer}".to_string(),
+        )
+        .with_profile_resolution(
+            HashMap::from([("slack".to_string(), "ops".to_string())]),
+            Arc::new(resolver),
+        );
+
+        let overrides = dispatcher
+            .build_run_overrides("slack")
+            .expect("expected run overrides");
+        assert_eq!(
+            overrides.model.as_deref(),
+            Some("anthropic/claude-opus-4-5")
+        );
+        assert_eq!(overrides.system_prompt.as_deref(), Some("ops prompt"));
+        assert_eq!(overrides.max_turns, Some(16));
+    }
+
+    #[tokio::test]
+    async fn profile_resolver_falls_back_to_inline_when_profile_missing() {
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("open in-memory gateway store"),
+        );
+
+        let dispatcher = Dispatcher::new(
+            StakpakClient::new("http://127.0.0.1:4096".to_string(), String::new()),
+            HashMap::new(),
+            store,
+            RouterConfig::default(),
+            None,
+            ApprovalMode::AllowAll,
+            Vec::new(),
+            HashMap::from([(
+                "slack".to_string(),
+                ChannelOverrides {
+                    model: Some("openai/gpt-4o-mini".to_string()),
+                    approval_mode: Some(ApprovalMode::Allowlist),
+                    approval_allowlist: Some(vec!["view".to_string()]),
+                },
+            )]),
+            "{channel}-{peer}".to_string(),
+        )
+        .with_profile_resolution(
+            HashMap::from([("slack".to_string(), "missing".to_string())]),
+            Arc::new(StaticOverrideResolver::default()),
+        );
+
+        let overrides = dispatcher
+            .build_run_overrides("slack")
+            .expect("expected inline fallback overrides");
+        assert_eq!(overrides.model.as_deref(), Some("openai/gpt-4o-mini"));
     }
 }

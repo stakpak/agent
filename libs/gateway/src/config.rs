@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use stakpak_shared::utils::normalize_optional_string;
 use thiserror::Error;
 
 use crate::router::{Binding, BindingMatch, DmScope, PeerMatch, PeerMatchKind, RouterConfig};
@@ -386,6 +387,24 @@ impl GatewayConfig {
         !self.enabled_channels().is_empty()
     }
 
+    pub fn check_deprecations(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if let Some(channel) = self.channels.telegram.as_ref() {
+            append_channel_deprecation_warnings(&mut warnings, "telegram", channel);
+        }
+
+        if let Some(channel) = self.channels.discord.as_ref() {
+            append_channel_deprecation_warnings(&mut warnings, "discord", channel);
+        }
+
+        if let Some(channel) = self.channels.slack.as_ref() {
+            append_channel_deprecation_warnings(&mut warnings, "slack", channel);
+        }
+
+        warnings
+    }
+
     pub fn router_config(&self) -> RouterConfig {
         let bindings = self
             .routing
@@ -609,11 +628,42 @@ impl ChannelConfigs {
 
         overrides
     }
+
+    pub fn profiles_map(&self) -> std::collections::HashMap<String, String> {
+        let mut profiles = std::collections::HashMap::new();
+
+        if let Some(profile) = self
+            .telegram
+            .as_ref()
+            .and_then(|channel| normalize_optional_string(channel.profile.clone()))
+        {
+            profiles.insert("telegram".to_string(), profile);
+        }
+
+        if let Some(profile) = self
+            .discord
+            .as_ref()
+            .and_then(|channel| normalize_optional_string(channel.profile.clone()))
+        {
+            profiles.insert("discord".to_string(), profile);
+        }
+
+        if let Some(profile) = self
+            .slack
+            .as_ref()
+            .and_then(|channel| normalize_optional_string(channel.profile.clone()))
+        {
+            profiles.insert("slack".to_string(), profile);
+        }
+
+        profiles
+    }
 }
 
 trait ChannelOverrideParts {
     fn model(&self) -> Option<String>;
     fn auto_approve(&self) -> Option<Vec<String>>;
+    fn profile(&self) -> Option<String>;
 }
 
 impl ChannelOverrideParts for TelegramConfig {
@@ -623,6 +673,10 @@ impl ChannelOverrideParts for TelegramConfig {
 
     fn auto_approve(&self) -> Option<Vec<String>> {
         self.auto_approve.clone()
+    }
+
+    fn profile(&self) -> Option<String> {
+        self.profile.clone()
     }
 }
 
@@ -634,6 +688,10 @@ impl ChannelOverrideParts for DiscordConfig {
     fn auto_approve(&self) -> Option<Vec<String>> {
         self.auto_approve.clone()
     }
+
+    fn profile(&self) -> Option<String> {
+        self.profile.clone()
+    }
 }
 
 impl ChannelOverrideParts for SlackConfig {
@@ -643,6 +701,10 @@ impl ChannelOverrideParts for SlackConfig {
 
     fn auto_approve(&self) -> Option<Vec<String>> {
         self.auto_approve.clone()
+    }
+
+    fn profile(&self) -> Option<String> {
+        self.profile.clone()
     }
 }
 
@@ -656,14 +718,28 @@ fn channel_overrides_from_parts(parts: &impl ChannelOverrideParts) -> ChannelOve
     }
 }
 
-fn normalize_optional_string(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        if value.trim().is_empty() {
-            None
-        } else {
-            Some(value)
-        }
-    })
+fn append_channel_deprecation_warnings(
+    warnings: &mut Vec<String>,
+    channel_name: &str,
+    channel: &impl ChannelOverrideParts,
+) {
+    let has_inline_model = normalize_optional_string(channel.model()).is_some();
+    let has_inline_auto_approve = channel.auto_approve().is_some();
+
+    if !has_inline_model && !has_inline_auto_approve {
+        return;
+    }
+
+    let profile = normalize_optional_string(channel.profile());
+    if profile.is_some() {
+        warnings.push(format!(
+            "channels.{channel_name}: inline model/auto_approve ignored when profile is set"
+        ));
+    } else {
+        warnings.push(format!(
+            "channels.{channel_name}: inline model/auto_approve is deprecated; use profile = \"name\" instead"
+        ));
+    }
 }
 
 fn normalize_allowlist(list: Option<Vec<String>>) -> Option<Vec<String>> {
@@ -1047,6 +1123,74 @@ mod tests {
             Some(ApprovalMode::Allowlist)
         ));
         assert_eq!(overrides.approval_allowlist, Some(vec![]));
+    }
+
+    #[test]
+    fn deprecation_warning_for_inline_model_without_profile() {
+        let mut config = GatewayConfig::default();
+        config.channels.telegram = Some(TelegramConfig {
+            token: "123:ABC".to_string(),
+            require_mention: false,
+            model: Some("anthropic/claude-sonnet-4-5".to_string()),
+            auto_approve: None,
+            profile: None,
+        });
+
+        let warnings = config.check_deprecations();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("deprecated"));
+    }
+
+    #[test]
+    fn deprecation_warning_when_profile_and_inline_fields_coexist() {
+        let mut config = GatewayConfig::default();
+        config.channels.slack = Some(super::SlackConfig {
+            bot_token: "xoxb-token".to_string(),
+            app_token: "xapp-token".to_string(),
+            model: Some("anthropic/claude-sonnet-4-5".to_string()),
+            auto_approve: None,
+            profile: Some("ops".to_string()),
+        });
+
+        let warnings = config.check_deprecations();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("ignored when profile is set"));
+    }
+
+    #[test]
+    fn no_deprecation_warning_when_profile_only() {
+        let mut config = GatewayConfig::default();
+        config.channels.discord = Some(super::DiscordConfig {
+            token: "discord-token".to_string(),
+            guilds: Vec::new(),
+            model: None,
+            auto_approve: None,
+            profile: Some("monitoring".to_string()),
+        });
+
+        let warnings = config.check_deprecations();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn channel_profiles_map_includes_explicit_profiles() {
+        let channels = ChannelConfigs {
+            telegram: Some(TelegramConfig {
+                token: "123:ABC".to_string(),
+                require_mention: false,
+                model: None,
+                auto_approve: None,
+                profile: Some("monitoring".to_string()),
+            }),
+            discord: None,
+            slack: None,
+        };
+
+        let profiles = channels.profiles_map();
+        assert_eq!(
+            profiles.get("telegram").map(String::as_str),
+            Some("monitoring")
+        );
     }
 
     #[test]

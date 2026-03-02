@@ -405,6 +405,8 @@ mod tests {
             provider: ProviderType::Remote,
             providers: HashMap::new(),
             model: None,
+            system_prompt: None,
+            max_turns: None,
             anonymous_id: None,
             collect_telemetry: None,
             editor: None,

@@ -875,9 +875,8 @@ fn resolve_schedule_profile_overrides(
     profile_name: &str,
     server: &AgentServerConnection,
 ) -> (Option<RunOverrides>, Option<HashSet<String>>) {
-    let Some(resolved) = crate::commands::autopilot::resolve_profile_to_overrides(
+    let Some(resolved) = crate::config::profile_resolver::resolve_profile_run_overrides(
         profile_name,
-        &server.boot_profile,
         Some(server.config_path.as_str()),
     ) else {
         return (None, None);
@@ -900,7 +899,8 @@ fn resolve_schedule_profile_overrides(
     let overrides = RunOverrides {
         model: normalized_model,
         auto_approve: normalized_auto_approve,
-        ..RunOverrides::default()
+        system_prompt: resolved.system_prompt,
+        max_turns: resolved.max_turns,
     };
 
     let overrides = if overrides.is_empty() {
@@ -2158,6 +2158,8 @@ api_key = "prod-key"
 model = "anthropic/claude-sonnet-4-5"
 allowed_tools = ["stakpak__run_command", "  "]
 auto_approve = ["stakpak__view"]
+system_prompt = "production prompt"
+max_turns = 24
 "#;
 
         std::fs::write(&config_path, config).expect("failed to write config");
@@ -2182,25 +2184,45 @@ auto_approve = ["stakpak__view"]
             overrides.auto_approve,
             Some(stakpak_gateway::client::AutoApproveOverride::AllowList(_))
         ));
+        assert_eq!(
+            overrides.system_prompt.as_deref(),
+            Some("production prompt")
+        );
+        assert_eq!(overrides.max_turns, Some(24));
 
         let allowed_tools = allowed_tools.expect("expected allowed tools override");
         assert!(allowed_tools.contains("run_command"));
     }
 
     #[test]
-    fn test_resolve_schedule_profile_overrides_noop_for_boot_profile() {
+    fn test_resolve_schedule_profile_overrides_includes_default_profile_values() {
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("config-default-profile.toml");
+
+        let config = r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+model = "openai/default-model"
+auto_approve = ["view"]
+"#;
+
+        std::fs::write(&config_path, config).expect("failed to write config");
+
         let server = AgentServerConnection {
             url: "http://127.0.0.1:4096".to_string(),
             token: String::new(),
             model: Some("openai/default-model".to_string()),
             default_allowed_tools: HashSet::from(["view".to_string()]),
             boot_profile: "default".to_string(),
-            config_path: "/tmp/does-not-matter.toml".to_string(),
+            config_path: config_path.to_string_lossy().to_string(),
         };
 
-        let (overrides, allowed_tools) = resolve_schedule_profile_overrides("default", &server);
-        assert!(overrides.is_none());
-        assert!(allowed_tools.is_none());
+        let (overrides, _allowed_tools) = resolve_schedule_profile_overrides("default", &server);
+        let overrides = overrides.expect("expected default profile overrides");
+        assert_eq!(overrides.model.as_deref(), Some("openai/default-model"));
     }
 
     #[test]
