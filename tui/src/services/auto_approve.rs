@@ -434,7 +434,10 @@ fn resolve_command_policy(
     let arg_prefix = format!("run_command::{name}::");
     let arg_policies = rules.iter().filter_map(|(key, policy)| {
         let pattern = key.strip_prefix(&arg_prefix)?;
-        let matched = cmd.args.iter().any(|arg| matches_pattern(pattern, arg));
+        let matched = cmd
+            .args
+            .iter()
+            .any(|arg| shell_parser::matches_pattern(pattern, arg));
         matched.then_some(policy.clone())
     });
 
@@ -443,25 +446,6 @@ fn resolve_command_policy(
         .chain(arg_policies)
         .max()
         .unwrap_or_else(|| default.clone())
-}
-
-/// Match a scope-key pattern against a single argument.
-///
-/// - `re:<regex>` — regex match
-/// - Contains `*`, `?`, or `[` — glob match
-/// - Otherwise — exact string equality
-fn matches_pattern(pattern: &str, arg: &str) -> bool {
-    if let Some(re_pattern) = pattern.strip_prefix("re:") {
-        regex::Regex::new(re_pattern)
-            .map(|re| re.is_match(arg))
-            .unwrap_or(false)
-    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        globset::Glob::new(pattern)
-            .map(|g| g.compile_matcher().is_match(arg))
-            .unwrap_or(false)
-    } else {
-        pattern == arg
-    }
 }
 
 impl AutoApproveConfig {
@@ -598,6 +582,128 @@ mod tests {
         if let Some(original) = original_dir {
             let _ = std::env::set_current_dir(&original);
         }
+    }
+
+    // --- Tests for hierarchical shell scope resolution ---
+
+    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
+
+    fn make_run_command_tool_call(command: &str) -> ToolCall {
+        ToolCall {
+            id: "tc-1".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({"command": command}).to_string(),
+            },
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn resolve_shell_scope_command_level_auto() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        let tc = make_run_command_tool_call("git status");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_most_restrictive_wins_in_pipeline() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        rules.insert(
+            "run_command::git::push".to_string(),
+            AutoApprovePolicy::Never,
+        );
+        let tc = make_run_command_tool_call("git log && git push origin main");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn resolve_shell_scope_unknown_command_falls_back_to_default() {
+        let rules = HashMap::new();
+        let tc = make_run_command_tool_call("rm -rf /tmp/test");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        // rules is empty, so base = run_command rule (absent) → default (Prompt)
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_returns_none_for_empty_parse() {
+        // An empty command string parses to zero commands → None
+        let rules = HashMap::new();
+        let tc = ToolCall {
+            id: "tc-2".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({"command": ""}).to_string(),
+            },
+            metadata: None,
+        };
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_shell_scope_glob_pattern_in_arg_rule() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::curl".to_string(), AutoApprovePolicy::Auto);
+        rules.insert(
+            "run_command::curl::*.prod.*".to_string(),
+            AutoApprovePolicy::Never,
+        );
+        let staging_tc = make_run_command_tool_call("curl https://api.staging.example.com");
+        assert_eq!(
+            resolve_shell_scope(&staging_tc, &rules, &AutoApprovePolicy::Prompt),
+            Some(AutoApprovePolicy::Auto)
+        );
+        let prod_tc = make_run_command_tool_call("curl https://api.prod.example.com");
+        assert_eq!(
+            resolve_shell_scope(&prod_tc, &rules, &AutoApprovePolicy::Prompt),
+            Some(AutoApprovePolicy::Never)
+        );
+    }
+
+    #[test]
+    fn resolve_shell_scope_nested_sh_c() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::rm".to_string(), AutoApprovePolicy::Never);
+        let tc = make_run_command_tool_call("sh -c 'rm -rf /tmp/old'");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Auto);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn matches_pattern_exact() {
+        assert!(shell_parser::matches_pattern("push", "push"));
+        assert!(!shell_parser::matches_pattern("push", "pull"));
+    }
+
+    #[test]
+    fn matches_pattern_glob() {
+        assert!(shell_parser::matches_pattern(
+            "*.prod.*",
+            "api.prod.example.com"
+        ));
+        assert!(!shell_parser::matches_pattern(
+            "*.prod.*",
+            "api.staging.example.com"
+        ));
+    }
+
+    #[test]
+    fn matches_pattern_regex() {
+        assert!(shell_parser::matches_pattern("re:^push$", "push"));
+        assert!(!shell_parser::matches_pattern("re:^push$", "push-force"));
+    }
+
+    #[test]
+    fn matches_pattern_invalid_regex_returns_false() {
+        assert!(!shell_parser::matches_pattern("re:[invalid", "anything"));
     }
 
     #[tokio::test]

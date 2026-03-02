@@ -13,7 +13,6 @@ stakpak-shared = { workspace = true }
 stakpak-api = { workspace = true }
 shell-parser = { workspace = true }
 regex = { workspace = true }
-globset = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ratatui = { workspace = true }

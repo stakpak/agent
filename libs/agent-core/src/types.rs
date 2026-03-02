@@ -162,7 +162,17 @@ impl ToolApprovalPolicy {
         }
     }
 
-    pub fn action_for(&self, tool_name: &str, tool_arguments: &Value) -> ToolApprovalAction {
+    /// Determine the approval action for a tool call.
+    ///
+    /// `tool_arguments` is `Some` when the raw JSON arguments are available
+    /// (used for hierarchical shell command resolution on `run_command`).
+    /// Pass `None` for tools that have no arguments or when shell inspection
+    /// is not needed.
+    pub fn action_for(
+        &self,
+        tool_name: &str,
+        tool_arguments: Option<&Value>,
+    ) -> ToolApprovalAction {
         let stripped = strip_tool_prefix(tool_name);
 
         match self {
@@ -170,8 +180,8 @@ impl ToolApprovalPolicy {
             Self::All => ToolApprovalAction::Approve,
             Self::Custom { rules, default } => {
                 if (stripped == "run_command" || stripped == "run_command_task")
-                    && let Some(command_str) =
-                        tool_arguments.get("command").and_then(|v| v.as_str())
+                    && let Some(args) = tool_arguments
+                    && let Some(command_str) = args.get("command").and_then(|v| v.as_str())
                 {
                     let parsed_commands = shell_parser::parse(command_str);
                     if !parsed_commands.is_empty() {
@@ -216,7 +226,10 @@ fn resolve_command_action(
     let arg_prefix = format!("run_command::{name}::");
     let arg_actions = rules.iter().filter_map(|(key, action)| {
         let pattern = key.strip_prefix(&arg_prefix)?;
-        let matched = cmd.args.iter().any(|arg| matches_pattern(pattern, arg));
+        let matched = cmd
+            .args
+            .iter()
+            .any(|arg| shell_parser::matches_pattern(pattern, arg));
         matched.then_some(*action)
     });
 
@@ -225,25 +238,6 @@ fn resolve_command_action(
         .chain(arg_actions)
         .max()
         .unwrap_or(default)
-}
-
-/// Match a scope-key pattern against a single argument.
-///
-/// - `re:<regex>` — regex match
-/// - Contains `*`, `?`, or `[` — glob match
-/// - Otherwise — exact string equality
-fn matches_pattern(pattern: &str, arg: &str) -> bool {
-    if let Some(re_pattern) = pattern.strip_prefix("re:") {
-        regex::Regex::new(re_pattern)
-            .map(|re| re.is_match(arg))
-            .unwrap_or(false)
-    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        globset::Glob::new(pattern)
-            .map(|g| g.compile_matcher().is_match(arg))
-            .unwrap_or(false)
-    } else {
-        pattern == arg
-    }
 }
 
 /// Strip MCP server prefix from tool name (e.g. "stakpak__run_command" -> "run_command").
@@ -257,15 +251,42 @@ pub fn strip_tool_prefix(name: &str) -> &str {
     name
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Security ordering: `Approve < Ask < Deny`.
+///
+/// The ordering is enforced via a manual `Ord` implementation so that
+/// reordering variants in the future cannot silently break the
+/// "most-restrictive wins" aggregation in `action_for`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolApprovalAction {
     /// Least restrictive — auto-approve.
-    Approve = 0,
+    Approve,
     /// Prompt the user.
-    Ask = 1,
+    Ask,
     /// Most restrictive — hard reject.
-    Deny = 2,
+    Deny,
+}
+
+impl ToolApprovalAction {
+    fn restrictiveness(self) -> u8 {
+        match self {
+            Self::Approve => 0,
+            Self::Ask => 1,
+            Self::Deny => 2,
+        }
+    }
+}
+
+impl PartialOrd for ToolApprovalAction {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ToolApprovalAction {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.restrictiveness().cmp(&other.restrictiveness())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -433,7 +454,7 @@ mod tests {
         let policy = ToolApprovalPolicy::with_defaults();
         for tool in DEFAULT_AUTO_APPROVE_TOOLS {
             assert_eq!(
-                policy.action_for(tool, &serde_json::json!({})),
+                policy.action_for(tool, None),
                 ToolApprovalAction::Approve,
                 "{tool} should be auto-approved"
             );
@@ -445,7 +466,7 @@ mod tests {
         let policy = ToolApprovalPolicy::with_defaults();
         for tool in DEFAULT_ASK_TOOLS {
             assert_eq!(
-                policy.action_for(tool, &serde_json::json!({})),
+                policy.action_for(tool, None),
                 ToolApprovalAction::Ask,
                 "{tool} should require approval"
             );
@@ -456,7 +477,7 @@ mod tests {
     fn with_defaults_asks_for_unknown_tools() {
         let policy = ToolApprovalPolicy::with_defaults();
         assert_eq!(
-            policy.action_for("some_unknown_tool", &serde_json::json!({})),
+            policy.action_for("some_unknown_tool", None),
             ToolApprovalAction::Ask
         );
     }
@@ -465,10 +486,7 @@ mod tests {
     fn from_allowlist_approves_listed() {
         let tools = vec!["view".to_string()];
         let policy = ToolApprovalPolicy::from_allowlist(&tools);
-        assert_eq!(
-            policy.action_for("view", &serde_json::json!({})),
-            ToolApprovalAction::Approve
-        );
+        assert_eq!(policy.action_for("view", None), ToolApprovalAction::Approve);
     }
 
     #[test]
@@ -476,7 +494,7 @@ mod tests {
         let tools = vec!["view".to_string()];
         let policy = ToolApprovalPolicy::from_allowlist(&tools);
         assert_eq!(
-            policy.action_for("run_command", &serde_json::json!({})),
+            policy.action_for("run_command", None),
             ToolApprovalAction::Deny
         );
     }
@@ -486,7 +504,7 @@ mod tests {
         let tools = vec!["view".to_string()];
         let policy = ToolApprovalPolicy::from_allowlist(&tools);
         assert_eq!(
-            policy.action_for("some_future_tool", &serde_json::json!({})),
+            policy.action_for("some_future_tool", None),
             ToolApprovalAction::Deny
         );
     }
@@ -497,11 +515,11 @@ mod tests {
         let policy = ToolApprovalPolicy::from_allowlist(&tools);
 
         assert_eq!(
-            policy.action_for("stakpak__view", &serde_json::json!({})),
+            policy.action_for("stakpak__view", None),
             ToolApprovalAction::Approve
         );
         assert_eq!(
-            policy.action_for("stakpak__run_command", &serde_json::json!({})),
+            policy.action_for("stakpak__run_command", None),
             ToolApprovalAction::Deny
         );
     }
@@ -513,7 +531,7 @@ mod tests {
             .with_overrides([("run_command".to_string(), ToolApprovalAction::Approve)]);
 
         assert_eq!(
-            policy.action_for("run_command", &serde_json::json!({})),
+            policy.action_for("run_command", None),
             ToolApprovalAction::Approve
         );
     }
@@ -528,52 +546,40 @@ mod tests {
         let policy = ToolApprovalPolicy::with_defaults()
             .with_overrides([("run_command".to_string(), ToolApprovalAction::Approve)]);
         assert_eq!(
-            policy.action_for("run_command", &serde_json::json!({})),
+            policy.action_for("run_command", None),
             ToolApprovalAction::Approve
         );
         // Other mutating tools unchanged
-        assert_eq!(
-            policy.action_for("create", &serde_json::json!({})),
-            ToolApprovalAction::Ask
-        );
+        assert_eq!(policy.action_for("create", None), ToolApprovalAction::Ask);
     }
 
     #[test]
     fn with_overrides_can_deny_tool() {
         let policy = ToolApprovalPolicy::with_defaults()
             .with_overrides([("remove".to_string(), ToolApprovalAction::Deny)]);
-        assert_eq!(
-            policy.action_for("remove", &serde_json::json!({})),
-            ToolApprovalAction::Deny
-        );
+        assert_eq!(policy.action_for("remove", None), ToolApprovalAction::Deny);
     }
 
     #[test]
     fn with_overrides_noop_on_none_and_all() {
         let none = ToolApprovalPolicy::None
             .with_overrides([("view".to_string(), ToolApprovalAction::Approve)]);
-        assert_eq!(
-            none.action_for("view", &serde_json::json!({})),
-            ToolApprovalAction::Ask
-        );
+        assert_eq!(none.action_for("view", None), ToolApprovalAction::Ask);
 
         let all = ToolApprovalPolicy::All
             .with_overrides([("view".to_string(), ToolApprovalAction::Deny)]);
-        assert_eq!(
-            all.action_for("view", &serde_json::json!({})),
-            ToolApprovalAction::Approve
-        );
+        assert_eq!(all.action_for("view", None), ToolApprovalAction::Approve);
     }
 
     #[test]
     fn action_for_strips_mcp_prefix() {
         let policy = ToolApprovalPolicy::with_defaults();
         assert_eq!(
-            policy.action_for("stakpak__view", &serde_json::json!({})),
+            policy.action_for("stakpak__view", None),
             ToolApprovalAction::Approve
         );
         assert_eq!(
-            policy.action_for("stakpak__run_command", &serde_json::json!({})),
+            policy.action_for("stakpak__run_command", None),
             ToolApprovalAction::Ask
         );
     }
@@ -582,18 +588,12 @@ mod tests {
     fn action_for_handles_edge_case_prefixes() {
         let policy = ToolApprovalPolicy::with_defaults();
         // No prefix — works as-is
-        assert_eq!(
-            policy.action_for("view", &serde_json::json!({})),
-            ToolApprovalAction::Approve
-        );
+        assert_eq!(policy.action_for("view", None), ToolApprovalAction::Approve);
         // Double-underscore at end — no stripping (nothing after __)
-        assert_eq!(
-            policy.action_for("view__", &serde_json::json!({})),
-            ToolApprovalAction::Ask
-        );
+        assert_eq!(policy.action_for("view__", None), ToolApprovalAction::Ask);
         // Prefix with unknown tool
         assert_eq!(
-            policy.action_for("other__unknown_tool", &serde_json::json!({})),
+            policy.action_for("other__unknown_tool", None),
             ToolApprovalAction::Ask
         );
     }
@@ -619,7 +619,10 @@ mod tests {
             default: ToolApprovalAction::Ask,
         };
         assert_eq!(
-            policy.action_for("run_command", &serde_json::json!({"command": "git status"})),
+            policy.action_for(
+                "run_command",
+                Some(&serde_json::json!({"command": "git status"}))
+            ),
             ToolApprovalAction::Approve
         );
     }
@@ -639,7 +642,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "git push origin main"})
+                Some(&serde_json::json!({"command": "git push origin main"}))
             ),
             ToolApprovalAction::Deny
         );
@@ -661,7 +664,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "git log && git push origin main"})
+                Some(&serde_json::json!({"command": "git log && git push origin main"}))
             ),
             ToolApprovalAction::Deny
         );
@@ -679,7 +682,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "rm -rf /tmp/test"})
+                Some(&serde_json::json!({"command": "rm -rf /tmp/test"}))
             ),
             ToolApprovalAction::Ask
         );
@@ -701,7 +704,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "curl https://api.staging.example.com"})
+                Some(&serde_json::json!({"command": "curl https://api.staging.example.com"}))
             ),
             ToolApprovalAction::Approve
         );
@@ -709,7 +712,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "curl https://api.prod.example.com"})
+                Some(&serde_json::json!({"command": "curl https://api.prod.example.com"}))
             ),
             ToolApprovalAction::Deny
         );
@@ -728,7 +731,7 @@ mod tests {
         assert_eq!(
             policy.action_for(
                 "run_command",
-                &serde_json::json!({"command": "sh -c 'rm -rf /tmp/old'"})
+                Some(&serde_json::json!({"command": "sh -c 'rm -rf /tmp/old'"}))
             ),
             ToolApprovalAction::Ask
         );

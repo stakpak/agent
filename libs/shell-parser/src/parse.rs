@@ -3,6 +3,41 @@ use tree_sitter::{Node, Parser};
 
 /// Shell interpreters recognized for nested `-c` script detection.
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh"];
+const ENV_VALUED_ARGS: &[&str] = &[
+    "-u",
+    "--unset",
+    "-S",
+    "--split-string",
+    "-C",
+    "--chdir",
+    "--block-signal",
+    "--default-signal",
+    "--ignore-signal",
+];
+
+const XARGS_VALUED_FLAGS: &[&str] = &[
+    "-a",
+    "--arg-file",
+    "-d",
+    "--delimiter",
+    "-E",
+    "--eof",
+    "-I",
+    "--replace",
+    "-L",
+    "--max-lines",
+    "-l",
+    "-n",
+    "--max-args",
+    "-P",
+    "--max-procs",
+    "--process-slot-var",
+    "-s",
+    "--max-chars",
+];
+
+// "-e",
+// "-i",
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedCommand {
@@ -162,13 +197,43 @@ fn extract_nested_script(command: &ParsedCommand) -> Option<String> {
         return extract_after_c_flag(&command.args);
     }
 
-    if name == "env" || name == "xargs" {
+    if name == "env" {
         let mut iter = command.args.iter();
         while let Some(arg) = iter.next() {
+            if arg.starts_with('-') {
+                if ENV_VALUED_ARGS.contains(&arg.as_str()) {
+                    iter.next(); // skip the flag's value
+                }
+                continue;
+            }
+            if arg.contains('=') {
+                continue;
+            }
             if SHELLS.contains(&arg.as_str()) {
                 let remaining: Vec<String> = iter.cloned().collect();
                 return extract_after_c_flag(&remaining);
             }
+            break;
+        }
+    } else if name == "xargs" {
+        let mut iter = command.args.iter();
+        while let Some(arg) = iter.next() {
+            if arg.starts_with('-') {
+                if XARGS_VALUED_FLAGS.contains(&arg.as_str())
+                    && let Some(next) = iter.clone().next()
+                    && !next.starts_with('-')
+                {
+                    iter.next(); // consume optional value
+                }
+                continue;
+            }
+
+            if SHELLS.contains(&arg.as_str()) {
+                let remaining: Vec<String> = iter.cloned().collect();
+                return extract_after_c_flag(&remaining);
+            }
+
+            break;
         }
     }
 
@@ -555,6 +620,185 @@ mod tests {
     }
 
     #[test]
+    fn extract_nested_script_env_unset_flag_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "-u".to_string(),
+                "FOO".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo hi".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_env_chdir_flag_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "-C".to_string(),
+                "/tmp".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo dir".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo dir".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_env_split_string_flag_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "-S".to_string(),
+                "VAR=val cmd".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo split".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo split".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_env_key_val_assignment_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "VAR=val".to_string(),
+                "OTHER=x".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo vars".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo vars".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_env_mixed_flags_and_assignments() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "-u".to_string(),
+                "OLDVAR".to_string(),
+                "NEW=1".to_string(),
+                "-C".to_string(),
+                "/home".to_string(),
+                "sh".to_string(),
+                "-c".to_string(),
+                "echo mixed".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo mixed".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_env_non_shell_after_flags() {
+        let cmd = ParsedCommand {
+            name: Some("env".to_string()),
+            args: vec![
+                "-u".to_string(),
+                "FOO".to_string(),
+                "python".to_string(),
+                "script.py".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), None);
+    }
+
+    #[test]
+    fn extract_nested_script_xargs_n_flag_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("xargs".to_string()),
+            args: vec![
+                "-n".to_string(),
+                "1".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo item".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo item".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_xargs_max_lines_flag_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("xargs".to_string()),
+            args: vec![
+                "-L".to_string(),
+                "1".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "rm {}".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("rm {}".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_xargs_multiple_flags_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("xargs".to_string()),
+            args: vec![
+                "-P".to_string(),
+                "4".to_string(),
+                "-I".to_string(),
+                "{}".to_string(),
+                "sh".to_string(),
+                "-c".to_string(),
+                "echo {}".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo {}".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_xargs_standalone_flags_skipped() {
+        let cmd = ParsedCommand {
+            name: Some("xargs".to_string()),
+            args: vec![
+                "-0".to_string(),
+                "-t".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo null".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), Some("echo null".to_string()));
+    }
+
+    #[test]
+    fn extract_nested_script_xargs_non_shell_after_flags() {
+        let cmd = ParsedCommand {
+            name: Some("xargs".to_string()),
+            args: vec![
+                "-n".to_string(),
+                "1".to_string(),
+                "rm".to_string(),
+                "-f".to_string(),
+            ],
+            offset: 0,
+        };
+        assert_eq!(extract_nested_script(&cmd), None);
+    }
+
+    #[test]
     fn parse_whitespace_only() {
         let commands = parse("   \t\n  ");
         assert_eq!(commands.len(), 0);
@@ -844,5 +1088,75 @@ mod tests {
         let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
         assert!(names.contains(&"ksh"));
         assert!(names.contains(&"echo"));
+    }
+
+    // --- Integration tests for env/xargs flag-skipping through full parse() ---
+
+    #[test]
+    fn parse_env_unset_flag_then_shell() {
+        let commands = parse(r#"env -u FOO bash -c "echo hi""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"env"));
+        assert!(
+            names.contains(&"echo"),
+            "nested echo should be extracted after env -u FOO"
+        );
+    }
+
+    #[test]
+    fn parse_env_chdir_flag_then_shell() {
+        let commands = parse(r#"env -C /tmp bash -c "echo dir""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"env"));
+        assert!(
+            names.contains(&"echo"),
+            "nested echo should be extracted after env -C /tmp"
+        );
+    }
+
+    #[test]
+    fn parse_env_key_val_then_shell() {
+        let commands = parse(r#"env VAR=val bash -c "echo $VAR""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"env"));
+        assert!(
+            names.contains(&"echo"),
+            "nested echo should be extracted after env VAR=val"
+        );
+    }
+
+    #[test]
+    fn parse_xargs_n_flag_then_shell() {
+        let commands = parse(r#"find . | xargs -n 1 bash -c "echo item""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"find"));
+        assert!(names.contains(&"xargs"));
+        assert!(
+            names.contains(&"echo"),
+            "nested echo should be extracted after xargs -n 1"
+        );
+    }
+
+    #[test]
+    fn parse_xargs_max_lines_flag_then_shell() {
+        let commands = parse(r#"find . | xargs -L 1 bash -c "rm {}""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"find"));
+        assert!(names.contains(&"xargs"));
+        assert!(
+            names.contains(&"rm"),
+            "nested rm should be extracted after xargs -L 1"
+        );
+    }
+
+    #[test]
+    fn parse_xargs_multiple_flags_then_shell() {
+        let commands = parse(r#"find . | xargs -P 4 -I {} sh -c "echo {}""#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"xargs"));
+        assert!(
+            names.contains(&"echo"),
+            "nested echo should be extracted after xargs -P 4 -I {{}}"
+        );
     }
 }
