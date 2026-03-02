@@ -17,10 +17,11 @@ use stakpak_shared::utils::truncate_chars_with_ellipsis;
 use crate::{
     channels::{ApprovalButton, ButtonStyle, Channel},
     client::{
-        CallerContextInput, MessageType, RunErrorPayload, SendMessageOptions, StakpakClient,
-        ToolCallsProposedPayload, ToolDecisionAction, ToolDecisionInput,
+        AutoApproveOverride, CallerContextInput, MessageType, RunErrorPayload, RunOverrides,
+        SendMessageOptions, StakpakClient, ToolCallsProposedPayload, ToolDecisionAction,
+        ToolDecisionInput,
     },
-    config::ApprovalMode,
+    config::{ApprovalMode, ChannelOverrides},
     router::{RouterConfig, resolve_routing_key},
     store::{GatewayStore, SessionMapping},
     targeting::{render_title_template, target_key_from_inbound},
@@ -44,6 +45,7 @@ pub struct Dispatcher {
     default_model: Option<String>,
     approval_mode: ApprovalMode,
     approval_allowlist: HashSet<String>,
+    channel_overrides: HashMap<String, ChannelOverrides>,
     title_template: String,
 }
 
@@ -162,6 +164,7 @@ impl Dispatcher {
         default_model: Option<String>,
         approval_mode: ApprovalMode,
         approval_allowlist: Vec<String>,
+        channel_overrides: HashMap<String, ChannelOverrides>,
         title_template: String,
     ) -> Self {
         Self {
@@ -176,6 +179,7 @@ impl Dispatcher {
             default_model,
             approval_mode,
             approval_allowlist: approval_allowlist.into_iter().collect(),
+            channel_overrides,
             title_template,
         }
     }
@@ -842,6 +846,18 @@ impl Dispatcher {
         queued: QueuedMessage,
         run_tx: mpsc::Sender<RunTaskResult>,
     ) -> Result<(), String> {
+        let channel_name = queued.inbound.channel.0.clone();
+        let run_overrides = self.build_run_overrides(&channel_name);
+        let top_level_model = if run_overrides
+            .as_ref()
+            .and_then(|overrides| overrides.model.as_ref())
+            .is_some()
+        {
+            None
+        } else {
+            self.resolve_effective_model(&channel_name, queued.run_options.model.clone())
+        };
+
         let message = Message::new(Role::User, queued.text.clone());
         let response = self
             .client
@@ -849,15 +865,12 @@ impl Dispatcher {
                 &session_id,
                 vec![message],
                 SendMessageOptions {
-                    model: queued
-                        .run_options
-                        .model
-                        .clone()
-                        .or_else(|| self.default_model.clone()),
+                    model: top_level_model,
                     message_type: MessageType::Message,
                     run_id: None,
                     sandbox: queued.run_options.sandbox,
                     context: queued.context.clone(),
+                    overrides: run_overrides,
                 },
             )
             .await;
@@ -897,11 +910,13 @@ impl Dispatcher {
         };
 
         let last_event_id = self.get_cursor(&session_id)?;
+        let (run_approval_mode, run_approval_allowlist) =
+            self.resolve_channel_approval(&channel_name);
         self.spawn_run_consumer(
             run_context,
             last_event_id,
-            self.approval_mode.clone(),
-            self.approval_allowlist.clone(),
+            run_approval_mode,
+            run_approval_allowlist,
             cancel,
             run_tx,
         );
@@ -944,11 +959,14 @@ impl Dispatcher {
             timeout_seconds,
         };
 
+        let (run_approval_mode, run_approval_allowlist) =
+            self.resolve_channel_approval(&delivery.channel.0);
+
         self.spawn_run_consumer(
             run_context,
             cursor,
-            self.approval_mode.clone(),
-            self.approval_allowlist.clone(),
+            run_approval_mode,
+            run_approval_allowlist,
             cancel,
             run_tx,
         );
@@ -1156,6 +1174,58 @@ impl Dispatcher {
         let next = current.map_or(cursor, |value| value.max(cursor));
         guard.insert(session_id.to_string(), next);
         Ok(())
+    }
+
+    fn resolve_effective_model(
+        &self,
+        channel_name: &str,
+        request_model: Option<String>,
+    ) -> Option<String> {
+        self.channel_overrides
+            .get(channel_name)
+            .and_then(|overrides| overrides.model.clone())
+            .or(request_model)
+            .or_else(|| self.default_model.clone())
+    }
+
+    fn resolve_channel_approval(&self, channel_name: &str) -> (ApprovalMode, HashSet<String>) {
+        let Some(overrides) = self.channel_overrides.get(channel_name) else {
+            return (self.approval_mode.clone(), self.approval_allowlist.clone());
+        };
+
+        let approval_mode = overrides
+            .approval_mode
+            .clone()
+            .unwrap_or_else(|| self.approval_mode.clone());
+
+        let approval_allowlist = overrides
+            .approval_allowlist
+            .as_ref()
+            .map(|list| list.iter().cloned().collect())
+            .unwrap_or_else(|| self.approval_allowlist.clone());
+
+        (approval_mode, approval_allowlist)
+    }
+
+    fn build_run_overrides(&self, channel_name: &str) -> Option<RunOverrides> {
+        let channel_overrides = self.channel_overrides.get(channel_name)?;
+
+        let auto_approve = channel_overrides
+            .approval_allowlist
+            .as_ref()
+            .map(|allowlist| AutoApproveOverride::AllowList(allowlist.clone()));
+
+        let overrides = RunOverrides {
+            model: channel_overrides.model.clone(),
+            auto_approve,
+            ..RunOverrides::default()
+        };
+
+        if overrides.is_empty() {
+            None
+        } else {
+            Some(overrides)
+        }
     }
 }
 
@@ -2021,7 +2091,7 @@ mod tests {
     use crate::{
         channels::{Channel, ChannelTestResult},
         client::{CallerContextInput, StakpakClient},
-        config::ApprovalMode,
+        config::{ApprovalMode, ChannelOverrides},
         router::RouterConfig,
         store::GatewayStore,
         types::{ChannelId, ChatType, DeliveryContext, InboundMessage, OutboundReply, PeerId},
@@ -2199,6 +2269,7 @@ mod tests {
             None,
             ApprovalMode::Allowlist,
             Vec::new(),
+            HashMap::new(),
             "{channel}-{peer}".to_string(),
         ));
 
@@ -2310,6 +2381,7 @@ mod tests {
             None,
             ApprovalMode::Allowlist,
             Vec::new(),
+            HashMap::new(),
             "{channel}-{peer}".to_string(),
         ));
 
@@ -2956,5 +3028,54 @@ mod tests {
 
         let context = latest_non_empty_context(&queue);
         assert!(context.is_empty());
+    }
+
+    #[tokio::test]
+    async fn channel_overrides_affect_model_approval_and_server_overrides() {
+        let store = Arc::new(
+            GatewayStore::open_in_memory()
+                .await
+                .expect("open in-memory gateway store"),
+        );
+
+        let dispatcher = Dispatcher::new(
+            StakpakClient::new("http://127.0.0.1:4096".to_string(), String::new()),
+            HashMap::new(),
+            store,
+            RouterConfig::default(),
+            Some("openai/default-model".to_string()),
+            ApprovalMode::AllowAll,
+            Vec::new(),
+            HashMap::from([(
+                "slack".to_string(),
+                ChannelOverrides {
+                    model: Some("anthropic/claude-sonnet-4-5".to_string()),
+                    approval_mode: Some(ApprovalMode::Allowlist),
+                    approval_allowlist: Some(vec!["view".to_string()]),
+                },
+            )]),
+            "{channel}-{peer}".to_string(),
+        );
+
+        assert_eq!(
+            dispatcher.resolve_effective_model("slack", Some("meta/model".to_string())),
+            Some("anthropic/claude-sonnet-4-5".to_string())
+        );
+
+        let (mode, allowlist) = dispatcher.resolve_channel_approval("slack");
+        assert!(matches!(mode, ApprovalMode::Allowlist));
+        assert!(allowlist.contains("view"));
+
+        let overrides = dispatcher
+            .build_run_overrides("slack")
+            .expect("expected run overrides");
+        assert_eq!(
+            overrides.model.as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
+        assert!(matches!(
+            overrides.auto_approve,
+            Some(AutoApproveOverride::AllowList(_))
+        ));
     }
 }

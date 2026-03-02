@@ -5,7 +5,7 @@ use crate::{
     message_bridge,
     session_actor::{ACTIVE_MODEL_METADATA_KEY, spawn_session_actor},
     state::AppState,
-    types::SessionRuntimeState,
+    types::{AutoApproveOverride, RunConfig, RunOverrides, SessionRuntimeState},
 };
 use async_stream::stream;
 use axum::{
@@ -122,6 +122,8 @@ struct SessionMessageRequest {
     sandbox: Option<bool>,
     #[serde(default)]
     context: Option<Vec<CallerContextInput>>,
+    #[serde(default)]
+    overrides: Option<RunOverrides>,
 }
 
 #[derive(Debug, Serialize)]
@@ -243,6 +245,11 @@ struct ConfigResponse {
 struct ModelsResponse {
     models: Vec<stakai::Model>,
 }
+
+const DEFAULT_MAX_TURNS: usize = 64;
+const MIN_MAX_TURNS: usize = 1;
+const MAX_MAX_TURNS: usize = 256;
+const MAX_SYSTEM_PROMPT_CHARS: usize = 32 * 1024;
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
     public_router()
@@ -535,8 +542,13 @@ async fn sessions_message_handler(
 
             let _ = state.refresh_mcp_tools().await;
 
-            let requested_or_persisted_model = match request.model.as_deref() {
-                Some(model) => Some(model.to_string()),
+            let overrides = request.overrides.as_ref();
+
+            let requested_or_persisted_model = match overrides
+                .and_then(|value| value.model.clone())
+                .or_else(|| request.model.clone())
+            {
+                Some(model) => Some(model),
                 None => load_persisted_model_for_session(&state, session_id).await,
             };
 
@@ -546,10 +558,35 @@ async fn sessions_message_handler(
                     api_error(StatusCode::BAD_REQUEST, "invalid_model", "Unknown model")
                 })?;
 
+            let tool_approval_policy = resolve_tool_approval_override(
+                overrides.and_then(|value| value.auto_approve.as_ref()),
+                &state.tool_approval_policy,
+            );
+
+            let system_prompt_override = overrides
+                .and_then(|value| value.system_prompt.clone())
+                .filter(|value| !value.trim().is_empty());
+
+            let max_turns = overrides
+                .and_then(|value| value.max_turns)
+                .unwrap_or(DEFAULT_MAX_TURNS)
+                // Defense-in-depth: clamp after validation in case a code path
+                // bypasses validate_session_message_request.
+                .clamp(MIN_MAX_TURNS, MAX_MAX_TURNS);
+
+            let run_config = RunConfig {
+                model,
+                inference: state.inference.clone(),
+                tool_approval_policy,
+                system_prompt: system_prompt_override,
+                max_turns,
+            };
+
             let caller_context = map_caller_context_inputs(request.context.as_deref());
 
             let state_for_spawn = state.clone();
             let message_for_spawn = request.message;
+            let run_config_for_spawn = run_config.clone();
             let sandbox_config = if request.sandbox.unwrap_or(false) {
                 state.sandbox_config.clone()
             } else {
@@ -561,7 +598,7 @@ async fn sessions_message_handler(
                 .start_run(session_id, move |allocated_run_id| {
                     let state = state_for_spawn.clone();
                     let message = message_for_spawn.clone();
-                    let model = model.clone();
+                    let run_config = run_config_for_spawn.clone();
                     let caller_context = caller_context.clone();
                     let sandbox_config = sandbox_config.clone();
                     async move {
@@ -569,7 +606,7 @@ async fn sessions_message_handler(
                             state,
                             session_id,
                             allocated_run_id,
-                            model,
+                            run_config,
                             message,
                             caller_context,
                             sandbox_config,
@@ -900,6 +937,37 @@ fn runtime_config(state: &AppState) -> ConfigResponse {
     }
 }
 
+fn resolve_tool_approval_override(
+    override_value: Option<&AutoApproveOverride>,
+    default: &stakpak_agent_core::ToolApprovalPolicy,
+) -> stakpak_agent_core::ToolApprovalPolicy {
+    let Some(override_value) = override_value else {
+        return default.clone();
+    };
+
+    match override_value {
+        AutoApproveOverride::Mode(mode) => match mode.trim().to_ascii_lowercase().as_str() {
+            "all" => stakpak_agent_core::ToolApprovalPolicy::All,
+            "none" => stakpak_agent_core::ToolApprovalPolicy::None,
+            _ => default.clone(),
+        },
+        AutoApproveOverride::AllowList(tools) => stakpak_agent_core::ToolApprovalPolicy::Custom {
+            rules: std::collections::HashMap::new(),
+            default: stakpak_agent_core::ToolApprovalAction::Ask,
+        }
+        .with_overrides(tools.iter().filter_map(|tool| {
+            let normalized = stakpak_agent_core::strip_tool_prefix(tool)
+                .trim()
+                .to_string();
+            if normalized.is_empty() {
+                None
+            } else {
+                Some((normalized, stakpak_agent_core::ToolApprovalAction::Approve))
+            }
+        })),
+    }
+}
+
 fn parse_status_param(status: &str) -> Option<SessionStatus> {
     match status.to_ascii_uppercase().as_str() {
         "ACTIVE" => Some(SessionStatus::Active),
@@ -1008,6 +1076,28 @@ fn validate_session_message_request(request: &SessionMessageRequest) -> Option<R
             "invalid_context",
             &message,
         ));
+    }
+
+    if let Some(overrides) = request.overrides.as_ref() {
+        if let Some(max_turns) = overrides.max_turns
+            && !(MIN_MAX_TURNS..=MAX_MAX_TURNS).contains(&max_turns)
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                "max_turns must be between 1 and 256",
+            ));
+        }
+
+        if let Some(system_prompt) = overrides.system_prompt.as_ref()
+            && system_prompt.chars().count() > MAX_SYSTEM_PROMPT_CHARS
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                "system_prompt exceeds maximum length",
+            ));
+        }
     }
 
     None
@@ -2666,6 +2756,69 @@ mod tests {
     }
 
     #[test]
+    fn resolve_tool_approval_override_uses_default_when_missing() {
+        let default = ToolApprovalPolicy::None;
+        let resolved = resolve_tool_approval_override(None, &default);
+        assert!(matches!(resolved, ToolApprovalPolicy::None));
+    }
+
+    #[test]
+    fn resolve_tool_approval_override_accepts_mode_all() {
+        let default = ToolApprovalPolicy::None;
+        let resolved = resolve_tool_approval_override(
+            Some(&AutoApproveOverride::Mode("all".to_string())),
+            &default,
+        );
+        assert!(matches!(resolved, ToolApprovalPolicy::All));
+    }
+
+    #[test]
+    fn resolve_tool_approval_override_accepts_mode_none() {
+        let default = ToolApprovalPolicy::All;
+        let resolved = resolve_tool_approval_override(
+            Some(&AutoApproveOverride::Mode("none".to_string())),
+            &default,
+        );
+        assert!(matches!(resolved, ToolApprovalPolicy::None));
+    }
+
+    #[test]
+    fn resolve_tool_approval_override_allowlist_normalizes_prefixed_names() {
+        let default = ToolApprovalPolicy::None;
+        let resolved = resolve_tool_approval_override(
+            Some(&AutoApproveOverride::AllowList(vec![
+                "stakpak__view".to_string(),
+                " run_command ".to_string(),
+                "".to_string(),
+            ])),
+            &default,
+        );
+
+        assert_eq!(resolved.action_for("view"), ToolApprovalAction::Approve);
+        assert_eq!(
+            resolved.action_for("run_command"),
+            ToolApprovalAction::Approve
+        );
+        assert_eq!(resolved.action_for("create"), ToolApprovalAction::Ask);
+    }
+
+    #[test]
+    fn resolve_tool_approval_override_unknown_mode_falls_back_to_default() {
+        let default = ToolApprovalPolicy::Custom {
+            rules: HashMap::from([("view".to_string(), ToolApprovalAction::Approve)]),
+            default: ToolApprovalAction::Ask,
+        };
+
+        let resolved = resolve_tool_approval_override(
+            Some(&AutoApproveOverride::Mode("unexpected".to_string())),
+            &default,
+        );
+
+        assert_eq!(resolved.action_for("view"), ToolApprovalAction::Approve);
+        assert_eq!(resolved.action_for("run_command"), ToolApprovalAction::Ask);
+    }
+
+    #[test]
     fn validate_session_message_request_rejects_too_many_context_items() {
         let request = SessionMessageRequest {
             message: stakai::Message::new(stakai::Role::User, "hello"),
@@ -2682,6 +2835,7 @@ mod tests {
                     })
                     .collect(),
             ),
+            overrides: None,
         };
 
         assert!(validate_session_message_request(&request).is_some());
@@ -2700,6 +2854,7 @@ mod tests {
                 content: "value".to_string(),
                 priority: None,
             }]),
+            overrides: None,
         };
 
         assert!(validate_session_message_request(&request).is_some());
@@ -2718,6 +2873,7 @@ mod tests {
                 content: "value".to_string(),
                 priority: None,
             }]),
+            overrides: None,
         };
 
         assert!(
@@ -2739,6 +2895,7 @@ mod tests {
                 content: "value".to_string(),
                 priority: None,
             }]),
+            overrides: None,
         };
 
         assert!(validate_session_message_request(&request).is_some());
@@ -2757,6 +2914,7 @@ mod tests {
                 content: "x".repeat(MAX_CALLER_CONTEXT_CONTENT_CHARS + 1),
                 priority: None,
             }]),
+            overrides: None,
         };
 
         assert!(validate_session_message_request(&request).is_some());
@@ -2775,12 +2933,107 @@ mod tests {
                 content: " ".repeat(MAX_CALLER_CONTEXT_CONTENT_CHARS + 1),
                 priority: None,
             }]),
+            overrides: None,
         };
 
         assert!(
             validate_session_message_request(&request).is_some(),
             "raw content length must be enforced even when trimmed content is empty"
         );
+    }
+
+    #[test]
+    fn validate_session_message_request_rejects_out_of_bounds_max_turns() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(0),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_some());
+
+        let request_too_large = SessionMessageRequest {
+            overrides: Some(RunOverrides {
+                max_turns: Some(MAX_MAX_TURNS + 1),
+                ..RunOverrides::default()
+            }),
+            ..request
+        };
+        assert!(validate_session_message_request(&request_too_large).is_some());
+    }
+
+    #[test]
+    fn validate_session_message_request_accepts_boundary_max_turns() {
+        let request_min = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(MIN_MAX_TURNS),
+                ..RunOverrides::default()
+            }),
+        };
+        assert!(validate_session_message_request(&request_min).is_none());
+
+        let request_max = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                max_turns: Some(MAX_MAX_TURNS),
+                ..RunOverrides::default()
+            }),
+        };
+        assert!(validate_session_message_request(&request_max).is_none());
+    }
+
+    #[test]
+    fn validate_session_message_request_rejects_oversized_system_prompt_override() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                system_prompt: Some("x".repeat(MAX_SYSTEM_PROMPT_CHARS + 1)),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_some());
+    }
+
+    #[test]
+    fn validate_session_message_request_accepts_boundary_system_prompt_override() {
+        let request = SessionMessageRequest {
+            message: stakai::Message::new(stakai::Role::User, "hello"),
+            r#type: SessionMessageType::Message,
+            run_id: None,
+            model: None,
+            sandbox: None,
+            context: None,
+            overrides: Some(RunOverrides {
+                system_prompt: Some("x".repeat(MAX_SYSTEM_PROMPT_CHARS)),
+                ..RunOverrides::default()
+            }),
+        };
+
+        assert!(validate_session_message_request(&request).is_none());
     }
 
     #[tokio::test]

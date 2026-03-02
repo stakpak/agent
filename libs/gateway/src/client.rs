@@ -68,6 +68,34 @@ pub enum MessageType {
     FollowUp,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AutoApproveOverride {
+    Mode(String),
+    AllowList(Vec<String>),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RunOverrides {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub auto_approve: Option<AutoApproveOverride>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub max_turns: Option<usize>,
+}
+
+impl RunOverrides {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.auto_approve.is_none()
+            && self.system_prompt.is_none()
+            && self.max_turns.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SendMessageOptions {
     pub model: Option<String>,
@@ -75,6 +103,7 @@ pub struct SendMessageOptions {
     pub run_id: Option<Uuid>,
     pub sandbox: Option<bool>,
     pub context: Vec<CallerContextInput>,
+    pub overrides: Option<RunOverrides>,
 }
 
 impl Default for SendMessageOptions {
@@ -85,6 +114,7 @@ impl Default for SendMessageOptions {
             run_id: None,
             sandbox: None,
             context: Vec::new(),
+            overrides: None,
         }
     }
 }
@@ -258,9 +288,12 @@ impl StakpakClient {
             run_id,
             sandbox,
             context,
+            overrides,
         } = opts;
 
         validate_context_inputs(&context)?;
+
+        let normalized_overrides = overrides.filter(|value| !value.is_empty());
 
         let payload = serde_json::json!({
             "message": message,
@@ -269,6 +302,7 @@ impl StakpakClient {
             "model": model,
             "sandbox": sandbox,
             "context": if context.is_empty() { None::<Vec<CallerContextInput>> } else { Some(context) },
+            "overrides": normalized_overrides,
         });
 
         self.request_json(
@@ -686,5 +720,23 @@ mod tests {
             validate_context_inputs(&[input]).is_err(),
             "raw content length must be enforced even when trimmed content is empty"
         );
+    }
+
+    #[test]
+    fn run_overrides_is_empty_only_when_all_fields_absent() {
+        let empty = RunOverrides::default();
+        assert!(empty.is_empty());
+
+        let with_model = RunOverrides {
+            model: Some("openai/test-model".to_string()),
+            ..RunOverrides::default()
+        };
+        assert!(!with_model.is_empty());
+
+        let with_allowlist = RunOverrides {
+            auto_approve: Some(AutoApproveOverride::AllowList(vec!["view".to_string()])),
+            ..RunOverrides::default()
+        };
+        assert!(!with_allowlist.is_empty());
     }
 }

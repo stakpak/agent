@@ -4,8 +4,8 @@
 
 use crate::commands::agent::run::pause::EXIT_CODE_PAUSED;
 use stakpak_gateway::client::{
-    CallerContextInput, ClientError, SendMessageOptions, StakpakClient, ToolDecisionAction,
-    ToolDecisionInput,
+    CallerContextInput, ClientError, RunOverrides, SendMessageOptions, StakpakClient,
+    ToolDecisionAction, ToolDecisionInput,
 };
 use stakpak_shared::models::async_manifest::PauseReason;
 use std::collections::{HashMap, HashSet};
@@ -71,6 +71,10 @@ pub struct AgentServerConnection {
     pub model: Option<String>,
     /// Default approved tools for watch runs (empty = allow all).
     pub default_allowed_tools: HashSet<String>,
+    /// Profile used when autopilot runtime booted the embedded server.
+    pub boot_profile: String,
+    /// Config path used to resolve per-profile overrides.
+    pub config_path: String,
 }
 
 /// Configuration for spawning the agent.
@@ -96,6 +100,8 @@ pub struct SpawnConfig {
     pub caller_context: Vec<CallerContextInput>,
     /// Tools this run can auto-approve. Empty means allow all tools.
     pub allowed_tools: HashSet<String>,
+    /// Optional per-request server overrides resolved from profile/channel config.
+    pub overrides: Option<RunOverrides>,
     /// Agent server connection.
     pub server: AgentServerConnection,
 }
@@ -190,9 +196,14 @@ async fn run_server_session(
     };
 
     let opts = SendMessageOptions {
-        model: server.model.clone(),
+        model: config
+            .overrides
+            .as_ref()
+            .and_then(|overrides| overrides.model.clone())
+            .or_else(|| server.model.clone()),
         sandbox: if config.sandbox { Some(true) } else { None },
         context: config.caller_context.clone(),
+        overrides: config.overrides.clone(),
         ..Default::default()
     };
 

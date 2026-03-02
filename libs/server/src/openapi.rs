@@ -194,6 +194,21 @@ pub struct CallerContextInputDoc {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum AutoApproveOverrideDoc {
+    Mode(String),
+    AllowList(Vec<String>),
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RunOverridesDoc {
+    pub model: Option<String>,
+    pub auto_approve: Option<AutoApproveOverrideDoc>,
+    pub system_prompt: Option<String>,
+    pub max_turns: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SessionMessageRequestDoc {
     pub message: StakaiMessageDoc,
     #[serde(rename = "type")]
@@ -202,6 +217,7 @@ pub struct SessionMessageRequestDoc {
     pub model: Option<String>,
     pub sandbox: Option<bool>,
     pub context: Option<Vec<CallerContextInputDoc>>,
+    pub overrides: Option<RunOverridesDoc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -651,6 +667,9 @@ impl Modify for SecurityAddon {
             ContentPartDoc,
             MessageContentDoc,
             StakaiMessageDoc,
+            CallerContextInputDoc,
+            AutoApproveOverrideDoc,
+            RunOverridesDoc,
             SessionMessageRequestDoc,
             SessionMessageResponseDoc,
             SessionMessagesResponseDoc,

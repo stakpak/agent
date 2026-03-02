@@ -748,18 +748,27 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
                 gateway_config.channels.telegram = Some(stakpak_gateway::config::TelegramConfig {
                     token,
                     require_mention: false,
+                    model: None,
+                    auto_approve: None,
+                    profile: None,
                 });
             }
             if let Some(token) = discord_token {
                 gateway_config.channels.discord = Some(stakpak_gateway::config::DiscordConfig {
                     token,
                     guilds: Vec::new(),
+                    model: None,
+                    auto_approve: None,
+                    profile: None,
                 });
             }
             if let (Some(bot_token), Some(app_token)) = (slack_bot_token, slack_app_token) {
                 gateway_config.channels.slack = Some(stakpak_gateway::config::SlackConfig {
                     bot_token,
                     app_token,
+                    model: None,
+                    auto_approve: None,
+                    profile: None,
                 });
             }
 
@@ -1235,6 +1244,12 @@ async fn start_foreground_runtime(
     let mut gateway_cfg = stakpak_gateway::GatewayConfig::load(config_path.as_path(), &gateway_cli)
         .unwrap_or_default();
 
+    resolve_gateway_channel_profiles(
+        &mut gateway_cfg,
+        &config.profile_name,
+        config.config_path.as_str(),
+    );
+
     apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &resolved_tool_policy);
 
     let gateway_runtime = if gateway_cfg.has_channels() {
@@ -1320,6 +1335,8 @@ async fn start_foreground_runtime(
         token: loopback_token,
         model: server_model_id,
         default_allowed_tools: watch_allowed_tools,
+        boot_profile: config.profile_name.clone(),
+        config_path: config.config_path.clone(),
     };
     let schedule_task = tokio::spawn(async move {
         if let Err(error) = crate::commands::watch::commands::run_scheduler(schedule_server).await {
@@ -1485,6 +1502,79 @@ fn resolve_server_tool_policy(
     policy
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ResolvedProfileOverrides {
+    pub model: Option<String>,
+    pub auto_approve: Option<Vec<String>>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+pub(crate) fn resolve_profile_to_overrides(
+    profile_name: &str,
+    boot_profile: &str,
+    config_path: Option<&str>,
+) -> Option<ResolvedProfileOverrides> {
+    if profile_name == boot_profile {
+        return None;
+    }
+
+    let config = match AppConfig::load(profile_name, config_path.map(Path::new)) {
+        Ok(config) => config,
+        Err(_) => return None,
+    };
+
+    let model = config.model.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    });
+
+    let auto_approve = config.auto_approve.map(|tools| {
+        tools
+            .into_iter()
+            .filter_map(|tool| {
+                let normalized = stakpak_server::strip_tool_prefix(&tool).trim().to_string();
+                if normalized.is_empty() {
+                    None
+                } else {
+                    Some(normalized)
+                }
+            })
+            .collect()
+    });
+
+    let allowed_tools = config.allowed_tools.map(|tools| {
+        tools
+            .into_iter()
+            .filter_map(|tool| {
+                let normalized = stakpak_server::strip_tool_prefix(&tool).trim().to_string();
+                if normalized.is_empty() {
+                    None
+                } else {
+                    Some(normalized)
+                }
+            })
+            .collect()
+    });
+
+    let resolved = ResolvedProfileOverrides {
+        model,
+        auto_approve,
+        allowed_tools,
+    };
+
+    if resolved.model.is_none()
+        && resolved.auto_approve.is_none()
+        && resolved.allowed_tools.is_none()
+    {
+        None
+    } else {
+        Some(resolved)
+    }
+}
+
 fn approved_tools_from_policy(policy: &stakpak_server::ToolApprovalPolicy) -> Vec<String> {
     match policy {
         stakpak_server::ToolApprovalPolicy::Custom { rules, .. } => rules
@@ -1562,6 +1652,78 @@ fn apply_gateway_policy_from_resolved_tools(
                 expand_gateway_approval_allowlist(&approved_tools_from_policy(policy));
         }
         stakpak_server::ToolApprovalPolicy::None => {}
+    }
+}
+
+fn resolve_gateway_channel_profiles(
+    gateway_cfg: &mut stakpak_gateway::GatewayConfig,
+    boot_profile: &str,
+    config_path: &str,
+) {
+    if let Some(telegram) = gateway_cfg.channels.telegram.as_mut() {
+        apply_profile_to_channel(
+            &mut telegram.profile,
+            &mut telegram.model,
+            &mut telegram.auto_approve,
+            boot_profile,
+            config_path,
+        );
+    }
+
+    if let Some(discord) = gateway_cfg.channels.discord.as_mut() {
+        apply_profile_to_channel(
+            &mut discord.profile,
+            &mut discord.model,
+            &mut discord.auto_approve,
+            boot_profile,
+            config_path,
+        );
+    }
+
+    if let Some(slack) = gateway_cfg.channels.slack.as_mut() {
+        apply_profile_to_channel(
+            &mut slack.profile,
+            &mut slack.model,
+            &mut slack.auto_approve,
+            boot_profile,
+            config_path,
+        );
+    }
+}
+
+fn apply_profile_to_channel(
+    profile: &mut Option<String>,
+    model: &mut Option<String>,
+    auto_approve: &mut Option<Vec<String>>,
+    boot_profile: &str,
+    config_path: &str,
+) {
+    // Preserve the configured profile name in-memory to avoid accidental config
+    // loss if this GatewayConfig is ever persisted later.
+    let Some(profile_name) = profile.as_deref() else {
+        return;
+    };
+
+    let Some(resolved) =
+        resolve_profile_to_overrides(profile_name, boot_profile, Some(config_path))
+    else {
+        return;
+    };
+
+    let model_is_missing = model
+        .as_ref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true);
+    if model_is_missing {
+        *model = resolved.model;
+    }
+
+    let allowlist_is_missing = auto_approve
+        .as_ref()
+        .map(|tools| tools.iter().all(|tool| tool.trim().is_empty()))
+        .unwrap_or(true);
+    if allowlist_is_missing {
+        *auto_approve = resolved.auto_approve;
     }
 }
 
@@ -3516,6 +3678,11 @@ mod tests {
         ))
     }
 
+    fn write_profile_config(path: &Path, content: &str) {
+        let write_result = std::fs::write(path, content);
+        assert!(write_result.is_ok());
+    }
+
     #[test]
     fn config_roundtrip_save_load() {
         let path = temp_file_path("autopilot-config");
@@ -4018,6 +4185,128 @@ app_token = "xapp-test"
             policy.action_for("run_command"),
             stakpak_server::ToolApprovalAction::Approve
         );
+    }
+
+    #[test]
+    fn resolve_profile_to_overrides_returns_none_for_boot_profile() {
+        let resolved = resolve_profile_to_overrides("default", "default", None);
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn resolve_profile_to_overrides_loads_profile_values() {
+        let path = temp_file_path("profile-overrides");
+        write_profile_config(
+            &path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+model = "openai/gpt-4o-mini"
+
+[profiles.production]
+api_key = "prod-key"
+model = "anthropic/claude-sonnet-4-5"
+allowed_tools = ["stakpak__view", ""]
+auto_approve = ["stakpak__run_command", "  "]
+"#,
+        );
+
+        let resolved = resolve_profile_to_overrides(
+            "production",
+            "default",
+            Some(path.to_string_lossy().as_ref()),
+        );
+        assert!(resolved.is_some());
+
+        if let Some(resolved) = resolved {
+            assert_eq!(
+                resolved.model.as_deref(),
+                Some("anthropic/claude-sonnet-4-5")
+            );
+            assert_eq!(resolved.allowed_tools, Some(vec!["view".to_string()]));
+            assert_eq!(resolved.auto_approve, Some(vec!["run_command".to_string()]));
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_profile_to_overrides_preserves_explicit_empty_tool_lists() {
+        let path = temp_file_path("profile-overrides-empty-tools");
+        write_profile_config(
+            &path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+
+[profiles.ops]
+api_key = "ops-key"
+allowed_tools = []
+auto_approve = []
+"#,
+        );
+
+        let resolved =
+            resolve_profile_to_overrides("ops", "default", Some(path.to_string_lossy().as_ref()));
+
+        assert!(resolved.is_some());
+        if let Some(resolved) = resolved {
+            assert_eq!(resolved.allowed_tools, Some(Vec::new()));
+            assert_eq!(resolved.auto_approve, Some(Vec::new()));
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_gateway_channel_profiles_applies_profile_defaults() {
+        let path = temp_file_path("gateway-channel-profile");
+        write_profile_config(
+            &path,
+            r#"
+[settings]
+editor = "nano"
+
+[profiles.default]
+api_key = "default-key"
+
+[profiles.ops]
+api_key = "ops-key"
+model = "anthropic/claude-opus-4-5"
+auto_approve = ["view"]
+"#,
+        );
+
+        let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
+        gateway_cfg.channels.slack = Some(stakpak_gateway::config::SlackConfig {
+            bot_token: "xoxb-token".to_string(),
+            app_token: "xapp-token".to_string(),
+            model: None,
+            auto_approve: None,
+            profile: Some("ops".to_string()),
+        });
+
+        resolve_gateway_channel_profiles(
+            &mut gateway_cfg,
+            "default",
+            path.to_string_lossy().as_ref(),
+        );
+
+        let slack = gateway_cfg.channels.slack.as_ref();
+        assert!(slack.is_some());
+        if let Some(slack) = slack {
+            assert_eq!(slack.model.as_deref(), Some("anthropic/claude-opus-4-5"));
+            assert_eq!(slack.auto_approve, Some(vec!["view".to_string()]));
+            assert_eq!(slack.profile.as_deref(), Some("ops"));
+        }
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
