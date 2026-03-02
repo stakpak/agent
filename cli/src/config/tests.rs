@@ -60,6 +60,8 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         provider: ProviderType::Remote,
         providers: HashMap::new(),
         model: None,
+        system_prompt: None,
+        max_turns: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
@@ -249,6 +251,86 @@ fn resolved_profile_config_merges_all_profile_defaults() {
 }
 
 #[test]
+fn profile_merge_prefers_system_prompt_and_max_turns_from_self() {
+    let base = ProfileConfig {
+        system_prompt: Some("shared prompt".to_string()),
+        max_turns: Some(32),
+        ..ProfileConfig::default()
+    };
+
+    let override_profile = ProfileConfig {
+        system_prompt: Some("profile prompt".to_string()),
+        max_turns: Some(64),
+        ..ProfileConfig::default()
+    };
+
+    let merged = override_profile.merge(Some(&base));
+    assert_eq!(merged.system_prompt.as_deref(), Some("profile prompt"));
+    assert_eq!(merged.max_turns, Some(64));
+}
+
+#[test]
+fn profile_merge_falls_back_to_base_for_system_prompt_and_max_turns() {
+    let base = ProfileConfig {
+        system_prompt: Some("shared prompt".to_string()),
+        max_turns: Some(24),
+        ..ProfileConfig::default()
+    };
+
+    let merged = ProfileConfig::default().merge(Some(&base));
+    assert_eq!(merged.system_prompt.as_deref(), Some("shared prompt"));
+    assert_eq!(merged.max_turns, Some(24));
+}
+
+#[test]
+fn profile_validate_rejects_invalid_max_turns_and_prompt_size() {
+    let min_turns = ProfileConfig {
+        max_turns: Some(1),
+        ..ProfileConfig::default()
+    };
+    assert!(min_turns.validate().is_ok());
+
+    let max_turns = ProfileConfig {
+        max_turns: Some(256),
+        ..ProfileConfig::default()
+    };
+    assert!(max_turns.validate().is_ok());
+
+    let invalid_low = ProfileConfig {
+        max_turns: Some(0),
+        ..ProfileConfig::default()
+    };
+    assert!(invalid_low.validate().is_err());
+
+    let invalid_high = ProfileConfig {
+        max_turns: Some(257),
+        ..ProfileConfig::default()
+    };
+    assert!(invalid_high.validate().is_err());
+
+    let invalid_prompt = ProfileConfig {
+        system_prompt: Some("x".repeat((32 * 1024) + 1)),
+        ..ProfileConfig::default()
+    };
+    assert!(invalid_prompt.validate().is_err());
+}
+
+#[test]
+fn profile_serde_round_trip_new_fields() {
+    let profile = ProfileConfig {
+        system_prompt: Some("monitoring prompt".to_string()),
+        max_turns: Some(48),
+        ..ProfileConfig::default()
+    };
+
+    let encoded = toml::to_string(&profile).expect("serialize profile");
+    let decoded: ProfileConfig = toml::from_str(&encoded).expect("deserialize profile");
+
+    assert_eq!(decoded.system_prompt.as_deref(), Some("monitoring prompt"));
+    assert_eq!(decoded.max_turns, Some(48));
+}
+
+#[test]
 fn insert_and_set_app_config_update_profiles_and_settings() {
     let mut config = ConfigFile::default();
     let app_config = sample_app_config("custom");
@@ -427,6 +509,8 @@ fn save_writes_profile_and_settings() {
         provider: ProviderType::Remote,
         providers: HashMap::new(),
         model: None,
+        system_prompt: None,
+        max_turns: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
         editor: Some("nano".into()),
