@@ -160,7 +160,13 @@ fn handle_tab_normal(state: &mut AppState) {
         if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
             let selected_helper = &state.filtered_helpers[state.helper_selected];
             // Commands that take arguments should have a trailing space
-            let needs_space = matches!(selected_helper.command, "/editor" | "/toggle_auto_approve");
+            let needs_space = matches!(
+                selected_helper.command.as_str(),
+                "/editor" | "/toggle_auto_approve" | "/review"
+            ) || matches!(
+                selected_helper.source,
+                crate::app::CommandSource::Custom { .. }
+            );
             let new_text = if needs_space {
                 format!("{} ", selected_helper.command)
             } else {
