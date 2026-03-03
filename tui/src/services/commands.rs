@@ -313,12 +313,16 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         HelperCommand {
             command: "/claw".into(),
             description: "Deploy & monitor OpenClaw gateway with Stakpak Autopilot".into(),
-            source: CommandSource::BuiltIn,
+            source: CommandSource::BuiltInWithPrompt {
+                prompt_content: include_str!("../../../libs/api/src/prompts/claw.v1.md").into(),
+            },
         },
         HelperCommand {
             command: "/review".into(),
             description: "Review code changes: /review [commit|branch|PR]".into(),
-            source: CommandSource::BuiltIn,
+            source: CommandSource::BuiltInWithPrompt {
+                prompt_content: include_str!("../../../libs/api/src/prompts/review.v1.md").into(),
+            },
         },
     ]
 }
@@ -589,103 +593,84 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             Ok(())
         }
 
-        "/review" => {
-            // Parse optional argument: /review <ref>
-            let raw_input = ctx.state.input().to_string();
-            let input = raw_input.trim().to_string();
-            let review_arg = input
-                .strip_prefix("/review")
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("");
-
-            // Only autocomplete if the raw input is exactly "/review" (no trailing space).
-            // If it's "/review " (with space), the user already had a chance to add args
-            // and chose to submit — fire the command with no args.
-            if review_arg.is_empty() && raw_input == "/review" {
-                let new_text = "/review ";
-                ctx.state.text_area.set_text(new_text);
-                ctx.state.text_area.set_cursor(new_text.len());
-                ctx.state.show_helper_dropdown = false;
-                return Ok(());
-            }
-
-            let prompt = build_review_command(review_arg);
-
-            ctx.state.messages.push(Message::user(prompt.clone(), None));
-            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
-                prompt,
-                ctx.state.shell_tool_calls.clone(),
-                Vec::new(),
-                None,
-            ));
-            ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
-            crate::services::message::invalidate_message_lines_cache(ctx.state);
-            Ok(())
-        }
-
-        "/claw" => {
-            const CLAW_PROMPT: &str = include_str!("../../../libs/api/src/prompts/claw.v1.md");
-            let prompt = CLAW_PROMPT.to_string();
-
-            ctx.state.messages.push(Message::user(prompt.clone(), None));
-            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
-                prompt,
-                ctx.state.shell_tool_calls.clone(),
-                Vec::new(),
-                None,
-            ));
-            ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
-            crate::services::message::invalidate_message_lines_cache(ctx.state);
-            Ok(())
-        }
-
         _ => {
-            // Check for custom commands loaded from .stakpak/commands/ or ~/.stakpak/commands/
-            let custom_match = ctx
+            // Generic handler for prompt-based commands:
+            //   - BuiltInWithPrompt: compile-time embedded prompts (e.g. /claw, /review)
+            //   - Custom: user-defined .md commands from .stakpak/commands/
+            //
+            // If the prompt contains the `{input}` placeholder it accepts arguments and
+            // the placeholder is replaced at runtime. Otherwise extra text is appended.
+            let prompt_match = ctx
                 .state
                 .helpers
                 .iter()
                 .find(|h| h.command == command_id)
                 .cloned();
 
-            if let Some(helper) = custom_match
-                && let crate::app::CommandSource::Custom { prompt_content } = &helper.source
-            {
-                // Parse extra text appended after the command name
-                let input = ctx.state.input().trim().to_string();
-                let extra = input
-                    .strip_prefix(command_id)
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
+            let prompt_content = match prompt_match.as_ref().map(|h| &h.source) {
+                Some(crate::app::CommandSource::BuiltInWithPrompt { prompt_content }) => {
+                    Some(prompt_content.clone())
+                }
+                Some(crate::app::CommandSource::Custom { prompt_content }) => {
+                    Some(prompt_content.clone())
+                }
+                _ => None,
+            };
 
-                let full_prompt = match extra {
-                    Some(extra_text) => format!("{}\n\n{}", prompt_content, extra_text),
-                    None => prompt_content.clone(),
-                };
+            let Some(prompt_content) = prompt_content else {
+                return Err(format!("Unknown command: {}", command_id));
+            };
 
-                ctx.state
-                    .messages
-                    .push(Message::user(full_prompt.clone(), None));
-                let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
-                    full_prompt,
-                    ctx.state.shell_tool_calls.clone(),
-                    Vec::new(),
-                    None,
-                ));
-                ctx.state.shell_tool_calls = None;
-                ctx.state.text_area.set_text("");
+            // Parse extra text appended after the command name
+            let raw_input = ctx.state.input().to_string();
+            let extra = raw_input
+                .trim()
+                .strip_prefix(command_id)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
+            let has_input_placeholder = prompt_content.contains("{input}");
+
+            // If the prompt accepts arguments via `{input}` and the raw input is
+            // exactly the command name (no trailing space), autocomplete instead of
+            // firing so the user can append a ref / argument.
+            if has_input_placeholder && extra.is_none() && raw_input.trim() == command_id {
+                let new_text = format!("{} ", command_id);
+                ctx.state.text_area.set_text(&new_text);
+                ctx.state.text_area.set_cursor(new_text.len());
                 ctx.state.show_helper_dropdown = false;
-                crate::services::message::invalidate_message_lines_cache(ctx.state);
                 return Ok(());
             }
 
-            Err(format!("Unknown command: {}", command_id))
+            let full_prompt = if has_input_placeholder {
+                // Replace `{input}` with the user argument (or a sensible default).
+                let input_display = match &extra {
+                    Some(text) => text.clone(),
+                    None => "(none — review all uncommitted changes)".to_string(),
+                };
+                prompt_content.replace("{input}", &input_display)
+            } else {
+                match extra {
+                    Some(extra_text) => format!("{}\n\n{}", prompt_content, extra_text),
+                    None => prompt_content,
+                }
+            };
+
+            ctx.state
+                .messages
+                .push(Message::user(full_prompt.clone(), None));
+            let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
+                full_prompt,
+                ctx.state.shell_tool_calls.clone(),
+                Vec::new(),
+                None,
+            ));
+            ctx.state.shell_tool_calls = None;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            crate::services::message::invalidate_message_lines_cache(ctx.state);
+            Ok(())
         }
     }
 }
@@ -879,118 +864,6 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     );
 
     prompt
-}
-
-pub fn build_review_command(user_input: &str) -> String {
-    let input_display = if user_input.is_empty() {
-        "(none — review all uncommitted changes)".to_string()
-    } else {
-        user_input.to_string()
-    };
-
-    format!(
-        r#"You are a code reviewer. Your job is to review code changes and provide actionable feedback.
-
----
-
-Input: {input_display}
-
----
-
-## Determining What to Review
-
-Based on the input provided, determine which type of review to perform:
-
-1. **No arguments (default)**: Review all uncommitted changes
-   - Run: `git diff` for unstaged changes
-   - Run: `git diff --cached` for staged changes
-   - Run: `git status --short` to identify untracked (net new) files
-
-2. **Commit hash** (40-char SHA or short hash): Review that specific commit
-   - Run: `git show <hash>`
-
-3. **Branch name**: Compare current branch to the specified branch
-   - Run: `git diff <branch>...HEAD`
-
-4. **PR URL or number** (contains "github.com" or "pull" or looks like a PR number): Review the pull request
-   - Run: `gh pr view <ref>` to get PR context
-   - Run: `gh pr diff <ref>` to get the diff
-
-Use best judgement when processing input.
-
----
-
-## Gathering Context
-
-**Diffs alone are not enough.** After getting the diff, read the entire file(s) being modified to understand the full context. Code that looks wrong in isolation may be correct given surrounding logic—and vice versa.
-
-- Use the diff to identify which files changed
-- Use `git status --short` to identify untracked files, then read their full contents
-- Read the full file to understand existing patterns, control flow, and error handling
-- Check for existing style guide or conventions files (CONVENTIONS.md, AGENTS.md, .editorconfig, etc.)
-
----
-
-## What to Look For
-
-**Bugs** - Your primary focus.
-- Logic errors, off-by-one mistakes, incorrect conditionals
-- If-else guards: missing guards, incorrect branching, unreachable code paths
-- Edge cases: null/empty/undefined inputs, error conditions, race conditions
-- Security issues: injection, auth bypass, data exposure
-- Broken error handling that swallows failures, throws unexpectedly or returns error types that are not caught.
-
-**Structure** - Does the code fit the codebase?
-- Does it follow existing patterns and conventions?
-- Are there established abstractions it should use but doesn't?
-- Excessive nesting that could be flattened with early returns or extraction
-
-**Performance** - Only flag if obviously problematic.
-- O(n²) on unbounded data, N+1 queries, blocking I/O on hot paths
-
-**Behavior Changes** - If a behavioral change is introduced, raise it (especially if it's possibly unintentional).
-
----
-
-## Before You Flag Something
-
-**Be certain.** If you're going to call something a bug, you need to be confident it actually is one.
-
-- Only review the changes - do not review pre-existing code that wasn't modified
-- Don't flag something as a bug if you're unsure - investigate first
-- Don't invent hypothetical problems - if an edge case matters, explain the realistic scenario where it breaks
-- If you need more context to be sure, use the tools below to get it
-
-**Don't be a zealot about style.** When checking code against conventions:
-
-- Verify the code is *actually* in violation. Don't complain about else statements if early returns are already being used correctly.
-- Some "violations" are acceptable when they're the simplest option. A `let` statement is fine if the alternative is convoluted.
-- Excessive nesting is a legitimate concern regardless of other style choices.
-- Don't flag style preferences as issues unless they clearly violate established project conventions.
-
----
-
-## Tools
-
-Use these to inform your review:
-
-- **Explore agent** - Find how existing code handles similar problems. Check patterns, conventions, and prior art before claiming something doesn't fit.
-- **Exa Code Context** - Verify correct usage of libraries/APIs before flagging something as wrong.
-- **Exa Web Search** - Research best practices if you're unsure about a pattern.
-
-If you're uncertain about something and can't verify it with these tools, say "I'm not sure about X" rather than flagging it as a definite issue.
-
----
-
-## Output
-
-1. If there is a bug, be direct and clear about why it is a bug.
-2. Clearly communicate severity of issues. Do not overstate severity.
-3. Critiques should clearly and explicitly communicate the scenarios, environments, or inputs that are necessary for the bug to arise. The comment should immediately indicate that the issue's severity depends on these factors.
-4. Your tone should be matter-of-fact and not accusatory or overly positive. It should read as a helpful AI assistant suggestion without sounding too much like a human reviewer.
-5. Write so the reader can quickly understand the issue without reading too closely.
-6. AVOID flattery, do not give any comments that are not helpful to the reader. Avoid phrasing like "Great job ...", "Thanks for ..."."#
-    )
 }
 
 fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {

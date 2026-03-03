@@ -501,15 +501,13 @@ fn handle_input_submitted(
         let input = state.input().to_string();
         let input_trimmed = input.trim();
 
-        // First check commands that take arguments
-        let command_with_args: Option<&str> = if input.starts_with("/editor ") {
-            Some("/editor")
-        } else if input.starts_with("/toggle_auto_approve ") {
-            Some("/toggle_auto_approve")
-        } else if input.starts_with("/review ") {
-            Some("/review")
-        } else {
-            None
+        // First check built-in commands that take arguments.
+        // Extract the slash-command word (everything up to the first space).
+        let command_word = input.split_once(' ').map(|(cmd, _)| cmd).unwrap_or(&input);
+
+        let command_with_args: Option<&str> = match command_word {
+            "/editor" | "/toggle_auto_approve" if input.contains(' ') => Some(command_word),
+            _ => None,
         };
 
         if let Some(command_id) = command_with_args {
@@ -524,18 +522,22 @@ fn handle_input_submitted(
             return;
         }
 
-        // Check custom commands that may have arguments (e.g., "/audit focus on auth")
+        // Check prompt-based commands (Custom + BuiltInWithPrompt) that may have
+        // arguments appended (e.g., "/review abc123", "/audit focus on auth").
         if input_trimmed.starts_with('/') {
-            let custom_with_args = state
+            let prompt_with_args = state
                 .helpers
                 .iter()
                 .find(|h| {
-                    matches!(h.source, crate::app::CommandSource::Custom { .. })
-                        && input.starts_with(&format!("{} ", h.command))
+                    matches!(
+                        h.source,
+                        crate::app::CommandSource::Custom { .. }
+                            | crate::app::CommandSource::BuiltInWithPrompt { .. }
+                    ) && input.starts_with(&format!("{} ", h.command))
                 })
                 .map(|h| h.command.clone());
 
-            if let Some(command_id) = custom_with_args {
+            if let Some(command_id) = prompt_with_args {
                 let ctx = CommandContext {
                     state,
                     input_tx,

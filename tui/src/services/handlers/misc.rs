@@ -162,10 +162,14 @@ fn handle_tab_normal(state: &mut AppState) {
             // Commands that take arguments should have a trailing space
             let needs_space = matches!(
                 selected_helper.command.as_str(),
-                "/editor" | "/toggle_auto_approve" | "/review"
+                "/editor" | "/toggle_auto_approve"
             ) || matches!(
                 selected_helper.source,
                 crate::app::CommandSource::Custom { .. }
+            ) || matches!(
+                &selected_helper.source,
+                crate::app::CommandSource::BuiltInWithPrompt { prompt_content }
+                    if prompt_content.contains("{input}")
             );
             let new_text = if needs_space {
                 format!("{} ", selected_helper.command)
