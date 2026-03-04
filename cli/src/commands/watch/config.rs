@@ -422,6 +422,16 @@ pub enum ConfigError {
     #[error("Check script not found for schedule '{schedule}': {path}")]
     CheckScriptNotFound { schedule: String, path: String },
 
+    #[error(
+        "Cannot expand '~' in check script path for schedule '{schedule}': {path}. Home directory for the running user could not be determined; use an absolute path."
+    )]
+    CheckScriptHomeDirUnavailable { schedule: String, path: String },
+
+    #[error(
+        "Cannot expand '~' in path: {path}. Home directory for the running user could not be determined; use an absolute path."
+    )]
+    PathHomeDirUnavailable { path: String },
+
     #[error("Schedule '{0}' is missing required field: {1}")]
     MissingRequiredField(String, String),
 }
@@ -429,7 +439,7 @@ pub enum ConfigError {
 impl ScheduleConfig {
     /// Load configuration from the default path (~/.stakpak/autopilot.toml).
     pub fn load_default() -> Result<Self, ConfigError> {
-        let path = expand_tilde(STAKPAK_AUTOPILOT_CONFIG_PATH);
+        let path = expand_tilde_for_path(Path::new(STAKPAK_AUTOPILOT_CONFIG_PATH))?;
         Self::load(&path)
     }
 
@@ -453,6 +463,7 @@ impl ScheduleConfig {
         self.validate_unique_schedule_names()?;
         self.validate_reserved_schedule_names()?;
         self.validate_cron_expressions()?;
+        self.validate_runtime_paths()?;
         self.validate_check_scripts()?;
         Ok(())
     }
@@ -492,11 +503,19 @@ impl ScheduleConfig {
         Ok(())
     }
 
+    /// Validate top-level runtime paths expand cleanly.
+    fn validate_runtime_paths(&self) -> Result<(), ConfigError> {
+        expand_tilde_for_path(Path::new(&self.watch.db_path))?;
+        expand_tilde_for_path(Path::new(&self.watch.log_dir))?;
+        Ok(())
+    }
+
     /// Validate check script paths exist (if specified).
     fn validate_check_scripts(&self) -> Result<(), ConfigError> {
         for schedule in &self.schedules {
             if let Some(check_path) = &schedule.check {
-                let expanded = expand_tilde(check_path);
+                let expanded =
+                    expand_tilde_for_check_path(Path::new(check_path), schedule.name.as_str())?;
                 if !expanded.exists() {
                     return Err(ConfigError::CheckScriptNotFound {
                         schedule: schedule.name.clone(),
@@ -555,24 +574,110 @@ impl ScheduleConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TildeExpansionError {
+    HomeDirUnavailable,
+}
+
+fn current_user_home_dir() -> Option<PathBuf> {
+    dirs::home_dir().or_else(resolve_home_dir_from_system)
+}
+
+#[cfg(unix)]
+fn resolve_home_dir_from_system() -> Option<PathBuf> {
+    use std::ffi::{CStr, OsStr};
+    use std::os::unix::ffi::OsStrExt;
+    use std::ptr;
+
+    // Fallback for environments where HOME is missing: ask the OS for the
+    // effective user's passwd entry directly.
+    unsafe {
+        let uid = libc::geteuid();
+        let mut pwd: libc::passwd = std::mem::zeroed();
+        let mut result: *mut libc::passwd = ptr::null_mut();
+
+        let mut buf_len = libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX);
+        if buf_len <= 0 {
+            buf_len = 4096;
+        }
+        let buf_len = usize::try_from(buf_len).unwrap_or(4096).max(1024);
+        let mut buf = vec![0u8; buf_len];
+
+        let rc = libc::getpwuid_r(
+            uid,
+            &mut pwd,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut result,
+        );
+
+        if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
+            return None;
+        }
+
+        let home_cstr = CStr::from_ptr(pwd.pw_dir);
+        let home_os = OsStr::from_bytes(home_cstr.to_bytes());
+        Some(PathBuf::from(home_os))
+    }
+}
+
+#[cfg(not(unix))]
+fn resolve_home_dir_from_system() -> Option<PathBuf> {
+    None
+}
+
+fn expand_tilde_with_home(
+    path: &Path,
+    home: Option<&Path>,
+) -> Result<PathBuf, TildeExpansionError> {
+    let path_str = path.to_string_lossy();
+
+    if path_str == "~" {
+        return home
+            .map(Path::to_path_buf)
+            .ok_or(TildeExpansionError::HomeDirUnavailable);
+    }
+
+    if let Some(stripped) = path_str
+        .strip_prefix("~/")
+        .or_else(|| path_str.strip_prefix("~\\"))
+    {
+        return home
+            .map(|home_dir| home_dir.join(stripped))
+            .ok_or(TildeExpansionError::HomeDirUnavailable);
+    }
+
+    Ok(path.to_path_buf())
+}
+
+fn expand_tilde_for_path(path: &Path) -> Result<PathBuf, ConfigError> {
+    let home = current_user_home_dir();
+    expand_tilde_with_home(path, home.as_deref()).map_err(|_| ConfigError::PathHomeDirUnavailable {
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+fn expand_tilde_for_check_path(path: &Path, schedule_name: &str) -> Result<PathBuf, ConfigError> {
+    let home = current_user_home_dir();
+    expand_tilde_with_home(path, home.as_deref()).map_err(|_| {
+        ConfigError::CheckScriptHomeDirUnavailable {
+            schedule: schedule_name.to_string(),
+            path: path.to_string_lossy().into_owned(),
+        }
+    })
+}
+
 /// Expand ~ to home directory in paths.
 pub fn expand_tilde<P: AsRef<Path>>(path: P) -> PathBuf {
-    let path_str = path.as_ref().to_string_lossy();
-    if let Some(stripped) = path_str.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if path_str == "~"
-        && let Some(home) = dirs::home_dir()
-    {
-        return home;
-    }
-    path.as_ref().to_path_buf()
+    let path_ref = path.as_ref();
+    let home = current_user_home_dir();
+    expand_tilde_with_home(path_ref, home.as_deref()).unwrap_or_else(|_| path_ref.to_path_buf())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_parse_valid_config() {
@@ -709,6 +814,19 @@ prompt = "Reserved"
         let home = dirs::home_dir().expect("Should have home dir");
         assert!(expanded.starts_with(&home));
         assert!(expanded.ends_with("test/path"));
+    }
+
+    #[test]
+    fn test_expand_tilde_with_home_requires_home_for_tilde_paths() {
+        let result = expand_tilde_with_home(Path::new("~/test/path"), None);
+        assert_eq!(result, Err(TildeExpansionError::HomeDirUnavailable));
+    }
+
+    #[test]
+    fn test_expand_tilde_with_home_passthrough_for_non_tilde_paths() {
+        let input = Path::new("/tmp/check.sh");
+        let result = expand_tilde_with_home(input, None);
+        assert_eq!(result, Ok(input.to_path_buf()));
     }
 
     #[test]
