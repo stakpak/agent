@@ -716,11 +716,10 @@ pub async fn run_interactive(
                                 }
                                 Ok(_) => {
                                     // Parsed OK but questions array is empty
-                                    let error_msg = "ask_user tool was called with no questions".to_string();
-                                    messages.push(tool_result(
-                                        tool_call.id.clone(),
-                                        error_msg.clone(),
-                                    ));
+                                    let error_msg =
+                                        "ask_user tool was called with no questions".to_string();
+                                    messages
+                                        .push(tool_result(tool_call.id.clone(), error_msg.clone()));
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::ToolResult(
@@ -735,11 +734,10 @@ pub async fn run_interactive(
                                 }
                                 Err(e) => {
                                     // Failed to parse arguments - return error result
-                                    let error_msg = format!("Failed to parse ask_user arguments: {}", e);
-                                    messages.push(tool_result(
-                                        tool_call.id.clone(),
-                                        error_msg.clone(),
-                                    ));
+                                    let error_msg =
+                                        format!("Failed to parse ask_user arguments: {}", e);
+                                    messages
+                                        .push(tool_result(tool_call.id.clone(), error_msg.clone()));
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::ToolResult(
