@@ -401,10 +401,27 @@ impl AppState {
         // Built-in commands from the unified command system
         let mut helpers = crate::services::commands::commands_to_helper_commands();
 
+        // Predefined commands shipped with the binary (from libs/api/src/commands/*.md)
+        // Skip any that clash with built-in command names
+        let builtin_names: std::collections::HashSet<String> =
+            helpers.iter().map(|h| h.command.clone()).collect();
+        for (name, description, prompt_content) in stakpak_api::commands::load_predefined_commands()
+        {
+            let command = format!("/{name}");
+            if builtin_names.contains(&command) {
+                continue;
+            }
+            helpers.push(HelperCommand {
+                command,
+                description,
+                source: CommandSource::BuiltInWithPrompt { prompt_content },
+            });
+        }
+
         // Load custom commands from ~/.stakpak/commands/ and .stakpak/commands/
         let custom = crate::services::custom_commands::load_custom_commands();
 
-        // Merge: skip custom commands whose names clash with built-in commands
+        // Merge: skip custom commands whose names clash with built-in or predefined commands
         let builtin_names: std::collections::HashSet<String> =
             helpers.iter().map(|h| h.command.clone()).collect();
         helpers.extend(

@@ -1,3 +1,7 @@
+---
+description: "Review code changes: /review [commit|branch|PR]"
+---
+
 You are a code reviewer. Your job is to review code changes and provide actionable feedback.
 
 ---

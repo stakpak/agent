@@ -1,3 +1,6 @@
+---
+description: Deploy & monitor OpenClaw gateway with Stakpak Autopilot
+---
 
 # Deploy & Monitor OpenClaw Gateway with Stakpak Autopilot
 

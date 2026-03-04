@@ -310,20 +310,6 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
             description: "Analyze your infrastructure setup".into(),
             source: CommandSource::BuiltIn,
         },
-        HelperCommand {
-            command: "/claw".into(),
-            description: "Deploy & monitor OpenClaw gateway with Stakpak Autopilot".into(),
-            source: CommandSource::BuiltInWithPrompt {
-                prompt_content: include_str!("../../../libs/api/src/prompts/claw.v1.md").into(),
-            },
-        },
-        HelperCommand {
-            command: "/review".into(),
-            description: "Review code changes: /review [commit|branch|PR]".into(),
-            source: CommandSource::BuiltInWithPrompt {
-                prompt_content: include_str!("../../../libs/api/src/prompts/review.v1.md").into(),
-            },
-        },
     ]
 }
 
