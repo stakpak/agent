@@ -42,7 +42,11 @@ pub struct AskUserQuestion {
 }
 
 /// A predefined answer option for a question.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+///
+/// The `value` field defaults to `label` when omitted by the LLM, since models
+/// frequently treat them as interchangeable. A custom `Deserialize` impl
+/// handles this fallback transparently.
+#[derive(Debug, Clone, Serialize, PartialEq, schemars::JsonSchema)]
 pub struct AskUserOption {
     #[schemars(description = "Value to return to LLM when selected")]
     pub value: String,
@@ -58,6 +62,31 @@ pub struct AskUserOption {
         description = "Default selection state when multi_select is true. Pre-marks this option as selected. Ignored for single-select questions."
     )]
     pub selected: bool,
+}
+
+impl<'de> Deserialize<'de> for AskUserOption {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw {
+            value: Option<String>,
+            label: String,
+            #[serde(default)]
+            description: Option<String>,
+            #[serde(default)]
+            selected: bool,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(AskUserOption {
+            value: raw.value.unwrap_or_else(|| raw.label.clone()),
+            label: raw.label,
+            description: raw.description,
+            selected: raw.selected,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -454,5 +483,64 @@ mod tests {
         let json = r#"{"question_label": "env", "answer": "dev", "is_custom": false}"#;
         let answer: AskUserAnswer = serde_json::from_str(json).unwrap();
         assert!(answer.selected_values.is_empty());
+    }
+
+    #[test]
+    fn test_option_value_defaults_to_label_when_missing() {
+        let json = r#"{"label": "Already configured", "description": "AWS CLI is configured"}"#;
+        let option: AskUserOption = serde_json::from_str(json).unwrap();
+        assert_eq!(option.value, "Already configured");
+        assert_eq!(option.label, "Already configured");
+        assert_eq!(
+            option.description,
+            Some("AWS CLI is configured".to_string())
+        );
+        assert!(!option.selected);
+    }
+
+    #[test]
+    fn test_option_explicit_value_preserved() {
+        let json =
+            r#"{"value": "dev", "label": "Development", "description": "For testing changes"}"#;
+        let option: AskUserOption = serde_json::from_str(json).unwrap();
+        assert_eq!(option.value, "dev");
+        assert_eq!(option.label, "Development");
+    }
+
+    #[test]
+    fn test_option_value_null_defaults_to_label() {
+        let json = r#"{"value": null, "label": "Production"}"#;
+        let option: AskUserOption = serde_json::from_str(json).unwrap();
+        assert_eq!(option.value, "Production");
+        assert_eq!(option.label, "Production");
+    }
+
+    #[test]
+    fn test_real_llm_payload_without_value_fields() {
+        // Exact payload from a real LLM response that caused a stuck ask_user popup.
+        let json = r#"{"questions":[{"allow_custom": false, "label": "AWS Config", "options": [{"description": "AWS CLI is configured with credentials (aws configure already done)", "label": "Already configured"}, {"description": "I'll provide Access Key ID and Secret Access Key", "label": "Need to configure"}], "question": "Is your AWS CLI already configured with credentials?"}, {"allow_custom": false, "label": "SSH Key", "options": [{"description": "I have an EC2 key pair created in AWS", "label": "Have key pair"}, {"description": "Need to create a new key pair in AWS", "label": "Need to create"}], "question": "Do you have an SSH key pair in AWS EC2 for instance access?"}]}"#;
+
+        let request: AskUserRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.questions.len(), 2);
+        assert_eq!(request.questions[0].label, "AWS Config");
+        assert_eq!(request.questions[0].options.len(), 2);
+        // value should default to label
+        assert_eq!(request.questions[0].options[0].value, "Already configured");
+        assert_eq!(request.questions[0].options[1].value, "Need to configure");
+        assert_eq!(request.questions[1].options[0].value, "Have key pair");
+    }
+
+    #[test]
+    fn test_option_roundtrip_with_explicit_value() {
+        let option = AskUserOption {
+            value: "custom_value".to_string(),
+            label: "Display Label".to_string(),
+            description: None,
+            selected: false,
+        };
+        let json = serde_json::to_string(&option).unwrap();
+        let parsed: AskUserOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.value, "custom_value");
+        assert_eq!(parsed.label, "Display Label");
     }
 }
