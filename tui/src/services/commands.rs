@@ -31,7 +31,7 @@ use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
-pub type CommandId = &'static str;
+pub type CommandId<'a> = &'a str;
 
 /// Command metadata for display (used by command palette)
 #[derive(Debug, Clone)]
@@ -202,94 +202,127 @@ pub fn get_all_commands() -> Vec<Command> {
 
 /// Convert Command to HelperCommand for backward compatibility
 pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
+    use crate::app::CommandSource;
     vec![
         HelperCommand {
-            command: "/help",
-            description: "Show help information and available commands",
+            command: "/help".into(),
+            description: "Show help information and available commands".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/model",
-            description: "Open model switcher to change AI model",
+            command: "/model".into(),
+            description: "Open model switcher to change AI model".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/clear",
-            description: "Clear the screen and show welcome message",
+            command: "/clear".into(),
+            description: "Clear the screen and show welcome message".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/status",
-            description: "Show account status and current working directory",
+            command: "/status".into(),
+            description: "Show account status and current working directory".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/sessions",
-            description: "List available sessions to switch to",
+            command: "/sessions".into(),
+            description: "List available sessions to switch to".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/resume",
-            description: "Resume the last session",
+            command: "/resume".into(),
+            description: "Resume the last session".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/new",
-            description: "Start a new session",
+            command: "/new".into(),
+            description: "Start a new session".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/memorize",
-            description: "Memorize the current conversation history",
+            command: "/memorize".into(),
+            description: "Memorize the current conversation history".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/summarize",
-            description: "Summarize the session into summary.md for later resume",
+            command: "/summarize".into(),
+            description: "Summarize the session into summary.md for later resume".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/usage",
-            description: "Show token usage for this session",
+            command: "/usage".into(),
+            description: "Show token usage for this session".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/issue",
-            description: "Report an issue or bug",
+            command: "/issue".into(),
+            description: "Report an issue or bug".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/editor",
-            description: "Open file in external editor: /editor <path>",
+            command: "/editor".into(),
+            description: "Open file in external editor: /editor <path>".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/support",
-            description: "Go to Discord support channel",
+            command: "/support".into(),
+            description: "Go to Discord support channel".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/list_approved_tools",
-            description: "List all tools that are auto-approved",
+            command: "/list_approved_tools".into(),
+            description: "List all tools that are auto-approved".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/toggle_auto_approve",
-            description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
+            command: "/toggle_auto_approve".into(),
+            description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view"
+                .into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/mouse_capture",
-            description: "Toggle mouse capture on/off",
+            command: "/mouse_capture".into(),
+            description: "Toggle mouse capture on/off".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/profiles",
-            description: "Switch to a different profile",
+            command: "/profiles".into(),
+            description: "Switch to a different profile".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/quit",
-            description: "Quit the application",
+            command: "/quit".into(),
+            description: "Quit the application".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/shortcuts",
-            description: "Show keyboard shortcuts",
+            command: "/shortcuts".into(),
+            description: "Show keyboard shortcuts".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/plan",
-            description: "Enter plan mode: /plan [optional prompt]",
+            command: "/plan".into(),
+            description: "Enter plan mode: /plan [optional prompt]".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/init",
-            description: "Analyze your infrastructure setup",
+            command: "/init".into(),
+            description: "Analyze your infrastructure setup".into(),
+            source: CommandSource::BuiltIn,
         },
         HelperCommand {
-            command: "/claw",
-            description: "Deploy & monitor OpenClaw gateway with Stakpak Autopilot",
+            command: "/claw".into(),
+            description: "Deploy & monitor OpenClaw gateway with Stakpak Autopilot".into(),
+            source: CommandSource::BuiltInWithPrompt {
+                prompt_content: include_str!("../../../libs/api/src/prompts/claw.v1.md").into(),
+            },
+        },
+        HelperCommand {
+            command: "/review".into(),
+            description: "Review code changes: /review [commit|branch|PR]".into(),
+            source: CommandSource::BuiltInWithPrompt {
+                prompt_content: include_str!("../../../libs/api/src/prompts/review.v1.md").into(),
+            },
         },
     ]
 }
@@ -313,7 +346,7 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
 // ========== Command Execution ==========
 
 /// Execute a command by its ID
-pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(), String> {
+pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result<(), String> {
     match command_id {
         "/help" => {
             push_help_message(ctx.state);
@@ -560,13 +593,75 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             Ok(())
         }
 
-        "/claw" => {
-            const CLAW_PROMPT: &str = include_str!("../../../libs/api/src/prompts/claw.v1.md");
-            let prompt = CLAW_PROMPT.to_string();
+        _ => {
+            // Generic handler for prompt-based commands:
+            //   - BuiltInWithPrompt: compile-time embedded prompts (e.g. /claw, /review)
+            //   - Custom: user-defined .md commands from .stakpak/commands/
+            //
+            // If the prompt contains the `{input}` placeholder it accepts arguments and
+            // the placeholder is replaced at runtime. Otherwise extra text is appended.
+            let prompt_match = ctx
+                .state
+                .helpers
+                .iter()
+                .find(|h| h.command == command_id)
+                .cloned();
 
-            ctx.state.messages.push(Message::user(prompt.clone(), None));
+            let prompt_content = match prompt_match.as_ref().map(|h| &h.source) {
+                Some(crate::app::CommandSource::BuiltInWithPrompt { prompt_content }) => {
+                    Some(prompt_content.clone())
+                }
+                Some(crate::app::CommandSource::Custom { prompt_content }) => {
+                    Some(prompt_content.clone())
+                }
+                _ => None,
+            };
+
+            let Some(prompt_content) = prompt_content else {
+                return Err(format!("Unknown command: {}", command_id));
+            };
+
+            // Parse extra text appended after the command name
+            let raw_input = ctx.state.input().to_string();
+            let extra = raw_input
+                .trim()
+                .strip_prefix(command_id)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
+            let has_input_placeholder = prompt_content.contains("{input}");
+
+            // If the prompt accepts arguments via `{input}` and the raw input is
+            // exactly the command name (no trailing space), autocomplete instead of
+            // firing so the user can append a ref / argument.
+            if has_input_placeholder && extra.is_none() && raw_input.trim() == command_id {
+                let new_text = format!("{} ", command_id);
+                ctx.state.text_area.set_text(&new_text);
+                ctx.state.text_area.set_cursor(new_text.len());
+                ctx.state.show_helper_dropdown = false;
+                return Ok(());
+            }
+
+            let full_prompt = if has_input_placeholder {
+                // Replace `{input}` with the user argument (or a sensible default).
+                let input_display = match &extra {
+                    Some(text) => text.clone(),
+                    None => "(none — review all uncommitted changes)".to_string(),
+                };
+                prompt_content.replace("{input}", &input_display)
+            } else {
+                match extra {
+                    Some(extra_text) => format!("{}\n\n{}", prompt_content, extra_text),
+                    None => prompt_content,
+                }
+            };
+
+            ctx.state
+                .messages
+                .push(Message::user(full_prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
-                prompt,
+                full_prompt,
                 ctx.state.shell_tool_calls.clone(),
                 Vec::new(),
                 None,
@@ -577,8 +672,6 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
-
-        _ => Err(format!("Unknown command: {}", command_id)),
     }
 }
 

@@ -398,8 +398,22 @@ pub struct AppStateOptions<'a> {
 
 impl AppState {
     pub fn get_helper_commands() -> Vec<HelperCommand> {
-        // Use unified command system
-        crate::services::commands::commands_to_helper_commands()
+        // Built-in commands from the unified command system
+        let mut helpers = crate::services::commands::commands_to_helper_commands();
+
+        // Load custom commands from ~/.stakpak/commands/ and .stakpak/commands/
+        let custom = crate::services::custom_commands::load_custom_commands();
+
+        // Merge: skip custom commands whose names clash with built-in commands
+        let builtin_names: std::collections::HashSet<String> =
+            helpers.iter().map(|h| h.command.clone()).collect();
+        helpers.extend(
+            custom
+                .into_iter()
+                .filter(|c| !builtin_names.contains(&c.command)),
+        );
+
+        helpers
     }
 
     /// Initialize file search channels and spawn worker

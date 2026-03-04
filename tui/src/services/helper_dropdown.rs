@@ -108,10 +108,17 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                     Style::default().fg(dropdown_muted).bg(dropdown_bg)
                 };
 
+                let description_text =
+                    if matches!(command.source, crate::app::CommandSource::Custom { .. }) {
+                        format!(" – [custom] {}", command.description)
+                    } else {
+                        format!(" – {}", command.description)
+                    };
+
                 let spans = vec![
                     Span::styled(format!("  {}  ", command.command), command_style),
                     Span::styled(padding, padding_style),
-                    Span::styled(format!(" – {}", command.description), description_style),
+                    Span::styled(description_text, description_style),
                 ];
 
                 visible_lines.push(Line::from(spans));

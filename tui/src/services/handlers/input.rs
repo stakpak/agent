@@ -275,6 +275,13 @@ pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<Inp
         if state.file_search.is_active() {
             state.file_search.reset();
         }
+        // Hot-reload custom commands from disk only when the input is
+        // exactly "/". This avoids filesystem I/O on every subsequent
+        // keystroke while still picking up new/removed .md files each
+        // time the user opens the slash-command dropdown.
+        if state.input() == "/" {
+            state.helpers = AppState::get_helper_commands();
+        }
         state.show_helper_dropdown = true;
         state.helper_scroll = 0;
         // Synchronously filter slash commands — no async race condition
@@ -454,15 +461,29 @@ fn handle_input_submitted(
             return;
         }
         if !state.filtered_helpers.is_empty() {
-            let command_id = state.filtered_helpers[state.helper_selected].command;
+            let selected = &state.filtered_helpers[state.helper_selected];
 
-            // Use unified command executor
+            // Custom commands: autocomplete into input on Enter (let user add extra text)
+            if matches!(selected.source, crate::app::CommandSource::Custom { .. }) {
+                let new_text = format!("{} ", selected.command);
+                state.text_area.set_text(&new_text);
+                state.text_area.set_cursor(new_text.len());
+                state.show_helper_dropdown = false;
+                state.filtered_helpers.clear();
+                state.helper_selected = 0;
+                state.helper_scroll = 0;
+                return;
+            }
+
+            let command_id = selected.command.clone();
+
+            // Use unified command executor for built-in commands
             let ctx = CommandContext {
                 state,
                 input_tx,
                 output_tx,
             };
-            if let Err(e) = execute_command(command_id, ctx) {
+            if let Err(e) = execute_command(&command_id, ctx) {
                 push_error_message(state, &e, None);
             }
             return; // Only return after executing a valid command
@@ -480,13 +501,13 @@ fn handle_input_submitted(
         let input = state.input().to_string();
         let input_trimmed = input.trim();
 
-        // First check commands that take arguments
-        let command_with_args: Option<&str> = if input.starts_with("/editor ") {
-            Some("/editor")
-        } else if input.starts_with("/toggle_auto_approve ") {
-            Some("/toggle_auto_approve")
-        } else {
-            None
+        // First check built-in commands that take arguments.
+        // Extract the slash-command word (everything up to the first space).
+        let command_word = input.split_once(' ').map(|(cmd, _)| cmd).unwrap_or(&input);
+
+        let command_with_args: Option<&str> = match command_word {
+            "/editor" | "/toggle_auto_approve" if input.contains(' ') => Some(command_word),
+            _ => None,
         };
 
         if let Some(command_id) = command_with_args {
@@ -501,13 +522,41 @@ fn handle_input_submitted(
             return;
         }
 
+        // Check prompt-based commands (Custom + BuiltInWithPrompt) that may have
+        // arguments appended (e.g., "/review abc123", "/audit focus on auth").
+        if input_trimmed.starts_with('/') {
+            let prompt_with_args = state
+                .helpers
+                .iter()
+                .find(|h| {
+                    matches!(
+                        h.source,
+                        crate::app::CommandSource::Custom { .. }
+                            | crate::app::CommandSource::BuiltInWithPrompt { .. }
+                    ) && input.starts_with(&format!("{} ", h.command))
+                })
+                .map(|h| h.command.clone());
+
+            if let Some(command_id) = prompt_with_args {
+                let ctx = CommandContext {
+                    state,
+                    input_tx,
+                    output_tx,
+                };
+                if let Err(e) = execute_command(&command_id, ctx) {
+                    push_error_message(state, &e, None);
+                }
+                return;
+            }
+        }
+
         // Then check if input exactly matches a known slash command (no args)
         if input_trimmed.starts_with('/') {
             let matched_command = state
                 .helpers
                 .iter()
                 .find(|h| h.command == input_trimmed)
-                .map(|h| h.command);
+                .map(|h| h.command.clone());
 
             if let Some(command_id) = matched_command {
                 let ctx = CommandContext {
@@ -515,7 +564,7 @@ fn handle_input_submitted(
                     input_tx,
                     output_tx,
                 };
-                if let Err(e) = execute_command(command_id, ctx) {
+                if let Err(e) = execute_command(&command_id, ctx) {
                     push_error_message(state, &e, None);
                 }
                 return;

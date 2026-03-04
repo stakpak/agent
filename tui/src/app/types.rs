@@ -105,10 +105,26 @@ pub struct FileSearchResult {
     pub input: String,
 }
 
+/// Source of a slash command — built-in or loaded from a custom `.md` file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandSource {
+    /// Hard-coded command handled by `execute_command()`.
+    BuiltIn,
+    /// Built-in command whose prompt is embedded at compile time (e.g. `/claw`, `/review`).
+    /// Handled generically by the `_ =>` fallback in `execute_command()` — no bespoke
+    /// match arm required. If the prompt contains `{input}`, it accepts user arguments
+    /// and the placeholder is replaced at runtime; otherwise the prompt fires as-is.
+    BuiltInWithPrompt { prompt_content: String },
+    /// User-defined command loaded from `~/.stakpak/commands/` or `.stakpak/commands/`.
+    /// The `prompt_content` is the raw markdown body of the file.
+    Custom { prompt_content: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct HelperCommand {
-    pub command: &'static str,
-    pub description: &'static str,
+    pub command: String,
+    pub description: String,
+    pub source: CommandSource,
 }
 
 #[derive(Debug, Clone)]

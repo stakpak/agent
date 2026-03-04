@@ -303,9 +303,12 @@ pub fn push_help_message(state: &mut AppState) {
 
     for cmd in &commands {
         lines.push(Line::from(vec![
-            Span::styled(cmd.command, Style::default().fg(ThemeColors::cyan())),
+            Span::styled(
+                cmd.command.clone(),
+                Style::default().fg(ThemeColors::cyan()),
+            ),
             Span::raw(" – "),
-            Span::raw(cmd.description),
+            Span::raw(cmd.description.clone()),
         ]));
     }
     lines.push(Line::from(""));
