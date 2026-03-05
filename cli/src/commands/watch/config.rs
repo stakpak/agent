@@ -600,16 +600,25 @@ fn resolve_home_dir_from_system() -> Option<PathBuf> {
         if buf_len <= 0 {
             buf_len = 4096;
         }
-        let buf_len = usize::try_from(buf_len).unwrap_or(4096).max(1024);
+        let mut buf_len = usize::try_from(buf_len).unwrap_or(4096).max(1024);
         let mut buf = vec![0u8; buf_len];
 
-        let rc = libc::getpwuid_r(
-            uid,
-            &mut pwd,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            &mut result,
-        );
+        let rc = loop {
+            let rc = libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &mut result,
+            );
+
+            if rc == libc::ERANGE && buf_len < 65536 {
+                buf_len *= 2;
+                buf.resize(buf_len, 0);
+                continue;
+            }
+            break rc;
+        };
 
         if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
             return None;

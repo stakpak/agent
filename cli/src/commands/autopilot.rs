@@ -2330,6 +2330,31 @@ fn validate_schedule(schedule: &AutopilotScheduleConfig) -> Result<(), String> {
                 schedule.name, check_path
             ));
         }
+
+        if !expanded.is_file() {
+            return Err(format!(
+                "Check script path is not a file for schedule '{}': {}",
+                schedule.name, check_path
+            ));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&expanded).map_err(|e| {
+                format!(
+                    "Cannot read check script metadata for schedule '{}': {}",
+                    schedule.name, e
+                )
+            })?;
+            let permissions = metadata.permissions();
+            if permissions.mode() & 0o111 == 0 {
+                return Err(format!(
+                    "Check script is not executable for schedule '{}': {}",
+                    schedule.name, check_path
+                ));
+            }
+        }
     }
 
     Ok(())
