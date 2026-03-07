@@ -94,6 +94,8 @@ Output a summary report but DO NOT make any changes to the system.
 This is a read-only health check.
 """
 # Optional: check script that determines if agent should run
+# `~` expands to the HOME of the user running autopilot.
+# For system services (systemd/launchd/containers), prefer an absolute path.
 # check = "~/.stakpak/schedules/check-weekday.sh"
 
 # Optional: which exit codes trigger the agent (overrides default)

@@ -136,6 +136,9 @@ stakpak autopilot schedule add health-check \
   --profile monitoring
 ```
 
+`check` script paths support `~`, which resolves against the HOME of the user running autopilot.
+For systemd/launchd/container deployments, prefer absolute paths (for example, `/home/ec2-user/.stakpak/checks/endpoints.sh`).
+
 ### Add channels with profile
 
 ```bash

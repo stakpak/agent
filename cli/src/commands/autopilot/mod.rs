@@ -1936,11 +1936,20 @@ async fn run_schedule_command(
                 sandbox,
                 enabled,
             };
+            let check_path = schedule.check.clone();
             add_schedule_in_config(&mut autopilot_config, schedule)?;
             autopilot_config.save()?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "added", signaled);
+            if let Some(path) = check_path.as_deref()
+                && uses_home_tilde_prefix(path)
+            {
+                eprintln!(
+                    "Note: check path '{}' uses '~'. It expands to the HOME of the user running autopilot; for systemd/launchd/containers, prefer an absolute path.",
+                    path
+                );
+            }
             Ok(())
         }
         AutopilotScheduleCommands::Remove { name } => {
@@ -2378,7 +2387,55 @@ fn validate_schedule(schedule: &AutopilotScheduleConfig) -> Result<(), String> {
         return Err("Schedule profile cannot be empty".to_string());
     }
 
+    if let Some(check_path) = schedule.check.as_deref() {
+        let expanded = crate::commands::watch::config::expand_tilde(check_path);
+        let expanded_str = expanded.to_string_lossy();
+
+        if uses_home_tilde_prefix(check_path) && uses_home_tilde_prefix(&expanded_str) {
+            return Err(format!(
+                "Cannot expand '~' in check script path for schedule '{}': {}. Home directory for the running user could not be determined; use an absolute path.",
+                schedule.name, check_path
+            ));
+        }
+
+        if !expanded.exists() {
+            return Err(format!(
+                "Check script not found for schedule '{}': {}",
+                schedule.name, check_path
+            ));
+        }
+
+        if !expanded.is_file() {
+            return Err(format!(
+                "Check script path is not a file for schedule '{}': {}",
+                schedule.name, check_path
+            ));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&expanded).map_err(|e| {
+                format!(
+                    "Cannot read check script metadata for schedule '{}': {}",
+                    schedule.name, e
+                )
+            })?;
+            let permissions = metadata.permissions();
+            if permissions.mode() & 0o111 == 0 {
+                return Err(format!(
+                    "Check script is not executable for schedule '{}': {}",
+                    schedule.name, check_path
+                ));
+            }
+        }
+    }
+
     Ok(())
+}
+
+fn uses_home_tilde_prefix(path: &str) -> bool {
+    path == "~" || path.starts_with("~/") || path.starts_with("~\\")
 }
 
 fn add_schedule_in_config(
@@ -3900,6 +3957,41 @@ mod tests {
         assert!(result.is_err());
         let message = result.expect_err("reserved schedule name should be rejected");
         assert!(message.contains("reserved"));
+    }
+
+    #[test]
+    fn schedule_missing_check_script_rejected() {
+        let mut config = AutopilotConfigFile::default();
+        let mut schedule = sample_schedule("missing-check");
+        let missing = temp_file_path("autopilot-missing-check-script");
+        let _ = std::fs::remove_file(&missing);
+        schedule.check = Some(missing.to_string_lossy().to_string());
+
+        let result = add_schedule_in_config(&mut config, schedule);
+        assert!(result.is_err());
+        let message = result.expect_err("missing check script should be rejected");
+        assert!(message.contains("Check script not found"));
+    }
+
+    #[test]
+    fn schedule_existing_check_script_is_accepted() {
+        let mut config = AutopilotConfigFile::default();
+        let mut schedule = sample_schedule("existing-check");
+        let script_path = temp_file_path("autopilot-existing-check-script");
+        std::fs::write(&script_path, "#!/bin/sh\necho ok\n").expect("write check script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+                .expect("set executable permission");
+        }
+        schedule.check = Some(script_path.to_string_lossy().to_string());
+
+        let result = add_schedule_in_config(&mut config, schedule);
+        assert!(result.is_ok());
+        assert_eq!(config.schedules.len(), 1);
+
+        let _ = std::fs::remove_file(script_path);
     }
 
     #[test]

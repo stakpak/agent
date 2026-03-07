@@ -6098,6 +6098,7 @@ dependencies = [
  "ignore",
  "jsonrpc-core",
  "jsonrpc-derive",
+ "libc",
  "libsql",
  "log",
  "names",
