@@ -3904,6 +3904,12 @@ mod tests {
         let mut schedule = sample_schedule("existing-check");
         let script_path = temp_file_path("autopilot-existing-check-script");
         std::fs::write(&script_path, "#!/bin/sh\necho ok\n").expect("write check script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+                .expect("set executable permission");
+        }
         schedule.check = Some(script_path.to_string_lossy().to_string());
 
         let result = add_schedule_in_config(&mut config, schedule);
