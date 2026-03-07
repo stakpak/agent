@@ -25,7 +25,8 @@ pub use idempotency::{IdempotencyRequest, IdempotencyStore, LookupResult, Stored
 pub use openapi::generate_openapi;
 pub use routes::{protected_router, public_router, router};
 pub use sandbox::{
-    PersistentSandbox, SandboxConfig, SandboxHealth, SandboxMode, SandboxedMcpServer,
+    PersistentSandbox, SandboxConfig, SandboxHealth, SandboxMode, SandboxUserMapping,
+    SandboxedMcpServer,
 };
 pub use session_actor::{build_checkpoint_envelope, build_run_context, spawn_session_actor};
 pub use session_manager::SessionManager;

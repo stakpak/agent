@@ -34,8 +34,9 @@ use stakpak_mcp_proxy::server::start_proxy_server;
 use stakpak_shared::cert_utils::{CertificateChain, MtlsIdentity};
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::ExitStatus;
 use std::sync::Arc;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::net::TcpListener;
 use tokio::process::Child;
 use tokio::sync::{broadcast, watch};
@@ -69,6 +70,16 @@ impl std::fmt::Display for SandboxMode {
 
 // ── Sandbox config ──────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SandboxUserMapping {
+    #[default]
+    ImageDefault,
+    HostUser {
+        uid: u32,
+        gid: u32,
+    },
+}
+
 /// Configuration for spawning sandboxed MCP servers.
 #[derive(Clone, Debug)]
 pub struct SandboxConfig {
@@ -80,6 +91,8 @@ pub struct SandboxConfig {
     pub volumes: Vec<String>,
     /// How sandbox containers are managed across sessions.
     pub mode: SandboxMode,
+    /// User identity mapping for the container runtime.
+    pub user_mapping: SandboxUserMapping,
 }
 
 // ── Sandbox health ──────────────────────────────────────────────────────────
@@ -386,7 +399,13 @@ impl SandboxedMcpServer {
                 .map_err(|e| format!("Failed to spawn sandbox container: {e}"))?;
 
         // 4. Parse the server CA cert (public) from the container's stdout
-        let server_ca_pem = parse_server_ca_from_stdout(&mut container_process).await?;
+        let server_ca_pem = match parse_server_ca_from_stdout(&mut container_process).await {
+            Ok(server_ca_pem) => server_ca_pem,
+            Err(base_message) => {
+                let error = sandbox_bootstrap_error(&mut container_process, &base_message).await;
+                return Err(error);
+            }
+        };
         tracing::info!(
             "Parsed server CA from container stdout ({} bytes)",
             server_ca_pem.len()
@@ -511,6 +530,13 @@ impl SandboxedMcpServer {
     }
 }
 
+fn sandbox_user_arg(user_mapping: &SandboxUserMapping) -> Option<String> {
+    match user_mapping {
+        SandboxUserMapping::ImageDefault => None,
+        SandboxUserMapping::HostUser { uid, gid } => Some(format!("{uid}:{gid}")),
+    }
+}
+
 async fn spawn_warden_container(
     config: &SandboxConfig,
     host_port: u16,
@@ -532,6 +558,10 @@ async fn spawn_warden_container(
         if is_named_volume(host_path) || Path::new(host_path).exists() {
             cmd.args(["--volume", &expanded]);
         }
+    }
+
+    if let Some(user_arg) = sandbox_user_arg(&config.user_mapping) {
+        cmd.args(["--user", &user_arg]);
     }
 
     // Port forwarding for the MCP server — publish on the sidecar so the
@@ -640,6 +670,76 @@ async fn parse_server_ca_from_stdout(process: &mut Child) -> Result<String, Stri
     }
 
     Ok(server_ca_pem)
+}
+
+async fn sandbox_bootstrap_error(process: &mut Child, base_message: &str) -> String {
+    let exit_status = ensure_process_exited(process).await;
+    let stderr_excerpt = read_stderr_excerpt(process, 4096).await;
+    format_bootstrap_error(base_message, exit_status, stderr_excerpt.as_deref())
+}
+
+async fn ensure_process_exited(process: &mut Child) -> Option<ExitStatus> {
+    if let Ok(Some(status)) = process.try_wait() {
+        return Some(status);
+    }
+
+    let _ = process.kill().await;
+    process.wait().await.ok()
+}
+
+async fn read_stderr_excerpt(process: &mut Child, max_bytes: usize) -> Option<String> {
+    let stderr = process.stderr.take()?;
+    let mut limited = stderr.take(max_bytes as u64);
+    let mut bytes = Vec::with_capacity(max_bytes.min(8192));
+
+    if limited.read_to_end(&mut bytes).await.is_err() {
+        return None;
+    }
+
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&bytes).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(truncate_chars(&text, max_bytes))
+}
+
+fn format_bootstrap_error(
+    base_message: &str,
+    exit_status: Option<ExitStatus>,
+    stderr_excerpt: Option<&str>,
+) -> String {
+    let mut message = base_message.to_string();
+
+    if let Some(status) = exit_status {
+        message.push_str("\nExit status: ");
+        if let Some(code) = status.code() {
+            message.push_str(&code.to_string());
+        } else {
+            message.push_str("terminated by signal");
+        }
+    }
+
+    if let Some(stderr_excerpt) = stderr_excerpt.filter(|value| !value.trim().is_empty()) {
+        message.push_str("\n\nContainer stderr:\n");
+        message.push_str(stderr_excerpt);
+    }
+
+    message
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+
+    let mut truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
+    truncated.push_str("...");
+    truncated
 }
 
 async fn wait_for_server_ready(
@@ -812,6 +912,29 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
     }
 
     #[test]
+    fn format_bootstrap_error_includes_stderr() {
+        let message = super::format_bootstrap_error(
+            "Container exited before outputting server CA certificate",
+            None,
+            Some("Failed to load config: Permission denied (os error 13)"),
+        );
+
+        assert!(message.contains("Container stderr:"));
+        assert!(message.contains("Permission denied"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn format_bootstrap_error_includes_exit_status() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let status = std::process::ExitStatus::from_raw(7 << 8);
+        let message = super::format_bootstrap_error("bootstrap failed", Some(status), None);
+
+        assert!(message.contains("Exit status: 7"));
+    }
+
+    #[test]
     fn mtls_identity_cross_trust() {
         use stakpak_shared::cert_utils::MtlsIdentity;
 
@@ -870,6 +993,19 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
                 "host_part={host_part:?} expected named={expected}"
             );
         }
+    }
+
+    #[test]
+    fn sandbox_user_arg_formats_host_mapping() {
+        let user_arg = super::sandbox_user_arg(&super::SandboxUserMapping::HostUser {
+            uid: 1000,
+            gid: 1001,
+        });
+        assert_eq!(user_arg.as_deref(), Some("1000:1001"));
+        assert_eq!(
+            super::sandbox_user_arg(&super::SandboxUserMapping::ImageDefault),
+            None
+        );
     }
 
     #[test]

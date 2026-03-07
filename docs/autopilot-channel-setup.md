@@ -1,5 +1,13 @@
 # Autopilot Channel Setup
 
+Before starting autopilot on a remote host, run:
+
+```bash
+stakpak autopilot doctor
+```
+
+That checks runtime prerequisites beyond channel wiring, including Docker access, memory, disk headroom, bind-port availability, and Linux linger status.
+
 ## Telegram
 
 1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the bot token
@@ -66,4 +74,7 @@
 ```bash
 stakpak autopilot channel list       # check configured channels
 stakpak autopilot channel test       # test connectivity
+stakpak autopilot doctor             # verify host/runtime readiness too
 ```
+
+Channel setup success does not guarantee the host is ready to run autopilot. Use `stakpak autopilot doctor` to verify Docker access, memory, disk headroom, and other runtime prerequisites.
