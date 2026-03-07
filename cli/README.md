@@ -18,6 +18,62 @@ This guide explains the current configuration model.
 
 ---
 
+## Autopilot deployment readiness
+
+Autopilot now has a shared readiness/probe system used by both:
+
+- `stakpak up` — fail-fast startup checks
+- `stakpak autopilot doctor` — fuller deployment-readiness report
+
+### What `stakpak up` checks before startup
+
+Blocking failures:
+
+- credentials configured
+- Docker installed
+- Docker accessible to the current user
+- clearly unsafe memory conditions
+
+Warnings:
+
+- bind-port conflicts
+- disabled systemd linger
+- low memory headroom
+
+### What `stakpak autopilot doctor` checks
+
+In addition to the startup probes, doctor also reports:
+
+- disk space headroom
+- critical sandbox mount readability hints
+- channel config validity
+- schedule config validity
+- service installation status
+- server health reachability
+- tool approval posture
+
+### Important behavior notes
+
+- `stakpak up` now runs preflight checks before image pull/service start
+- sandbox permission issues are addressed by mapping the host UID/GID into the container runtime when possible
+- secret/config files should **not** be made world-readable as a workaround
+
+### Common probe meanings
+
+| Probe | Meaning | Typical fix |
+|------|---------|-------------|
+| `docker_installed` | Docker binary missing | Install Docker |
+| `docker_accessible` | User cannot talk to daemon | Add user to docker group / start daemon |
+| `memory` | Host is too small or borderline | Use 2GB+ RAM or add swap |
+| `disk_space` | Low free space for image pulls/logs | Free space or expand volume |
+| `bind_port` | Listen address unavailable | `stakpak down` or change bind |
+| `systemd_linger` | User service may stop after logout | `sudo loginctl enable-linger $USER` |
+| `sandbox_mount_inputs` | Critical mounted inputs may be unreadable | Fix invoking-user readability; do not loosen secret perms globally |
+
+Use `stakpak autopilot doctor` as the canonical deployment-readiness and remediation entrypoint.
+
+---
+
 ## File ownership
 
 ### 1) `~/.stakpak/config.toml` (behavior profiles)

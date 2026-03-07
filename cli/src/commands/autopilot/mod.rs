@@ -19,7 +19,15 @@ use crate::{
     utils::server_context::{load_remote_skills_context, startup_project_dir},
 };
 
-const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../prompts/system_prompt.v1.md");
+mod presenter;
+mod probes;
+
+use self::probes::{
+    AutopilotProbeContext, ProbeMode, RealProbeEnvironment, run_autopilot_probes,
+    summarize as summarize_probe_results,
+};
+
+const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../prompts/system_prompt.v1.md");
 
 #[derive(Args, PartialEq, Debug, Clone)]
 pub struct StartArgs {
@@ -705,6 +713,66 @@ struct AutopilotChannelStatusJson {
     alerts_only: bool,
 }
 
+#[cfg(unix)]
+fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
+    let uid = read_unix_id_value("-u");
+    let gid = read_unix_id_value("-g");
+
+    match (uid, gid) {
+        (Some(uid), Some(gid)) => stakpak_server::SandboxUserMapping::HostUser { uid, gid },
+        _ => stakpak_server::SandboxUserMapping::ImageDefault,
+    }
+}
+
+#[cfg(not(unix))]
+fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
+    stakpak_server::SandboxUserMapping::ImageDefault
+}
+
+#[cfg(unix)]
+fn read_unix_id_value(flag: &str) -> Option<u32> {
+    let output = std::process::Command::new("id").arg(flag).output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+async fn run_startup_preflight(config: &AppConfig, bind_addr: &str) -> Result<(), String> {
+    let base_url = loopback_base_url_from_bind(bind_addr);
+    let server_health_url = format!("{base_url}/v1/health");
+    let probe_client = build_probe_http_client();
+    let server_reachable = if let Some(client) = probe_client.as_ref() {
+        endpoint_ok(client, &server_health_url).await
+    } else {
+        false
+    };
+
+    let env = RealProbeEnvironment;
+    let ctx = AutopilotProbeContext {
+        app_config: config,
+        bind_addr: Some(bind_addr),
+        server_reachable,
+    };
+    let results = run_autopilot_probes(ProbeMode::Startup, &ctx, &env);
+    presenter::print_probe_report("Preflight checks", &results);
+
+    let summary = summarize_probe_results(&results);
+    if summary.blocking_failures > 0 {
+        return Err(format!(
+            "Preflight checks failed with {} blocking issue(s)",
+            summary.blocking_failures
+        ));
+    }
+
+    Ok(())
+}
+
 async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Result<(), String> {
     let autopilot_config_path = AutopilotConfigFile::path();
     let needs_setup = !autopilot_config_path.exists() || options.force;
@@ -826,6 +894,9 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
     let effective_options = options.clone().with_server_config(&effective_server);
 
     if effective_options.foreground || effective_options.from_service {
+        if !effective_options.from_service {
+            run_startup_preflight(config, &effective_server.listen).await?;
+        }
         return start_foreground_runtime(config, &effective_options).await;
     }
 
@@ -838,6 +909,8 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         println!("  Stop        stakpak autopilot down");
         return Ok(());
     }
+
+    run_startup_preflight(config, &effective_server.listen).await?;
 
     if !autopilot_service_installed() {
         install_autopilot_service(config)?;
@@ -1219,6 +1292,7 @@ async fn start_foreground_runtime(
         image: stakpak_image.clone(),
         volumes,
         mode: sandbox_mode.clone(),
+        user_mapping: detect_host_user_mapping(),
     };
     tracing::info!(image = %stakpak_image, mode = %sandbox_mode, warden = %sandbox_config.warden_path, "Sandbox config initialized");
     let app_state = app_state.with_sandbox(sandbox_config.clone());
@@ -2884,16 +2958,7 @@ async fn logs_autopilot(
 async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
     println!("Autopilot doctor");
 
-    let mut failures = 0u32;
-
-    let has_stakpak_key = config.get_stakpak_api_key().is_some();
-    let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
-    if has_stakpak_key || has_provider_keys {
-        println!("✓ Credentials configured");
-    } else {
-        failures += 1;
-        println!("✗ No credentials configured");
-    }
+    let mut failures = 0usize;
 
     let autopilot_config = match AutopilotConfigFile::load_or_default() {
         Ok(cfg) => {
@@ -2906,7 +2971,26 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
             AutopilotConfigFile::default()
         }
     };
-    let _ = &autopilot_config; // used below for schedule count
+    let _ = &autopilot_config;
+
+    let base_url = loopback_base_url_from_bind(&autopilot_config.server.listen);
+    let server_health_url = format!("{}/v1/health", base_url);
+    let probe_client = build_probe_http_client();
+    let server_reachable = if let Some(client) = probe_client.as_ref() {
+        endpoint_ok(client, &server_health_url).await
+    } else {
+        false
+    };
+
+    let env = RealProbeEnvironment;
+    let probe_ctx = AutopilotProbeContext {
+        app_config: config,
+        bind_addr: Some(&autopilot_config.server.listen),
+        server_reachable,
+    };
+    let probe_results = run_autopilot_probes(ProbeMode::Doctor, &probe_ctx, &env);
+    presenter::print_probe_report("Deployment readiness", &probe_results);
+    failures += summarize_probe_results(&probe_results).blocking_failures;
 
     let gateway_path = AutopilotConfigFile::path();
     match load_gateway_config_allowing_no_channels(gateway_path.as_path()) {
@@ -2954,15 +3038,6 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         failures += 1;
         println!("✗ Autopilot service not installed");
     }
-
-    let base_url = loopback_base_url_from_bind(&autopilot_config.server.listen);
-    let server_health_url = format!("{}/v1/health", base_url);
-    let probe_client = build_probe_http_client();
-    let server_reachable = if let Some(client) = probe_client.as_ref() {
-        endpoint_ok(client, &server_health_url).await
-    } else {
-        false
-    };
 
     if server_reachable {
         println!("✓ Server health endpoint reachable");

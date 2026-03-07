@@ -73,6 +73,24 @@ stakpak autopilot down
 stakpak autopilot doctor
 ```
 
+#### Autopilot prerequisites
+
+Before running autopilot on a remote VM:
+
+- Docker must be installed and accessible to the current user
+- 2GB+ RAM is recommended for reliable autopilot + sandbox runs
+- Swap is strongly recommended on small Linux hosts
+- Linux user services may require linger to survive logout
+
+`stakpak up` now runs preflight checks before startup, and `stakpak autopilot doctor` can be used as a deployment-readiness check before first boot:
+
+```bash
+stakpak autopilot doctor
+stakpak up
+```
+
+See also: [cli/README.md](cli/README.md)
+
 #### Unified configuration (profiles + autopilot wiring)
 
 - `~/.stakpak/config.toml`: profile behavior (`model`, `allowed_tools`, `auto_approve`, `system_prompt`, `max_turns`, provider credentials)

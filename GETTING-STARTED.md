@@ -66,7 +66,19 @@ stakpak --async "Help me understand this codebase"
 
 ### 4. Autopilot (24/7 Mode)
 
+Before you start on a remote machine:
+
+- Install Docker and verify `docker ps` works for your user
+- Use a 2GB+ host when possible
+- Add swap on smaller hosts
+- On Linux, enable linger if you want the user service to survive logout
+
+Recommended first-run flow:
+
 ```bash
+# Validate host readiness first
+stakpak autopilot doctor
+
 # One-time setup (channels + schedules + runtime defaults)
 stakpak onboard
 
@@ -87,6 +99,26 @@ stakpak autopilot logs
 stakpak autopilot down
 stakpak autopilot doctor
 ```
+
+`stakpak up` now runs preflight checks before startup and may stop early with actionable guidance when Docker, memory, disk, or service prerequisites are not ready.
+
+Common fixes:
+
+```bash
+# Install Docker (Ubuntu/Debian)
+sudo apt-get install -y docker.io
+sudo usermod -aG docker $USER
+newgrp docker
+docker ps
+
+# Enable linger on Linux so the user service survives logout
+sudo loginctl enable-linger $USER
+
+# Rerun readiness checks
+stakpak autopilot doctor
+```
+
+For detailed remediation by probe, use `stakpak autopilot doctor` and the deployment-readiness section in `cli/README.md`.
 
 ## 🎯 Operation Modes
 
