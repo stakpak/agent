@@ -76,7 +76,7 @@ pub fn preview_diff_from_strings(
 
     // Helper function to wrap content while maintaining proper indentation
     fn wrap_content(content: &str, terminal_width: usize, prefix_width: usize) -> Vec<String> {
-        let available_width = terminal_width.saturating_sub(prefix_width + 4);
+        let available_width = terminal_width.saturating_sub(prefix_width);
 
         if UnicodeWidthStr::width(content) <= available_width {
             return vec![content.to_string()];
@@ -138,8 +138,9 @@ pub fn preview_diff_from_strings(
                     old_line_num += 1;
                     new_line_num += 1;
 
-                    let line_content =
-                        diff.old_slices()[old_range.start + idx].trim_end().replace('\t', "    ");
+                    let line_content = diff.old_slices()[old_range.start + idx]
+                        .trim_end()
+                        .replace('\t', "    ");
                     let prefix_width = 4 + 1 + 4 + 1 + 2;
                     let wrapped_content = wrap_content(&line_content, terminal_width, prefix_width);
 
@@ -241,7 +242,7 @@ pub fn preview_diff_from_strings(
 
                         let current_width =
                             prefix_width + UnicodeWidthStr::width(content_line.as_str());
-                        let target_width = terminal_width.saturating_sub(4);
+                        let target_width = terminal_width;
                         let padding_needed = target_width.saturating_sub(current_width);
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
@@ -315,7 +316,7 @@ pub fn preview_diff_from_strings(
 
                         let current_width =
                             prefix_width + UnicodeWidthStr::width(content_line.as_str());
-                        let target_width = terminal_width.saturating_sub(4);
+                        let target_width = terminal_width;
                         let padding_needed = target_width.saturating_sub(current_width);
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
@@ -390,7 +391,7 @@ pub fn preview_diff_from_strings(
 
                         let current_width =
                             prefix_width + UnicodeWidthStr::width(content_line.as_str());
-                        let target_width = terminal_width.saturating_sub(4);
+                        let target_width = terminal_width;
                         let padding_needed = target_width.saturating_sub(current_width);
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
@@ -459,7 +460,7 @@ pub fn preview_diff_from_strings(
 
                         let current_width =
                             prefix_width + UnicodeWidthStr::width(content_line.as_str());
-                        let target_width = terminal_width.saturating_sub(4);
+                        let target_width = terminal_width;
                         let padding_needed = target_width.saturating_sub(current_width);
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
