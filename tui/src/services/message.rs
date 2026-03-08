@@ -1332,6 +1332,9 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 cleaned = format!("{}{}", cleaned_before, after_checkpoint);
             }
 
+            // Strip any ANSI escape codes that may be present in LLM responses
+            cleaned = crate::services::bash_block::strip_all_ansi(&cleaned);
+
             let borrowed_lines =
                 render_markdown_to_lines_with_width(&cleaned, width).unwrap_or_default();
             for line in borrowed_lines {
@@ -1365,6 +1368,9 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                     break;
                 }
             }
+
+            // Strip any ANSI escape codes that may be present in LLM responses
+            cleaned = crate::services::bash_block::strip_all_ansi(&cleaned);
 
             // Handle shell history
             if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
