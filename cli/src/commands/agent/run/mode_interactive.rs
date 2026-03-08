@@ -163,11 +163,12 @@ async fn send_next_tool_from_queue(
         .unwrap_or(&tool_call.function.name);
 
     // Auto-approve ask_user — show popup directly, skip the approval bar.
-    // If parsing fails, fall through to normal approval flow.
+    // If parsing fails or questions are empty, fall through to normal approval flow.
     if tool_name == "ask_user"
         && let Ok(request) = serde_json::from_str::<
             stakpak_shared::models::integrations::openai::AskUserRequest,
         >(&tool_call.function.arguments)
+        && !request.questions.is_empty()
     {
         send_input_event(
             input_tx,
@@ -700,7 +701,7 @@ pub async fn run_interactive(
                                 stakpak_shared::models::integrations::openai::AskUserRequest,
                             >(&tool_call.function.arguments)
                             {
-                                Ok(request) => {
+                                Ok(request) if !request.questions.is_empty() => {
                                     // Send the popup event to TUI
                                     send_input_event(
                                         &input_tx,
@@ -713,15 +714,51 @@ pub async fn run_interactive(
                                     // Don't continue - wait for AskUserResponse
                                     continue;
                                 }
+                                Ok(_) => {
+                                    // Parsed OK but questions array is empty
+                                    let error_msg =
+                                        "ask_user tool was called with no questions".to_string();
+                                    messages
+                                        .push(tool_result(tool_call.id.clone(), error_msg.clone()));
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ToolResult(
+                                            stakpak_shared::models::integrations::openai::ToolCallResult {
+                                                call: tool_call.clone(),
+                                                result: error_msg,
+                                                status: ToolCallResultStatus::Error,
+                                            },
+                                        ),
+                                    )
+                                    .await?;
+                                }
                                 Err(e) => {
                                     // Failed to parse arguments - return error result
-                                    messages.push(tool_result(
-                                        tool_call.id.clone(),
-                                        format!("Failed to parse ask_user arguments: {}", e),
-                                    ));
+                                    let error_msg =
+                                        format!("Failed to parse ask_user arguments: {}", e);
+                                    messages
+                                        .push(tool_result(tool_call.id.clone(), error_msg.clone()));
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ToolResult(
+                                            stakpak_shared::models::integrations::openai::ToolCallResult {
+                                                call: tool_call.clone(),
+                                                result: error_msg,
+                                                status: ToolCallResultStatus::Error,
+                                            },
+                                        ),
+                                    )
+                                    .await?;
                                 }
                             }
-                            // If we get here, there was an error - continue to next iteration
+                            // Error path: process next queued tool or retry via API.
+                            // Do NOT fall through to normal tool execution below.
+                            if !tools_queue.is_empty() {
+                                let next_tool_call = tools_queue.remove(0);
+                                send_next_tool_from_queue(&input_tx, &next_tool_call).await?;
+                            }
+                            // Either way, skip normal tool execution — the error is
+                            // already in messages, so the API call will let the LLM retry.
                             continue;
                         }
 

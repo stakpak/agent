@@ -424,7 +424,11 @@ pub fn update(
                 return;
             }
             InputEvent::ShowAskUserPopup(tool_call, questions) => {
-                ask_user::handle_show_ask_user_popup(state, tool_call, questions);
+                if questions.is_empty() {
+                    ask_user::send_empty_questions_error(state, tool_call, output_tx);
+                } else {
+                    ask_user::handle_show_ask_user_popup(state, tool_call, questions);
+                }
                 return;
             }
             _ => {}
@@ -540,7 +544,11 @@ pub fn update(
 
     // Handle ShowAskUserPopup event even when popup is not visible
     if let InputEvent::ShowAskUserPopup(tool_call, questions) = event {
-        ask_user::handle_show_ask_user_popup(state, tool_call, questions);
+        if questions.is_empty() {
+            ask_user::send_empty_questions_error(state, tool_call, output_tx);
+        } else {
+            ask_user::handle_show_ask_user_popup(state, tool_call, questions);
+        }
         return;
     }
 

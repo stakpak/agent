@@ -19,6 +19,28 @@ fn get_total_options(question: &AskUserQuestion) -> usize {
     }
 }
 
+/// Safety-net: send an error response when questions are empty so the backend
+/// never blocks waiting for an `AskUserResponse` that will never arrive.
+pub fn send_empty_questions_error(
+    _state: &mut AppState,
+    tool_call: ToolCall,
+    output_tx: &Sender<OutputEvent>,
+) {
+    let result = AskUserResult {
+        answers: vec![],
+        completed: false,
+        reason: Some("ask_user tool was called with no questions".to_string()),
+    };
+    let display_result = serde_json::to_string_pretty(&result)
+        .unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize result: {}\"}}", e));
+    let tool_result = ToolCallResult {
+        call: tool_call,
+        result: display_result,
+        status: ToolCallResultStatus::Error,
+    };
+    let _ = output_tx.try_send(OutputEvent::AskUserResponse(tool_result));
+}
+
 /// Show the ask user inline block with the given questions
 pub fn handle_show_ask_user_popup(
     state: &mut AppState,
