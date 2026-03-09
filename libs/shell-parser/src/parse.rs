@@ -47,9 +47,14 @@ pub struct ParsedCommand {
     pub offset: usize,
 }
 
+/// Maximum nesting depth for recursive `-c` script expansion.
+const MAX_SCRIPT_DEPTH: usize = 5;
+
 pub fn parse(input: &str) -> Vec<ParsedCommand> {
     let mut all_commands = Vec::new();
-    let mut scripts = vec![input.to_string()];
+    // Each entry is (script, depth) where depth tracks how many levels of
+    // `-c` nesting we have descended through.
+    let mut scripts = vec![(input.to_string(), 0usize)];
 
     let mut parser = Parser::new();
     if parser
@@ -59,7 +64,7 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
         return all_commands;
     }
 
-    while let Some(script) = scripts.pop() {
+    while let Some((script, depth)) = scripts.pop() {
         parser.reset();
 
         let Some(tree) = parser.parse(&script, None) else {
@@ -73,7 +78,11 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
                 let cmd = extract_command_from_node(&script, &node);
 
                 if let Some(inner) = extract_nested_script(&cmd) {
-                    scripts.push(inner);
+                    if depth < MAX_SCRIPT_DEPTH {
+                        scripts.push((inner, depth + 1));
+                    } else {
+                        return Vec::new();
+                    }
                 }
 
                 all_commands.push(cmd);
