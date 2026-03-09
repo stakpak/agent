@@ -51,15 +51,16 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
     let mut all_commands = Vec::new();
     let mut scripts = vec![input.to_string()];
 
-    while let Some(script) = scripts.pop() {
-        let mut parser = Parser::new();
+    let mut parser = Parser::new();
+    if parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .is_err()
+    {
+        return all_commands;
+    }
 
-        if parser
-            .set_language(&tree_sitter_bash::LANGUAGE.into())
-            .is_err()
-        {
-            continue;
-        }
+    while let Some(script) = scripts.pop() {
+        parser.reset();
 
         let Some(tree) = parser.parse(&script, None) else {
             continue;
