@@ -469,6 +469,12 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
         .ask_user_questions
         .iter()
         .filter_map(|q| state.ask_user_answers.get(&q.label).cloned())
+        .map(|mut answer| {
+            answer.answer = state
+                .secret_manager
+                .redact_and_store_secrets(&answer.answer, None);
+            answer
+        })
         .collect();
 
     let result = AskUserResult {
