@@ -1,3 +1,7 @@
+---
+description: Deploy & monitor OpenClaw gateway with Stakpak Autopilot
+---
+
 # Deploy & Monitor OpenClaw Gateway with AWS Lightsail Blueprint + Stakpak Autopilot
 
 ## Goals
@@ -17,7 +21,7 @@
 * Always verify with `openclaw channels status --probe` and `openclaw models status` after configuration changes
 * Write scripts locally and SCP to remote hosts — never create scripts via SSH heredoc (shell escaping breaks)
 * The blueprint locks SSH to browser-only (`lightsail-connect`) by default — you MUST open port 22 to your IP before any CLI-based SSH access (Phase 1.4)
-* The `openclaw channels add --channel` flag is **case-sensitive** — use `Telegram`, `Discord`, `Slack`, `WhatsApp` (capitalized first letter)
+* Channel plugins (telegram, discord, slack, whatsapp, etc.) are **disabled by default** — you MUST run `openclaw plugins enable <channel>` and restart the gateway before `openclaw channels add` will recognize the channel. Without this, `channels add --channel telegram` returns `Unknown channel: telegram`.
 * The Bedrock IAM role name must match `LightsailRoleFor-<EC2-instance-id>` (get via instance metadata), and the trust policy must allow Lightsail's managed account (`002204026182`)
 
 ## Prerequisites
@@ -399,17 +403,22 @@ openclaw models status
 
 > **Skip this phase** if `$MESSAGING_CHANNEL` = `skip`.
 
-#### 3.1 Add Channel
+#### 3.1 Enable Channel Plugin & Add Channel
 
-SSH into the instance and configure the channel using the tokens collected in Prerequisites.
+SSH into the instance and enable the channel plugin first, then configure using the tokens collected in Prerequisites.
 
-> **⚠ IMPORTANT**: Use the non-interactive `--channel` and `--token` flags for automation. The `--channel` value is **case-sensitive** — use `Telegram`, `WhatsApp`, `Discord`, `Slack` (capitalized), NOT lowercase. Using `telegram` (lowercase) returns `Unknown channel: telegram`.
+> **⚠ IMPORTANT**: Channel plugins are **disabled by default** on the Lightsail blueprint. You must enable the plugin and restart the gateway before `channels add` will work. The `--channel` value is **lowercase** — use `telegram`, `whatsapp`, `discord`, `slack`.
 
 **If `$MESSAGING_CHANNEL` = `telegram`:**
 
 ```bash
-# Add the channel non-interactively (note: capital "Telegram")
-openclaw channels add --channel Telegram --token "$OPENCLAW_BOT_TOKEN"
+# Enable the telegram plugin (disabled by default)
+openclaw plugins enable telegram
+sudo systemctl restart openclaw-gateway
+sleep 10
+
+# Add the channel non-interactively (lowercase "telegram")
+openclaw channels add --channel telegram --token "$OPENCLAW_BOT_TOKEN"
 ```
 
 Then configure security and pre-approve the user:
@@ -427,8 +436,13 @@ openclaw config set channels.telegram.reactionLevel "minimal"
 **If `$MESSAGING_CHANNEL` = `whatsapp`:**
 
 ```bash
+# Enable the whatsapp plugin (disabled by default)
+openclaw plugins enable whatsapp
+sudo systemctl restart openclaw-gateway
+sleep 10
+
 # WhatsApp requires interactive QR code pairing — cannot be fully automated
-openclaw channels add --channel WhatsApp
+openclaw channels add --channel whatsapp
 # A QR code will be displayed in the terminal
 # On your phone: WhatsApp → Settings → Linked Devices → scan the QR code
 # Complete pairing on your phone
@@ -439,13 +453,23 @@ openclaw channels add --channel WhatsApp
 **If `$MESSAGING_CHANNEL` = `discord`:**
 
 ```bash
-openclaw channels add --channel Discord --token "$DISCORD_BOT_TOKEN"
+# Enable the discord plugin (disabled by default)
+openclaw plugins enable discord
+sudo systemctl restart openclaw-gateway
+sleep 10
+
+openclaw channels add --channel discord --token "$DISCORD_BOT_TOKEN"
 ```
 
 **If `$MESSAGING_CHANNEL` = `slack`:**
 
 ```bash
-openclaw channels add --channel Slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"
+# Enable the slack plugin (disabled by default)
+openclaw plugins enable slack
+sudo systemctl restart openclaw-gateway
+sleep 10
+
+openclaw channels add --channel slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"
 ```
 
 #### 3.2 Restart & Verify
@@ -958,7 +982,7 @@ Per-channel steps to get new credentials:
 | 20 | Plugin requires restart | Config change not picked up | `sudo systemctl restart openclaw-gateway` |
 | 21 | SSH times out to Lightsail instance | Blueprint restricts port 22 to `lightsail-connect` (browser SSH) only | Open port 22 to your IP: `aws lightsail put-instance-public-ports` (see Phase 1.4) |
 | 22 | `Load key: invalid format` when SSH-ing | SSH key downloaded via `--output text \| base64 -d` | The `privateKeyBase64` field is raw PEM, not base64. Use `python3`/`jq -r` to extract from JSON (see Phase 1.5) |
-| 23 | `Unknown channel: telegram` | Channel name is case-sensitive in `--channel` flag | Use `--channel Telegram` (capital T), not `--channel telegram` |
+| 23 | `Unknown channel: telegram` | Channel plugin is disabled by default | Run `openclaw plugins enable telegram` (or discord/slack/whatsapp) then `sudo systemctl restart openclaw-gateway` before running `channels add` |
 | 24 | `AccessDenied` when instance assumes IAM role | Trust policy only has `lightsail.amazonaws.com` principal | Must also allow `arn:aws:iam::002204026182:role/AmazonLightsailInstance` (see Phase 2.2 Option B) |
 | 25 | IAM role name wrong, Bedrock still fails | Used Lightsail UUID instead of EC2 instance ID | Role name must be `LightsailRoleFor-i-xxxxxxxxx` (EC2 ID from instance metadata), not the Lightsail UUID |
 | 26 | `openclaw doctor` shows CRITICAL: session/credentials dirs missing | Blueprint doesn't create these dirs | `mkdir -p ~/.openclaw/agents/main/sessions ~/.openclaw/credentials && chmod 700 ~/.openclaw/credentials` (see Phase 4.2) |
