@@ -166,9 +166,17 @@ async fn handle_device_flow_login(
     println!();
     println!("To authenticate with {}:", provider.name());
     println!();
-    println!("  1. Visit: {}", device_code.verification_uri);
+    // Use OSC 8 escape sequence for a clickable hyperlink in supported terminals
+    println!(
+        "  1. Visit: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
+        device_code.verification_uri, device_code.verification_uri
+    );
     println!("  2. Enter code: {}", device_code.user_code);
     println!();
+
+    // Try to open the browser automatically
+    let _ = open::that(&device_code.verification_uri);
+
     println!("Waiting for authorisation...");
 
     // Step 2: poll using the same HTTP client that was built in step 1.
