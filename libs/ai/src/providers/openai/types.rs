@@ -107,10 +107,13 @@ pub struct OpenAIFunctionCall {
 #[allow(dead_code)]
 pub struct ChatCompletionResponse {
     pub id: String,
+    /// providers like GitHub Copilot omit this field; default to empty string.
+    #[serde(default)]
     pub object: String,
     pub created: u64,
     pub model: String,
     pub choices: Vec<ChatChoice>,
+    #[serde(default)]
     pub usage: ChatUsage,
 }
 
@@ -162,6 +165,8 @@ pub struct ChatUsage {
 #[allow(dead_code)]
 pub struct ChatCompletionChunk {
     pub id: String,
+    /// Some providers (e.g. GitHub Copilot) omit this field; default to empty string.
+    #[serde(default)]
     pub object: String,
     pub created: u64,
     pub model: String,
