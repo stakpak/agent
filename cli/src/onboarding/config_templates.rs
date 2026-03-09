@@ -96,6 +96,23 @@ pub fn generate_gemini_profile() -> ProfileConfig {
     profile
 }
 
+/// Generate GitHub Copilot profile configuration (credentials stored via OAuth device flow)
+pub fn generate_github_copilot_profile() -> ProfileConfig {
+    let mut profile = ProfileConfig {
+        provider: Some(ProviderType::Local),
+        model: Some("github-copilot/gpt-4o".to_string()),
+        ..ProfileConfig::default()
+    };
+    profile.providers.insert(
+        "github-copilot".to_string(),
+        ProviderConfig::GitHubCopilot {
+            api_endpoint: None,
+            auth: None,
+        },
+    );
+    profile
+}
+
 /// Generate Anthropic profile configuration (credentials stored separately in config.toml auth field)
 pub fn generate_anthropic_profile() -> ProfileConfig {
     let mut profile = ProfileConfig {
