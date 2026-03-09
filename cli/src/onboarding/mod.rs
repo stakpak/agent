@@ -890,10 +890,7 @@ async fn handle_github_copilot_setup(config: &mut AppConfig, profile_name: &str)
     let token = match provider.wait_for_token(&flow, &device_code).await {
         Ok(t) => t,
         Err(e) => {
-            crate::onboarding::styled_output::render_error(&format!(
-                "Authorization failed: {}",
-                e
-            ));
+            crate::onboarding::styled_output::render_error(&format!("Authorization failed: {}", e));
             return false;
         }
     };
