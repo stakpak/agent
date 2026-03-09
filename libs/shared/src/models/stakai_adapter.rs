@@ -505,10 +505,10 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     use stakai::providers::anthropic::{
         AnthropicConfig as StakaiAnthropicConfig, AnthropicProvider,
     };
+    use stakai::providers::copilot::{CopilotConfig, CopilotProvider};
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
     use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
-    use stakai::providers::copilot::{CopilotConfig, CopilotProvider};
 
     let mut registry = ProviderRegistry::new();
 

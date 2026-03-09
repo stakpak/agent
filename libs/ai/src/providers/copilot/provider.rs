@@ -37,7 +37,6 @@ use reqwest_eventsource::EventSource;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
-
 #[derive(serde::Deserialize)]
 struct Endpoints {
     api: String,
@@ -51,7 +50,7 @@ struct TokenResp {
 }
 
 /// Refresh the cached token this many seconds before it actually expires.
-const REFRESH_BUFFER_SECS: u64 = 300; 
+const REFRESH_BUFFER_SECS: u64 = 300;
 
 /// Hardcoded VSCode version string required by the Copilot backend.
 /// Update this when GitHub changes its accepted version range.
@@ -85,7 +84,6 @@ impl CopilotProvider {
 
     /// Fetch a fresh short-lived Copilot API token from GitHub.
     async fn fetch_token(&self) -> Result<CachedCopilotToken> {
-
         let resp = self
             .client
             .get("https://api.github.com/copilot_internal/v2/token")
@@ -181,7 +179,6 @@ impl CopilotProvider {
         let token = self.get_token().await?;
         Ok(token.api_base)
     }
-
 }
 
 #[async_trait]
@@ -191,13 +188,12 @@ impl Provider for CopilotProvider {
     }
 
     fn build_headers(&self, _custom_headers: Option<&Headers>) -> Headers {
-        // The Copilot token exchange is async, so headers cannot be built synchronously. 
-        // return empty headers 
+        // The Copilot token exchange is async, so headers cannot be built synchronously.
+        // return empty headers
         Headers::new()
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
-        
         let headers = self
             .build_headers_async(request.options.headers.as_ref())
             .await?;
@@ -229,7 +225,6 @@ impl Provider for CopilotProvider {
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
-
         let headers = self
             .build_headers_async(request.options.headers.as_ref())
             .await?;
@@ -245,9 +240,8 @@ impl Provider for CopilotProvider {
             .headers(headers.to_reqwest_headers())
             .json(&openai_req);
 
-        let event_source = EventSource::new(req_builder).map_err(|e| {
-            Error::stream_error(format!("Failed to create event source: {}", e))
-        })?;
+        let event_source = EventSource::new(req_builder)
+            .map_err(|e| Error::stream_error(format!("Failed to create event source: {}", e)))?;
 
         create_completions_stream(event_source).await
     }

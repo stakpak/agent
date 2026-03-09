@@ -369,6 +369,15 @@ pub fn config_to_toml_preview(profile: &ProfileConfig, profile_name: &str) -> St
                     toml.push_str(&format!("profile_name = \"{}\"\n", profile));
                 }
             }
+            ProviderConfig::GitHubCopilot { api_endpoint, auth } => {
+                toml.push_str("type = \"github-copilot\"\n");
+                if let Some(endpoint) = api_endpoint {
+                    toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
+                }
+                if let Some(a) = auth {
+                    toml.push_str(&format!("# auth: {} (set)\n", a.auth_type_display()));
+                }
+            }
         }
     }
 

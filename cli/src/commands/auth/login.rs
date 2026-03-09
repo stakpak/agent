@@ -1,8 +1,10 @@
 //! Login command - authenticate with LLM providers
 
+use crate::config::AppConfig;
 use crate::onboarding::menu::{prompt_password, select_option_no_header};
 use crate::onboarding::navigation::NavResult;
 use stakpak_shared::models::auth::ProviderAuth;
+use stakpak_shared::models::llm::ProviderConfig;
 use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
 use std::io::{self, Write};
 use std::path::Path;
@@ -106,6 +108,9 @@ pub async fn handle_login(
             handle_oauth_login(config_dir, provider, &method_id, &profile).await
         }
         AuthMethodType::ApiKey => handle_api_key_login(config_dir, provider, &profile).await,
+        AuthMethodType::DeviceFlow => {
+            handle_device_flow_login(config_dir, provider, &method_id, &profile).await
+        }
     }
 }
 
@@ -145,6 +150,41 @@ async fn select_profile_for_auth(config_dir: &Path) -> Result<String, String> {
     }
 }
 
+/// Handle Device Authorization Grant (RFC 8628) login.
+async fn handle_device_flow_login(
+    config_dir: &Path,
+    provider: &dyn OAuthProvider,
+    method_id: &str,
+    profile: &str,
+) -> Result<(), String> {
+    // Step 1: request device code and display instructions to the user.
+    let (flow, device_code) = provider
+        .request_device_code(method_id)
+        .await
+        .map_err(|e| format!("Device flow failed: {}", e))?;
+
+    println!();
+    println!("To authenticate with {}:", provider.name());
+    println!();
+    println!("  1. Visit: {}", device_code.verification_uri);
+    println!("  2. Enter code: {}", device_code.user_code);
+    println!();
+    println!("Waiting for authorisation...");
+
+    // Step 2: poll using the same HTTP client that was built in step 1.
+    let token = provider
+        .wait_for_token(&flow, &device_code)
+        .await
+        .map_err(|e| format!("Device flow failed: {}", e))?;
+
+    let auth = provider
+        .post_device_authorize(method_id, &token)
+        .await
+        .map_err(|e| format!("Post-authorization failed: {}", e))?;
+
+    save_auth_to_config(config_dir, provider, profile, auth)
+}
+
 /// Handle OAuth login flow
 async fn handle_oauth_login(
     config_dir: &Path,
@@ -152,9 +192,6 @@ async fn handle_oauth_login(
     method_id: &str,
     profile: &str,
 ) -> Result<(), String> {
-    use crate::config::AppConfig;
-    use stakpak_shared::models::llm::ProviderConfig;
-
     let oauth_config = provider
         .oauth_config(method_id)
         .ok_or("OAuth not supported for this method")?;
@@ -201,15 +238,26 @@ async fn handle_oauth_login(
         .await
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
-    // Load config using the standard pipeline (handles migrations, old formats, etc.)
+    save_auth_to_config(config_dir, provider, profile, auth)
+}
+
+/// Persist a `ProviderAuth` into the config file for the given profile.
+///
+/// Shared by all login flows (OAuth, device flow, API key).  Handles
+/// creating the provider config entry if it doesn't exist yet, syncing the
+/// readonly profile, saving to disk, and printing the success message.
+fn save_auth_to_config(
+    config_dir: &Path,
+    provider: &dyn OAuthProvider,
+    profile: &str,
+    auth: ProviderAuth,
+) -> Result<(), String> {
     let config_path = config_dir.join("config.toml");
     let mut config_file = AppConfig::load_config_file(&config_path)
         .map_err(|e| format!("Failed to load config file: {}", e))?;
 
-    // Get or create profile
     let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
 
-    // Get or create provider config
     let provider_config = profile_config
         .providers
         .entry(provider.id().to_string())
@@ -222,7 +270,6 @@ async fn handle_oauth_login(
             })
         });
 
-    // Set auth on provider config
     provider_config.set_auth(auth);
 
     // Keep readonly profile in sync when modifying the default profile
@@ -230,7 +277,6 @@ async fn handle_oauth_login(
         config_file.update_readonly();
     }
 
-    // Save config file
     config_file
         .save_to(&config_path)
         .map_err(|e| format!("Failed to save credentials: {}", e))?;
@@ -309,10 +355,21 @@ async fn handle_non_interactive_setup(
         "anthropic" => generate_anthropic_profile(),
         "openai" => generate_openai_profile(),
         "gemini" => generate_gemini_profile(),
+        "github-copilot" => {
+            // GitHub Copilot uses the device flow, not a plain API key.
+            // Non-interactive setup is not supported; direct the user to the interactive flow.
+            return Err(
+                "GitHub Copilot uses the GitHub Device Flow for authentication.\n\
+                 Run 'stakpak auth login --provider github-copilot' (without --api-key) \
+                 to authenticate interactively."
+                    .to_string(),
+            );
+        }
         _ => {
             return Err(format!(
-                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak, amazon-bedrock\n\
-                 For bedrock, use: stakpak auth login --provider amazon-bedrock --region <region>",
+                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak, amazon-bedrock, github-copilot\n\
+                 For bedrock, use: stakpak auth login --provider amazon-bedrock --region <region>\n\
+                 For github-copilot, run without --api-key to use the device flow.",
                 provider_id
             ));
         }
