@@ -462,6 +462,12 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                         inference_config.stakpak(api_key.to_string(), api_endpoint.clone());
                 }
             }
+            ProviderConfig::GitHubCopilot { .. } => {
+                // GitHub Copilot is handled by build_provider_registry_direct via the
+                // OpenAI-compatible CopilotProvider; InferenceConfig doesn't support it
+                // directly.
+                let _ = name;
+            }
             ProviderConfig::Custom { .. } => {
                 // Custom providers are handled by build_provider_registry_direct
                 // InferenceConfig doesn't support custom providers directly
@@ -502,6 +508,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
     use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
+    use stakai::providers::copilot::{CopilotConfig, CopilotProvider};
 
     let mut registry = ProviderRegistry::new();
 
@@ -565,6 +572,17 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 let provider = StakpakProvider::new(stakpak_config)
                     .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
                 registry = registry.register("stakpak", provider);
+            }
+            ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
+                if let Some(access_token) = provider_config.access_token() {
+                    let mut copilot_config = CopilotConfig::new(access_token.to_string());
+                    if let Some(endpoint) = api_endpoint {
+                        copilot_config = copilot_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = CopilotProvider::new(copilot_config)
+                        .map_err(|e| format!("Failed to create GitHub Copilot provider: {}", e))?;
+                    registry = registry.register("github-copilot", provider);
+                }
             }
             ProviderConfig::Custom { api_endpoint, .. } => {
                 // Custom providers are registered as OpenAI-compatible providers.
