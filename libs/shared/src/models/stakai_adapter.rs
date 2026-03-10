@@ -463,10 +463,11 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                 }
             }
             ProviderConfig::GitHubCopilot { .. } => {
-                // GitHub Copilot is handled by build_provider_registry_direct via the
-                // OpenAI-compatible CopilotProvider; InferenceConfig doesn't support it
-                // directly.
-                let _ = name;
+                tracing::debug!(
+                    provider = %name,
+                    "GitHub Copilot provider is not configured via InferenceConfig; \
+                     it will be routed through the provider registry instead"
+                );
             }
             ProviderConfig::Custom { .. } => {
                 // Custom providers are handled by build_provider_registry_direct

@@ -122,7 +122,7 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                 ),
                 (
                     InitialChoice::OwnKeys,
-                    "Use my own Model/API Key (or Claude Pro/Max - Github Copilot Subscription)",
+                    "Use my own Model/API Key (or Claude Pro/Max / GitHub Copilot Subscription)",
                     false,
                 ),
             ],

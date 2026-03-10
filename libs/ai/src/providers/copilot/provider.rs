@@ -17,8 +17,8 @@
 //! ## Required headers on chat requests
 //!
 //! - `Authorization: Bearer <copilot-api-token>`
-//! - `Editor-Version: vscode/1.95.0`
-//! - `Editor-Plugin-Version: copilot-chat/0.22.4`
+//! - `Editor-Version: vscode/1.95.0`  (override via `STAKPAK_COPILOT_EDITOR_VERSION`)
+//! - `Editor-Plugin-Version: copilot-chat/0.22.4`  (override via `STAKPAK_COPILOT_EDITOR_PLUGIN_VERSION`)
 //! - `Openai-Intent: conversation-edits`
 //! - `x-initiator: agent`
 //! - `User-Agent: stakpak/<version>`
@@ -152,7 +152,13 @@ impl CopilotProvider {
     }
 
     /// Build the full set of headers required by the Copilot chat API.
-    async fn build_headers_async(&self, custom_headers: Option<&Headers>) -> Result<Headers> {
+    ///
+    /// Returns `(headers, api_base)` so callers can obtain both from a single
+    /// token acquisition without a second `get_token()` call.
+    async fn build_headers_async(
+        &self,
+        custom_headers: Option<&Headers>,
+    ) -> Result<(Headers, String)> {
         let token = self.get_token().await?;
 
         let mut headers = Headers::new();
@@ -163,8 +169,13 @@ impl CopilotProvider {
             format!("stakpak/{}", env!("CARGO_PKG_VERSION")),
         );
         // Required by the Copilot backend — must be a recognised VSCode version.
-        headers.insert("Editor-Version", EDITOR_VERSION);
-        headers.insert("Editor-Plugin-Version", EDITOR_PLUGIN_VERSION);
+        // Both values can be overridden at runtime via environment variables.
+        let editor_version = std::env::var("STAKPAK_COPILOT_EDITOR_VERSION")
+            .unwrap_or_else(|_| EDITOR_VERSION.to_string());
+        let editor_plugin_version = std::env::var("STAKPAK_COPILOT_EDITOR_PLUGIN_VERSION")
+            .unwrap_or_else(|_| EDITOR_PLUGIN_VERSION.to_string());
+        headers.insert("Editor-Version", editor_version);
+        headers.insert("Editor-Plugin-Version", editor_plugin_version);
         headers.insert("Openai-Intent", "conversation-edits");
         headers.insert("x-initiator", "agent");
 
@@ -172,12 +183,7 @@ impl CopilotProvider {
             headers.merge_with(custom);
         }
 
-        Ok(headers)
-    }
-
-    async fn get_api_base(&self) -> Result<String> {
-        let token = self.get_token().await?;
-        Ok(token.api_base)
+        Ok((headers, token.api_base))
     }
 }
 
@@ -188,17 +194,16 @@ impl Provider for CopilotProvider {
     }
 
     fn build_headers(&self, _custom_headers: Option<&Headers>) -> Headers {
-        // The Copilot token exchange is async, so headers cannot be built synchronously.
-        // return empty headers
-        Headers::new()
+        panic!(
+            "CopilotProvider::build_headers is not supported; \
+             use build_headers_async instead — Copilot token exchange is async"
+        )
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
-        let headers = self
+        let (headers, api_base) = self
             .build_headers_async(request.options.headers.as_ref())
             .await?;
-
-        let api_base = self.get_api_base().await?;
 
         let url = format!("{}/chat/completions", api_base);
         let openai_req = to_openai_request(&request, false);
@@ -225,11 +230,9 @@ impl Provider for CopilotProvider {
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
-        let headers = self
+        let (headers, api_base) = self
             .build_headers_async(request.options.headers.as_ref())
             .await?;
-
-        let api_base = self.get_api_base().await?;
 
         let url = format!("{}/chat/completions", api_base);
         let openai_req = to_openai_request(&request, true);

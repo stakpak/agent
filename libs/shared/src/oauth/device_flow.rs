@@ -59,17 +59,15 @@ pub enum DeviceFlowState {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum PollResponse {
-    Token(DeviceTokenResponse),
-    Error(PollError),
-}
-
-#[derive(Debug, Deserialize)]
-struct PollError {
-    error: String,
+struct PollRaw {
+    // success fields
+    access_token: Option<String>,
+    token_type: Option<String>,
     #[serde(default)]
-    error_description: String,
+    scope: String,
+    // error fields
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 /// Manages a complete RFC 8628 device-flow OAuth session.
@@ -183,16 +181,16 @@ impl DeviceFlow {
                 )));
             }
 
-            let poll_result: PollResponse = response.json().await.map_err(|e| {
+            let poll_raw: PollRaw = response.json().await.map_err(|e| {
                 OAuthError::token_exchange_failed(format!(
                     "Failed to parse token poll response: {}",
                     e
                 ))
             })?;
 
-            match poll_result {
-                PollResponse::Token(token) => return Ok(token),
-                PollResponse::Error(err) => match err.error.as_str() {
+            // Error field takes priority — check it before looking at token fields.
+            if let Some(ref err) = poll_raw.error {
+                match err.as_str() {
                     // Normal — user hasn't approved yet; wait then retry
                     "authorization_pending" => {}
                     // Provider asked us to back off — add 5 s per RFC 8628 §3.5
@@ -232,15 +230,25 @@ impl DeviceFlow {
                     other => {
                         return Err(OAuthError::token_exchange_failed(format!(
                             "Unexpected error from provider: {} — {}",
-                            other, err.error_description
+                            other,
+                            poll_raw.error_description.as_deref().unwrap_or("")
                         )));
                     }
-                },
+                }
+            } else if let Some(access_token) = poll_raw.access_token {
+                let token_type = poll_raw.token_type.unwrap_or_default();
+                return Ok(DeviceTokenResponse {
+                    access_token,
+                    token_type,
+                    scope: poll_raw.scope,
+                });
+            } else {
+                return Err(OAuthError::token_exchange_failed(
+                    "Token poll response contained neither an error nor an access token",
+                ));
             }
 
-            // Sleep *after* processing the response so the first attempt is
-            // made immediately (RFC 8628 only requires the minimum gap
-            // *between* requests, not before the first one).
+            // RFC 8628 only requires the minimum gap between requests.
             tokio::time::sleep(Duration::from_secs(interval_secs)).await;
         }
     }

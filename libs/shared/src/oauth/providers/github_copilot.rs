@@ -12,11 +12,8 @@ use crate::oauth::provider::{AuthMethod, AuthMethodType, OAuthProvider};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 
-/// Sentinel value stored in the `expires` field of a GitHub Copilot OAuth
-/// token.  GitHub's device-flow response contains no expiry for the OAuth
-/// token itself (only the short-lived Copilot API token has an expiry).
-/// Using `i64::MAX` signals "no expiry known"; the `CopilotProvider` handles
-/// re-authentication on 401 responses at the API level.
+/// GitHub's device-flow response contains no expiry for the OAuth token
+/// if the GitHub OAuth token is revoked, the user must re-authenticate manually.
 const GITHUB_TOKEN_NO_EXPIRY: i64 = i64::MAX;
 
 /// GitHub Copilot OAuth provider
@@ -118,13 +115,6 @@ impl OAuthProvider for GitHubCopilotProvider {
         if method_id != "device-flow" {
             return Err(OAuthError::unknown_method(method_id));
         }
-
-        // The GitHub OAuth access token is used directly as a Bearer token for
-        // the Copilot API.  GitHub's device-flow response carries no refresh
-        // token and no expiry for the OAuth token itself (only the short-lived
-        // Copilot API session token has an expiry).
-        // GITHUB_TOKEN_NO_EXPIRY signals "no known expiry"; the CopilotProvider
-        // handles re-authentication on 401 responses at the API level.
         Ok(ProviderAuth::oauth_with_name(
             &token.access_token,
             "", // no refresh token in GitHub device-flow responses
