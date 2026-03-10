@@ -213,6 +213,46 @@ mod tests {
 
     use super::*;
 
+    fn fake_aws_access_key() -> String {
+        ["AKIA", "IOSFODNN7EX23PLE"].concat()
+    }
+
+    fn fake_aws_access_key_alt() -> String {
+        ["AKIA", "IOSFODNN7REALKEY"].concat()
+    }
+
+    fn fake_aws_access_key_example() -> String {
+        ["AKIA", "IOSFODNN7EXAMPLE"].concat()
+    }
+
+    fn fake_github_token() -> String {
+        ["ghp", "_1234567890abcdef", "1234567890abcdef", "12345678"].concat()
+    }
+
+    fn fake_github_token_short() -> String {
+        ["ghp", "_1234567890abcdef"].concat()
+    }
+
+    fn fake_api_key_long() -> String {
+        ["abc123def456", "ghi789jkl012", "mno345pqr678"].concat()
+    }
+
+    fn fake_api_key() -> String {
+        ["abc123def456", "ghi789jklmnop"].concat()
+    }
+
+    fn fake_secret_token() -> String {
+        ["Kx9mP2nQ8rT4", "vW7yZ3cF6hJ1", "lN5sA0bD8eF"].concat()
+    }
+
+    fn fake_secret_token_long() -> String {
+        ["Kx9mP2nQ8rT4", "vW7yZ3cF6hJ1", "lN5sA0bD8eF2gH5jK"].concat()
+    }
+
+    fn fake_password_secret() -> String {
+        ["super", "secret", "password", "123456"].concat()
+    }
+
     #[test]
     fn test_redaction_key_generation() {
         let key1 = generate_redaction_key("test");
@@ -259,8 +299,8 @@ mod tests {
     #[test]
     fn test_redact_secrets_with_api_key() {
         // Use a pattern that matches the generic-api-key rule
-        let input = "export API_KEY=abc123def456ghi789jkl012mno345pqr678";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let input = format!("export API_KEY={}", fake_api_key_long());
+        let result = redact_secrets(&input, None, &HashMap::new(), false);
 
         // Should detect the API key and redact it
         assert!(!result.redaction_map.is_empty());
@@ -272,8 +312,8 @@ mod tests {
 
     #[test]
     fn test_redact_secrets_with_aws_key() {
-        let input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let input = format!("AWS_ACCESS_KEY_ID={}", fake_aws_access_key());
+        let result = redact_secrets(&input, None, &HashMap::new(), false);
 
         // Should detect the AWS access key
         assert!(!result.redaction_map.is_empty());
@@ -284,33 +324,30 @@ mod tests {
 
     #[test]
     fn test_redaction_identical_secrets() {
-        let input = r#"
-        export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE
-        export AWS_ACCESS_KEY_ID_2=AKIAIOSFODNN7EX23PLE
-        "#;
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let aws_key = fake_aws_access_key();
+        let input = format!(
+            "\n        export AWS_ACCESS_KEY_ID={aws_key}\n        export AWS_ACCESS_KEY_ID_2={aws_key}\n        "
+        );
+        let result = redact_secrets(&input, None, &HashMap::new(), false);
 
         assert_eq!(result.redaction_map.len(), 1);
     }
 
     #[test]
     fn test_redaction_identical_secrets_different_contexts() {
-        let input_1 = r#"
-        export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE
-        "#;
-        let input_2 = r#"
-        export SOME_OTHER_SECRET=AKIAIOSFODNN7EX23PLE
-        "#;
-        let result_1 = redact_secrets(input_1, None, &HashMap::new(), false);
-        let result_2 = redact_secrets(input_2, None, &result_1.redaction_map, false);
+        let aws_key = fake_aws_access_key();
+        let input_1 = format!("\n        export AWS_ACCESS_KEY_ID={aws_key}\n        ");
+        let input_2 = format!("\n        export SOME_OTHER_SECRET={aws_key}\n        ");
+        let result_1 = redact_secrets(&input_1, None, &HashMap::new(), false);
+        let result_2 = redact_secrets(&input_2, None, &result_1.redaction_map, false);
 
         assert_eq!(result_1.redaction_map, result_2.redaction_map);
     }
 
     #[test]
     fn test_redact_secrets_with_github_token() {
-        let input = "GITHUB_TOKEN=ghp_1234567890abcdef1234567890abcdef12345678";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let input = format!("GITHUB_TOKEN={}", fake_github_token());
+        let result = redact_secrets(&input, None, &HashMap::new(), false);
 
         // Should detect the GitHub PAT
         assert!(!result.redaction_map.is_empty());
@@ -344,11 +381,11 @@ mod tests {
             // Test the regex directly first
             if let Some(regex_pattern) = &rule.regex {
                 if let Ok(regex) = Regex::new(regex_pattern) {
-                    let test_input = "API_KEY=abc123def456ghi789jkl012mno345pqr678";
+                    let test_input = format!("API_KEY={}", fake_api_key_long());
                     println!("\nTesting regex directly:");
                     println!("  Input: {}", test_input);
 
-                    for mat in regex.find_iter(test_input) {
+                    for mat in regex.find_iter(&test_input) {
                         println!("  Raw match: '{}'", mat.as_str());
                         println!("  Match position: {}-{}", mat.start(), mat.end());
 
@@ -372,16 +409,16 @@ mod tests {
 
             // Test various input patterns
             let test_inputs = vec![
-                "API_KEY=abc123def456ghi789jkl012mno345pqr678",
-                "api_key=RaNd0mH1ghEnTr0pyV4luE567890abcdef",
-                "access_key=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF2gH5jK",
-                "secret_token=1234567890abcdef1234567890abcdef",
-                "password=9k2L8pMvB3nQ7rX1ZdF5GhJwY4AsPo6C",
+                format!("API_KEY={}", fake_api_key_long()),
+                "api_key=RaNd0mH1ghEnTr0pyV4luE567890abcdef".to_string(),
+                format!("access_key={}", fake_secret_token_long()),
+                "secret_token=1234567890abcdef1234567890abcdef".to_string(),
+                "password=9k2L8pMvB3nQ7rX1ZdF5GhJwY4AsPo6C".to_string(),
             ];
 
             for input in test_inputs {
                 println!("\nTesting input: {}", input);
-                let result = redact_secrets(input, None, &HashMap::new(), false);
+                let result = redact_secrets(&input, None, &HashMap::new(), false);
                 println!("  Detected secrets: {}", result.redaction_map.len());
                 if !result.redaction_map.is_empty() {
                     println!("  Redacted: {}", result.redacted_string);
@@ -503,7 +540,7 @@ mod tests {
 
         // Also test with a known working pattern from AWS
         println!("\nTesting AWS pattern that we know works:");
-        let aws_input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
+        let aws_input = format!("AWS_ACCESS_KEY_ID={}", fake_aws_access_key_example());
         println!("Input: {}", aws_input);
 
         let aws_rule = config
@@ -513,7 +550,7 @@ mod tests {
             .unwrap();
         if let Some(aws_regex_pattern) = &aws_rule.regex {
             if let Ok(regex) = Regex::new(aws_regex_pattern) {
-                for mat in regex.find_iter(aws_input) {
+                for mat in regex.find_iter(&aws_input) {
                     println!("AWS Match: '{}'", mat.as_str());
                     if let Some(captures) = regex.captures(mat.as_str()) {
                         for (i, cap) in captures.iter().enumerate() {
@@ -547,17 +584,17 @@ mod tests {
         // Create test patterns that should match the regex structure
         let test_inputs = vec![
             // Pattern: prefix + keyword + separator + value + terminator
-            "myapp_api_key = \"abc123def456ghi789jklmnop\"",
-            "export SECRET_TOKEN=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF",
-            "app.auth.password: 9k2L8pMvB3nQ7rX1ZdF5GhJwY4AsPo6C8mN",
-            "config.access_key=\"RaNd0mH1ghEnTr0pyV4luE567890abcdef\";",
-            "DB_CREDENTIALS=xy9mP2nQ8rT4vW7yZ3cF6hJ1lN5sAdefghij",
+            format!("myapp_api_key = \"{}\"", fake_api_key()),
+            format!("export SECRET_TOKEN={}", fake_secret_token()),
+            "app.auth.password: 9k2L8pMvB3nQ7rX1ZdF5GhJwY4AsPo6C8mN".to_string(),
+            "config.access_key=\"RaNd0mH1ghEnTr0pyV4luE567890abcdef\";".to_string(),
+            "DB_CREDENTIALS=xy9mP2nQ8rT4vW7yZ3cF6hJ1lN5sAdefghij".to_string(),
         ];
 
         for input in test_inputs {
             println!("\nTesting: '{}'", input);
 
-            let matches: Vec<_> = regex.find_iter(input).collect();
+            let matches: Vec<_> = regex.find_iter(&input).collect();
             println!("  Matches found: {}", matches.len());
 
             for (i, mat) in matches.iter().enumerate() {
@@ -573,7 +610,7 @@ mod tests {
 
                                 // Also check if it would be allowed by allowlists
                                 let allowed = should_allow_match(
-                                    input,
+                                    &input,
                                     None,
                                     mat.as_str(),
                                     mat.start(),
@@ -589,7 +626,7 @@ mod tests {
             }
 
             // Test the full redact_secrets function
-            let result = redact_secrets(input, None, &HashMap::new(), false);
+            let result = redact_secrets(&input, None, &HashMap::new(), false);
             println!(
                 "  Full function detected: {} secrets",
                 result.redaction_map.len()
@@ -603,7 +640,7 @@ mod tests {
     #[test]
     fn test_regex_components() {
         // Test individual components of the generic API key regex
-        let test_input = "export API_KEY=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF";
+        let test_input = format!("export API_KEY={}", fake_secret_token());
         println!("Testing input: {}", test_input);
 
         // Test simpler regex patterns step by step
@@ -624,12 +661,12 @@ mod tests {
 
             match Regex::new(pattern) {
                 Ok(regex) => {
-                    if regex.is_match(test_input) {
+                    if regex.is_match(&test_input) {
                         println!("  ✓ MATCHES");
-                        for mat in regex.find_iter(test_input) {
+                        for mat in regex.find_iter(&test_input) {
                             println!("    Full match: '{}'", mat.as_str());
                         }
-                        if let Some(captures) = regex.captures(test_input) {
+                        if let Some(captures) = regex.captures(&test_input) {
                             for (i, cap) in captures.iter().enumerate() {
                                 if let Some(cap) = cap {
                                     println!("    Capture {}: '{}'", i, cap.as_str());
@@ -658,7 +695,7 @@ mod tests {
                 Ok(regex) => {
                     println!("  ✓ Regex compiles successfully");
                     println!("  Testing against: {}", test_input);
-                    if regex.is_match(test_input) {
+                    if regex.is_match(&test_input) {
                         println!("  ✓ MATCHES");
                     } else {
                         println!("  ✗ NO MATCH");
@@ -673,22 +710,18 @@ mod tests {
 
     #[test]
     fn test_comprehensive_secrets_redaction() {
-        let input = r#"
-# Configuration file with various secrets
-export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7REALKEY
-export GITHUB_TOKEN=ghp_1234567890abcdef1234567890abcdef12345678
-export API_KEY=abc123def456ghi789jklmnop
-export SECRET_TOKEN=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF
-export PASSWORD=supersecretpassword123456
-
-# Some normal configuration
-export DEBUG=true
-export PORT=3000
-"#;
+        let aws_key = fake_aws_access_key_alt();
+        let github_token = fake_github_token();
+        let api_key = fake_api_key();
+        let secret_token = fake_secret_token();
+        let password = fake_password_secret();
+        let input = format!(
+            "\n# Configuration file with various secrets\nexport AWS_ACCESS_KEY_ID={aws_key}\nexport GITHUB_TOKEN={github_token}\nexport API_KEY={api_key}\nexport SECRET_TOKEN={secret_token}\nexport PASSWORD={password}\n\n# Some normal configuration\nexport DEBUG=true\nexport PORT=3000\n"
+        );
 
         println!("Original input:\n{}", input);
 
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let result = redact_secrets(&input, None, &HashMap::new(), false);
 
         println!("Redacted output:\n{}", result.redacted_string);
         println!("\nDetected {} secrets:", result.redaction_map.len());
@@ -704,13 +737,9 @@ export PORT=3000
         );
 
         // Verify specific secrets are redacted
-        assert!(!result.redacted_string.contains("AKIAIOSFODNN7REALKEY"));
-        assert!(
-            !result
-                .redacted_string
-                .contains("ghp_1234567890abcdef1234567890abcdef12345678")
-        );
-        assert!(!result.redacted_string.contains("abc123def456ghi789jklmnop"));
+        assert!(!result.redacted_string.contains(&aws_key));
+        assert!(!result.redacted_string.contains(&github_token));
+        assert!(!result.redacted_string.contains(&api_key));
 
         // Verify normal config is preserved
         assert!(result.redacted_string.contains("DEBUG=true"));
@@ -746,13 +775,13 @@ export PORT=3000
         println!("Generic API Key rule keywords: {:?}", generic_rule.keywords);
 
         // Test 1: Input with keywords should be processed
-        let input_with_keywords = "export API_KEY=abc123def456ghi789jklmnop";
-        let result1 = redact_secrets(input_with_keywords, None, &HashMap::new(), false);
+        let input_with_keywords = format!("export API_KEY={}", fake_api_key());
+        let result1 = redact_secrets(&input_with_keywords, None, &HashMap::new(), false);
         println!("\nTest 1 - Input WITH keywords:");
         println!("  Input: {}", input_with_keywords);
         println!(
             "  Keywords present: {}",
-            contains_any_keyword(input_with_keywords, &generic_rule.keywords)
+            contains_any_keyword(&input_with_keywords, &generic_rule.keywords)
         );
         println!("  Secrets detected: {}", result1.redaction_map.len());
 
@@ -773,20 +802,20 @@ export PORT=3000
             .iter()
             .find(|r| r.id == "aws-access-token")
             .unwrap();
-        let aws_input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
-        let result3 = redact_secrets(aws_input, None, &HashMap::new(), false);
+        let aws_input = format!("AWS_ACCESS_KEY_ID={}", fake_aws_access_key_example());
+        let result3 = redact_secrets(&aws_input, None, &HashMap::new(), false);
         println!("\nTest 3 - AWS input:");
         println!("  Input: {}", aws_input);
         println!("  AWS rule keywords: {:?}", aws_rule.keywords);
         println!(
             "  Keywords present: {}",
-            contains_any_keyword(aws_input, &aws_rule.keywords)
+            contains_any_keyword(&aws_input, &aws_rule.keywords)
         );
         println!("  Secrets detected: {}", result3.redaction_map.len());
 
         // Validate that keyword filtering is working
         assert!(
-            contains_any_keyword(input_with_keywords, &generic_rule.keywords),
+            contains_any_keyword(&input_with_keywords, &generic_rule.keywords),
             "API_KEY input should contain generic-api-key keywords"
         );
         assert!(
@@ -794,7 +823,7 @@ export PORT=3000
             "DATABASE_URL input should NOT contain generic-api-key keywords"
         );
         assert!(
-            contains_any_keyword(aws_input, &aws_rule.keywords),
+            contains_any_keyword(&aws_input, &aws_rule.keywords),
             "AWS input should contain AWS rule keywords"
         );
     }
@@ -827,19 +856,19 @@ export PORT=3000
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 2: Input with specific keywords should only process relevant rules
-        let specific_keywords_input = "export GITHUB_TOKEN=ghp_1234567890abcdef";
+        let specific_keywords_input = format!("export GITHUB_TOKEN={}", fake_github_token_short());
         println!("\nTesting input with specific keywords (github):");
         println!("  Input: {}", specific_keywords_input);
 
         let mut matching_rules = Vec::new();
         for rule in &config.rules {
-            if contains_any_keyword(specific_keywords_input, &rule.keywords) {
+            if contains_any_keyword(&specific_keywords_input, &rule.keywords) {
                 matching_rules.push(&rule.id);
             }
         }
         println!("  Rules that would be processed: {:?}", matching_rules);
 
-        let result = redact_secrets(specific_keywords_input, None, &HashMap::new(), false);
+        let result = redact_secrets(&specific_keywords_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 3: Verify that rules without keywords are always processed
@@ -911,21 +940,23 @@ export PORT=3000
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Now test with input that has relevant keywords
-        let secret_input =
-            "export API_KEY=abc123def456ghi789jklmnop SECRET_TOKEN=xyz789uvw012rst345def678";
+        let secret_input = format!(
+            "export API_KEY={} SECRET_TOKEN=xyz789uvw012rst345def678",
+            fake_api_key()
+        );
         println!("\nTesting input WITH secret keywords:");
         println!("  Input: {}", secret_input);
 
         let mut rules_with_keywords = 0;
         for rule in &config.rules {
-            if contains_any_keyword(secret_input, &rule.keywords) {
+            if contains_any_keyword(&secret_input, &rule.keywords) {
                 rules_with_keywords += 1;
             }
         }
 
         println!("  Rules that match keywords: {}", rules_with_keywords);
 
-        let result = redact_secrets(secret_input, None, &HashMap::new(), false);
+        let result = redact_secrets(&secret_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Assertions
@@ -973,11 +1004,11 @@ export PORT=3000
         println!("✅ Test passed");
 
         // Test API keyword - should process generic-api-key rule
-        let api_input = "export API_KEY=abc123def456ghi789jklmnop";
+        let api_input = format!("export API_KEY={}", fake_api_key());
         println!("\n--- API keyword - should process generic-api-key rule ---");
         println!("Input: {}", api_input);
 
-        let api_rules = count_rules_that_would_process(api_input);
+        let api_rules = count_rules_that_would_process(&api_input);
         println!(
             "Rules that would be processed: {} out of {}",
             api_rules.len(),
@@ -985,18 +1016,18 @@ export PORT=3000
         );
         println!("  Rules: {:?}", api_rules);
 
-        let api_secrets = detect_secrets(api_input, None, false);
+        let api_secrets = detect_secrets(&api_input, None, false);
         println!("Secrets detected: {} (expected: 1)", api_secrets.len());
         assert!(!api_secrets.is_empty(), "Should detect at least 1 secrets");
         println!("✅ Test passed");
 
         // Test AWS keyword - should process aws-access-token rule
         // Use a realistic AWS key that matches the pattern [A-Z2-7]{16}
-        let aws_input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7REALKEY";
+        let aws_input = format!("AWS_ACCESS_KEY_ID={}", fake_aws_access_key_alt());
         println!("\n--- AWS keyword - should process aws-access-token rule ---");
         println!("Input: {}", aws_input);
 
-        let aws_rules = count_rules_that_would_process(aws_input);
+        let aws_rules = count_rules_that_would_process(&aws_input);
         println!(
             "Rules that would be processed: {} out of {}",
             aws_rules.len(),
@@ -1004,7 +1035,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", aws_rules);
 
-        let aws_secrets = detect_secrets(aws_input, None, false);
+        let aws_secrets = detect_secrets(&aws_input, None, false);
         println!("Secrets detected: {} (expected: 1)", aws_secrets.len());
 
         // Should detect AWS key
@@ -1017,8 +1048,8 @@ export PORT=3000
         println!("=== DEBUGGING MISSING SECRETS ===");
 
         let test_cases = vec![
-            "SECRET_TOKEN=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF",
-            "PASSWORD=supersecretpassword123456",
+            format!("SECRET_TOKEN={}", fake_secret_token()),
+            format!("PASSWORD={}", fake_password_secret()),
         ];
 
         for input in test_cases {
@@ -1042,9 +1073,9 @@ export PORT=3000
             // Test the fallback regex directly
             if let Ok(regex) = create_simple_api_key_regex() {
                 println!("  Testing fallback regex:");
-                if regex.is_match(input) {
+                if regex.is_match(&input) {
                     println!("    ✓ Fallback regex MATCHES");
-                    for mat in regex.find_iter(input) {
+                    for mat in regex.find_iter(&input) {
                         println!("    Match: '{}'", mat.as_str());
                         if let Some(captures) = regex.captures(mat.as_str()) {
                             for (i, cap) in captures.iter().enumerate() {
@@ -1062,7 +1093,7 @@ export PORT=3000
                             .find(|r| r.id == "generic-api-key")
                             .unwrap();
                         let allowed = should_allow_match(
-                            input,
+                            &input,
                             None,
                             mat.as_str(),
                             mat.start(),
@@ -1083,7 +1114,7 @@ export PORT=3000
             }
 
             // Test full detection
-            let result = redact_secrets(input, None, &HashMap::new(), false);
+            let result = redact_secrets(&input, None, &HashMap::new(), false);
             println!(
                 "  Full detection result: {} secrets",
                 result.redaction_map.len()
@@ -1096,8 +1127,8 @@ export PORT=3000
         println!("=== DEBUGGING ALLOWLIST FILTERING ===");
 
         let test_cases = vec![
-            "SECRET_TOKEN=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF",
-            "PASSWORD=supersecretpassword123456",
+            format!("SECRET_TOKEN={}", fake_secret_token()),
+            format!("PASSWORD={}", fake_password_secret()),
         ];
 
         let config = &*GITLEAKS_CONFIG;
@@ -1111,7 +1142,7 @@ export PORT=3000
             println!("\nAnalyzing: {}", input);
 
             if let Ok(regex) = create_simple_api_key_regex() {
-                for mat in regex.find_iter(input) {
+                for mat in regex.find_iter(&input) {
                     let match_text = mat.as_str();
                     println!("  Match: '{}'", match_text);
 
@@ -1180,10 +1211,10 @@ export PORT=3000
         println!("=== DEBUGGING NEW ALLOWLIST LOGIC ===");
 
         let test_cases = vec![
-            "SECRET_TOKEN=Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA0bD8eF",
-            "PASSWORD=supersecretpassword123456",
-            "PASSWORD=password123", // Should be filtered
-            "API_KEY=example_key",  // Should be filtered
+            format!("SECRET_TOKEN={}", fake_secret_token()),
+            format!("PASSWORD={}", fake_password_secret()),
+            "PASSWORD=password123".to_string(), // Should be filtered
+            "API_KEY=example_key".to_string(),  // Should be filtered
         ];
 
         let config = &*GITLEAKS_CONFIG;
@@ -1197,13 +1228,12 @@ export PORT=3000
             println!("\nTesting: {}", input);
 
             if let Ok(regex) = create_simple_api_key_regex() {
-                for mat in regex.find_iter(input) {
+                for mat in regex.find_iter(&input) {
                     let match_text = mat.as_str();
                     println!("  Match: '{}'", match_text);
 
                     // Parse the KEY=VALUE
-                    if let Some(equals_pos) = match_text.find('=') {
-                        let value = &match_text[equals_pos + 1..];
+                    if let Some((_, value)) = match_text.split_once('=') {
                         println!("    Value: '{}'", value);
 
                         // Test specific stopwords
@@ -1236,7 +1266,7 @@ export PORT=3000
                     if let Some(rule_allowlists) = &generic_rule.allowlists {
                         for (rule_idx, allowlist) in rule_allowlists.iter().enumerate() {
                             let allowed = is_allowed_by_rule_allowlist(
-                                input,
+                                &input,
                                 None,
                                 match_text,
                                 mat.start(),

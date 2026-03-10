@@ -8,7 +8,7 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
-stakpak-shared = { workspace = true }
+stakpak-shared = { workspace = true, features = ["sqlite"] }
 stakai = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

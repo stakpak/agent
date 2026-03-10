@@ -37,7 +37,7 @@ impl GatewayStore {
             db,
             _temp_dir: None,
         };
-        store.configure_pragmas().await?;
+        store.configure_database_pragmas().await?;
         store.run_migrations().await?;
         Ok(store)
     }
@@ -55,32 +55,36 @@ impl GatewayStore {
             db,
             _temp_dir: Some(temp_dir),
         };
-        store.configure_pragmas().await?;
+        store.configure_database_pragmas().await?;
         store.run_migrations().await?;
         Ok(store)
     }
 
-    async fn configure_pragmas(&self) -> Result<()> {
-        let conn = self.connection()?;
-        // journal_mode returns a result row, so use query() instead of execute()
-        conn.query("PRAGMA journal_mode = WAL", ())
+    async fn configure_database_pragmas(&self) -> Result<()> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_database_pragmas(&conn)
             .await
-            .context("failed to set journal_mode")?;
-        conn.query("PRAGMA busy_timeout = 5000", ())
-            .await
-            .context("failed to set busy_timeout")?;
-        conn.query("PRAGMA synchronous = NORMAL", ())
-            .await
-            .context("failed to set synchronous")?;
+            .context("database pragma setup")?;
         Ok(())
     }
 
-    fn connection(&self) -> Result<Connection> {
+    fn connect_raw(&self) -> Result<Connection> {
         self.db.connect().context("failed to connect sqlite db")
     }
 
+    /// Open a fresh connection with per-connection PRAGMAs applied.
+    ///
+    /// See [`stakpak_shared::sqlite::apply_connection_pragmas`] for details.
+    async fn connection(&self) -> Result<Connection> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_connection_pragmas(&conn)
+            .await
+            .context("connection pragma setup")?;
+        Ok(conn)
+    }
+
     pub async fn get(&self, routing_key: &str) -> Result<Option<SessionMapping>> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(
                 "SELECT session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
@@ -108,7 +112,7 @@ impl GatewayStore {
         let channel_meta = serde_json::to_string(&mapping.delivery.channel_meta)
             .context("failed to serialize channel_meta")?;
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute(
             "INSERT OR REPLACE INTO sessions
              (routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at)
@@ -135,7 +139,7 @@ impl GatewayStore {
         &self,
         session_id: &str,
     ) -> Result<Option<(String, SessionMapping)>> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(
                 "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
@@ -168,7 +172,7 @@ impl GatewayStore {
         let channel_meta = serde_json::to_string(&delivery.channel_meta)
             .context("failed to serialize channel_meta")?;
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute(
             "UPDATE sessions
              SET channel = ?,
@@ -193,7 +197,7 @@ impl GatewayStore {
     }
 
     pub async fn list(&self, limit: usize) -> Result<Vec<(String, SessionMapping)>> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(
                 "SELECT routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at
@@ -220,7 +224,7 @@ impl GatewayStore {
     }
 
     pub async fn delete(&self, routing_key: &str) -> Result<()> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute("DELETE FROM sessions WHERE routing_key = ?", [routing_key])
             .await
             .context("failed to delete routing key")?;
@@ -230,7 +234,7 @@ impl GatewayStore {
 
     pub async fn prune(&self, max_age_ms: i64) -> Result<usize> {
         let cutoff = now_millis() - max_age_ms;
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let deleted = conn
             .execute("DELETE FROM sessions WHERE updated_at < ?", [cutoff])
             .await
@@ -250,7 +254,7 @@ impl GatewayStore {
         let expires_at = delivered_at + (ttl_hours as i64 * 60 * 60 * 1000);
         let context_json = serde_json::to_string(context).context("failed to serialize context")?;
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute(
             "INSERT OR REPLACE INTO delivery_context
              (channel, target_key, context, delivered_at, expires_at)
@@ -274,7 +278,7 @@ impl GatewayStore {
         channel: &str,
         target_key: &str,
     ) -> Result<Option<serde_json::Value>> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let mut rows = conn
             .query(
@@ -309,7 +313,7 @@ impl GatewayStore {
     }
 
     pub async fn prune_delivery_contexts(&self) -> Result<usize> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let deleted = conn
             .execute(
                 "DELETE FROM delivery_context WHERE expires_at <= ?",
@@ -322,7 +326,7 @@ impl GatewayStore {
     }
 
     async fn run_migrations(&self) -> Result<()> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS sessions (
@@ -697,5 +701,139 @@ mod tests {
             .await
             .expect("pop valid");
         assert!(valid.is_some());
+    }
+
+    #[tokio::test]
+    async fn connection_applies_busy_timeout() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
+        let conn = store.connection().await.expect("connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout,
+            stakpak_shared::sqlite::BUSY_TIMEOUT.as_millis() as i64,
+            "busy_timeout should match shared constant on every connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_connection_has_default_busy_timeout() {
+        let store = GatewayStore::open_in_memory().await.expect("store");
+        let conn = store.connect_raw().expect("raw connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout, 0,
+            "raw connections should have default busy_timeout=0"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_writes_succeed_with_busy_timeout() {
+        let store = std::sync::Arc::new(GatewayStore::open_in_memory().await.expect("store"));
+
+        // Barrier forces all tasks to start their write simultaneously,
+        // guaranteeing real lock contention.
+        let n: usize = 20;
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(n));
+
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let store = std::sync::Arc::clone(&store);
+            let barrier = std::sync::Arc::clone(&barrier);
+            let now = now_millis();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let key = format!("rk-{}", i);
+                let mapping = SessionMapping {
+                    session_id: format!("s-{}", i),
+                    title: "concurrent".to_string(),
+                    delivery: DeliveryContext {
+                        channel: ChannelId::from("telegram"),
+                        peer_id: PeerId::from("123"),
+                        chat_type: ChatType::Direct,
+                        channel_meta: json!({}),
+                        updated_at: now,
+                    },
+                    created_at: now - 10,
+                };
+                store.set(&key, &mapping).await
+            }));
+        }
+
+        let mut failures = Vec::new();
+        for handle in handles {
+            if let Err(e) = handle.await.expect("task panicked") {
+                failures.push(e.to_string());
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "concurrent writes should not fail with busy_timeout; got: {:?}",
+            failures
+        );
+    }
+
+    /// Deterministic regression test: hold an exclusive transaction on one
+    /// connection while a second connection attempts a write.  With
+    /// busy_timeout the second write waits and succeeds; without it the
+    /// second write immediately fails with SQLITE_BUSY.
+    ///
+    /// Must run on a multi-threaded runtime because SQLite's busy_timeout is a
+    /// blocking wait inside C code — on a single-threaded runtime the commit
+    /// task would never be polled while the writer blocks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn write_waits_for_exclusive_transaction() {
+        let store = std::sync::Arc::new(GatewayStore::open_in_memory().await.expect("store"));
+
+        // Connection A: hold an exclusive lock.
+        let conn_a = store.connection().await.expect("conn_a");
+        conn_a
+            .execute("BEGIN EXCLUSIVE", ())
+            .await
+            .expect("begin exclusive");
+        conn_a
+            .execute(
+                "INSERT INTO sessions (routing_key, session_id, title, channel, peer_id, chat_type, channel_meta, created_at, updated_at) VALUES ('holder', 'sh', 'h', 'c', 'p', '\"Direct\"', '{}', 0, 0)",
+                (),
+            )
+            .await
+            .expect("insert under exclusive lock");
+
+        // Connection B: attempt a write while A holds the lock.
+        let store2 = std::sync::Arc::clone(&store);
+        let writer = tokio::spawn(async move {
+            let mapping = SessionMapping {
+                session_id: "s-contended".to_string(),
+                title: "contended".to_string(),
+                delivery: DeliveryContext {
+                    channel: ChannelId::from("telegram"),
+                    peer_id: PeerId::from("456"),
+                    chat_type: ChatType::Direct,
+                    channel_meta: json!({}),
+                    updated_at: now_millis(),
+                },
+                created_at: now_millis() - 10,
+            };
+            store2.set("rk-contended", &mapping).await
+        });
+
+        // Let B start waiting, then release A.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        conn_a.execute("COMMIT", ()).await.expect("commit");
+
+        let result = writer.await.expect("task panicked");
+        assert!(
+            result.is_ok(),
+            "write should succeed after lock release; got: {:?}",
+            result.err()
+        );
     }
 }

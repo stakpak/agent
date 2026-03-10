@@ -20,7 +20,7 @@ stakpak-mcp-server = { workspace = true }
 stakpak-mcp-client = { workspace = true }
 stakpak-mcp-proxy = { workspace = true }
 stakpak-tui = { workspace = true }
-stakpak-shared = { workspace = true }
+stakpak-shared = { workspace = true, features = ["sqlite"] }
 stakpak-server = { workspace = true }
 stakpak-gateway = { workspace = true }
 stakai = { workspace = true }
