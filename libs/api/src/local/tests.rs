@@ -686,6 +686,7 @@ mod local_storage_tests {
         let now = chrono::Utc::now();
         let conn = storage
             .connection()
+            .await
             .expect("failed to open test connection");
         conn.execute(
             "INSERT INTO checkpoints (id, session_id, status, execution_depth, parent_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -723,6 +724,7 @@ mod local_storage_tests {
         let now = chrono::Utc::now();
         let conn = storage
             .connection()
+            .await
             .expect("failed to open test connection");
         conn.execute(
             "INSERT INTO checkpoints (id, session_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -953,6 +955,7 @@ mod local_storage_tests {
         let storage = create_test_storage().await;
         let conn = storage
             .connection()
+            .await
             .expect("failed to open test connection");
 
         let version = crate::local::migrations::current_version(&conn)
@@ -970,6 +973,7 @@ mod local_storage_tests {
         let storage = create_test_storage().await;
         let conn = storage
             .connection()
+            .await
             .expect("failed to open test connection");
 
         // Should be at version 2
@@ -1702,6 +1706,7 @@ mod local_storage_tests {
         let storage = create_test_storage().await;
         let conn = storage
             .connection()
+            .await
             .expect("failed to open test connection");
 
         // Rollback to version 1 (keeps 1, removes 2)
@@ -1714,5 +1719,172 @@ mod local_storage_tests {
             .await
             .unwrap();
         assert_eq!(version, 1);
+    }
+
+    #[tokio::test]
+    async fn test_connection_applies_busy_timeout() {
+        let storage = create_test_storage().await;
+        let conn = storage
+            .connection()
+            .await
+            .expect("failed to open connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout,
+            stakpak_shared::sqlite::BUSY_TIMEOUT.as_millis() as i64,
+            "busy_timeout should match shared constant on every connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_raw_connection_has_default_busy_timeout() {
+        let storage = create_test_storage().await;
+        let conn = storage
+            .connect_raw()
+            .expect("failed to open raw connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout, 0,
+            "raw connections should have default busy_timeout=0"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_session_creates_succeed_with_busy_timeout() {
+        let storage = std::sync::Arc::new(create_test_storage().await);
+
+        // Barrier forces all tasks to start their write simultaneously,
+        // guaranteeing real lock contention.
+        let n: usize = 20;
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(n));
+
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let storage = std::sync::Arc::clone(&storage);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let request = CreateSessionRequest::new(
+                    format!("concurrent-session-{}", i),
+                    vec![ChatMessage {
+                        role: Role::User,
+                        content: Some(MessageContent::String(format!("msg {}", i))),
+                        ..Default::default()
+                    }],
+                );
+                storage.create_session(&request).await
+            }));
+        }
+
+        let mut failures = Vec::new();
+        for handle in handles {
+            if let Err(e) = handle.await.expect("task panicked") {
+                failures.push(e.to_string());
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "concurrent session creates should not fail with busy_timeout; got: {:?}",
+            failures
+        );
+    }
+
+    /// Deterministic regression test: hold an exclusive transaction on one
+    /// connection while a second connection attempts a write.  With
+    /// busy_timeout the second write waits and succeeds; without it the
+    /// second write immediately fails with SQLITE_BUSY.
+    ///
+    /// Must run on a multi-threaded runtime because SQLite's busy_timeout is a
+    /// blocking wait inside C code — on a single-threaded runtime the commit
+    /// task would never be polled while the writer blocks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_write_waits_for_exclusive_transaction() {
+        let storage = std::sync::Arc::new(create_test_storage().await);
+
+        // Connection A: hold an exclusive lock.
+        let conn_a = storage.connection().await.expect("conn_a");
+        conn_a
+            .execute("BEGIN EXCLUSIVE", ())
+            .await
+            .expect("begin exclusive");
+        conn_a
+            .execute(
+                "INSERT INTO sessions (id, title, visibility, status, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000099', 'holder', 'PRIVATE', 'ACTIVE', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                (),
+            )
+            .await
+            .expect("insert under exclusive lock");
+
+        // Connection B: attempt a session create while A holds the lock.
+        let storage2 = std::sync::Arc::clone(&storage);
+        let writer = tokio::spawn(async move {
+            let request = CreateSessionRequest::new(
+                "contended-session",
+                vec![ChatMessage {
+                    role: Role::User,
+                    content: Some(MessageContent::String("contended".to_string())),
+                    ..Default::default()
+                }],
+            );
+            storage2.create_session(&request).await
+        });
+
+        // Let B start waiting, then release A.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        conn_a.execute("COMMIT", ()).await.expect("commit");
+
+        let result = writer.await.expect("task panicked");
+        assert!(
+            result.is_ok(),
+            "write should succeed after lock release; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Constructor regression test: startup uses a one-off raw connection for
+    /// database-level PRAGMAs before migrations run. That path must also wait
+    /// on transient locks instead of failing immediately with SQLITE_BUSY.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_new_waits_for_startup_database_lock() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("startup-lock.db");
+        let db = libsql::Builder::new_local(&db_path)
+            .build()
+            .await
+            .expect("open lock db");
+        let conn_a = db.connect().expect("conn_a");
+        conn_a
+            .execute("BEGIN EXCLUSIVE", ())
+            .await
+            .expect("begin exclusive");
+        conn_a
+            .execute("CREATE TABLE IF NOT EXISTS startup_lock (id INTEGER)", ())
+            .await
+            .expect("create table under lock");
+
+        let db_path_string = db_path.to_string_lossy().into_owned();
+        let opener =
+            tokio::spawn(
+                async move { crate::local::storage::LocalStorage::new(&db_path_string).await },
+            );
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        conn_a.execute("COMMIT", ()).await.expect("commit");
+
+        let result = opener.await.expect("task panicked");
+        assert!(
+            result.is_ok(),
+            "LocalStorage::new should wait for startup lock release; got: {:?}",
+            result.err()
+        );
     }
 }

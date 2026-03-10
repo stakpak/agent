@@ -56,6 +56,7 @@ impl LocalStorage {
             db,
             _temp_dir: temp_dir,
         };
+        storage.configure_database_pragmas().await?;
         storage.init_schema().await?;
 
         Ok(storage)
@@ -73,8 +74,21 @@ impl LocalStorage {
             db,
             _temp_dir: None,
         };
+        storage.configure_database_pragmas().await?;
         storage.init_schema().await?;
         Ok(storage)
+    }
+
+    /// Set database-level PRAGMAs that persist across connections.
+    ///
+    /// Per-connection PRAGMAs (busy_timeout, synchronous) are applied in
+    /// `connection()` on every fresh connection instead.
+    async fn configure_database_pragmas(&self) -> Result<(), StorageError> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_database_pragmas(&conn)
+            .await
+            .map_err(|e| StorageError::Connection(e.to_string()))?;
+        Ok(())
     }
 
     /// Create from an existing connection.
@@ -90,17 +104,28 @@ impl LocalStorage {
 
     /// Initialize database schema by running migrations
     async fn init_schema(&self) -> Result<(), StorageError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         super::migrations::run_migrations(&conn)
             .await
             .map_err(StorageError::Internal)
     }
 
-    /// Open a fresh connection for a single storage operation.
-    pub(crate) fn connection(&self) -> Result<Connection, StorageError> {
+    /// Open a raw connection without per-connection PRAGMAs.
+    pub(crate) fn connect_raw(&self) -> Result<Connection, StorageError> {
         self.db
             .connect()
             .map_err(|e| StorageError::Connection(format!("Failed to connect to database: {}", e)))
+    }
+
+    /// Open a fresh connection with per-connection PRAGMAs applied.
+    ///
+    /// See [`stakpak_shared::sqlite::apply_connection_pragmas`] for details.
+    pub(crate) async fn connection(&self) -> Result<Connection, StorageError> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_connection_pragmas(&conn)
+            .await
+            .map_err(|e| StorageError::Connection(e.to_string()))?;
+        Ok(conn)
     }
 
     /// Get the latest checkpoint for a session using a caller-provided connection.
@@ -190,7 +215,7 @@ impl SessionStorage for LocalStorage {
             limit, offset
         ));
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = if let Some(search) = &query.search {
             conn.query(&sql, [search.as_str()])
                 .await
@@ -246,7 +271,7 @@ impl SessionStorage for LocalStorage {
     }
 
     async fn get_session(&self, session_id: Uuid) -> Result<Session, StorageError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(
                 "SELECT id, title, visibility, COALESCE(status, 'ACTIVE') as status, cwd, created_at, updated_at FROM sessions WHERE id = ?",
@@ -308,7 +333,7 @@ impl SessionStorage for LocalStorage {
         let session_id = Uuid::new_v4();
         let checkpoint_id = Uuid::new_v4();
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         // Create session
         conn.execute(
@@ -365,7 +390,7 @@ impl SessionStorage for LocalStorage {
         let now = Utc::now();
 
         {
-            let conn = self.connection()?;
+            let conn = self.connection().await?;
 
             // Update fields individually since libsql doesn't support dynamic params easily
             if let Some(title) = &request.title {
@@ -396,7 +421,7 @@ impl SessionStorage for LocalStorage {
     async fn delete_session(&self, session_id: Uuid) -> Result<(), StorageError> {
         // Mark as deleted instead of actually deleting
         let now = Utc::now();
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         conn.execute(
             "UPDATE sessions SET status = 'DELETED', updated_at = ? WHERE id = ?",
             (now.to_rfc3339(), session_id.to_string()),
@@ -420,7 +445,7 @@ impl SessionStorage for LocalStorage {
             limit, offset
         );
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(&sql, [session_id.to_string()])
             .await
@@ -467,7 +492,7 @@ impl SessionStorage for LocalStorage {
     }
 
     async fn get_checkpoint(&self, checkpoint_id: Uuid) -> Result<Checkpoint, StorageError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let mut rows = conn
             .query(
                 "SELECT id, session_id, parent_id, state, created_at, updated_at FROM checkpoints WHERE id = ?",
@@ -526,7 +551,7 @@ impl SessionStorage for LocalStorage {
         let state_json = serde_json::to_string(&request.state)
             .map_err(|e| StorageError::Internal(e.to_string()))?;
 
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute(
             "INSERT INTO checkpoints (id, session_id, parent_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",

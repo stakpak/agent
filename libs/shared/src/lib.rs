@@ -17,3 +17,6 @@ pub mod telemetry;
 pub mod terminal_theme;
 pub mod tls_client;
 pub mod utils;
+
+#[cfg(feature = "sqlite")]
+pub mod sqlite;

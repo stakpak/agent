@@ -140,36 +140,40 @@ impl ScheduleDb {
             .map_err(|e| DbError::Connection(format!("Failed to open database: {}", e)))?;
 
         let storage = Self { db };
-        storage.configure_pragmas().await?;
+        storage.configure_database_pragmas().await?;
         storage.init_schema().await?;
 
         Ok(storage)
     }
 
-    async fn configure_pragmas(&self) -> Result<(), DbError> {
-        let conn = self.connection()?;
-        // journal_mode returns a result row, so use query() instead of execute()
-        conn.query("PRAGMA journal_mode = WAL", ())
+    async fn configure_database_pragmas(&self) -> Result<(), DbError> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_database_pragmas(&conn)
             .await
-            .map_err(|e| DbError::Query(format!("Failed to set journal_mode: {}", e)))?;
-        conn.query("PRAGMA busy_timeout = 5000", ())
-            .await
-            .map_err(|e| DbError::Query(format!("Failed to set busy_timeout: {}", e)))?;
-        conn.query("PRAGMA synchronous = NORMAL", ())
-            .await
-            .map_err(|e| DbError::Query(format!("Failed to set synchronous: {}", e)))?;
+            .map_err(|e| DbError::Query(e.to_string()))?;
         Ok(())
     }
 
-    fn connection(&self) -> Result<Connection, DbError> {
+    fn connect_raw(&self) -> Result<Connection, DbError> {
         self.db
             .connect()
             .map_err(|e| DbError::Connection(format!("Failed to connect to database: {}", e)))
     }
 
+    /// Open a fresh connection with per-connection PRAGMAs applied.
+    ///
+    /// See [`stakpak_shared::sqlite::apply_connection_pragmas`] for details.
+    async fn connection(&self) -> Result<Connection, DbError> {
+        let conn = self.connect_raw()?;
+        stakpak_shared::sqlite::apply_connection_pragmas(&conn)
+            .await
+            .map_err(|e| DbError::Query(e.to_string()))?;
+        Ok(conn)
+    }
+
     /// Initialize database schema.
     async fn init_schema(&self) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         // Create trigger_runs table
         conn.execute(
@@ -263,7 +267,7 @@ impl ScheduleDb {
 
     /// Check if a schedule already has a run in "running" status.
     pub async fn has_running_run(&self, schedule_name: &str) -> Result<bool, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let status = RunStatus::Running.to_string();
 
         let mut rows = conn
@@ -286,7 +290,7 @@ impl ScheduleDb {
 
     /// Insert a new schedule run, returning the run ID.
     pub async fn insert_run(&self, schedule_name: &str) -> Result<i64, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
         let status = RunStatus::Running.to_string();
 
@@ -320,7 +324,7 @@ impl ScheduleDb {
         stderr: &str,
         timed_out: bool,
     ) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute(
             "UPDATE trigger_runs SET check_exit_code = ?, check_stdout = ?, check_stderr = ?, check_timed_out = ? WHERE id = ?",
@@ -338,7 +342,7 @@ impl ScheduleDb {
         run_id: i64,
         session_id: &str,
     ) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute(
             "UPDATE trigger_runs SET agent_woken = 1, interactive_delegated = 0, agent_session_id = ? WHERE id = ?",
@@ -357,7 +361,7 @@ impl ScheduleDb {
         session_id: &str,
         note: &str,
     ) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute(
             "UPDATE trigger_runs SET agent_woken = 1, interactive_delegated = 1, agent_session_id = ?, error_message = ? WHERE id = ?",
@@ -375,7 +379,7 @@ impl ScheduleDb {
         run_id: i64,
         checkpoint_id: &str,
     ) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute(
             "UPDATE trigger_runs SET agent_last_checkpoint_id = ? WHERE id = ?",
@@ -396,7 +400,7 @@ impl ScheduleDb {
         agent_stdout: Option<&str>,
         agent_stderr: Option<&str>,
     ) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
         let status_str = status.to_string();
 
@@ -412,7 +416,7 @@ impl ScheduleDb {
 
     /// Get a run by ID.
     pub async fn get_run(&self, run_id: i64) -> Result<ScheduleRun, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let mut rows = conn
             .query(
@@ -434,7 +438,7 @@ impl ScheduleDb {
 
     /// List runs with optional filters.
     pub async fn list_runs(&self, filter: &ListRunsFilter) -> Result<Vec<ScheduleRun>, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let mut sql =
             "SELECT id, trigger_name, started_at, finished_at, check_exit_code, check_stdout,
@@ -487,7 +491,7 @@ impl ScheduleDb {
 
     /// Delete runs older than the specified number of days.
     pub async fn prune_runs(&self, older_than_days: u32) -> Result<u64, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let result = conn
             .execute(
@@ -503,7 +507,7 @@ impl ScheduleDb {
     /// Mark all stale "running" runs as failed.
     /// Runs are considered stale if they've been running and the autopilot service is no longer active.
     pub async fn clean_stale_runs(&self) -> Result<u64, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
 
         let result = conn
@@ -519,7 +523,7 @@ impl ScheduleDb {
 
     /// Set autopilot state (upsert).
     pub async fn set_autopilot_state(&self, pid: i64) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -534,7 +538,7 @@ impl ScheduleDb {
 
     /// Update autopilot heartbeat.
     pub async fn update_heartbeat(&self) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -549,7 +553,7 @@ impl ScheduleDb {
 
     /// Get autopilot state.
     pub async fn get_autopilot_state(&self) -> Result<Option<SchedulerState>, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let mut rows = conn
             .query(
@@ -576,7 +580,7 @@ impl ScheduleDb {
 
     /// Clear autopilot state.
     pub async fn clear_autopilot_state(&self) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         conn.execute("DELETE FROM autopilot_state WHERE id = 1", ())
             .await
@@ -587,7 +591,7 @@ impl ScheduleDb {
 
     /// Insert a pending schedule request (for manual schedule fires).
     pub async fn insert_pending_schedule(&self, schedule_name: &str) -> Result<i64, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -613,7 +617,7 @@ impl ScheduleDb {
 
     /// Request a scheduler config reload using the pending_triggers signal queue.
     pub async fn request_config_reload(&self) -> Result<(), DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -632,7 +636,7 @@ impl ScheduleDb {
 
     /// Get and delete all pending schedules (atomic pop).
     pub async fn pop_pending_schedules(&self) -> Result<Vec<PendingSchedule>, DbError> {
-        let conn = self.connection()?;
+        let conn = self.connection().await?;
 
         let mut rows = conn
             .query(
@@ -734,11 +738,19 @@ mod tests {
     use tempfile::{TempDir, tempdir};
 
     async fn create_test_db() -> (ScheduleDb, TempDir) {
-        let dir = tempdir().expect("Failed to create temp dir");
+        let dir = match tempdir() {
+            Ok(dir) => dir,
+            Err(e) => panic!("Failed to create temp dir: {e}"),
+        };
         let db_path = dir.path().join("test.db");
-        let db = ScheduleDb::new(db_path.to_str().expect("Invalid path"))
-            .await
-            .expect("Failed to create test db");
+        let db_path_str = match db_path.to_str() {
+            Some(path) => path,
+            None => panic!("Invalid path: {}", db_path.display()),
+        };
+        let db = match ScheduleDb::new(db_path_str).await {
+            Ok(db) => db,
+            Err(e) => panic!("Failed to create test db: {e}"),
+        };
         (db, dir)
     }
 
@@ -752,7 +764,7 @@ mod tests {
             .expect("Failed to create db");
 
         // Verify tables exist by querying them
-        let conn = db.connection().expect("Failed to open connection");
+        let conn = db.connection().await.expect("Failed to open connection");
 
         let mut rows = conn
             .query(
@@ -1081,7 +1093,7 @@ mod tests {
     #[tokio::test]
     async fn test_pending_schedules_tolerates_malformed_created_at() {
         let (db, _dir) = create_test_db().await;
-        let conn = db.connection().expect("Failed to open connection");
+        let conn = db.connection().await.expect("Failed to open connection");
 
         conn.execute(
             "INSERT INTO pending_triggers (trigger_name, created_at) VALUES (?, ?)",
@@ -1093,5 +1105,120 @@ mod tests {
         let pending = db.pop_pending_schedules().await.expect("Pop failed");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].schedule_name, "schedule-a");
+    }
+
+    #[tokio::test]
+    async fn test_connection_applies_busy_timeout() {
+        let (db, _dir) = create_test_db().await;
+        let conn = db.connection().await.expect("Failed to open connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout,
+            stakpak_shared::sqlite::BUSY_TIMEOUT.as_millis() as i64,
+            "busy_timeout should match shared constant on every connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_raw_connection_has_default_busy_timeout() {
+        let (db, _dir) = create_test_db().await;
+        let conn = db.connect_raw().expect("Failed to open raw connection");
+
+        let timeout = stakpak_shared::sqlite::read_busy_timeout_millis(&conn)
+            .await
+            .expect("read_busy_timeout_millis failed");
+
+        assert_eq!(
+            timeout, 0,
+            "raw connections should have default busy_timeout=0 (proving connection() adds the PRAGMA)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_writes_succeed_with_busy_timeout() {
+        let (db, _dir) = create_test_db().await;
+        let db = std::sync::Arc::new(db);
+
+        // Use a barrier so all 20 tasks start their write at the same instant,
+        // forcing real lock contention.  Without busy_timeout the losers would
+        // immediately get SQLITE_BUSY.
+        let n: usize = 20;
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(n));
+
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = std::sync::Arc::clone(&db);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let name = format!("concurrent-schedule-{}", i);
+                db.insert_run(&name).await
+            }));
+        }
+
+        let mut successes = 0;
+        let mut failures = Vec::new();
+        for handle in handles {
+            match handle.await.expect("task panicked") {
+                Ok(_) => successes += 1,
+                Err(e) => failures.push(e.to_string()),
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "concurrent writes should not fail with busy_timeout set; got {} failures: {:?}",
+            failures.len(),
+            failures
+        );
+        assert_eq!(successes, n);
+    }
+
+    /// Deterministic regression test: hold an exclusive transaction on one
+    /// connection while a second connection attempts a write.  With
+    /// busy_timeout the second write waits and succeeds after the first
+    /// commits; without it, the second write would immediately fail.
+    ///
+    /// Must run on a multi-threaded runtime because SQLite's busy_timeout is a
+    /// blocking wait inside C code — on a single-threaded runtime the commit
+    /// task would never be polled while the writer blocks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_write_waits_for_exclusive_transaction() {
+        let (db, _dir) = create_test_db().await;
+
+        // Connection A: begin an exclusive transaction (holds the write lock).
+        let conn_a = db.connection().await.expect("conn_a");
+        conn_a
+            .execute("BEGIN EXCLUSIVE", ())
+            .await
+            .expect("begin exclusive");
+        conn_a
+            .execute(
+                "INSERT INTO pending_triggers (trigger_name) VALUES ('holder')",
+                (),
+            )
+            .await
+            .expect("insert under exclusive lock");
+
+        // Connection B: attempt a write in the background while A holds the lock.
+        let db2 = std::sync::Arc::new(db);
+        let db2_clone = std::sync::Arc::clone(&db2);
+        let writer = tokio::spawn(async move { db2_clone.insert_run("contended-schedule").await });
+
+        // Give B a moment to start waiting, then release A's lock.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        conn_a.execute("COMMIT", ()).await.expect("commit");
+
+        // B should succeed (it waited via busy_timeout instead of failing).
+        let result = writer.await.expect("task panicked");
+        assert!(
+            result.is_ok(),
+            "write should succeed after lock release; got: {:?}",
+            result.err()
+        );
     }
 }

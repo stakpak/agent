@@ -10,6 +10,7 @@ homepage = { workspace = true }
 [features]
 default = []
 bedrock = ["stakai/bedrock"]
+sqlite = ["dep:libsql"]
 
 [dependencies]
 tracing = { workspace = true }
@@ -43,6 +44,7 @@ stakai = { workspace = true }
 reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.8.0"
 itertools = "0.14.0"
+libsql = { workspace = true, optional = true }
 # OAuth dependencies
 sha2 = "0.10"
 base64 = "0.22"

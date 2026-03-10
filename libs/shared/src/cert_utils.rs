@@ -675,9 +675,7 @@ mod tests {
             .create_server_config()
             .expect("Failed to create server config");
 
-        // Verify server config is created successfully
-        // The fact that it doesn't panic/error is the main test
-        assert!(true, "Server config created successfully");
+        // The fact that creation succeeds without returning an error is the assertion.
     }
 
     #[tokio::test]
@@ -689,9 +687,7 @@ mod tests {
             .create_client_config()
             .expect("Failed to create client config");
 
-        // Verify client config is created successfully
-        // The fact that it doesn't panic/error is the main test
-        assert!(true, "Client config created successfully");
+        // The fact that creation succeeds without returning an error is the assertion.
     }
 
     #[tokio::test]
