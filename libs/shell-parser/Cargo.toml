@@ -9,6 +9,7 @@ homepage = { workspace = true }
 
 [dependencies]
 globset = { workspace = true }
+log = { workspace = true }
 regex = { workspace = true }
 tree-sitter = "0.26.6"
 tree-sitter-bash = "0.25.1"

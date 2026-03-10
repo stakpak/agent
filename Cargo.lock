@@ -5892,6 +5892,7 @@ name = "shell-parser"
 version = "0.3.66"
 dependencies = [
  "globset",
+ "log",
  "regex",
  "tree-sitter",
  "tree-sitter-bash",

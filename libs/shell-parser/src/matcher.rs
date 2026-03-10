@@ -40,7 +40,15 @@ pub fn matches_pattern(pattern: &str, arg: &str) -> bool {
                 guard.regex.insert(re_pattern.to_string(), re);
                 result
             }
-            Err(_) => false,
+            Err(e) => {
+                log::warn!(
+                    "Invalid regex pattern {:?} in tool approval rule: {}. \
+                     The rule will be ignored; fix the pattern to have it take effect.",
+                    re_pattern,
+                    e
+                );
+                false
+            }
         }
     } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
         let mut guard = cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -54,7 +62,15 @@ pub fn matches_pattern(pattern: &str, arg: &str) -> bool {
                 guard.glob.insert(pattern.to_string(), matcher);
                 result
             }
-            Err(_) => false,
+            Err(e) => {
+                log::warn!(
+                    "Invalid glob pattern {:?} in tool approval rule: {}. \
+                     The rule will be ignored; fix the pattern to have it take effect.",
+                    pattern,
+                    e
+                );
+                false
+            }
         }
     } else {
         pattern == arg
