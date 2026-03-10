@@ -727,6 +727,11 @@ fn handle_input_submitted(
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
 
+        // Scan for secrets typed character-by-character
+        let final_input = state
+            .secret_manager
+            .redact_and_store_secrets(&final_input, None);
+
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 

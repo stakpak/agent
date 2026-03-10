@@ -399,7 +399,8 @@ pub fn handle_ask_user_custom_input_paste(state: &mut AppState, text: &str) {
 
     let current_q = &state.ask_user_questions[state.ask_user_current_tab];
     if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
-        state.ask_user_custom_input.push_str(text);
+        let redacted = state.secret_manager.redact_and_store_secrets(text, None);
+        state.ask_user_custom_input.push_str(&redacted);
         refresh_ask_user_block(state);
     }
 }
@@ -469,6 +470,12 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
         .ask_user_questions
         .iter()
         .filter_map(|q| state.ask_user_answers.get(&q.label).cloned())
+        .map(|mut answer| {
+            answer.answer = state
+                .secret_manager
+                .redact_and_store_secrets(&answer.answer, None);
+            answer
+        })
         .collect();
 
     let result = AskUserResult {
