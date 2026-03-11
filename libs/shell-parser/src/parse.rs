@@ -47,10 +47,20 @@ pub struct ParsedCommand {
     pub offset: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseError {
+    ParserUnavailable,
+    NestingLimitExceeded,
+}
+
 /// Maximum nesting depth for recursive `-c` script expansion.
 const MAX_SCRIPT_DEPTH: usize = 5;
 
 pub fn parse(input: &str) -> Vec<ParsedCommand> {
+    parse_with_status(input).ok().unwrap_or_default()
+}
+
+pub fn parse_with_status(input: &str) -> Result<Vec<ParsedCommand>, ParseError> {
     let mut all_commands = Vec::new();
     // Each entry is (script, depth) where depth tracks how many levels of
     // `-c` nesting we have descended through.
@@ -61,7 +71,7 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
         .set_language(&tree_sitter_bash::LANGUAGE.into())
         .is_err()
     {
-        return all_commands;
+        return Err(ParseError::ParserUnavailable);
     }
 
     while let Some((script, depth)) = scripts.pop() {
@@ -81,7 +91,7 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
                     if depth < MAX_SCRIPT_DEPTH {
                         scripts.push((inner, depth + 1));
                     } else {
-                        return Vec::new();
+                        return Err(ParseError::NestingLimitExceeded);
                     }
                 }
 
@@ -97,7 +107,7 @@ pub fn parse(input: &str) -> Vec<ParsedCommand> {
         }
     }
 
-    all_commands
+    Ok(all_commands)
 }
 
 fn extract_command_from_node(source: &str, node: &Node) -> ParsedCommand {
@@ -187,7 +197,11 @@ fn unescape(content: &str, quote: char) -> String {
             && let Some(&next) = chars.peek()
             && (next == quote || next == '\\')
         {
-            result.push(chars.next().unwrap());
+            if let Some(escaped) = chars.next() {
+                result.push(escaped);
+            } else {
+                result.push(c);
+            }
         } else {
             result.push(c);
         }
@@ -211,6 +225,9 @@ fn extract_nested_script(command: &ParsedCommand) -> Option<String> {
         let mut iter = command.args.iter();
         while let Some(arg) = iter.next() {
             if arg.starts_with('-') {
+                if arg == "-S" || arg == "--split-string" {
+                    return iter.next().cloned();
+                }
                 if ENV_VALUED_ARGS.contains(&arg.as_str()) {
                     iter.next(); // skip the flag's value
                 }
@@ -674,7 +691,7 @@ mod tests {
             ],
             offset: 0,
         };
-        assert_eq!(extract_nested_script(&cmd), Some("echo split".to_string()));
+        assert_eq!(extract_nested_script(&cmd), Some("VAR=val cmd".to_string()));
     }
 
     #[test]
@@ -1009,7 +1026,7 @@ mod tests {
     #[test]
     fn parse_command_with_inline_comment() {
         let commands = parse("echo hello # this is a comment");
-        assert!(commands.len() >= 1);
+        assert!(!commands.is_empty());
         assert_eq!(commands[0].name.as_deref(), Some("echo"));
     }
 
@@ -1168,5 +1185,33 @@ mod tests {
             names.contains(&"echo"),
             "nested echo should be extracted after xargs -P 4 -I {{}}"
         );
+    }
+
+    #[test]
+    fn parse_env_split_string_then_shell() {
+        let commands = parse(r#"env -S 'bash -c "echo hi"'"#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"env"));
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"echo"));
+    }
+
+    #[test]
+    fn parse_env_split_string_nested_destructive_command() {
+        let commands = parse(r#"env -S 'bash -c "rm -rf /tmp/test"'"#);
+        let names: Vec<_> = commands.iter().filter_map(|c| c.name.as_deref()).collect();
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"rm"));
+    }
+
+    #[test]
+    fn parse_with_status_reports_nesting_limit_exceeded() {
+        let mut script = "echo deeply nested".to_string();
+        for _ in 0..=MAX_SCRIPT_DEPTH {
+            script = format!("sh -c {:?}", script);
+        }
+
+        let result = parse_with_status(&script);
+        assert_eq!(result, Err(ParseError::NestingLimitExceeded));
     }
 }

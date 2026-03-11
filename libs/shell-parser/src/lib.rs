@@ -4,6 +4,8 @@
 
 mod matcher;
 mod parse;
+mod resolver;
 
 pub use matcher::matches_pattern;
-pub use parse::{ParsedCommand, parse};
+pub use parse::{ParseError, ParsedCommand, parse, parse_with_status};
+pub use resolver::resolve_hierarchical_policy;
