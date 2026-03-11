@@ -391,60 +391,43 @@ fn resolve_shell_scope(
 ) -> Option<AutoApprovePolicy> {
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
     let command_str = args.get("command")?.as_str()?;
+    let tool_name = strip_tool_name(&tool_call.function.name);
+    let fallback_scopes = if tool_name == "run_command_task" {
+        vec!["run_command"]
+    } else {
+        Vec::new()
+    };
 
-    let parsed_commands = shell_parser::parse(command_str);
-    if parsed_commands.is_empty() {
-        return None;
+    match shell_parser::resolve_hierarchical_policy(
+        command_str,
+        tool_name,
+        &fallback_scopes,
+        rules,
+        default.clone(),
+    ) {
+        Ok(action) => action,
+        Err(_) => Some(
+            conservative_shell_parse_fallback(tool_name, rules, default)
+                .max(AutoApprovePolicy::Prompt),
+        ),
     }
-
-    parsed_commands
-        .iter()
-        .map(|cmd| resolve_command_policy(cmd, rules, default))
-        .max()
 }
 
-/// Resolve the approval policy for a single parsed command against scope rules.
-///
-/// 1. Base policy: `rules["run_command::<name>"]` -> `rules["run_command"]` -> `default`
-/// 2. Argument-level: for each rule key `"run_command::<name>::<pattern>"`,
-///    if any arg matches the pattern, include the policy as a candidate.
-/// 3. Aggregate: most restrictive wins (Never > Prompt > Auto).
-fn resolve_command_policy(
-    cmd: &shell_parser::ParsedCommand,
+fn conservative_shell_parse_fallback(
+    tool_scope: &str,
     rules: &HashMap<String, AutoApprovePolicy>,
     default: &AutoApprovePolicy,
 ) -> AutoApprovePolicy {
-    let Some(name) = &cmd.name else {
-        // Variable-expansion command ($CMD) — only the global fallback applies.
-        return rules
-            .get("run_command")
-            .cloned()
-            .unwrap_or_else(|| default.clone());
-    };
-
-    // 1. Base policy: command-level -> global -> default
-    let command_key = format!("run_command::{name}");
-    let base = rules
-        .get(&command_key)
-        .or_else(|| rules.get("run_command"))
+    rules
+        .get(tool_scope)
         .cloned()
-        .unwrap_or_else(|| default.clone());
-
-    // 2. Argument-level matches
-    let arg_prefix = format!("run_command::{name}::");
-    let arg_policies = rules.iter().filter_map(|(key, policy)| {
-        let pattern = key.strip_prefix(&arg_prefix)?;
-        let matched = cmd
-            .args
-            .iter()
-            .any(|arg| shell_parser::matches_pattern(pattern, arg));
-        matched.then_some(policy.clone())
-    });
-
-    // 3. Aggregate: base + matched arg policies, take the most restrictive
-    std::iter::once(base)
-        .chain(arg_policies)
-        .max()
+        .or_else(|| {
+            if tool_scope == "run_command_task" {
+                rules.get("run_command").cloned()
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| default.clone())
 }
 
@@ -509,7 +492,7 @@ mod tests {
         assert_eq!(config.tools.get("read"), Some(&AutoApprovePolicy::Auto)); // Profile wins
         assert_eq!(config.tools.get("write"), Some(&AutoApprovePolicy::Auto)); // Profile default
         assert_eq!(config.tools.get("delete"), Some(&AutoApprovePolicy::Auto)); // Session-only
-        assert_eq!(config.enabled, false); // Session override
+        assert!(!config.enabled); // Session override
     }
 
     #[test]
@@ -588,16 +571,20 @@ mod tests {
 
     use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
 
-    fn make_run_command_tool_call(command: &str) -> ToolCall {
+    fn make_tool_call(tool_name: &str, command: &str) -> ToolCall {
         ToolCall {
             id: "tc-1".to_string(),
             r#type: "function".to_string(),
             function: FunctionCall {
-                name: "run_command".to_string(),
+                name: tool_name.to_string(),
                 arguments: serde_json::json!({"command": command}).to_string(),
             },
             metadata: None,
         }
+    }
+
+    fn make_run_command_tool_call(command: &str) -> ToolCall {
+        make_tool_call("run_command", command)
     }
 
     #[test]
@@ -673,6 +660,52 @@ mod tests {
         let mut rules = HashMap::new();
         rules.insert("run_command::rm".to_string(), AutoApprovePolicy::Never);
         let tc = make_run_command_tool_call("sh -c 'rm -rf /tmp/old'");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Auto);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn resolve_shell_scope_argument_rule_can_relax_default_when_more_specific() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::git::status".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        let tc = make_run_command_tool_call("git status");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_run_command_task_rule_overrides_shared_scope() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command_task".to_string(), AutoApprovePolicy::Never);
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        let tc = make_tool_call("run_command_task", "git status");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn resolve_shell_scope_run_command_task_can_fallback_to_shared_scope() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        let tc = make_tool_call("run_command_task", "git status");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_parse_error_fails_closed() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command_task".to_string(), AutoApprovePolicy::Never);
+
+        let mut command = "echo deeply nested".to_string();
+        for _ in 0..=6 {
+            command = format!("sh -c '{}'", command.replace('\'', "'\\''"));
+        }
+
+        let tc = make_tool_call("run_command_task", &command);
         let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Auto);
         assert_eq!(result, Some(AutoApprovePolicy::Never));
     }

@@ -126,9 +126,17 @@ Level-3 scope keys support three matching modes against the command's argument l
 
 A level-3 rule matches if **any** argument in the command's arg list satisfies the pattern. Multiple level-3 rules for the same command are stored as separate HashMap keys and are each looked up independently.
 
-### 4.3 Multi-Command Aggregation
+### 4.3 Specificity and Aggregation
 
-Pipelines, command lists (`&&`, `||`, `;`), and nested scripts each produce multiple `ParsedCommand` entries. Each command is resolved independently, and the **most restrictive** action across all commands becomes the final decision.
+Resolution happens in two stages:
+
+1. **Within one scope** (`run_command`, `run_command_task`, etc.), the **most specific** matching rule wins:
+   - `scope::<command>::<argument-pattern>`
+   - `scope::<command>`
+   - `scope`
+2. **Across multiple parsed commands** in a pipeline / list / nested script, the **most restrictive** action wins.
+
+This allows rules like `run_command::git::status = approve` to relax the default for that specific command while still ensuring that a later `rm`/`push` in the same shell string escalates the final decision.
 
 Restrictiveness order (implemented via `Ord` on the enum with explicit discriminants):
 
@@ -158,9 +166,11 @@ pub fn action_for(&self, tool_name: &str) -> ToolApprovalAction
 pub fn action_for(&self, tool_name: &str, tool_arguments: &serde_json::Value) -> ToolApprovalAction
 ```
 
-When `tool_name` is `"run_command"` / `"run_command_task"` and `tool_arguments` contains a `"command"` field: parse the command string → resolve scope chains → aggregate via `.max()` → fall through to `rules.get("run_command")` then `default` if nothing matched. All other tool names are unaffected.
+When `tool_name` is `"run_command"` / `"run_command_task"` and `tool_arguments` contains a `"command"` field: the command string is parsed and resolved via `shell_parser::resolve_hierarchical_policy(...)`.
 
-Scope resolution and `matches_pattern` are implemented inline in `agent-core/src/types.rs` (not imported from `shell-parser`).
+- `run_command_task` first checks `run_command_task...` scopes, then falls back to shared `run_command...` scopes if no task-specific rule matches.
+- Parse failures fail closed to at least `Ask` while preserving stricter explicit `Deny` rules.
+- All other tool names are unaffected.
 
 ### 5.2 `ApprovalStateMachine::new()` — Pass Arguments
 
@@ -188,11 +198,11 @@ if tool_name == "run_command" || tool_name == "run_command_task" {
 }
 ```
 
-`resolve_shell_scope` calls `shell_parser::parse()`, then `resolve_command_policy()` for each parsed command, and returns the most restrictive policy. If the command string cannot be extracted or parsed, `None` is returned and the existing flat lookup proceeds as before.
+`resolve_shell_scope` now delegates to `shell_parser::resolve_hierarchical_policy(...)` using the tool name as the primary scope and `run_command` as a shared fallback scope for `run_command_task`.
+
+If the command string cannot be extracted, it returns `None`. If parsing fails (for example due to excessive nested `-c` depth), it fails closed to at least `Prompt` while preserving stricter explicit `Never` rules.
 
 **Note:** The hardcoded `run_command → Prompt` entries (in `AutoApproveConfig::default()` and the `ensure_command_patterns()` / approval-update paths) are **not removed** in this commit. `CommandPatterns` remains in the struct as dead code. Cleanup is deferred to a follow-up.
-
-Scope resolution and `matches_pattern` are re-implemented locally in `auto_approve.rs` (mirroring the `agent-core` implementation), using `shell_parser::parse()` for the AST step.
 
 ### 5.4 `handle_show_confirmation_dialog()` — No Changes
 
