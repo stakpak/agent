@@ -30,6 +30,7 @@ pub mod tool_names {
     pub const CREATE_FILE: &str = "create_file";
     pub const EDIT_FILE: &str = "edit_file";
     pub const RUN_COMMAND: &str = "run_command";
+    pub const RUN_REMOTE_COMMAND: &str = "run_remote_command";
     pub const SEARCH_DOCS: &str = "search_docs";
     pub const LOAD_SKILL: &str = "load_skill";
     pub const LOCAL_CODE_SEARCH: &str = "local_code_search";

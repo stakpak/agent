@@ -606,6 +606,12 @@ pub fn extract_bash_block_info(
             content_color: ThemeColors::text(),
             tool_type: "Run Command".to_string(),
         },
+        "run_remote_command" | "run_remote_command_task" => BubbleColors {
+            border_color: tool_border_color(),
+            title_color: ThemeColors::warning(),
+            content_color: ThemeColors::text(),
+            tool_type: "Run Remote Command".to_string(),
+        },
         "read_file" => BubbleColors {
             border_color: ThemeColors::magenta(),
             title_color: tool_muted_color(),
@@ -1718,7 +1724,7 @@ pub fn render_refreshed_terminal_bubble(
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_name = strip_tool_name(&tool_call.function.name);
-    if tool_name == "run_command_task" {
+    if matches!(tool_name, "run_command_task" | "run_remote_command_task") {
         return false;
     }
     true

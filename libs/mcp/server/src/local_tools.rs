@@ -38,6 +38,7 @@ use url;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RunCommandRequest {
     #[schemars(description = "The shell command to execute")]
     pub command: String,
@@ -45,14 +46,19 @@ pub struct RunCommandRequest {
     pub description: Option<String>,
     #[schemars(description = "Optional timeout for the command execution in seconds")]
     pub timeout: Option<u64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_optional_nonempty_trimmed_string"
-    )]
-    #[schemars(
-        description = "Optional remote connection string (format: user@host or user@host:port). Omit this field for local execution; do not send an empty string."
-    )]
-    pub remote: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunRemoteCommandRequest {
+    #[schemars(description = "The shell command to execute on the remote system")]
+    pub command: String,
+    #[schemars(description = "Optional description of the command to execute")]
+    pub description: Option<String>,
+    #[schemars(description = "Optional timeout for the command execution in seconds")]
+    pub timeout: Option<u64>,
+    #[schemars(description = "Remote connection string (format: user@host or user@host:port)")]
+    pub remote: String,
     #[serde(
         default,
         deserialize_with = "deserialize_optional_nonempty_preserved_string"
@@ -71,6 +77,56 @@ pub struct RunCommandRequest {
 pub struct CommandResult {
     pub output: String,
     pub exit_code: i32,
+}
+
+/// Validate and normalize a remote connection string.
+///
+/// Enforces the same structure expected by `RemoteConnectionInfo::parse_connection_string()`:
+/// exactly one `@`, non-empty username, non-empty hostname, and optional port that parses as u16.
+/// Returns the trimmed string on success, or a structured `CallToolResult` error.
+fn validate_remote_connection(raw: &str) -> Result<String, CallToolResult> {
+    let trimmed = raw.trim().to_string();
+
+    let make_err = |detail: &str| {
+        CallToolResult::error(vec![
+            Content::text("INVALID_REMOTE_CONNECTION"),
+            Content::text(format!(
+                "Invalid remote connection string '{}'. {}. Expected format: user@host or user@host:port",
+                trimmed, detail
+            )),
+        ])
+    };
+
+    let (username, host_port) = trimmed
+        .split_once('@')
+        .ok_or_else(|| make_err("Missing '@'"))?;
+
+    if username.is_empty() {
+        return Err(make_err("Username is empty"));
+    }
+
+    // Reject multiple '@' — the host_port portion must not contain another '@'
+    if host_port.contains('@') {
+        return Err(make_err("Contains multiple '@' characters"));
+    }
+
+    let (hostname, port_str) = if let Some((h, p)) = host_port.split_once(':') {
+        (h, Some(p))
+    } else {
+        (host_port, None)
+    };
+
+    if hostname.is_empty() {
+        return Err(make_err("Hostname is empty"));
+    }
+
+    if let Some(port) = port_str
+        && port.parse::<u16>().is_err()
+    {
+        return Err(make_err(&format!("Invalid port '{port}'")));
+    }
+
+    Ok(trimmed)
 }
 
 fn deserialize_optional_nonempty_trimmed_string<'de, D>(
@@ -251,18 +307,11 @@ use stakpak_shared::models::tools::ask_user::AskUserRequest;
 #[tool_router(router = tool_router_local, vis = "pub")]
 impl ToolContainer {
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access on local or remote systems via SSH.
+        description = "Execute a shell command locally with full system access.
 
-REMOTE EXECUTION:
-- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
-- Examples:
-  * 'user@server.com' (uses default port 22 and auto-discovered keys)
-  * 'user@server.com:2222' with password authentication
-  * Remote paths: 'ssh://user@host/path' or 'user@host:/path'
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
 
-If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
+For remote command execution via SSH, use the run_remote_command tool instead."
     )]
     pub async fn run_command(
         &self,
@@ -271,67 +320,66 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             command,
             description: _,
             timeout,
+        }): Parameters<RunCommandRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.execute_local_command(&command, timeout, &ctx).await {
+            Ok(mut command_result) => Self::format_command_result(&mut command_result),
+            Err(error_result) => Ok(error_result),
+        }
+    }
+
+    #[tool(description = "Execute a shell command on a remote system via SSH.
+
+REMOTE EXECUTION:
+- Set 'remote' parameter to 'user@host' or 'user@host:port'
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
+- Examples:
+  * 'user@server.com' (uses default port 22 and auto-discovered keys)
+  * 'user@server.com:2222' with password authentication
+
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
+
+For local command execution, use the run_command tool instead.")]
+    pub async fn run_remote_command(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(RunRemoteCommandRequest {
+            command,
+            description: _,
+            timeout,
             remote,
             password,
             private_key_path,
-        }): Parameters<RunCommandRequest>,
+        }): Parameters<RunRemoteCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Use unified command execution helper
+        let remote = match validate_remote_connection(&remote) {
+            Ok(r) => r,
+            Err(err) => return Ok(err),
+        };
+
         match self
-            .execute_command_unified(&command, timeout, remote, password, private_key_path, &ctx)
+            .execute_command_unified(
+                &command,
+                timeout,
+                Some(remote),
+                password,
+                private_key_path,
+                &ctx,
+            )
             .await
         {
-            Ok(mut command_result) => {
-                command_result.output =
-                    match handle_large_output(&command_result.output, "command.output", 300, false)
-                    {
-                        Ok(result) => result,
-                        Err(e) => {
-                            return Ok(CallToolResult::error(vec![
-                                Content::text("OUTPUT_HANDLING_ERROR"),
-                                Content::text(format!("Failed to handle command output: {}", e)),
-                            ]));
-                        }
-                    };
-
-                if command_result.output.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text("No output")]));
-                }
-
-                if command_result.exit_code != 0 {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("COMMAND_FAILED"),
-                        Content::text(&command_result.output),
-                    ]));
-                }
-                Ok(CallToolResult::success(vec![Content::text(
-                    &command_result.output,
-                )]))
-            }
+            Ok(mut command_result) => Self::format_command_result(&mut command_result),
             Err(error_result) => Ok(error_result),
         }
     }
 
     #[tool(
-        description = "Execute a shell command asynchronously in the background on LOCAL OR REMOTE systems and return immediately with task information without waiting for completion.
+        description = "Execute a local shell command asynchronously in the background and return immediately with task information without waiting for completion.
 
-REMOTE EXECUTION SUPPORT:
-- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH background execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Examples:
-  * 'user@server.com' - Remote background task with auto-discovered keys
-  * 'user@server.com:2222' - Remote background task with custom port
+Use this for starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
 
-Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
-
-PARAMETERS:
-- command: The shell command to execute (locally or remotely)
-- description: Optional description of the command (not used in execution)
-- timeout: Optional timeout in seconds after which the task will be terminated
-- remote: Optional remote connection string for SSH execution
-- password: Optional password for remote authentication
-- private_key_path: Optional path to private key for remote authentication
+For remote background tasks via SSH, use the run_remote_command_task tool instead.
 
 RETURNS:
 - task_id: Unique identifier for the background task
@@ -347,60 +395,80 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             command,
             description,
             timeout,
-            remote,
-            password,
-            private_key_path,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
         let timeout_duration = timeout.map(std::time::Duration::from_secs);
 
-        // Handle both local and remote async commands using TaskManager
-        let result = if let Some(remote_str) = remote {
-            // Remote async command
-            let remote_connection = RemoteConnectionInfo {
-                connection_string: remote_str,
-                password,
-                private_key_path,
-            };
+        let result = self
+            .get_task_manager()
+            .start_task(command, description, timeout_duration, None)
+            .await;
 
-            self.get_task_manager()
-                .start_task(
-                    command,
-                    description,
-                    timeout_duration,
-                    Some(remote_connection),
-                )
-                .await
-        } else {
-            // Local async command (existing logic)
-            self.get_task_manager()
-                .start_task(command, description, timeout_duration, None)
-                .await
-        };
-
-        match result {
-            Ok(task_info) => {
-                let output = serde_json::to_string_pretty(&task_info)
-                    .unwrap_or_else(|_| format!("Task started: {}", task_info.id));
-
-                Ok(CallToolResult::success(vec![Content::text(format!(
-                    "Background task started:\n{}",
-                    output
-                ))]))
-            }
-            Err(e) => {
-                error!("Failed to start background task: {}", e);
-
-                Ok(CallToolResult::error(vec![
-                    Content::text("RUN_COMMAND_TASK_ERROR"),
-                    Content::text(format!("Failed to start background task: {}", e)),
-                ]))
-            }
-        }
+        Self::format_task_result(result)
     }
 
     #[tool(
-        description = "Get the status of all background tasks started with run_command_task.
+        description = "Execute a shell command asynchronously in the background on a remote system via SSH and return immediately with task information without waiting for completion.
+
+REMOTE EXECUTION:
+- Set 'remote' parameter to 'user@host' or 'user@host:port'
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Examples:
+  * 'user@server.com' - Remote background task with auto-discovered keys
+  * 'user@server.com:2222' - Remote background task with custom port
+
+Use this for port-forwarding, starting servers, tailing logs, or other long-running remote commands.
+
+For local background tasks, use the run_command_task tool instead.
+
+RETURNS:
+- task_id: Unique identifier for the background task
+- status: Current task status (will be 'Running' initially)
+- start_time: When the task was started
+
+Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
+    )]
+    pub async fn run_remote_command_task(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(RunRemoteCommandRequest {
+            command,
+            description,
+            timeout,
+            remote,
+            password,
+            private_key_path,
+        }): Parameters<RunRemoteCommandRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let remote = match validate_remote_connection(&remote) {
+            Ok(r) => r,
+            Err(err) => return Ok(err),
+        };
+
+        let timeout_duration = timeout.map(std::time::Duration::from_secs);
+
+        let remote_connection = RemoteConnectionInfo {
+            connection_string: remote,
+            password,
+            private_key_path,
+        };
+
+        let result = self
+            .get_task_manager()
+            .start_task(
+                command,
+                description,
+                timeout_duration,
+                Some(remote_connection),
+            )
+            .await;
+
+        Self::format_task_result(result)
+    }
+
+    #[tool(
+        description = "Get the status of all background tasks started with run_command_task or run_remote_command_task.
 
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
@@ -519,7 +587,7 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
     }
 
     #[tool(
-        description = "Cancel a running asynchronous background task started with run_command_task.
+        description = "Cancel a running asynchronous background task started with run_command_task or run_remote_command_task.
 
 PARAMETERS:
 - task_id: The unique identifier of the task to cancel. Use the get_all_tasks tool to get the task ID.
@@ -1148,7 +1216,62 @@ SAFETY NOTES:
             .unwrap_or(false)
     }
 
-    /// Execute command either locally or remotely based on parameters
+    /// Format a command result into a CallToolResult
+    fn format_command_result(
+        command_result: &mut CommandResult,
+    ) -> Result<CallToolResult, McpError> {
+        command_result.output =
+            match handle_large_output(&command_result.output, "command.output", 300, false) {
+                Ok(result) => result,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("OUTPUT_HANDLING_ERROR"),
+                        Content::text(format!("Failed to handle command output: {}", e)),
+                    ]));
+                }
+            };
+
+        if command_result.output.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text("No output")]));
+        }
+
+        if command_result.exit_code != 0 {
+            return Ok(CallToolResult::error(vec![
+                Content::text("COMMAND_FAILED"),
+                Content::text(&command_result.output),
+            ]));
+        }
+        Ok(CallToolResult::success(vec![Content::text(
+            &command_result.output,
+        )]))
+    }
+
+    /// Format a task start result into a CallToolResult
+    fn format_task_result(
+        result: Result<TaskInfo, stakpak_shared::task_manager::TaskError>,
+    ) -> Result<CallToolResult, McpError> {
+        match result {
+            Ok(task_info) => {
+                let output = serde_json::to_string_pretty(&task_info)
+                    .unwrap_or_else(|_| format!("Task started: {}", task_info.id));
+
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Background task started:\n{}",
+                    output
+                ))]))
+            }
+            Err(e) => {
+                error!("Failed to start background task: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("RUN_COMMAND_TASK_ERROR"),
+                    Content::text(format!("Failed to start background task: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    /// Execute command either locally or remotely based on parameters.
     async fn execute_command_unified(
         &self,
         command: &str,
@@ -1159,11 +1282,10 @@ SAFETY NOTES:
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
         if let Some(remote_str) = &remote {
-            // Remote execution
             let connection_info = RemoteConnectionInfo {
                 connection_string: remote_str.clone(),
-                password: password.clone(),
-                private_key_path: private_key_path.clone(),
+                password,
+                private_key_path,
             };
 
             let connection_manager = self.get_remote_connection_manager();
@@ -1200,7 +1322,6 @@ SAFETY NOTES:
                 exit_code,
             })
         } else {
-            // Local execution - existing logic
             self.execute_local_command(command, timeout, ctx).await
         }
     }
@@ -3188,25 +3309,169 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_command_request_empty_remote_is_none() {
-        let request: RunCommandRequest = serde_json::from_value(serde_json::json!({
+    fn run_remote_command_request_whitespace_remote_deserializes_but_validated_at_runtime() {
+        let result = serde_json::from_value::<RunRemoteCommandRequest>(serde_json::json!({
             "command": "echo hello",
             "remote": "   "
-        }))
-        .expect("run command request should deserialize");
-
-        assert!(request.remote.is_none());
+        }));
+        // Whitespace remote deserializes (it's a plain String) but will be
+        // rejected at handler level by the trim + contains('@') check
+        assert!(result.is_ok());
+        let req = result.unwrap();
+        let trimmed = req.remote.trim();
+        assert!(trimmed.is_empty() || !trimmed.contains('@'));
     }
 
     #[test]
-    fn run_command_request_password_preserves_whitespace() {
-        let request: RunCommandRequest = serde_json::from_value(serde_json::json!({
+    fn run_remote_command_request_password_preserves_whitespace() {
+        let request: RunRemoteCommandRequest = serde_json::from_value(serde_json::json!({
             "command": "echo hello",
+            "remote": "user@host",
             "password": "  pass with spaces  "
+        }))
+        .expect("run remote command request should deserialize");
+
+        assert_eq!(request.password.as_deref(), Some("  pass with spaces  "));
+    }
+
+    #[test]
+    fn run_command_request_has_no_remote_fields() {
+        let request: RunCommandRequest = serde_json::from_value(serde_json::json!({
+            "command": "echo hello"
         }))
         .expect("run command request should deserialize");
 
-        assert_eq!(request.password.as_deref(), Some("  pass with spaces  "));
+        assert_eq!(request.command, "echo hello");
+    }
+
+    #[test]
+    fn run_command_rejects_legacy_remote_field() {
+        // A legacy payload with `remote` must NOT silently deserialize as a
+        // local RunCommandRequest — it should fail due to deny_unknown_fields.
+        let result = serde_json::from_value::<RunCommandRequest>(serde_json::json!({
+            "command": "rm -rf /tmp/x",
+            "remote": "user@prod"
+        }));
+        assert!(
+            result.is_err(),
+            "RunCommandRequest must reject unknown 'remote' field to prevent wrong-host execution"
+        );
+    }
+
+    #[test]
+    fn run_command_rejects_legacy_password_field() {
+        let result = serde_json::from_value::<RunCommandRequest>(serde_json::json!({
+            "command": "echo hello",
+            "password": "secret"
+        }));
+        assert!(
+            result.is_err(),
+            "RunCommandRequest must reject unknown 'password' field"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // validate_remote_connection
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn validate_remote_rejects_empty() {
+        let err = validate_remote_connection("").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_whitespace_only() {
+        let err = validate_remote_connection("   ").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_missing_at() {
+        let err = validate_remote_connection("hostname").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+    }
+
+    #[test]
+    fn validate_remote_accepts_user_at_host() {
+        let result = validate_remote_connection("user@host");
+        assert_eq!(result.unwrap(), "user@host");
+    }
+
+    #[test]
+    fn validate_remote_accepts_user_at_host_port() {
+        let result = validate_remote_connection("user@host:2222");
+        assert_eq!(result.unwrap(), "user@host:2222");
+    }
+
+    #[test]
+    fn validate_remote_trims_whitespace() {
+        let result = validate_remote_connection("  user@host  ");
+        assert_eq!(result.unwrap(), "user@host");
+    }
+
+    #[test]
+    fn validate_remote_rejects_empty_username() {
+        let err = validate_remote_connection("@host").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+        assert!(text.contains("Username is empty"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_empty_hostname() {
+        let err = validate_remote_connection("user@").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+        assert!(text.contains("Hostname is empty"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_multiple_at() {
+        let err = validate_remote_connection("user@@host").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+        assert!(text.contains("multiple '@'"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_invalid_port() {
+        let err = validate_remote_connection("user@host:abc").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+        assert!(text.contains("Invalid port"));
+    }
+
+    #[test]
+    fn validate_remote_rejects_port_out_of_range() {
+        let err = validate_remote_connection("user@host:99999").unwrap_err();
+        let text = format!("{:?}", err);
+        assert!(text.contains("INVALID_REMOTE_CONNECTION"));
+        assert!(text.contains("Invalid port"));
+    }
+
+    #[test]
+    fn validate_remote_accepts_port_22() {
+        assert_eq!(
+            validate_remote_connection("user@host:22").unwrap(),
+            "user@host:22"
+        );
+    }
+
+    #[test]
+    fn remote_request_rejects_unknown_fields() {
+        let result = serde_json::from_value::<RunRemoteCommandRequest>(serde_json::json!({
+            "command": "echo hello",
+            "remote": "user@host",
+            "unknown_field": "value"
+        }));
+        assert!(
+            result.is_err(),
+            "RunRemoteCommandRequest must reject unknown fields"
+        );
     }
 
     // ---------------------------------------------------------------

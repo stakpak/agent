@@ -1821,7 +1821,9 @@ fn render_tool_preview(tool_name: &str, args: &serde_json::Value) -> String {
     };
 
     match tool_name {
-        "run_command" | "run_command_task" => render_run_command_preview(object),
+        "run_command" | "run_command_task" | "run_remote_command" | "run_remote_command_task" => {
+            render_run_command_preview(object)
+        }
         "create" => render_create_preview(object),
         "str_replace" => render_str_replace_preview(object),
         "remove" => render_remove_preview(object),
