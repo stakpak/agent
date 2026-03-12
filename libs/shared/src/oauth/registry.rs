@@ -1,7 +1,7 @@
 //! OAuth provider registry
 
 use super::provider::OAuthProvider;
-use super::providers::{AnthropicProvider, StakpakProvider};
+use super::providers::{AnthropicProvider, GitHubCopilotProvider, StakpakProvider};
 use std::collections::HashMap;
 
 /// Registry of OAuth providers
@@ -19,10 +19,7 @@ impl ProviderRegistry {
         // Register built-in providers
         registry.register(Box::new(StakpakProvider::new()));
         registry.register(Box::new(AnthropicProvider::new()));
-
-        // Future providers:
-        // registry.register(Box::new(GitHubCopilotProvider::new()));
-        // registry.register(Box::new(OpenAIProvider::new()));
+        registry.register(Box::new(GitHubCopilotProvider::new()));
 
         registry
     }

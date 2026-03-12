@@ -35,6 +35,7 @@
 //! ```
 
 pub mod config;
+pub mod device_flow;
 pub mod error;
 pub mod flow;
 pub mod pkce;
@@ -44,9 +45,10 @@ pub mod registry;
 
 // Re-export commonly used types
 pub use config::OAuthConfig;
+pub use device_flow::{DeviceCodeResponse, DeviceFlow, DeviceFlowState, DeviceTokenResponse};
 pub use error::{OAuthError, OAuthResult};
 pub use flow::{OAuthFlow, TokenResponse};
 pub use pkce::PkceChallenge;
 pub use provider::{AuthMethod, AuthMethodType, OAuthProvider};
-pub use providers::AnthropicProvider;
+pub use providers::{AnthropicProvider, GitHubCopilotProvider};
 pub use registry::ProviderRegistry;

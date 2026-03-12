@@ -1,7 +1,8 @@
 //! OAuth provider trait and authentication method types
 
 use super::config::OAuthConfig;
-use super::error::OAuthResult;
+use super::device_flow::{DeviceCodeResponse, DeviceFlow, DeviceTokenResponse};
+use super::error::{OAuthError, OAuthResult};
 use super::flow::TokenResponse;
 use crate::models::auth::ProviderAuth;
 use async_trait::async_trait;
@@ -61,10 +62,12 @@ impl AuthMethod {
 /// Type of authentication method
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthMethodType {
-    /// OAuth 2.0 browser-based flow
+    /// OAuth 2.0 browser-based flow (PKCE)
     OAuth,
     /// Manual API key entry
     ApiKey,
+    /// Device Authorization Grant (RFC 8628) — polling-based, no browser redirect
+    DeviceFlow,
 }
 
 /// Trait for providers that support authentication
@@ -101,6 +104,53 @@ pub trait OAuthProvider: Send + Sync {
     /// Get the environment variable name for API key (if supported)
     fn api_key_env_var(&self) -> Option<&'static str> {
         None
+    }
+
+    /// Build a [`DeviceFlow`] for the given method.
+    ///
+    /// Override this for any method whose `method_type` is
+    /// [`AuthMethodType::DeviceFlow`].  The default implementation returns an
+    /// error so providers that don't support device flow fail with a clear
+    /// message rather than a panic.
+    fn device_flow(&self, method_id: &str) -> OAuthResult<DeviceFlow> {
+        Err(OAuthError::unknown_method(format!(
+            "Provider '{}' does not support the Device Authorization Grant for method '{}'",
+            self.id(),
+            method_id,
+        )))
+    }
+
+    /// Step 1 of the Device Authorization Grant: request a device code.
+    async fn request_device_code(
+        &self,
+        method_id: &str,
+    ) -> OAuthResult<(DeviceFlow, DeviceCodeResponse)> {
+        let flow = self.device_flow(method_id)?;
+        let code = flow.request_device_code().await?;
+        Ok((flow, code))
+    }
+
+    /// Step 2 of the Device Authorization Grant: poll until the user approves.
+    async fn wait_for_token(
+        &self,
+        flow: &DeviceFlow,
+        device_code: &DeviceCodeResponse,
+    ) -> OAuthResult<DeviceTokenResponse> {
+        flow.poll_for_token(device_code).await
+    }
+
+    /// Post-authorization processing for the Device Authorization Grant.
+    async fn post_device_authorize(
+        &self,
+        method_id: &str,
+        token: &DeviceTokenResponse,
+    ) -> OAuthResult<ProviderAuth> {
+        let _ = (method_id, token);
+        Err(OAuthError::unknown_method(format!(
+            "Provider '{}' does not support post_device_authorize for method '{}'",
+            self.id(),
+            method_id,
+        )))
     }
 }
 

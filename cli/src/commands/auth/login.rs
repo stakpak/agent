@@ -1,11 +1,32 @@
 //! Login command - authenticate with LLM providers
 
+use crate::config::AppConfig;
+use crate::config::{ProfileConfig, ProviderType};
+use crate::onboarding::config_templates::{
+    generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
+    generate_openai_profile,
+};
 use crate::onboarding::menu::{prompt_password, select_option_no_header};
 use crate::onboarding::navigation::NavResult;
+use crate::onboarding::save_config::save_to_profile;
 use stakpak_shared::models::auth::ProviderAuth;
+use stakpak_shared::models::llm::ProviderConfig;
 use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
 use std::io::{self, Write};
 use std::path::Path;
+
+/// AWS/Bedrock-specific login parameters
+pub struct AwsLoginParams {
+    pub region: Option<String>,
+    pub aws_profile_name: Option<String>,
+}
+
+/// OAuth token parameters for non-interactive login
+pub struct OAuthTokenParams {
+    pub access: Option<String>,
+    pub refresh: String,
+    pub expiry: i64,
+}
 
 /// Handle the login command
 pub async fn handle_login(
@@ -14,23 +35,44 @@ pub async fn handle_login(
     profile: Option<&str>,
     api_key: Option<String>,
     endpoint: Option<String>,
-    region: Option<String>,
-    aws_profile_name: Option<String>,
+    aws: AwsLoginParams,
+    oauth: OAuthTokenParams,
 ) -> Result<(), String> {
     // Bedrock has its own non-interactive flow (no API key needed)
     if provider == "bedrock" || provider == "amazon-bedrock" {
-        return handle_bedrock_setup(config_dir, profile, region, aws_profile_name, endpoint).await;
+        return handle_bedrock_setup(
+            config_dir,
+            profile,
+            aws.region,
+            aws.aws_profile_name,
+            endpoint,
+        )
+        .await;
+    }
+
+    // Non-interactive OAuth setup when --access is provided
+    if let Some(access_token) = oauth.access {
+        return handle_non_interactive_oauth_setup(
+            config_dir,
+            provider,
+            profile,
+            access_token,
+            oauth.refresh,
+            oauth.expiry,
+        )
+        .await;
     }
 
     // Non-interactive mode when --api-key is provided
     if let Some(key) = api_key {
-        return handle_non_interactive_setup(config_dir, provider, profile, key, endpoint).await;
+        return handle_non_interactive_api_setup(config_dir, provider, profile, key, endpoint)
+            .await;
     }
 
     if endpoint.is_some() {
         let _validated = validate_login_endpoint(endpoint)?;
         eprintln!(
-            "Warning: --endpoint is currently applied only in non-interactive mode (--api-key). Ignoring in interactive flow."
+            "Warning: --endpoint is currently applied only in non-interactive mode (--api-key/--access). Ignoring in interactive flow."
         );
     }
 
@@ -106,6 +148,9 @@ pub async fn handle_login(
             handle_oauth_login(config_dir, provider, &method_id, &profile).await
         }
         AuthMethodType::ApiKey => handle_api_key_login(config_dir, provider, &profile).await,
+        AuthMethodType::DeviceFlow => {
+            handle_device_flow_login(config_dir, provider, &method_id, &profile).await
+        }
     }
 }
 
@@ -145,6 +190,49 @@ async fn select_profile_for_auth(config_dir: &Path) -> Result<String, String> {
     }
 }
 
+/// Handle Device Authorization Grant (RFC 8628) login.
+async fn handle_device_flow_login(
+    config_dir: &Path,
+    provider: &dyn OAuthProvider,
+    method_id: &str,
+    profile: &str,
+) -> Result<(), String> {
+    // Step 1: request device code and display instructions to the user.
+    let (flow, device_code) = provider
+        .request_device_code(method_id)
+        .await
+        .map_err(|e| format!("Device flow failed: {}", e))?;
+
+    println!();
+    println!("To authenticate with {}:", provider.name());
+    println!();
+    // Use OSC 8 escape sequence for a clickable hyperlink in supported terminals
+    println!(
+        "  1. Visit: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
+        device_code.verification_uri, device_code.verification_uri
+    );
+    println!("  2. Enter code: {}", device_code.user_code);
+    println!();
+
+    // Try to open the browser automatically
+    let _ = open::that(&device_code.verification_uri);
+
+    println!("Waiting for authorisation...");
+
+    // Step 2: poll using the same HTTP client that was built in step 1.
+    let token = provider
+        .wait_for_token(&flow, &device_code)
+        .await
+        .map_err(|e| format!("Device flow failed: {}", e))?;
+
+    let auth = provider
+        .post_device_authorize(method_id, &token)
+        .await
+        .map_err(|e| format!("Post-authorization failed: {}", e))?;
+
+    save_auth_to_config(config_dir, provider, profile, auth)
+}
+
 /// Handle OAuth login flow
 async fn handle_oauth_login(
     config_dir: &Path,
@@ -152,9 +240,6 @@ async fn handle_oauth_login(
     method_id: &str,
     profile: &str,
 ) -> Result<(), String> {
-    use crate::config::AppConfig;
-    use stakpak_shared::models::llm::ProviderConfig;
-
     let oauth_config = provider
         .oauth_config(method_id)
         .ok_or("OAuth not supported for this method")?;
@@ -201,15 +286,26 @@ async fn handle_oauth_login(
         .await
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
-    // Load config using the standard pipeline (handles migrations, old formats, etc.)
+    save_auth_to_config(config_dir, provider, profile, auth)
+}
+
+/// Persist a `ProviderAuth` into the config file for the given profile.
+///
+/// Shared by all login flows (OAuth, device flow, API key).  Handles
+/// creating the provider config entry if it doesn't exist yet, syncing the
+/// readonly profile, saving to disk, and printing the success message.
+fn save_auth_to_config(
+    config_dir: &Path,
+    provider: &dyn OAuthProvider,
+    profile: &str,
+    auth: ProviderAuth,
+) -> Result<(), String> {
     let config_path = config_dir.join("config.toml");
     let mut config_file = AppConfig::load_config_file(&config_path)
         .map_err(|e| format!("Failed to load config file: {}", e))?;
 
-    // Get or create profile
     let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
 
-    // Get or create provider config
     let provider_config = profile_config
         .providers
         .entry(provider.id().to_string())
@@ -222,7 +318,6 @@ async fn handle_oauth_login(
             })
         });
 
-    // Set auth on provider config
     provider_config.set_auth(auth);
 
     // Keep readonly profile in sync when modifying the default profile
@@ -230,7 +325,6 @@ async fn handle_oauth_login(
         config_file.update_readonly();
     }
 
-    // Save config file
     config_file
         .save_to(&config_path)
         .map_err(|e| format!("Failed to save credentials: {}", e))?;
@@ -273,19 +367,13 @@ fn validate_login_endpoint(endpoint: Option<String>) -> Result<Option<String>, S
 
 /// Handle non-interactive setup with --api-key and --provider flags
 /// This initializes config and saves credentials in one step, mirroring interactive setup
-async fn handle_non_interactive_setup(
+async fn handle_non_interactive_api_setup(
     config_dir: &Path,
     provider_id: &str,
     profile: Option<&str>,
     api_key: String,
     endpoint: Option<String>,
 ) -> Result<(), String> {
-    use crate::config::{ProfileConfig, ProviderType};
-    use crate::onboarding::config_templates::{
-        generate_anthropic_profile, generate_gemini_profile, generate_openai_profile,
-    };
-    use crate::onboarding::save_config::save_to_profile;
-
     // Default to "default" profile for non-interactive setup
     let profile_name = profile.unwrap_or("default");
 
@@ -309,10 +397,21 @@ async fn handle_non_interactive_setup(
         "anthropic" => generate_anthropic_profile(),
         "openai" => generate_openai_profile(),
         "gemini" => generate_gemini_profile(),
+        "github-copilot" => {
+            return Err("GitHub Copilot does not support API key authentication.\n\
+                It requires OAuth via your GitHub account.\n\n\
+                Authenticate using one of the following:\n\
+                • Interactive login:\n\
+                stakpak auth login --provider github-copilot\n\n\
+                • Provide an OAuth access token:\n\
+                stakpak auth login --access <ACESS_TOKEN>"
+                .to_string());
+        }
         _ => {
             return Err(format!(
-                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak, amazon-bedrock\n\
-                 For bedrock, use: stakpak auth login --provider amazon-bedrock --region <region>",
+                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak, amazon-bedrock, github-copilot\n\
+                 For bedrock, use: stakpak auth login --provider amazon-bedrock --region <region>\n\
+                 For github-copilot, run without --api-key to use the device flow.",
                 provider_id
             ));
         }
@@ -340,6 +439,66 @@ async fn handle_non_interactive_setup(
     }
 
     // Save profile config to config.toml (this also creates readonly profile)
+    let config_path = config_dir.join("config.toml");
+    let config_path_str = config_path
+        .to_str()
+        .ok_or_else(|| "Invalid config path".to_string())?;
+
+    save_to_profile(config_path_str, profile_name, profile_config)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    println!(
+        "Successfully configured {} for profile '{}'.",
+        provider_id, profile_name
+    );
+    println!("Config saved to: {}", config_path.display());
+
+    Ok(())
+}
+
+/// Handle non-interactive OAuth setup with --access, --refresh, --expiry.
+///
+/// Works for any provider that supports OAuth (`ProviderAuth::OAuth`).
+async fn handle_non_interactive_oauth_setup(
+    config_dir: &Path,
+    provider_id: &str,
+    profile: Option<&str>,
+    access_token: String,
+    refresh_token: String,
+    expiry: i64,
+) -> Result<(), String> {
+    let profile_name = profile.unwrap_or("default");
+
+    std::fs::create_dir_all(config_dir)
+        .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+    let auth = ProviderAuth::OAuth {
+        access: access_token,
+        refresh: refresh_token,
+        expires: expiry,
+        name: None,
+    };
+
+    let mut profile_config = match provider_id {
+        "anthropic" => generate_anthropic_profile(),
+        "openai" => generate_openai_profile(),
+        "gemini" => generate_gemini_profile(),
+        "github-copilot" => generate_github_copilot_profile(),
+        _ => {
+            return Err(format!(
+                "Unsupported provider '{}' for OAuth non-interactive setup. \
+                 Supported: anthropic, openai, gemini, github-copilot",
+                provider_id
+            ));
+        }
+    };
+
+    let provider = profile_config
+        .providers
+        .get_mut(provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found in generated profile", provider_id))?;
+    provider.set_auth(auth);
+
     let config_path = config_dir.join("config.toml");
     let config_path_str = config_path
         .to_str()
@@ -533,7 +692,7 @@ mod tests {
 
     async fn assert_non_interactive_provider_endpoint(provider_id: &str, endpoint: &str) {
         let temp_dir = temp_dir();
-        let result = handle_non_interactive_setup(
+        let result = handle_non_interactive_api_setup(
             temp_dir.path(),
             provider_id,
             Some("default"),
@@ -591,7 +750,7 @@ mod tests {
         let temp_dir = temp_dir();
 
         let endpoint = "https://self-hosted.example.com";
-        let result = handle_non_interactive_setup(
+        let result = handle_non_interactive_api_setup(
             temp_dir.path(),
             "stakpak",
             Some("default"),

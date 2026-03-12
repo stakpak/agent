@@ -217,6 +217,35 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         profile_name: Option<String>,
     },
+    /// GitHub Copilot provider configuration
+    ///
+    /// Uses the GitHub Device Authorization Grant to obtain an OAuth token, then
+    /// calls the OpenAI-compatible Copilot API endpoint.
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.github-copilot]
+    /// type = "github-copilot"
+    ///
+    /// [profiles.myprofile.providers.github-copilot.auth]
+    /// type = "oauth"
+    /// access = "ghu_..."
+    /// refresh = ""
+    /// expires = 9223372036854775807
+    /// name = "GitHub Copilot"
+    ///
+    /// # Then use models as:
+    /// model = "github-copilot/gpt-4o"
+    /// ```
+    #[serde(rename = "github-copilot")]
+    GitHubCopilot {
+        /// Optional custom API endpoint (defaults to https://api.githubcopilot.com)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+        /// Authentication credentials (OAuth access token from device flow)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
+    },
 }
 
 impl ProviderConfig {
@@ -229,6 +258,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { .. } => "custom",
             ProviderConfig::Stakpak { .. } => "stakpak",
             ProviderConfig::Bedrock { .. } => "amazon-bedrock",
+            ProviderConfig::GitHubCopilot { .. } => "github-copilot",
         }
     }
 
@@ -248,6 +278,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
+            ProviderConfig::GitHubCopilot { .. } => None, // OAuth only, no API key
         }
     }
 
@@ -260,6 +291,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { auth, .. } => auth.as_ref(),
             ProviderConfig::Stakpak { auth, .. } => auth.as_ref(),
             ProviderConfig::Bedrock { .. } => None,
+            ProviderConfig::GitHubCopilot { auth, .. } => auth.as_ref(),
         }
     }
 
@@ -301,6 +333,8 @@ impl ProviderConfig {
                 }
             }
             ProviderConfig::Bedrock { .. } => None,
+            // GitHubCopilot has no legacy fields; auth is always in the `auth` field
+            ProviderConfig::GitHubCopilot { .. } => None,
         }
     }
 
@@ -342,6 +376,11 @@ impl ProviderConfig {
                 *auth_field = Some(auth);
                 *api_key = None;
                 *access_token = None;
+            }
+            ProviderConfig::GitHubCopilot {
+                auth: auth_field, ..
+            } => {
+                *auth_field = Some(auth);
             }
             ProviderConfig::Bedrock { .. } => {
                 // Bedrock uses AWS credential chain, no auth field
@@ -388,6 +427,11 @@ impl ProviderConfig {
                 *api_key = None;
                 *access_token = None;
             }
+            ProviderConfig::GitHubCopilot {
+                auth: auth_field, ..
+            } => {
+                *auth_field = None;
+            }
             ProviderConfig::Bedrock { .. } => {
                 // Bedrock uses AWS credential chain, no auth field
             }
@@ -403,6 +447,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
+            ProviderConfig::GitHubCopilot { api_endpoint, .. } => api_endpoint.as_deref(),
         }
     }
 
@@ -415,7 +460,8 @@ impl ProviderConfig {
             ProviderConfig::OpenAI { api_endpoint, .. }
             | ProviderConfig::Anthropic { api_endpoint, .. }
             | ProviderConfig::Gemini { api_endpoint, .. }
-            | ProviderConfig::Stakpak { api_endpoint, .. } => {
+            | ProviderConfig::Stakpak { api_endpoint, .. }
+            | ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
                 *api_endpoint = endpoint;
             }
             ProviderConfig::Custom { api_endpoint, .. } => {
@@ -427,10 +473,10 @@ impl ProviderConfig {
         }
     }
 
-    /// Get the access token (Anthropic only)
+    /// Get the access token (for OAuth-based providers such as Anthropic and GitHub Copilot)
     ///
     /// Checks the `auth` field first for OAuth access token, then falls back
-    /// to the legacy `access_token` field.
+    /// to the legacy `access_token` field (Anthropic only).
     pub fn access_token(&self) -> Option<&str> {
         // First check auth field for OAuth access token
         if let Some(auth) = self.get_auth_ref()
@@ -438,7 +484,7 @@ impl ProviderConfig {
         {
             return Some(token);
         }
-        // Fall back to legacy access_token field
+        // Fall back to legacy access_token field (Anthropic only)
         match self {
             ProviderConfig::Anthropic { access_token, .. } => access_token.as_deref(),
             _ => None,
@@ -537,6 +583,14 @@ impl ProviderConfig {
         }
     }
 
+    /// Create a GitHub Copilot provider config with auth (OAuth token from device flow)
+    pub fn github_copilot_with_auth(auth: ProviderAuth) -> Self {
+        ProviderConfig::GitHubCopilot {
+            api_endpoint: None,
+            auth: Some(auth),
+        }
+    }
+
     /// Create a Bedrock provider config
     pub fn bedrock(region: String, profile_name: Option<String>) -> Self {
         ProviderConfig::Bedrock {
@@ -585,6 +639,10 @@ impl ProviderConfig {
             }),
             "stakpak" => Some(ProviderConfig::Stakpak {
                 api_key: None,
+                api_endpoint: None,
+                auth: None,
+            }),
+            "github-copilot" => Some(ProviderConfig::GitHubCopilot {
                 api_endpoint: None,
                 auth: None,
             }),
