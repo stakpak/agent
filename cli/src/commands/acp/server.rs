@@ -1564,9 +1564,14 @@ impl acp::Agent for StakpakAcpAgent {
             *caps = args.client_capabilities.clone();
         }
 
-        // If no API key, provide an auth method for browser-based authentication
+        // Only advertise Stakpak auth if the user has no credentials at all
+        // (no Stakpak API key AND no local provider keys configured)
         // This implements ACP Agent Auth - the agent handles the OAuth-like flow internally
-        let auth_methods = if self.config.read().await.api_key.is_none() {
+        let config_guard = self.config.read().await;
+        let has_any_credentials = config_guard.api_key.is_some()
+            || !config_guard.get_llm_provider_config().providers.is_empty();
+        drop(config_guard);
+        let auth_methods = if !has_any_credentials {
             vec![acp::AuthMethod::new(
                 acp::AuthMethodId::new("stakpak"),
                 "Login to Stakpak",
@@ -1693,7 +1698,7 @@ impl acp::Agent for StakpakAcpAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         log::info!("Received new session request {args:?}");
 
-        // Check if we have a valid API key
+        // Check if we have valid credentials: either a Stakpak API key OR local provider keys
         // In-memory config is now always up-to-date since authenticate() updates it directly
         let config = self.config.read().await;
         let has_api_key = config.api_key.is_some() || std::env::var("STAKPAK_API_KEY").is_ok() || {
@@ -1710,12 +1715,13 @@ impl acp::Agent for StakpakAcpAgent {
                 Err(_) => false,
             }
         };
+        let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
         drop(config);
 
-        if !has_api_key {
-            log::error!("API key is missing - authentication required");
+        if !has_api_key && !has_provider_keys {
+            log::error!("No credentials configured - authentication required");
             return Err(acp::Error::auth_required().data(
-                "Authentication required. Use the 'stakpak' auth method to authenticate via browser.".to_string()
+                "Authentication required. Configure a provider with `stakpak auth login` or use the 'stakpak' auth method to authenticate via browser.".to_string()
             ));
         }
 
