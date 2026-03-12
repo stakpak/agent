@@ -11,6 +11,7 @@ use crate::types::{
     InputTokenDetails, Message, OutputTokenDetails, ProviderOptions, ResponseContent, Role, Usage,
 };
 use serde_json::json;
+use std::collections::HashMap;
 
 /// Convert unified request to Gemini request
 pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
@@ -100,10 +101,15 @@ fn convert_messages(
     let mut result = Vec::new();
     let mut system_parts = Vec::new();
 
+    // Build a lookup map from tool_call_id -> function_name so that tool results
+    // can resolve the correct function name. The Gemini API requires
+    // function_response.name to match the preceding function_call.name.
+    let tool_call_names = build_tool_call_name_map(messages);
+
     // Collect system messages
     for msg in messages {
         if msg.role == Role::System {
-            let content = to_gemini_content(msg)?;
+            let content = to_gemini_content(msg, &tool_call_names)?;
             system_parts.extend(content.parts);
         }
     }
@@ -122,15 +128,33 @@ fn convert_messages(
             continue; // Already handled
         }
 
-        let content = to_gemini_content(msg)?;
+        let content = to_gemini_content(msg, &tool_call_names)?;
         result.push(content);
     }
 
     Ok((system_instruction, result))
 }
 
+/// Build a map from tool_call_id to function name by scanning all ToolCall parts
+/// in the message history. This allows tool results to look up the correct function
+/// name that the Gemini API requires.
+fn build_tool_call_name_map(messages: &[Message]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for msg in messages {
+        for part in msg.parts() {
+            if let ContentPart::ToolCall { id, name, .. } = part {
+                map.insert(id.clone(), name.clone());
+            }
+        }
+    }
+    map
+}
+
 /// Convert unified message to Gemini content
-fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
+fn to_gemini_content(
+    msg: &Message,
+    tool_call_names: &HashMap<String, String>,
+) -> Result<GeminiContent> {
     let role = match msg.role {
         Role::User | Role::System => "user",
         Role::Assistant => "model", // Gemini uses "model" instead of "assistant"
@@ -198,19 +222,14 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                 content,
                 ..
             } => {
-                // Gemini function response
-                // We'll extract the function name from the content if possible,
-                // but Gemini now supports ID-based matching in some versions.
-                // For now, we'll try to get the name from the content if it's an object,
-                // otherwise use "unknown".
-                let name = if let Some(obj) = content.as_object() {
-                    obj.get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string()
-                } else {
-                    "unknown".to_string()
-                };
+                // Resolve the function name from the corresponding ToolCall in
+                // the message history. The Gemini API requires
+                // function_response.name to match the function_call.name from
+                // the preceding model turn.
+                let name = tool_call_names
+                    .get(tool_call_id)
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string());
 
                 // Gemini requires function_response.response to be a JSON object
                 // (google.protobuf.Struct). Wrap non-object values in {"result": ...}.
@@ -385,18 +404,22 @@ mod tests {
 
     #[test]
     fn test_to_gemini_content_tool_result() {
+        // Build the name map as convert_messages() would
+        let mut tool_call_names = HashMap::new();
+        tool_call_names.insert("call_123".to_string(), "get_weather".to_string());
+
         let msg = Message {
             role: Role::Tool,
             content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
                 tool_call_id: "call_123".to_string(),
-                content: serde_json::json!({"temp": 22, "name": "get_weather"}),
+                content: serde_json::json!({"temp": 22}),
                 provider_options: None,
             }]),
             name: None,
             provider_options: None,
         };
 
-        let result = to_gemini_content(&msg).unwrap();
+        let result = to_gemini_content(&msg, &tool_call_names).unwrap();
         assert_eq!(result.role, "function");
         assert_eq!(result.parts.len(), 1);
         let part = &result.parts[0];
@@ -411,6 +434,9 @@ mod tests {
     fn test_to_gemini_content_tool_result_string_wrapped() {
         // Gemini requires function_response.response to be a JSON object (Struct).
         // When tool result content is a string, it must be wrapped in {"result": ...}.
+        let mut tool_call_names = HashMap::new();
+        tool_call_names.insert("call_456".to_string(), "read_file".to_string());
+
         let msg = Message {
             role: Role::Tool,
             content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
@@ -422,10 +448,11 @@ mod tests {
             provider_options: None,
         };
 
-        let result = to_gemini_content(&msg).unwrap();
+        let result = to_gemini_content(&msg, &tool_call_names).unwrap();
         let part = &result.parts[0];
         let resp = part.function_response.as_ref().unwrap();
         assert_eq!(resp.id, "call_456");
+        assert_eq!(resp.name, "read_file");
         // String should be wrapped in an object
         assert!(
             resp.response.is_object(),
@@ -433,6 +460,76 @@ mod tests {
             resp.response
         );
         assert_eq!(resp.response["result"], "File: README.md\n  1: # Hello");
+    }
+
+    #[test]
+    fn test_convert_messages_resolves_tool_result_names() {
+        // Simulate the real-world flow: model proposes a tool call, then the
+        // tool result comes back as a separate message with string content
+        // (the way stakai_adapter.rs actually produces tool results).
+        let messages = vec![
+            Message::new(Role::User, "List files"),
+            Message {
+                role: Role::Assistant,
+                content: crate::types::MessageContent::Parts(vec![ContentPart::ToolCall {
+                    id: "call_abc".to_string(),
+                    name: "run_command".to_string(),
+                    arguments: serde_json::json!({"command": "ls"}),
+                    metadata: None,
+                    provider_options: None,
+                }]),
+                name: None,
+                provider_options: None,
+            },
+            Message {
+                role: Role::Tool,
+                content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
+                    tool_call_id: "call_abc".to_string(),
+                    content: serde_json::Value::String("README.md\nsrc/\nCargo.toml".to_string()),
+                    provider_options: None,
+                }]),
+                name: None,
+                provider_options: None,
+            },
+        ];
+
+        let (_system, contents) = convert_messages(&messages).unwrap();
+        assert_eq!(contents.len(), 3);
+
+        // The tool result message (index 2) should have the resolved name
+        let tool_result_content = &contents[2];
+        assert_eq!(tool_result_content.role, "function");
+        let resp = tool_result_content.parts[0]
+            .function_response
+            .as_ref()
+            .expect("should have function_response");
+        assert_eq!(
+            resp.name, "run_command",
+            "name should be resolved from the preceding tool call, not 'unknown'"
+        );
+        assert_eq!(resp.id, "call_abc");
+    }
+
+    #[test]
+    fn test_convert_messages_tool_result_fallback_when_no_matching_call() {
+        // If there's no matching tool call (edge case), name falls back to "unknown"
+        let messages = vec![Message {
+            role: Role::Tool,
+            content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
+                tool_call_id: "call_orphan".to_string(),
+                content: serde_json::Value::String("some result".to_string()),
+                provider_options: None,
+            }]),
+            name: None,
+            provider_options: None,
+        }];
+
+        let (_system, contents) = convert_messages(&messages).unwrap();
+        let resp = contents[0].parts[0]
+            .function_response
+            .as_ref()
+            .expect("should have function_response");
+        assert_eq!(resp.name, "unknown");
     }
 
     #[test]
