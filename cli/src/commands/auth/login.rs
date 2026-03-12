@@ -15,6 +15,19 @@ use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRe
 use std::io::{self, Write};
 use std::path::Path;
 
+/// AWS/Bedrock-specific login parameters
+pub struct AwsLoginParams {
+    pub region: Option<String>,
+    pub aws_profile_name: Option<String>,
+}
+
+/// OAuth token parameters for non-interactive login
+pub struct OAuthTokenParams {
+    pub access: Option<String>,
+    pub refresh: String,
+    pub expiry: i64,
+}
+
 /// Handle the login command
 pub async fn handle_login(
     config_dir: &Path,
@@ -22,26 +35,30 @@ pub async fn handle_login(
     profile: Option<&str>,
     api_key: Option<String>,
     endpoint: Option<String>,
-    region: Option<String>,
-    aws_profile_name: Option<String>,
-    access: Option<String>,
-    refresh: String,
-    expiry: i64,
+    aws: AwsLoginParams,
+    oauth: OAuthTokenParams,
 ) -> Result<(), String> {
     // Bedrock has its own non-interactive flow (no API key needed)
     if provider == "bedrock" || provider == "amazon-bedrock" {
-        return handle_bedrock_setup(config_dir, profile, region, aws_profile_name, endpoint).await;
+        return handle_bedrock_setup(
+            config_dir,
+            profile,
+            aws.region,
+            aws.aws_profile_name,
+            endpoint,
+        )
+        .await;
     }
 
     // Non-interactive OAuth setup when --access is provided
-    if let Some(access_token) = access {
+    if let Some(access_token) = oauth.access {
         return handle_non_interactive_oauth_setup(
             config_dir,
             provider,
             profile,
             access_token,
-            refresh,
-            expiry,
+            oauth.refresh,
+            oauth.expiry,
         )
         .await;
     }

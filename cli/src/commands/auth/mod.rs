@@ -105,11 +105,15 @@ impl AuthCommands {
                     profile.as_deref(),
                     api_key,
                     endpoint,
-                    region,
-                    profile_name,
-                    access,
-                    refresh,
-                    expiry,
+                    login::AwsLoginParams {
+                        region,
+                        aws_profile_name: profile_name,
+                    },
+                    login::OAuthTokenParams {
+                        access,
+                        refresh,
+                        expiry,
+                    },
                 )
                 .await
             }
