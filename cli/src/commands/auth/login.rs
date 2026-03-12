@@ -1,8 +1,14 @@
 //! Login command - authenticate with LLM providers
 
 use crate::config::AppConfig;
+use crate::config::{ProfileConfig, ProviderType};
+use crate::onboarding::config_templates::{
+    generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
+    generate_openai_profile,
+};
 use crate::onboarding::menu::{prompt_password, select_option_no_header};
 use crate::onboarding::navigation::NavResult;
+use crate::onboarding::save_config::save_to_profile;
 use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::llm::ProviderConfig;
 use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
@@ -18,21 +24,38 @@ pub async fn handle_login(
     endpoint: Option<String>,
     region: Option<String>,
     aws_profile_name: Option<String>,
+    access: Option<String>,
+    refresh: String,
+    expiry: i64,
 ) -> Result<(), String> {
     // Bedrock has its own non-interactive flow (no API key needed)
     if provider == "bedrock" || provider == "amazon-bedrock" {
         return handle_bedrock_setup(config_dir, profile, region, aws_profile_name, endpoint).await;
     }
 
+    // Non-interactive OAuth setup when --access is provided
+    if let Some(access_token) = access {
+        return handle_non_interactive_oauth_setup(
+            config_dir,
+            provider,
+            profile,
+            access_token,
+            refresh,
+            expiry,
+        )
+        .await;
+    }
+
     // Non-interactive mode when --api-key is provided
     if let Some(key) = api_key {
-        return handle_non_interactive_setup(config_dir, provider, profile, key, endpoint).await;
+        return handle_non_interactive_api_setup(config_dir, provider, profile, key, endpoint)
+            .await;
     }
 
     if endpoint.is_some() {
         let _validated = validate_login_endpoint(endpoint)?;
         eprintln!(
-            "Warning: --endpoint is currently applied only in non-interactive mode (--api-key). Ignoring in interactive flow."
+            "Warning: --endpoint is currently applied only in non-interactive mode (--api-key/--access). Ignoring in interactive flow."
         );
     }
 
@@ -327,19 +350,13 @@ fn validate_login_endpoint(endpoint: Option<String>) -> Result<Option<String>, S
 
 /// Handle non-interactive setup with --api-key and --provider flags
 /// This initializes config and saves credentials in one step, mirroring interactive setup
-async fn handle_non_interactive_setup(
+async fn handle_non_interactive_api_setup(
     config_dir: &Path,
     provider_id: &str,
     profile: Option<&str>,
     api_key: String,
     endpoint: Option<String>,
 ) -> Result<(), String> {
-    use crate::config::{ProfileConfig, ProviderType};
-    use crate::onboarding::config_templates::{
-        generate_anthropic_profile, generate_gemini_profile, generate_openai_profile,
-    };
-    use crate::onboarding::save_config::save_to_profile;
-
     // Default to "default" profile for non-interactive setup
     let profile_name = profile.unwrap_or("default");
 
@@ -364,14 +381,14 @@ async fn handle_non_interactive_setup(
         "openai" => generate_openai_profile(),
         "gemini" => generate_gemini_profile(),
         "github-copilot" => {
-            // GitHub Copilot uses the device flow, not a plain API key.
-            // Non-interactive setup is not supported; direct the user to the interactive flow.
-            return Err(
-                "GitHub Copilot uses the GitHub Device Flow for authentication.\n\
-                 Run 'stakpak auth login --provider github-copilot' (without --api-key) \
-                 to authenticate interactively."
-                    .to_string(),
-            );
+            return Err("GitHub Copilot does not support API key authentication.\n\
+                It requires OAuth via your GitHub account.\n\n\
+                Authenticate using one of the following:\n\
+                • Interactive login:\n\
+                stakpak auth login --provider github-copilot\n\n\
+                • Provide an OAuth access token:\n\
+                stakpak auth login --access <ACESS_TOKEN>"
+                .to_string());
         }
         _ => {
             return Err(format!(
@@ -405,6 +422,66 @@ async fn handle_non_interactive_setup(
     }
 
     // Save profile config to config.toml (this also creates readonly profile)
+    let config_path = config_dir.join("config.toml");
+    let config_path_str = config_path
+        .to_str()
+        .ok_or_else(|| "Invalid config path".to_string())?;
+
+    save_to_profile(config_path_str, profile_name, profile_config)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    println!(
+        "Successfully configured {} for profile '{}'.",
+        provider_id, profile_name
+    );
+    println!("Config saved to: {}", config_path.display());
+
+    Ok(())
+}
+
+/// Handle non-interactive OAuth setup with --access, --refresh, --expiry.
+///
+/// Works for any provider that supports OAuth (`ProviderAuth::OAuth`).
+async fn handle_non_interactive_oauth_setup(
+    config_dir: &Path,
+    provider_id: &str,
+    profile: Option<&str>,
+    access_token: String,
+    refresh_token: String,
+    expiry: i64,
+) -> Result<(), String> {
+    let profile_name = profile.unwrap_or("default");
+
+    std::fs::create_dir_all(config_dir)
+        .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+    let auth = ProviderAuth::OAuth {
+        access: access_token,
+        refresh: refresh_token,
+        expires: expiry,
+        name: None,
+    };
+
+    let mut profile_config = match provider_id {
+        "anthropic" => generate_anthropic_profile(),
+        "openai" => generate_openai_profile(),
+        "gemini" => generate_gemini_profile(),
+        "github-copilot" => generate_github_copilot_profile(),
+        _ => {
+            return Err(format!(
+                "Unsupported provider '{}' for OAuth non-interactive setup. \
+                 Supported: anthropic, openai, gemini, github-copilot",
+                provider_id
+            ));
+        }
+    };
+
+    let provider = profile_config
+        .providers
+        .get_mut(provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found in generated profile", provider_id))?;
+    provider.set_auth(auth);
+
     let config_path = config_dir.join("config.toml");
     let config_path_str = config_path
         .to_str()
@@ -598,7 +675,7 @@ mod tests {
 
     async fn assert_non_interactive_provider_endpoint(provider_id: &str, endpoint: &str) {
         let temp_dir = temp_dir();
-        let result = handle_non_interactive_setup(
+        let result = handle_non_interactive_api_setup(
             temp_dir.path(),
             provider_id,
             Some("default"),
@@ -656,7 +733,7 @@ mod tests {
         let temp_dir = temp_dir();
 
         let endpoint = "https://self-hosted.example.com";
-        let result = handle_non_interactive_setup(
+        let result = handle_non_interactive_api_setup(
             temp_dir.path(),
             "stakpak",
             Some("default"),
