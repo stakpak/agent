@@ -713,7 +713,7 @@ struct AutopilotChannelStatusJson {
     alerts_only: bool,
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
     let uid = read_unix_id_value("-u");
     let gid = read_unix_id_value("-g");
@@ -724,12 +724,15 @@ fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
+    // On macOS, Docker Desktop handles file ownership transparently via its VM
+    // layer, so user mapping is not needed and would cause permission errors
+    // inside the container.
     stakpak_server::SandboxUserMapping::ImageDefault
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn read_unix_id_value(flag: &str) -> Option<u32> {
     let output = std::process::Command::new("id").arg(flag).output().ok()?;
 

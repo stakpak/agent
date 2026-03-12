@@ -105,7 +105,12 @@ pub fn handle_stream_tool_result(
     let is_run_command = state
         .dialog_command
         .as_ref()
-        .map(|tc| strip_tool_name(&tc.function.name) == "run_command")
+        .map(|tc| {
+            matches!(
+                strip_tool_name(&tc.function.name),
+                "run_command" | "run_remote_command"
+            )
+        })
         .unwrap_or(false);
 
     let command_str = if is_run_command {
@@ -923,7 +928,7 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
         let auto_approve = action.status == crate::services::approval_bar::ApprovalStatus::Approved;
 
         // Create the appropriate pending block based on tool type
-        if tool_name == "run_command" {
+        if matches!(tool_name, "run_command" | "run_remote_command") {
             let command = super::shell::extract_command_from_tool_call(tool_call)
                 .unwrap_or_else(|_| "unknown command".to_string());
 

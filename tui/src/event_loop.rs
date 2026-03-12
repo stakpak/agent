@@ -261,15 +261,16 @@ pub async fn run_tui(
                        update_session_tool_calls_queue(&mut state, tool_call_result);
                        let tool_name = strip_tool_name(&tool_call_result.call.function.name);
 
-                       if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_name == "run_command" {
+                       let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
+                       if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {
                            state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
-                       // Determine the state for run_command tools
+                       // Determine the state for command tools
                        let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
                        let is_error = tool_call_result.status == ToolCallResultStatus::Error;
 
-                       if (is_cancelled || is_error) && tool_name != "run_command" {
-                           // For non-run_command tools with cancelled/error, use old renderer
+                       if (is_cancelled || is_error) && !is_fg_cmd {
+                           // For non-command tools with cancelled/error, use old renderer
                            state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                            state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                        } else {
@@ -282,13 +283,13 @@ pub async fn run_tui(
                                    // (needed for extracting line numbers from the diff output)
                                    state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
-                               "run_command_task" => {
+                               "run_command_task" | "run_remote_command_task" => {
                                    // TUI: bordered result block (is_collapsed: None)
                                    state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: full content without border (is_collapsed: Some(true))
                                    state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
-                                "run_command" => {
+                                "run_command" | "run_remote_command" => {
                                     // Use unified run command block with appropriate state
                                     let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
                                         .unwrap_or_else(|_| "command".to_string());

@@ -537,62 +537,87 @@ fn sandbox_user_arg(user_mapping: &SandboxUserMapping) -> Option<String> {
     }
 }
 
+/// Build the argument list for `warden wrap`.
+///
+/// All options come before the positional `<IMAGE>` argument, then `--` and the
+/// command.  Extracting this into a pure function makes it testable without
+/// spawning a real process.
+fn build_warden_argv(
+    config: &SandboxConfig,
+    host_port: u16,
+    client_ca_pem: &str,
+    env_overrides: &[(&str, &str)],
+) -> Vec<String> {
+    use stakpak_shared::container::{expand_volume_path, is_named_volume};
+
+    let mut args: Vec<String> = vec!["wrap".to_string()];
+
+    // --- options (must come before positional <IMAGE>) ---
+
+    for vol in &config.volumes {
+        let expanded = expand_volume_path(vol);
+        let host_path = expanded.split(':').next().unwrap_or(&expanded);
+        if is_named_volume(host_path) || Path::new(host_path).exists() {
+            args.push("--volume".to_string());
+            args.push(expanded);
+        }
+    }
+
+    if let Some(user_arg) = sandbox_user_arg(&config.user_mapping) {
+        args.push("--user".to_string());
+        args.push(user_arg);
+    }
+
+    args.push("-p".to_string());
+    args.push(format!("127.0.0.1:{host_port}:8080"));
+
+    args.push("--env".to_string());
+    args.push("STAKPAK_SKIP_WARDEN=1".to_string());
+
+    args.push("--env".to_string());
+    args.push("STAKPAK_MCP_PORT=8080".to_string());
+
+    args.push("--env".to_string());
+    args.push(format!("{TRUSTED_CLIENT_CA_ENV}={client_ca_pem}"));
+
+    for (key, value) in env_overrides {
+        args.push("--env".to_string());
+        args.push(format!("{key}={value}"));
+    }
+
+    // --- positional image ---
+    args.push(config.image.clone());
+
+    // --- command after `--` ---
+    args.push("--".to_string());
+    args.push("stakpak".to_string());
+    args.push("mcp".to_string());
+    args.push("start".to_string());
+
+    args
+}
+
 async fn spawn_warden_container(
     config: &SandboxConfig,
     host_port: u16,
     client_ca_pem: &str,
 ) -> Result<Child, String> {
-    use stakpak_shared::container::{expand_volume_path, is_named_volume};
-
-    let mut cmd = tokio::process::Command::new(&config.warden_path);
-    cmd.arg("wrap");
-    cmd.arg(&config.image);
-
-    // Mount configured volumes
-    for vol in &config.volumes {
-        let expanded = expand_volume_path(vol);
-        let host_path = expanded.split(':').next().unwrap_or(&expanded);
-        // Named volumes (e.g. "stakpak-aqua-cache:/container/path") don't have a
-        // host filesystem path — mount them unconditionally. Bind mounts are only
-        // added when the host path actually exists.
-        if is_named_volume(host_path) || Path::new(host_path).exists() {
-            cmd.args(["--volume", &expanded]);
+    // Collect env-var pass-throughs
+    let mut env_pairs: Vec<(String, String)> = Vec::new();
+    for var in &["STAKPAK_API_KEY", "STAKPAK_PROFILE", "STAKPAK_API_ENDPOINT"] {
+        if let Ok(val) = std::env::var(var) {
+            env_pairs.push((var.to_string(), val));
         }
     }
 
-    if let Some(user_arg) = sandbox_user_arg(&config.user_mapping) {
-        cmd.args(["--user", &user_arg]);
-    }
+    let env_refs: Vec<(&str, &str)> = env_pairs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let argv = build_warden_argv(config, host_port, client_ca_pem, &env_refs);
 
-    // Port forwarding for the MCP server — publish on the sidecar so the
-    // host can reach the container's MCP server port directly.
-    cmd.args(["-p", &format!("127.0.0.1:{host_port}:8080")]);
-
-    // Prevent warden re-entry
-    cmd.args(["--env", "STAKPAK_SKIP_WARDEN=1"]);
-
-    // Tell the MCP server to bind to a fixed port inside the container
-    // so it matches the published port on the sidecar.
-    cmd.args(["--env", "STAKPAK_MCP_PORT=8080"]);
-
-    // Pass the client CA cert (public only) so the server can trust the client.
-    cmd.args(["--env", &format!("{TRUSTED_CLIENT_CA_ENV}={client_ca_pem}")]);
-
-    // Pass through API credentials if set
-    if let Ok(api_key) = std::env::var("STAKPAK_API_KEY") {
-        cmd.args(["--env", &format!("STAKPAK_API_KEY={api_key}")]);
-    }
-    if let Ok(profile) = std::env::var("STAKPAK_PROFILE") {
-        cmd.args(["--env", &format!("STAKPAK_PROFILE={profile}")]);
-    }
-    if let Ok(endpoint) = std::env::var("STAKPAK_API_ENDPOINT") {
-        cmd.args(["--env", &format!("STAKPAK_API_ENDPOINT={endpoint}")]);
-    }
-
-    // The MCP server detects STAKPAK_MCP_CLIENT_CA and generates its own
-    // server identity, outputting the server CA cert to stdout.
-    cmd.args(["--", "stakpak", "mcp", "start"]);
-
+    let mut cmd = tokio::process::Command::new(&config.warden_path);
+    cmd.args(&argv);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     cmd.stdin(std::process::Stdio::null());
@@ -1042,6 +1067,76 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
         // Display
         assert_eq!(super::SandboxMode::Persistent.to_string(), "persistent");
         assert_eq!(super::SandboxMode::Ephemeral.to_string(), "ephemeral");
+    }
+
+    // ── Warden argument ordering ───────────────────────────────────────
+
+    #[test]
+    fn warden_argv_options_before_image() {
+        let config = super::SandboxConfig {
+            warden_path: "warden".to_string(),
+            image: "ghcr.io/stakpak/agent:latest".to_string(),
+            volumes: vec!["named-vol:/data".to_string()],
+            mode: super::SandboxMode::Persistent,
+            user_mapping: super::SandboxUserMapping::HostUser {
+                uid: 1000,
+                gid: 1001,
+            },
+        };
+
+        let argv = super::build_warden_argv(&config, 9999, "FAKE_CA_PEM", &[("MY_VAR", "val")]);
+
+        // Find where the positional image argument sits
+        let image_pos = argv
+            .iter()
+            .position(|a| a == "ghcr.io/stakpak/agent:latest")
+            .expect("image arg must be present");
+
+        // Find where `--` sits (start of the command section)
+        let dash_pos = argv
+            .iter()
+            .position(|a| a == "--")
+            .expect("-- separator must be present");
+
+        // All option flags must come before the image
+        for (i, arg) in argv.iter().enumerate() {
+            if arg.starts_with('-') && arg != "--" {
+                assert!(
+                    i < image_pos,
+                    "option '{}' at position {} must come before image at position {}",
+                    arg,
+                    i,
+                    image_pos
+                );
+            }
+        }
+
+        // Image must come before `--`
+        assert!(image_pos < dash_pos, "image must come before -- separator");
+
+        // Command after `--` must be `stakpak mcp start`
+        let command_section: Vec<&str> = argv[dash_pos + 1..].iter().map(|s| s.as_str()).collect();
+        assert_eq!(command_section, vec!["stakpak", "mcp", "start"]);
+
+        // Verify specific options are present
+        assert!(argv.contains(&"--volume".to_string()));
+        assert!(argv.contains(&"--user".to_string()));
+        assert!(argv.contains(&"1000:1001".to_string()));
+        assert!(argv.contains(&"-p".to_string()));
+    }
+
+    #[test]
+    fn warden_argv_no_user_when_image_default() {
+        let config = super::SandboxConfig {
+            warden_path: "warden".to_string(),
+            image: "ghcr.io/stakpak/agent:latest".to_string(),
+            volumes: vec![],
+            mode: super::SandboxMode::Persistent,
+            user_mapping: super::SandboxUserMapping::ImageDefault,
+        };
+
+        let argv = super::build_warden_argv(&config, 8080, "CA", &[]);
+        assert!(!argv.contains(&"--user".to_string()));
     }
 
     #[test]
