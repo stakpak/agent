@@ -8,12 +8,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum AutoApprovePolicy {
-    Auto,
+    /// Least restrictive — auto-approve.
+    Auto = 0,
+    /// Prompt the user.
     #[default]
-    Prompt,
-    Never,
+    Prompt = 1,
+    /// Most restrictive — hard reject.
+    Never = 2,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +208,14 @@ impl AutoApproveManager {
         let binding = tool_call.function.name.clone();
         let tool_name = strip_tool_name(&binding);
 
+        // For shell commands, resolve hierarchical scope keys
+        if (tool_name == "run_command" || tool_name == "run_command_task")
+            && let Some(action) =
+                resolve_shell_scope(tool_call, &self.config.tools, &self.config.default_policy)
+        {
+            return action;
+        }
+
         // Check if there's a specific policy for this tool
         if let Some(policy) = self.config.tools.get(tool_name) {
             return policy.clone();
@@ -367,6 +378,76 @@ impl AutoApproveManager {
     }
 }
 
+/// Resolve hierarchical shell scope for a tool call.
+///
+/// Parses the shell command string from the tool call arguments, then resolves
+/// each parsed command against scope keys in the rules map.
+/// Returns the most restrictive policy across all commands, or `None` if the
+/// command string cannot be extracted or parsed.
+fn resolve_shell_scope(
+    tool_call: &ToolCall,
+    rules: &HashMap<String, AutoApprovePolicy>,
+    default: &AutoApprovePolicy,
+) -> Option<AutoApprovePolicy> {
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
+    let command_str = args.get("command")?.as_str()?;
+
+    let parsed_commands = shell_parser::parse(command_str);
+    if parsed_commands.is_empty() {
+        return None;
+    }
+
+    parsed_commands
+        .iter()
+        .map(|cmd| resolve_command_policy(cmd, rules, default))
+        .max()
+}
+
+/// Resolve the approval policy for a single parsed command against scope rules.
+///
+/// 1. Base policy: `rules["run_command::<name>"]` -> `rules["run_command"]` -> `default`
+/// 2. Argument-level: for each rule key `"run_command::<name>::<pattern>"`,
+///    if any arg matches the pattern, include the policy as a candidate.
+/// 3. Aggregate: most restrictive wins (Never > Prompt > Auto).
+fn resolve_command_policy(
+    cmd: &shell_parser::ParsedCommand,
+    rules: &HashMap<String, AutoApprovePolicy>,
+    default: &AutoApprovePolicy,
+) -> AutoApprovePolicy {
+    let Some(name) = &cmd.name else {
+        // Variable-expansion command ($CMD) — only the global fallback applies.
+        return rules
+            .get("run_command")
+            .cloned()
+            .unwrap_or_else(|| default.clone());
+    };
+
+    // 1. Base policy: command-level -> global -> default
+    let command_key = format!("run_command::{name}");
+    let base = rules
+        .get(&command_key)
+        .or_else(|| rules.get("run_command"))
+        .cloned()
+        .unwrap_or_else(|| default.clone());
+
+    // 2. Argument-level matches
+    let arg_prefix = format!("run_command::{name}::");
+    let arg_policies = rules.iter().filter_map(|(key, policy)| {
+        let pattern = key.strip_prefix(&arg_prefix)?;
+        let matched = cmd
+            .args
+            .iter()
+            .any(|arg| shell_parser::matches_pattern(pattern, arg));
+        matched.then_some(policy.clone())
+    });
+
+    // 3. Aggregate: base + matched arg policies, take the most restrictive
+    std::iter::once(base)
+        .chain(arg_policies)
+        .max()
+        .unwrap_or_else(|| default.clone())
+}
+
 impl AutoApproveConfig {
     fn save(
         &self,
@@ -501,6 +582,128 @@ mod tests {
         if let Some(original) = original_dir {
             let _ = std::env::set_current_dir(&original);
         }
+    }
+
+    // --- Tests for hierarchical shell scope resolution ---
+
+    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
+
+    fn make_run_command_tool_call(command: &str) -> ToolCall {
+        ToolCall {
+            id: "tc-1".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({"command": command}).to_string(),
+            },
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn resolve_shell_scope_command_level_auto() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        let tc = make_run_command_tool_call("git status");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_most_restrictive_wins_in_pipeline() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
+        rules.insert(
+            "run_command::git::push".to_string(),
+            AutoApprovePolicy::Never,
+        );
+        let tc = make_run_command_tool_call("git log && git push origin main");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn resolve_shell_scope_unknown_command_falls_back_to_default() {
+        let rules = HashMap::new();
+        let tc = make_run_command_tool_call("rm -rf /tmp/test");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        // rules is empty, so base = run_command rule (absent) → default (Prompt)
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_returns_none_for_empty_parse() {
+        // An empty command string parses to zero commands → None
+        let rules = HashMap::new();
+        let tc = ToolCall {
+            id: "tc-2".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({"command": ""}).to_string(),
+            },
+            metadata: None,
+        };
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_shell_scope_glob_pattern_in_arg_rule() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::curl".to_string(), AutoApprovePolicy::Auto);
+        rules.insert(
+            "run_command::curl::*.prod.*".to_string(),
+            AutoApprovePolicy::Never,
+        );
+        let staging_tc = make_run_command_tool_call("curl https://api.staging.example.com");
+        assert_eq!(
+            resolve_shell_scope(&staging_tc, &rules, &AutoApprovePolicy::Prompt),
+            Some(AutoApprovePolicy::Auto)
+        );
+        let prod_tc = make_run_command_tool_call("curl https://api.prod.example.com");
+        assert_eq!(
+            resolve_shell_scope(&prod_tc, &rules, &AutoApprovePolicy::Prompt),
+            Some(AutoApprovePolicy::Never)
+        );
+    }
+
+    #[test]
+    fn resolve_shell_scope_nested_sh_c() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::rm".to_string(), AutoApprovePolicy::Never);
+        let tc = make_run_command_tool_call("sh -c 'rm -rf /tmp/old'");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Auto);
+        assert_eq!(result, Some(AutoApprovePolicy::Never));
+    }
+
+    #[test]
+    fn matches_pattern_exact() {
+        assert!(shell_parser::matches_pattern("push", "push"));
+        assert!(!shell_parser::matches_pattern("push", "pull"));
+    }
+
+    #[test]
+    fn matches_pattern_glob() {
+        assert!(shell_parser::matches_pattern(
+            "*.prod.*",
+            "api.prod.example.com"
+        ));
+        assert!(!shell_parser::matches_pattern(
+            "*.prod.*",
+            "api.staging.example.com"
+        ));
+    }
+
+    #[test]
+    fn matches_pattern_regex() {
+        assert!(shell_parser::matches_pattern("re:^push$", "push"));
+        assert!(!shell_parser::matches_pattern("re:^push$", "push-force"));
+    }
+
+    #[test]
+    fn matches_pattern_invalid_regex_returns_false() {
+        assert!(!shell_parser::matches_pattern("re:[invalid", "anything"));
     }
 
     #[tokio::test]
