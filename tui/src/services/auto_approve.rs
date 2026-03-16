@@ -8,6 +8,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
+const SHELL_TOOLS: &[&str] = &[
+    "run_command",
+    "run_command_task",
+    "run_remote_command",
+    "run_remote_command_task",
+];
+
+const BASE_SHELL_TOOL: &str = "run_command";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum AutoApprovePolicy {
     /// Least restrictive — auto-approve.
@@ -214,7 +223,7 @@ impl AutoApproveManager {
         let tool_name = strip_tool_name(&binding);
 
         // For shell commands, resolve hierarchical scope keys
-        if (tool_name == "run_command" || tool_name == "run_command_task")
+        if SHELL_TOOLS.contains(&tool_name)
             && let Some(action) =
                 resolve_shell_scope(tool_call, &self.config.tools, &self.config.default_policy)
         {
@@ -397,8 +406,8 @@ fn resolve_shell_scope(
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
     let command_str = args.get("command")?.as_str()?;
     let tool_name = strip_tool_name(&tool_call.function.name);
-    let fallback_scopes = if tool_name == "run_command_task" {
-        vec!["run_command"]
+    let fallback_scopes = if SHELL_TOOLS.contains(&tool_name) && tool_name != BASE_SHELL_TOOL {
+        vec![BASE_SHELL_TOOL]
     } else {
         Vec::new()
     };
@@ -427,8 +436,8 @@ fn conservative_shell_parse_fallback(
         .get(tool_scope)
         .cloned()
         .or_else(|| {
-            if tool_scope == "run_command_task" {
-                rules.get("run_command").cloned()
+            if SHELL_TOOLS.contains(&tool_scope) && tool_scope != BASE_SHELL_TOOL {
+                rules.get(BASE_SHELL_TOOL).cloned()
             } else {
                 None
             }

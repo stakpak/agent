@@ -77,6 +77,15 @@ pub enum ToolApprovalPolicy {
     },
 }
 
+const SHELL_TOOLS: &[&str] = &[
+    "run_command",
+    "run_command_task",
+    "run_remote_command",
+    "run_remote_command_task",
+];
+
+const BASE_SHELL_TOOL: &str = "run_command";
+
 /// Read-only tools that are safe to auto-approve by default.
 const DEFAULT_AUTO_APPROVE_TOOLS: &[&str] = &[
     "view",
@@ -181,12 +190,15 @@ impl ToolApprovalPolicy {
             Self::None => ToolApprovalAction::Ask,
             Self::All => ToolApprovalAction::Approve,
             Self::Custom { rules, default } => {
-                if (stripped == "run_command" || stripped == "run_command_task")
+                if SHELL_TOOLS.contains(&stripped)
                     && let Some(args) = tool_arguments
                     && let Some(command_str) = args.get("command").and_then(|v| v.as_str())
                 {
-                    let fallback_scopes = if stripped == "run_command_task" {
-                        vec!["run_command"]
+                    let fallback_scopes = if SHELL_TOOLS
+                        .iter()
+                        .any(|&c| c == stripped && c != BASE_SHELL_TOOL)
+                    {
+                        vec![BASE_SHELL_TOOL]
                     } else {
                         Vec::new()
                     };
@@ -222,8 +234,8 @@ fn conservative_shell_parse_fallback(
         .get(tool_scope)
         .copied()
         .or_else(|| {
-            if tool_scope == "run_command_task" {
-                rules.get("run_command").copied()
+            if SHELL_TOOLS.contains(&tool_scope) && tool_scope != BASE_SHELL_TOOL {
+                rules.get(BASE_SHELL_TOOL).copied()
             } else {
                 None
             }
