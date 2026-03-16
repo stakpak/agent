@@ -183,13 +183,25 @@ impl ToolApprovalPolicy {
                     && let Some(args) = tool_arguments
                     && let Some(command_str) = args.get("command").and_then(|v| v.as_str())
                 {
-                    let parsed_commands = shell_parser::parse(command_str);
-                    if !parsed_commands.is_empty() {
-                        return parsed_commands
-                            .iter()
-                            .map(|cmd| resolve_command_action(cmd, rules, *default))
-                            .max()
-                            .unwrap_or(*default);
+                    let fallback_scopes = if stripped == "run_command_task" {
+                        vec!["run_command"]
+                    } else {
+                        Vec::new()
+                    };
+
+                    match shell_parser::resolve_hierarchical_policy(
+                        command_str,
+                        stripped,
+                        &fallback_scopes,
+                        rules,
+                        *default,
+                    ) {
+                        Ok(Some(action)) => return action,
+                        Ok(None) => {}
+                        Err(_) => {
+                            return conservative_shell_parse_fallback(stripped, rules, *default)
+                                .max(ToolApprovalAction::Ask);
+                        }
                     }
                 }
 
@@ -199,44 +211,21 @@ impl ToolApprovalPolicy {
     }
 }
 
-/// Resolve the approval action for a single parsed command against scope rules.
-///
-/// 1. Base policy: `rules["run_command::<name>"]` -> `rules["run_command"]` -> `default`
-/// 2. Argument-level: for each rule key `"run_command::<name>::<pattern>"`,
-///    if any arg matches the pattern, include the action as a candidate.
-/// 3. Aggregate: most restrictive wins (Deny > Ask > Approve).
-fn resolve_command_action(
-    cmd: &shell_parser::ParsedCommand,
+fn conservative_shell_parse_fallback(
+    tool_scope: &str,
     rules: &HashMap<String, ToolApprovalAction>,
     default: ToolApprovalAction,
 ) -> ToolApprovalAction {
-    let Some(name) = &cmd.name else {
-        return rules.get("run_command").copied().unwrap_or(default);
-    };
-
-    // 1. Base policy: command-level -> global -> default
-    let command_key = format!("run_command::{name}");
-    let base = rules
-        .get(&command_key)
-        .or_else(|| rules.get("run_command"))
+    rules
+        .get(tool_scope)
         .copied()
-        .unwrap_or(default);
-
-    // 2. Argument-level matches
-    let arg_prefix = format!("run_command::{name}::");
-    let arg_actions = rules.iter().filter_map(|(key, action)| {
-        let pattern = key.strip_prefix(&arg_prefix)?;
-        let matched = cmd
-            .args
-            .iter()
-            .any(|arg| shell_parser::matches_pattern(pattern, arg));
-        matched.then_some(*action)
-    });
-
-    // 3. Aggregate: base + matched arg actions, take the most restrictive
-    std::iter::once(base)
-        .chain(arg_actions)
-        .max()
+        .or_else(|| {
+            if tool_scope == "run_command_task" {
+                rules.get("run_command").copied()
+            } else {
+                None
+            }
+        })
         .unwrap_or(default)
 }
 
@@ -734,6 +723,87 @@ mod tests {
                 Some(&serde_json::json!({"command": "sh -c 'rm -rf /tmp/old'"}))
             ),
             ToolApprovalAction::Ask
+        );
+    }
+
+    #[test]
+    fn e2e_argument_level_rule_can_relax_default_when_more_specific() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::git::status".to_string(),
+            ToolApprovalAction::Approve,
+        );
+        let policy = ToolApprovalPolicy::Custom {
+            rules,
+            default: ToolApprovalAction::Ask,
+        };
+
+        assert_eq!(
+            policy.action_for(
+                "run_command",
+                Some(&serde_json::json!({"command": "git status"}))
+            ),
+            ToolApprovalAction::Approve
+        );
+    }
+
+    #[test]
+    fn e2e_run_command_task_specific_rule_overrides_shared_run_command_scope() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command_task".to_string(), ToolApprovalAction::Deny);
+        rules.insert("run_command::git".to_string(), ToolApprovalAction::Approve);
+        let policy = ToolApprovalPolicy::Custom {
+            rules,
+            default: ToolApprovalAction::Ask,
+        };
+
+        assert_eq!(
+            policy.action_for(
+                "run_command_task",
+                Some(&serde_json::json!({"command": "git status"}))
+            ),
+            ToolApprovalAction::Deny
+        );
+    }
+
+    #[test]
+    fn e2e_run_command_task_can_fallback_to_shared_run_command_scope() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git".to_string(), ToolApprovalAction::Approve);
+        let policy = ToolApprovalPolicy::Custom {
+            rules,
+            default: ToolApprovalAction::Ask,
+        };
+
+        assert_eq!(
+            policy.action_for(
+                "run_command_task",
+                Some(&serde_json::json!({"command": "git status"}))
+            ),
+            ToolApprovalAction::Approve
+        );
+    }
+
+    #[test]
+    fn e2e_parse_error_fails_closed_without_losing_explicit_deny() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command_task".to_string(), ToolApprovalAction::Deny);
+        let policy = ToolApprovalPolicy::Custom {
+            rules,
+            default: ToolApprovalAction::Approve,
+        };
+
+        let mut command = "echo deeply nested".to_string();
+        for _ in 0..=6 {
+            command = format!("sh -c '{}'", command.replace('\'', "'\\''"));
+        }
+
+        assert_eq!(
+            policy.action_for(
+                "run_command_task",
+                Some(&serde_json::json!({"command": command}))
+            ),
+            ToolApprovalAction::Deny
         );
     }
 }
