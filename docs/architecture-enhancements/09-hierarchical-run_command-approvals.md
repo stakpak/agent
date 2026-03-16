@@ -22,7 +22,7 @@ This feature adds scope-aware resolution as an **early-exit layer** before the f
 
 ---
 
-## 2. New Crate: `libs/shell-tool-approvals/`
+## 2. New Crate: `libs/shell-tool-approvals`
 
 A new workspace crate handles all parsing and scope resolution. It has **no dependencies** on `agent-core`, `tui`, or any other workspace crate — it is a pure library.
 
