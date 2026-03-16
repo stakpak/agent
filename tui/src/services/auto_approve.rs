@@ -55,6 +55,11 @@ impl Default for AutoApproveConfig {
         tools.insert("generate_code".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("run_command".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("run_command_task".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("run_remote_command".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert(
+            "run_remote_command_task".to_string(),
+            AutoApprovePolicy::Prompt,
+        );
         tools.insert("subagent_task".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("cancel_task".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("remove".to_string(), AutoApprovePolicy::Prompt);

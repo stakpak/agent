@@ -19,8 +19,8 @@ use crate::config::AppConfig;
 use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
     BuiltinProvider, DEFAULT_MODEL, ProviderSetup, config_to_toml_preview,
-    generate_anthropic_profile, generate_gemini_profile, generate_multi_provider_profile,
-    generate_openai_profile,
+    generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
+    generate_multi_provider_profile, generate_openai_profile,
 };
 use crate::onboarding::menu::{
     prompt_password, prompt_profile_name, select_option, select_option_no_header,
@@ -122,7 +122,7 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                 ),
                 (
                     InitialChoice::OwnKeys,
-                    "Use my own Model/API Key (or Claude Pro/Max Subscription)",
+                    "Use my own Model/API Key (or Claude Pro/Max / GitHub Copilot Subscription)",
                     false,
                 ),
             ],
@@ -200,6 +200,7 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
                     "Hybrid providers (e.g., Google and Anthropic)",
                     false,
                 ),
+                (ProviderChoice::GitHubCopilot, "GitHub Copilot", false),
                 (ProviderChoice::Byom, "Bring your own model", false),
             ],
             1,
@@ -219,6 +220,9 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
             }
             NavResult::Forward(ProviderChoice::Hybrid) => {
                 handle_hybrid_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::GitHubCopilot) => {
+                handle_github_copilot_setup(config, profile_name).await
             }
             NavResult::Forward(ProviderChoice::Byom) => {
                 handle_byom_setup(config, profile_name).await
@@ -821,6 +825,136 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
     }
 }
 
+/// Handle GitHub Copilot setup via device flow
+/// Returns true if completed, false if cancelled/back
+async fn handle_github_copilot_setup(config: &mut AppConfig, profile_name: &str) -> bool {
+    use stakpak_shared::oauth::ProviderRegistry;
+
+    // Clear previous step content
+    print!("\x1b[u");
+    print!("\x1b[0J");
+    print!("\x1b[K");
+    let _ = io::stdout().flush();
+
+    crate::onboarding::styled_output::render_title("GitHub Copilot Configuration");
+    print!("\r\n");
+
+    let steps = vec![
+        ("Step 1".to_string(), StepStatus::Completed),
+        ("Step 2".to_string(), StepStatus::Completed),
+        ("Step 3".to_string(), StepStatus::Active),
+    ];
+    crate::onboarding::styled_output::render_steps(&steps);
+    print!("\r\n");
+
+    crate::onboarding::styled_output::render_info(
+        "Authenticate with your GitHub account (GitHub Copilot subscription required).",
+    );
+    print!("\r\n");
+
+    crate::onboarding::styled_output::render_default_model("github-copilot/gpt-4o");
+
+    let registry = ProviderRegistry::new();
+    let provider = match registry.get("github-copilot") {
+        Some(p) => p,
+        None => {
+            crate::onboarding::styled_output::render_error("GitHub Copilot provider not found");
+            return false;
+        }
+    };
+
+    // Request device code
+    let (flow, device_code) = match provider.request_device_code("device-flow").await {
+        Ok(pair) => pair,
+        Err(e) => {
+            crate::onboarding::styled_output::render_error(&format!(
+                "Failed to start device flow: {}",
+                e
+            ));
+            return false;
+        }
+    };
+
+    print!("\r\n");
+    println!("Visit: {}", device_code.verification_uri);
+    println!("Enter code: {}", device_code.user_code);
+    print!("\r\n");
+
+    // Try to open browser
+    let _ = open::that(&device_code.verification_uri);
+
+    crate::onboarding::styled_output::render_info("Waiting for GitHub authorization...");
+    print!("\r\n");
+
+    // Poll for token
+    let token = match provider.wait_for_token(&flow, &device_code).await {
+        Ok(t) => t,
+        Err(e) => {
+            crate::onboarding::styled_output::render_error(&format!("Authorization failed: {}", e));
+            return false;
+        }
+    };
+
+    // Convert to ProviderAuth
+    let auth = match provider.post_device_authorize("device-flow", &token).await {
+        Ok(a) => a,
+        Err(e) => {
+            crate::onboarding::styled_output::render_error(&format!(
+                "Post-authorization failed: {}",
+                e
+            ));
+            return false;
+        }
+    };
+
+    // Build profile and embed auth
+    let mut profile = generate_github_copilot_profile();
+    if let Some(provider_config) = profile.providers.get_mut("github-copilot") {
+        provider_config.set_auth(auth);
+    }
+
+    // Preview and save
+    crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
+        &profile,
+        profile_name,
+    ));
+
+    match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
+        NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
+            let config_path = get_config_path_string(config);
+            let telemetry = match save_to_profile(&config_path, profile_name, profile.clone()) {
+                Ok(t) => t,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to save configuration: {}",
+                        e
+                    ));
+                    std::process::exit(1);
+                }
+            };
+
+            print!("\r\n");
+            crate::onboarding::styled_output::render_success(
+                "Successfully authenticated with GitHub Copilot!",
+            );
+            print!("\r\n");
+            crate::onboarding::styled_output::render_success("Configuration saved successfully");
+            print!("\r\n");
+
+            config.provider = profile
+                .provider
+                .unwrap_or(crate::config::ProviderType::Local);
+            config.providers = profile.providers.clone();
+            config.model = profile.model.clone();
+            config.anonymous_id = telemetry.anonymous_id;
+            config.collect_telemetry = telemetry.collect_telemetry;
+
+            true
+        }
+        NavResult::Forward(Some(false)) | NavResult::Back | NavResult::Cancel => false,
+    }
+}
+
 /// Handle BYOM / Custom Provider setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
@@ -915,6 +1049,7 @@ enum ProviderChoice {
     Anthropic,
     Google,
     Hybrid,
+    GitHubCopilot,
     Byom,
 }
 

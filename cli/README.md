@@ -58,6 +58,21 @@ In addition to the startup probes, doctor also reports:
 - sandbox permission issues are addressed by mapping the host UID/GID into the container runtime when possible
 - secret/config files should **not** be made world-readable as a workaround
 
+### Sandbox mode
+
+Autopilot spawns a Docker-based sandbox container to isolate subagent tool calls. The `sandbox_mode` field in `[server]` controls the container lifecycle:
+
+```toml
+[server]
+listen = "127.0.0.1:4096"
+sandbox_mode = "ephemeral"  # or "persistent" (default)
+```
+
+| Mode | Behavior | Startup requirement |
+|------|----------|---------------------|
+| `persistent` (default) | Single container spawned at startup, reused for all sessions. If the container fails to start, autopilot refuses to start. | Docker + working image for host arch |
+| `ephemeral` | Container spawned per-session only when `sandbox: true` is requested. The sandbox image is still pulled/validated at startup so Docker progress is visible. | Docker + working image for host arch |
+
 ### Common probe meanings
 
 | Probe | Meaning | Typical fix |

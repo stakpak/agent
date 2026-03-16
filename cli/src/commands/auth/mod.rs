@@ -48,6 +48,18 @@ pub enum AuthCommands {
         /// AWS named profile for Bedrock provider (from ~/.aws/config)
         #[arg(long)]
         profile_name: Option<String>,
+
+        /// OAuth access token (non-interactive setup)
+        #[arg(long)]
+        access: Option<String>,
+
+        /// OAuth refresh token (non-interactive setup, default: "")
+        #[arg(long, default_value = "")]
+        refresh: String,
+
+        /// OAuth token expiry as Unix timestamp ms (non-interactive setup, default: i64::MAX)
+        #[arg(long, default_value_t = i64::MAX)]
+        expiry: i64,
     },
 
     /// Logout from an LLM provider
@@ -83,6 +95,9 @@ impl AuthCommands {
                 endpoint,
                 region,
                 profile_name,
+                access,
+                refresh,
+                expiry,
             } => {
                 login::handle_login(
                     &config_dir,
@@ -90,8 +105,15 @@ impl AuthCommands {
                     profile.as_deref(),
                     api_key,
                     endpoint,
-                    region,
-                    profile_name,
+                    login::AwsLoginParams {
+                        region,
+                        aws_profile_name: profile_name,
+                    },
+                    login::OAuthTokenParams {
+                        access,
+                        refresh,
+                        expiry,
+                    },
                 )
                 .await
             }

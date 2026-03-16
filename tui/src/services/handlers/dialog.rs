@@ -20,11 +20,16 @@ use uuid::Uuid;
 
 use super::EventChannels;
 
+/// Check if a tool name (after prefix stripping) is a foreground command tool
+fn is_foreground_command_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "run_command" | "run_remote_command")
+}
+
 /// Update a run_command block from Pending to Running state
 /// This should be called when a run_command tool is approved and starts executing
 pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall) {
     let tool_name = strip_tool_name(&tool_call.function.name);
-    if tool_name != "run_command" {
+    if !is_foreground_command_tool(tool_name) {
         return;
     }
 
@@ -65,7 +70,7 @@ pub fn update_pending_tool_to_first(
     let tool_name = strip_tool_name(&first_tool.function.name);
 
     // Create the appropriate pending block based on tool type
-    if tool_name == "run_command" {
+    if is_foreground_command_tool(tool_name) {
         let command = super::shell::extract_command_from_tool_call(first_tool)
             .unwrap_or_else(|_| "unknown command".to_string());
 
@@ -127,9 +132,9 @@ pub fn handle_esc_event(
     // Common handling for rejection
     state.message_tool_calls = None;
     state.tool_call_execution_order.clear();
-    // Store the latest tool call for potential retry (only for run_command)
+    // Store the latest tool call for potential retry (only for command tools)
     if let Some(tool_call) = &state.dialog_command
-        && strip_tool_name(&tool_call.function.name) == "run_command"
+        && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
     {
         state.latest_tool_call = Some(tool_call.clone());
     }
@@ -183,8 +188,8 @@ pub fn handle_esc(
                 .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
 
             let tool_name = strip_tool_name(&tool_call.function.name);
-            if tool_name == "run_command" {
-                // For run_command, remove the pending unified block and add rejected unified block
+            if is_foreground_command_tool(tool_name) {
+                // For command tools, remove the pending unified block and add rejected unified block
                 // Remove pending message by tool_call_id
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
                     state.messages.retain(|m| m.id != tool_call_uuid);
@@ -330,8 +335,8 @@ pub fn handle_show_confirmation_dialog(
         .unwrap_or(false)
     {
         let tool_name = strip_tool_name(&tool_call.function.name);
-        if tool_name == "run_command" {
-            // Use unified block for run_command
+        if is_foreground_command_tool(tool_name) {
+            // Use unified block for command tools
             let command =
                 crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
                     .unwrap_or_else(|_| "unknown command".to_string());
@@ -363,14 +368,14 @@ pub fn handle_show_confirmation_dialog(
 
     state.dialog_command = Some(tool_call.clone());
     let tool_name = strip_tool_name(&tool_call.function.name);
-    if tool_name == "run_command" {
+    if is_foreground_command_tool(tool_name) {
         state.latest_tool_call = Some(tool_call.clone());
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
     // Tool call is pending - create pending border block and check if we should show popup
-    // For run_command, try to use tool_call.id as UUID so removal logic in event_loop works
-    let message_id = if tool_name == "run_command" {
+    // For command tools, try to use tool_call.id as UUID so removal logic in event_loop works
+    let message_id = if is_foreground_command_tool(tool_name) {
         Uuid::parse_str(&tool_call.id).unwrap_or_else(|_| Uuid::new_v4())
     } else {
         Uuid::new_v4()
@@ -381,8 +386,8 @@ pub fn handle_show_confirmation_dialog(
     // subsequent tools are added to the approval bar (see !was_empty branch below).
     let previous_pending_bash_message_id = state.pending_bash_message_id;
 
-    // Use unified run command block for run_command tool calls
-    if tool_name == "run_command" {
+    // Use unified run command block for command tool calls
+    if is_foreground_command_tool(tool_name) {
         // Extract command from tool call arguments
         let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
             .unwrap_or_else(|_| "unknown command".to_string());
