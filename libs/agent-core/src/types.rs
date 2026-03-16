@@ -189,7 +189,7 @@ impl ToolApprovalPolicy {
                         Vec::new()
                     };
 
-                    match shell_parser::resolve_hierarchical_policy(
+                    match shell_tool_approvals::resolve_hierarchical_policy(
                         command_str,
                         stripped,
                         &fallback_scopes,
@@ -716,7 +716,7 @@ mod tests {
             default: ToolApprovalAction::Approve,
         };
         // The outer command is "sh", but the inner script contains "rm"
-        // shell_parser recursively extracts inner commands from "sh -c '...'"
+        // shell_tool_approvals recursively extracts inner commands from "sh -c '...'"
         assert_eq!(
             policy.action_for(
                 "run_command",

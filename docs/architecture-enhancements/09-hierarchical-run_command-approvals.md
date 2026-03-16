@@ -22,14 +22,14 @@ This feature adds scope-aware resolution as an **early-exit layer** before the f
 
 ---
 
-## 2. New Crate: `libs/shell-parser/`
+## 2. New Crate: `libs/shell-tool-approvals/`
 
 A new workspace crate handles all parsing and scope resolution. It has **no dependencies** on `agent-core`, `tui`, or any other workspace crate — it is a pure library.
 
 ### 2.1 Public API
 
 ```rust
-// libs/shell-parser/src/lib.rs
+// libs/shell-tool-approvals/src/lib.rs
 pub use parse::{ParsedCommand, parse};
 ```
 

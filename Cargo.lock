@@ -5888,7 +5888,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "shell-parser"
+name = "shell-tool-approvals"
 version = "0.3.67"
 dependencies = [
  "globset",
@@ -6179,7 +6179,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "shell-parser",
+ "shell-tool-approvals",
  "stakai",
  "thiserror 2.0.17",
  "tokio",
@@ -6412,7 +6412,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "shell-parser",
+ "shell-tool-approvals",
  "shlex",
  "similar",
  "stakai",

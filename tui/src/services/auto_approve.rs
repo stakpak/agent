@@ -398,7 +398,7 @@ fn resolve_shell_scope(
         Vec::new()
     };
 
-    match shell_parser::resolve_hierarchical_policy(
+    match shell_tool_approvals::resolve_hierarchical_policy(
         command_str,
         tool_name,
         &fallback_scopes,
