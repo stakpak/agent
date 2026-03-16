@@ -717,17 +717,17 @@ mod tests {
 
     #[test]
     fn matches_pattern_exact() {
-        assert!(shell_parser::matches_pattern("push", "push"));
-        assert!(!shell_parser::matches_pattern("push", "pull"));
+        assert!(shell_tool_approvals::matches_pattern("push", "push"));
+        assert!(!shell_tool_approvals::matches_pattern("push", "pull"));
     }
 
     #[test]
     fn matches_pattern_glob() {
-        assert!(shell_parser::matches_pattern(
+        assert!(shell_tool_approvals::matches_pattern(
             "*.prod.*",
             "api.prod.example.com"
         ));
-        assert!(!shell_parser::matches_pattern(
+        assert!(!shell_tool_approvals::matches_pattern(
             "*.prod.*",
             "api.staging.example.com"
         ));
@@ -735,13 +735,19 @@ mod tests {
 
     #[test]
     fn matches_pattern_regex() {
-        assert!(shell_parser::matches_pattern("re:^push$", "push"));
-        assert!(!shell_parser::matches_pattern("re:^push$", "push-force"));
+        assert!(shell_tool_approvals::matches_pattern("re:^push$", "push"));
+        assert!(!shell_tool_approvals::matches_pattern(
+            "re:^push$",
+            "push-force"
+        ));
     }
 
     #[test]
     fn matches_pattern_invalid_regex_returns_false() {
-        assert!(!shell_parser::matches_pattern("re:[invalid", "anything"));
+        assert!(!shell_tool_approvals::matches_pattern(
+            "re:[invalid",
+            "anything"
+        ));
     }
 
     #[tokio::test]

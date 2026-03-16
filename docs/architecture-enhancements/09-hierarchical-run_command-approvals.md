@@ -166,7 +166,7 @@ pub fn action_for(&self, tool_name: &str) -> ToolApprovalAction
 pub fn action_for(&self, tool_name: &str, tool_arguments: &serde_json::Value) -> ToolApprovalAction
 ```
 
-When `tool_name` is `"run_command"` / `"run_command_task"` and `tool_arguments` contains a `"command"` field: the command string is parsed and resolved via `shell_parser::resolve_hierarchical_policy(...)`.
+When `tool_name` is `"run_command"` / `"run_command_task"` and `tool_arguments` contains a `"command"` field: the command string is parsed and resolved via `shell_tool_approvals::resolve_hierarchical_policy(...)`.
 
 - `run_command_task` first checks `run_command_task...` scopes, then falls back to shared `run_command...` scopes if no task-specific rule matches.
 - Parse failures fail closed to at least `Ask` while preserving stricter explicit `Deny` rules.
@@ -198,7 +198,7 @@ if tool_name == "run_command" || tool_name == "run_command_task" {
 }
 ```
 
-`resolve_shell_scope` now delegates to `shell_parser::resolve_hierarchical_policy(...)` using the tool name as the primary scope and `run_command` as a shared fallback scope for `run_command_task`.
+`resolve_shell_scope` now delegates to `shell_tool_approvals::resolve_hierarchical_policy(...)` using the tool name as the primary scope and `run_command` as a shared fallback scope for `run_command_task`.
 
 If the command string cannot be extracted, it returns `None`. If parsing fails (for example due to excessive nested `-c` depth), it fails closed to at least `Prompt` while preserving stricter explicit `Never` rules.
 
