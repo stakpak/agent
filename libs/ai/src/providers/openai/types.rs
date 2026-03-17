@@ -164,11 +164,18 @@ pub struct ChatUsage {
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct ChatCompletionChunk {
+    /// Some providers (e.g. GitHub Copilot) send chunks with an empty id.
+    #[serde(default)]
     pub id: String,
     /// Some providers (e.g. GitHub Copilot) omit this field; default to empty string.
     #[serde(default)]
     pub object: String,
+    /// Some providers (e.g. GitHub Copilot) send chunks with `created: 0`.
+    #[serde(default)]
     pub created: u64,
+    /// Some providers (e.g. GitHub Copilot) omit the model field on
+    /// `prompt_filter_results` chunks; default to empty string.
+    #[serde(default)]
     pub model: String,
     pub choices: Vec<ChunkChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -28,7 +28,7 @@ impl GitHubCopilotProvider {
     /// OAuth App client IDs are **not secret** — they identify the application
     /// and are safe to embed in source code.  Only the `client_secret` (unused
     /// in the device flow) must be kept confidential.
-    pub const CLIENT_ID: &'static str = "Ov23li6Jke610XFUzJf5";
+    pub const CLIENT_ID: &'static str = "Iv1.b507a08c87ecfe98";
 
     /// OAuth scope required for Copilot API access.
     /// `read:user` is sufficient — Copilot authorization is bound to the
