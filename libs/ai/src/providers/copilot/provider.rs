@@ -2,26 +2,30 @@
 //!
 //! ## Authentication flow
 //!
-//! 1. The user authenticates via GitHub Device Flow → receives a GitHub OAuth
-//!    token (`ghu_...`).
+//! 1. The user authenticates via GitHub Device Flow (client ID `Iv1.b507a08c87ecfe98`)
+//!    → receives a GitHub user-to-server token (`ghu_...`).
 //! 2. Before each API call the provider exchanges that token for a short-lived
 //!    Copilot API token via:
 //!    `GET https://api.github.com/copilot_internal/v2/token`
-//!    (Authorization: token <github-oauth-token>)
+//!    (Authorization: Bearer <github-token>)
 //! 3. The response contains:
 //!    - `token`: short-lived Copilot API token (sent as Bearer on chat requests)
 //!    - `expires_at`: Unix timestamp (integer seconds)
 //!    - `endpoints.api`: resolved chat API base URL (e.g. `https://api.individual.githubcopilot.com`)
 //! 4. The Copilot API token is cached in memory and refreshed 5 min before expiry.
 //!
-//! ## Required headers on chat requests
+//! ## Required headers
 //!
+//! Both the token exchange and chat requests require the following headers:
+//! - `User-Agent: GitHubCopilotChat/<version>`
+//! - `Editor-Version: vscode/<version>`
+//! - `Editor-Plugin-Version: copilot-chat/<version>`
+//! - `Copilot-Integration-Id: vscode-chat`
+//!
+//! Chat requests additionally need:
 //! - `Authorization: Bearer <copilot-api-token>`
-//! - `Editor-Version: vscode/1.95.0`  (override via `STAKPAK_COPILOT_EDITOR_VERSION`)
-//! - `Editor-Plugin-Version: copilot-chat/0.22.4`  (override via `STAKPAK_COPILOT_EDITOR_PLUGIN_VERSION`)
 //! - `Openai-Intent: conversation-edits`
-//! - `x-initiator: agent`
-//! - `User-Agent: stakpak/<version>`
+//! - `X-Initiator: agent`
 
 use super::types::{CachedCopilotToken, CopilotConfig};
 use crate::error::{Error, Result};
@@ -37,6 +41,21 @@ use reqwest_eventsource::EventSource;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
+/// Refresh the cached token this many seconds before it actually expires.
+const REFRESH_BUFFER_SECS: u64 = 300;
+
+/// User-Agent header value expected by the Copilot backend.
+const COPILOT_USER_AGENT: &str = "GitHubCopilotChat/0.35.0";
+
+/// Editor version header required by the Copilot backend.
+const EDITOR_VERSION: &str = "vscode/1.107.0";
+
+/// Editor plugin version header required by the Copilot backend.
+const EDITOR_PLUGIN_VERSION: &str = "copilot-chat/0.35.0";
+
+/// Integration identifier required by the Copilot backend.
+const COPILOT_INTEGRATION_ID: &str = "vscode-chat";
+
 #[derive(serde::Deserialize)]
 struct Endpoints {
     api: String,
@@ -48,17 +67,6 @@ struct TokenResp {
     expires_at: u64,
     endpoints: Option<Endpoints>,
 }
-
-/// Refresh the cached token this many seconds before it actually expires.
-const REFRESH_BUFFER_SECS: u64 = 300;
-
-/// Hardcoded VSCode version string required by the Copilot backend.
-/// Update this when GitHub changes its accepted version range.
-const EDITOR_VERSION: &str = "vscode/1.95.0";
-
-/// Hardcoded Copilot Chat plugin version required by the Copilot backend.
-/// Update this when GitHub changes its accepted version range.
-const EDITOR_PLUGIN_VERSION: &str = "copilot-chat/0.22.4";
 
 /// GitHub Copilot provider.
 pub struct CopilotProvider {
@@ -87,15 +95,15 @@ impl CopilotProvider {
         let resp = self
             .client
             .get("https://api.github.com/copilot_internal/v2/token")
-            .header(
-                "Authorization",
-                format!("token {}", self.config.github_token),
-            )
             .header("Accept", "application/json")
             .header(
-                "User-Agent",
-                format!("stakpak/{}", env!("CARGO_PKG_VERSION")),
+                "Authorization",
+                format!("Bearer {}", self.config.github_token),
             )
+            .header("User-Agent", COPILOT_USER_AGENT)
+            .header("Editor-Version", EDITOR_VERSION)
+            .header("Editor-Plugin-Version", EDITOR_PLUGIN_VERSION)
+            .header("Copilot-Integration-Id", COPILOT_INTEGRATION_ID)
             .send()
             .await?;
 
@@ -164,20 +172,12 @@ impl CopilotProvider {
         let mut headers = Headers::new();
         headers.insert("Authorization", format!("Bearer {}", token.token));
         headers.insert("Content-Type", "application/json");
-        headers.insert(
-            "User-Agent",
-            format!("stakpak/{}", env!("CARGO_PKG_VERSION")),
-        );
-        // Required by the Copilot backend — must be a recognised VSCode version.
-        // Both values can be overridden at runtime via environment variables.
-        let editor_version = std::env::var("STAKPAK_COPILOT_EDITOR_VERSION")
-            .unwrap_or_else(|_| EDITOR_VERSION.to_string());
-        let editor_plugin_version = std::env::var("STAKPAK_COPILOT_EDITOR_PLUGIN_VERSION")
-            .unwrap_or_else(|_| EDITOR_PLUGIN_VERSION.to_string());
-        headers.insert("Editor-Version", editor_version);
-        headers.insert("Editor-Plugin-Version", editor_plugin_version);
+        headers.insert("User-Agent", COPILOT_USER_AGENT);
+        headers.insert("Editor-Version", EDITOR_VERSION);
+        headers.insert("Editor-Plugin-Version", EDITOR_PLUGIN_VERSION);
+        headers.insert("Copilot-Integration-Id", COPILOT_INTEGRATION_ID);
         headers.insert("Openai-Intent", "conversation-edits");
-        headers.insert("x-initiator", "agent");
+        headers.insert("X-Initiator", "agent");
 
         if let Some(custom) = custom_headers {
             headers.merge_with(custom);
