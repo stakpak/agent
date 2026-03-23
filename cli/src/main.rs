@@ -59,6 +59,17 @@ use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
 use crate::onboarding::{OnboardingMode, run_onboarding};
+
+fn config_has_any_auth(config: &AppConfig) -> bool {
+    config_has_any_auth_flags(
+        config.get_stakpak_api_key().is_some(),
+        !config.get_llm_provider_config().providers.is_empty(),
+    )
+}
+
+fn config_has_any_auth_flags(has_stakpak_key: bool, has_provider_keys: bool) -> bool {
+    has_stakpak_key || has_provider_keys
+}
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
@@ -310,10 +321,9 @@ async fn main() {
                 stakpak_shared::terminal_theme::init_theme(theme_override);
 
                 // Run onboarding if no credentials are configured at all
-                // Check both Stakpak API key AND local provider keys
                 let has_stakpak_key = config.get_stakpak_api_key().is_some();
-                let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
-                if !has_stakpak_key && !has_provider_keys {
+                let has_auth = config_has_any_auth(&config);
+                if !has_auth {
                     run_onboarding(&mut config, OnboardingMode::Default).await;
                 }
 
@@ -631,7 +641,8 @@ async fn main() {
                 }
             } else if let Some(command) = cli.command {
                 // Run a specific subcommand (Account, Config, etc.)
-                if config.get_stakpak_api_key().is_none() && command.requires_auth() {
+                let has_auth = config_has_any_auth(&config);
+                if !has_auth && command.requires_auth() {
                     run_onboarding(&mut config, OnboardingMode::Default).await;
                 }
                 let _ = gitignore::ensure_stakpak_in_gitignore(&config);
@@ -651,6 +662,95 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn write_executable_script(path: &std::path::Path, content: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, content).expect("write script");
+        let mut permissions = std::fs::metadata(path)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod script");
+    }
+
+    #[test]
+    fn config_has_any_auth_flags_false_when_no_credentials() {
+        assert!(!config_has_any_auth_flags(false, false));
+    }
+
+    #[test]
+    fn config_has_any_auth_flags_true_when_provider_is_configured() {
+        assert!(config_has_any_auth_flags(false, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_remap_path_preserves_home_and_drops_via_gosu() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        std::fs::create_dir_all(&fake_bin).expect("create fake bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+
+        write_executable_script(
+            &fake_bin.join("id"),
+            "#!/bin/sh\nif [ \"$1\" = \"-u\" ]; then\n  echo 0\n  exit 0\nfi\n/usr/bin/id \"$@\"\n",
+        );
+        write_executable_script(
+            &fake_bin.join("sed"),
+            "#!/bin/sh\nprintf 'sed:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
+        );
+        write_executable_script(
+            &fake_bin.join("find"),
+            "#!/bin/sh\nprintf 'find:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
+        );
+        write_executable_script(
+            &fake_bin.join("gosu"),
+            "#!/bin/sh\nprintf 'gosu:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nprintf 'home:%s\\n' \"$HOME\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
+        );
+
+        let script_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/entrypoint.sh");
+        let path_env = format!(
+            "{}:{}",
+            fake_bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+
+        let output = std::process::Command::new("sh")
+            .arg(script_path)
+            .arg("/usr/local/bin/stakpak")
+            .arg("mcp")
+            .arg("start")
+            .env("PATH", path_env)
+            .env("ENTRYPOINT_LOG", &log_path)
+            .env("STAKPAK_TARGET_UID", "1234")
+            .env("STAKPAK_TARGET_GID", "5678")
+            .output()
+            .expect("run entrypoint");
+
+        assert!(
+            output.status.success(),
+            "entrypoint failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read entrypoint log");
+        assert!(
+            log.contains("gosu:agent /usr/local/bin/stakpak mcp start"),
+            "expected gosu handoff in log, got: {log}"
+        );
+        assert!(
+            log.contains("home:/home/agent"),
+            "expected HOME to be preserved, got: {log}"
+        );
+        assert!(
+            log.contains("find:/home/agent -xdev"),
+            "expected home-tree ownership fixup, got: {log}"
+        );
+    }
 
     #[test]
     fn cli_parses_session_flag() {

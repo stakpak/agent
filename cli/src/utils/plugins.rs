@@ -16,6 +16,23 @@ pub struct PluginConfig {
     pub repo: Option<String>,
     pub owner: Option<String>,
     pub version_arg: Option<String>,
+    pub prefer_server_version: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LatestVersionSource {
+    Server,
+    GitHub,
+}
+
+fn latest_version_source(config: &PluginConfig) -> LatestVersionSource {
+    if config.prefer_server_version {
+        LatestVersionSource::Server
+    } else if config.owner.is_some() && config.repo.is_some() {
+        LatestVersionSource::GitHub
+    } else {
+        LatestVersionSource::Server
+    }
 }
 
 /// Get the path to a plugin, downloading it if necessary
@@ -28,16 +45,26 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         repo: config.repo,
         owner: config.owner,
         version_arg: config.version_arg,
+        prefer_server_version: config.prefer_server_version,
     };
 
     // Get the target version from the server or GitHub
     let target_version = match config.version.clone() {
         Some(version) => version,
         None => {
-            let latest = if let (Some(owner), Some(repo)) = (&config.owner, &config.repo) {
-                get_latest_github_release_version(owner, repo).await
-            } else {
-                get_latest_version(&config).await
+            let latest = match latest_version_source(&config) {
+                LatestVersionSource::Server => get_latest_version(&config).await,
+                LatestVersionSource::GitHub => {
+                    let owner = match config.owner.as_deref() {
+                        Some(owner) => owner,
+                        None => return get_plugin_path_without_version_check(&config).await,
+                    };
+                    let repo = match config.repo.as_deref() {
+                        Some(repo) => repo,
+                        None => return get_plugin_path_without_version_check(&config).await,
+                    };
+                    get_latest_github_release_version(owner, repo).await
+                }
             };
 
             match latest {
@@ -83,15 +110,22 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         }
     }
 
-    // Try to download and install the latest version
-    match download_and_install_plugin(&config).await {
-        Ok(path) => {
-            // println!(
-            //     "Successfully installed {} v{} -> {}",
-            //     config.name, target_version, path
-            // );
-            path
-        }
+    // Pin the resolved version so the download URL uses the exact version
+    // rather than falling back to "latest" (which could race with a new release).
+    let resolved_config = PluginConfig {
+        version: Some(target_version.clone()),
+        name: config.name.clone(),
+        base_url: config.base_url.clone(),
+        targets: config.targets.clone(),
+        repo: config.repo.clone(),
+        owner: config.owner.clone(),
+        version_arg: config.version_arg.clone(),
+        prefer_server_version: config.prefer_server_version,
+    };
+
+    // Try to download and install the resolved version
+    match download_and_install_plugin(&resolved_config).await {
+        Ok(path) => path,
         Err(e) => {
             eprintln!("Failed to download {}: {}", config.name, e);
             // Try to use existing version if available
@@ -505,4 +539,73 @@ pub fn execute_plugin_command(mut cmd: Command, plugin_name: String) -> Result<(
     }
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn current_target() -> String {
+        let (platform, arch) = get_platform_suffix().expect("current platform supported in tests");
+        format!("{platform}-{arch}")
+    }
+
+    fn test_config() -> PluginConfig {
+        PluginConfig {
+            name: "warden".to_string(),
+            base_url: "https://example.com/releases".to_string(),
+            targets: vec![current_target()],
+            version: None,
+            repo: Some("warden".to_string()),
+            owner: Some("stakpak".to_string()),
+            version_arg: None,
+            prefer_server_version: false,
+        }
+    }
+
+    #[test]
+    fn latest_version_source_prefers_server_when_flag_is_set() {
+        let mut config = test_config();
+        config.prefer_server_version = true;
+        assert_eq!(latest_version_source(&config), LatestVersionSource::Server);
+    }
+
+    #[test]
+    fn latest_version_source_uses_github_when_repo_and_owner_exist() {
+        let config = test_config();
+        assert_eq!(latest_version_source(&config), LatestVersionSource::GitHub);
+    }
+
+    #[test]
+    fn latest_version_source_falls_back_to_server_without_repo_metadata() {
+        let mut config = test_config();
+        config.repo = None;
+        config.owner = None;
+        assert_eq!(latest_version_source(&config), LatestVersionSource::Server);
+    }
+
+    #[test]
+    fn get_download_info_uses_pinned_github_version_instead_of_latest() {
+        let mut config = test_config();
+        config.base_url = "https://github.com/stakpak/warden".to_string();
+        config.version = Some("v1.2.3".to_string());
+
+        let (download_url, _, _) = get_download_info(&config).expect("download info");
+        assert!(download_url.contains("/releases/download/v1.2.3/"));
+        assert!(!download_url.contains("/releases/latest/"));
+    }
+
+    #[test]
+    fn get_download_info_uses_pinned_server_version_instead_of_latest() {
+        let mut config = test_config();
+        config.base_url = "https://warden-cli-releases.s3.amazonaws.com".to_string();
+        config.version = Some("v9.9.9".to_string());
+        config.repo = None;
+        config.owner = None;
+        config.prefer_server_version = true;
+
+        let (download_url, _, _) = get_download_info(&config).expect("download info");
+        assert!(download_url.contains("/v9.9.9/"));
+        assert!(!download_url.contains("/latest/"));
+    }
 }
