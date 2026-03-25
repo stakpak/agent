@@ -3,13 +3,15 @@ use crate::services::detect_term::ThemeColors;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::Paragraph,
+    style::Style,
+    widgets::{Block, Borders, Paragraph},
 };
 use std::time::{Duration, Instant};
 
 const BANNER_MESSAGE_DURATION: Duration = Duration::from_secs(60);
+
+/// Height of the banner when visible: 1 line of text + 2 border lines.
+const BANNER_VISIBLE_HEIGHT: u16 = 3;
 
 #[derive(Debug, Clone)]
 pub struct BannerMessage {
@@ -30,10 +32,11 @@ impl BannerMessage {
     }
 }
 
-/// Returns 1 if there is an active (non-expired) banner message, 0 otherwise.
+/// Returns the banner height: `BANNER_VISIBLE_HEIGHT` when there is an active
+/// (non-expired) message, `0` otherwise.
 pub fn banner_height(state: &AppState) -> u16 {
     match &state.banner_message {
-        Some(msg) if !msg.is_expired() => 1,
+        Some(msg) if !msg.is_expired() => BANNER_VISIBLE_HEIGHT,
         _ => 0,
     }
 }
@@ -52,13 +55,13 @@ pub fn render_banner(f: &mut Frame, area: Rect, state: &mut AppState) {
     };
 
     let text = msg.text.clone();
-    let banner = Paragraph::new(Line::from(vec![Span::styled(
-        text,
-        Style::default()
-            .fg(ratatui::style::Color::White)
-            .bg(ThemeColors::accent())
-            .add_modifier(Modifier::BOLD),
-    )]))
-    .alignment(Alignment::Center);
-    f.render_widget(banner, area);
+    let warning_style = Style::default().fg(ThemeColors::warning());
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(warning_style);
+
+    let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Left);
+
+    f.render_widget(paragraph, area);
 }

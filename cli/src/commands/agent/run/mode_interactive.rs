@@ -408,6 +408,21 @@ pub async fn run_interactive(
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
+            // Show banner if no APPS.md was found
+            if agent_context
+                .as_ref()
+                .map(|ctx| ctx.apps_md.is_none())
+                .unwrap_or(true)
+            {
+                let _ = send_input_event(
+                    &input_tx,
+                    InputEvent::SetBannerMessage(
+                        " ⚠️ System not scanned - context limited. Run /init to unlock full capabilities ".to_string(),
+                    ),
+                )
+                .await;
+            }
+
             // Fetch billing info (only when Stakpak API key is present)
             if has_stakpak_key {
                 refresh_billing_info(client.as_ref(), &input_tx).await;
