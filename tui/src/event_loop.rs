@@ -224,20 +224,22 @@ pub async fn run_tui(
                        // The approval bar will be visible, so input and dropdown are hidden
                        let approval_bar_height = state.approval_bar.calculate_height(term_rect.width).max(7); // Use expected height
 
-                       let outer_chunks = ratatui::layout::Layout::default()
-                           .direction(ratatui::layout::Direction::Vertical)
-                           .constraints([
-                               ratatui::layout::Constraint::Min(1), // messages
-                               ratatui::layout::Constraint::Length(1), // loading
-                               ratatui::layout::Constraint::Length(0), // shell popup
-                               ratatui::layout::Constraint::Length(approval_bar_height), // approval bar
-                               ratatui::layout::Constraint::Length(0), // input (hidden when approval bar visible)
-                               ratatui::layout::Constraint::Length(0), // dropdown (hidden when approval bar visible)
-                               ratatui::layout::Constraint::Length(hint_height), // hint
-                           ])
-                           .split(term_rect);
-                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
-                       let message_area_height = outer_chunks[0].height as usize;
+                       let banner_h = crate::services::banner::banner_height(&state);
+                        let outer_chunks = ratatui::layout::Layout::default()
+                             .direction(ratatui::layout::Direction::Vertical)
+                             .constraints([
+                                 ratatui::layout::Constraint::Length(banner_h), // banner (0 if no message)
+                                 ratatui::layout::Constraint::Min(1), // messages
+                                 ratatui::layout::Constraint::Length(1), // loading
+                                 ratatui::layout::Constraint::Length(0), // shell popup
+                                 ratatui::layout::Constraint::Length(approval_bar_height), // approval bar
+                                 ratatui::layout::Constraint::Length(0), // input (hidden when approval bar visible)
+                                 ratatui::layout::Constraint::Length(0), // dropdown (hidden when approval bar visible)
+                                 ratatui::layout::Constraint::Length(hint_height), // hint
+                             ])
+                             .split(term_rect);
+                         let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
+                         let message_area_height = outer_chunks[1].height as usize;
 
                        crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_file_search_results();
@@ -389,28 +391,30 @@ pub async fn run_tui(
                        let dropdown_showing = state.show_helper_dropdown
                            && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
                                || !state.filtered_files.is_empty());
-                       let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
-                       } else {
-                           0
-                       };
-                       let hint_height = if dropdown_showing { 0 } else { margin_height };
-                       let outer_chunks = ratatui::layout::Layout::default()
-                           .direction(ratatui::layout::Direction::Vertical)
-                           .constraints([
-                               ratatui::layout::Constraint::Min(1), // messages
-                               ratatui::layout::Constraint::Length(1), // loading indicator
-                               ratatui::layout::Constraint::Length(input_height as u16),
-                               ratatui::layout::Constraint::Length(dropdown_height),
-                               ratatui::layout::Constraint::Length(hint_height),
-                           ])
-                           .split(term_rect);
-                       // Subtract 2 for padding (matches view.rs padded_message_area)
-                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
-                       let message_area_height = outer_chunks[0].height as usize;
-                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        state.poll_file_search_results();
-                       // Handle pending editor open request
+                        let dropdown_height = if dropdown_showing {
+                            state.filtered_helpers.len() as u16
+                        } else {
+                            0
+                        };
+                         let hint_height = if dropdown_showing { 0 } else { margin_height };
+                        let banner_h = crate::services::banner::banner_height(&state);
+                        let outer_chunks = ratatui::layout::Layout::default()
+                            .direction(ratatui::layout::Direction::Vertical)
+                            .constraints([
+                                ratatui::layout::Constraint::Length(banner_h), // banner (0 if no message)
+                                ratatui::layout::Constraint::Min(1), // messages
+                                ratatui::layout::Constraint::Length(1), // loading indicator
+                                ratatui::layout::Constraint::Length(input_height as u16),
+                                ratatui::layout::Constraint::Length(dropdown_height),
+                                ratatui::layout::Constraint::Length(hint_height),
+                            ])
+                            .split(term_rect);
+                        // Subtract 2 for padding (matches view.rs padded_message_area)
+                        let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
+                        let message_area_height = outer_chunks[1].height as usize;
+                         crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                         state.poll_file_search_results();
+                        // Handle pending editor open request
                        if let Some(file_path) = state.pending_editor_open.take() {
                            // Disable mouse capture before opening editor to prevent weird input
                            let was_mouse_capture_enabled = state.mouse_capture_enabled;
@@ -479,21 +483,23 @@ pub async fn run_tui(
                        } else {
                            0
                        };
-                       let hint_height = if dropdown_showing { 0 } else { margin_height };
-                       let outer_chunks = ratatui::layout::Layout::default()
-                           .direction(ratatui::layout::Direction::Vertical)
-                           .constraints([
-                               ratatui::layout::Constraint::Min(1), // messages
-                               ratatui::layout::Constraint::Length(1), // loading indicator
-                               ratatui::layout::Constraint::Length(input_height as u16),
-                               ratatui::layout::Constraint::Length(dropdown_height),
-                               ratatui::layout::Constraint::Length(hint_height),
-                           ])
-                           .split(term_rect);
-                       // Subtract 2 for padding (matches view.rs padded_message_area)
-                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
-                       let message_area_height = outer_chunks[0].height as usize;
-                    if let InputEvent::EmergencyClearTerminal = event {
+                        let hint_height = if dropdown_showing { 0 } else { margin_height };
+                        let banner_h = crate::services::banner::banner_height(&state);
+                         let outer_chunks = ratatui::layout::Layout::default()
+                             .direction(ratatui::layout::Direction::Vertical)
+                             .constraints([
+                                 ratatui::layout::Constraint::Length(banner_h), // banner (0 if no message)
+                                 ratatui::layout::Constraint::Min(1), // messages
+                                 ratatui::layout::Constraint::Length(1), // loading indicator
+                                 ratatui::layout::Constraint::Length(input_height as u16),
+                                 ratatui::layout::Constraint::Length(dropdown_height),
+                                 ratatui::layout::Constraint::Length(hint_height),
+                             ])
+                             .split(term_rect);
+                         // Subtract 2 for padding (matches view.rs padded_message_area)
+                         let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
+                         let message_area_height = outer_chunks[1].height as usize;
+                      if let InputEvent::EmergencyClearTerminal = event {
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }

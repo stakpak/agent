@@ -8,6 +8,7 @@ pub use types::*;
 
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::banner::BannerMessage;
 use crate::services::board_tasks::TaskProgress;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::ThemeColors;
@@ -241,6 +242,7 @@ pub struct AppState {
     // ========== Text Selection State ==========
     pub selection: SelectionState,
     pub toast: Option<Toast>,
+    pub banner_message: Option<BannerMessage>,
     /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
     pub selection_auto_scroll: i32,
 
@@ -596,6 +598,7 @@ impl AppState {
             // Text selection initialization
             selection: SelectionState::default(),
             toast: None,
+            banner_message: None,
             selection_auto_scroll: 0,
             input_content_area: None,
 

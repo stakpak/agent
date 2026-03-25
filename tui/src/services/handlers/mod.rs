@@ -1307,6 +1307,9 @@ pub fn update(
         InputEvent::SetSessions(sessions) => {
             misc::handle_set_sessions(state, sessions);
         }
+        InputEvent::SetBannerMessage(text) => {
+            misc::handle_set_banner_message(state, text);
+        }
         InputEvent::StartLoadingOperation(operation) => {
             misc::handle_start_loading_operation(state, operation);
         }

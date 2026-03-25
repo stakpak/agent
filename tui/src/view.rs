@@ -20,20 +20,17 @@ use ratatui::{
 };
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
-
-    // Full-width banner at the top
+    // Full-width banner at the top (height=0 when no active message)
+    let banner_h = banner::banner_height(state);
     let vertical_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // fixed height for banner
-            Constraint::Min(1)] // Rest of the screen for main content
-        )
+        .constraints([Constraint::Length(banner_h), Constraint::Min(1)])
         .split(f.area());
 
     let banner_area = vertical_chunks[0];
     let screen_area = vertical_chunks[1];
 
-    banner::render_banner(f, banner_area);
+    banner::render_banner(f, banner_area, state);
 
     // Horizontal split for the side panel
     let (main_area, side_panel_area) = if state.show_side_panel {
