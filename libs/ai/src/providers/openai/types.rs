@@ -1,5 +1,6 @@
 //! OpenAI-specific types
 
+use crate::types::{Headers, OpenAIOptions};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for OpenAI provider
@@ -11,6 +12,10 @@ pub struct OpenAIConfig {
     pub base_url: String,
     /// Organization ID (optional)
     pub organization: Option<String>,
+    /// Provider-level headers applied to every request.
+    pub custom_headers: Headers,
+    /// Default OpenAI-specific options applied when a request does not specify any.
+    pub default_openai_options: Option<OpenAIOptions>,
 }
 
 impl OpenAIConfig {
@@ -20,6 +25,8 @@ impl OpenAIConfig {
             api_key: api_key.into(),
             base_url: "https://api.openai.com/v1".to_string(),
             organization: None,
+            custom_headers: Headers::new(),
+            default_openai_options: None,
         }
     }
 
@@ -32,6 +39,24 @@ impl OpenAIConfig {
     /// Set organization
     pub fn with_organization(mut self, org: impl Into<String>) -> Self {
         self.organization = Some(org.into());
+        self
+    }
+
+    /// Add a provider-level custom header.
+    pub fn with_custom_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.custom_headers.insert(key, value);
+        self
+    }
+
+    /// Replace provider-level custom headers.
+    pub fn with_custom_headers(mut self, headers: Headers) -> Self {
+        self.custom_headers = headers;
+        self
+    }
+
+    /// Configure default OpenAI-specific request options.
+    pub fn with_default_openai_options(mut self, options: OpenAIOptions) -> Self {
+        self.default_openai_options = Some(options);
         self
     }
 }
@@ -236,6 +261,8 @@ pub struct ResponsesRequest {
     pub input: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

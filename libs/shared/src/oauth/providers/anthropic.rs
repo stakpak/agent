@@ -76,33 +76,6 @@ impl AnthropicProvider {
 
         Ok(result.raw_key)
     }
-
-    /// Helper to decode JWT payload (without verification)
-    fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() != 3 {
-            return None;
-        }
-
-        use base64::Engine;
-        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-
-        let payload_part = parts[1];
-        let decoded = match engine.decode(payload_part) {
-            Ok(d) => d,
-            Err(_) => {
-                let rem = payload_part.len() % 4;
-                if rem > 0 {
-                    let padded = format!("{}{}", payload_part, "=".repeat(4 - rem));
-                    engine.decode(&padded).ok()?
-                } else {
-                    return None;
-                }
-            }
-        };
-
-        serde_json::from_slice(&decoded).ok()
-    }
 }
 
 impl Default for AnthropicProvider {
@@ -148,13 +121,18 @@ impl OAuthProvider for AnthropicProvider {
             _ => return None,
         };
 
-        Some(OAuthConfig::new(
-            Self::CLIENT_ID,
-            auth_url,
-            Self::TOKEN_URL,
-            Self::REDIRECT_URL,
-            Self::SCOPES.iter().map(|s| s.to_string()).collect(),
-        ))
+        Some(
+            OAuthConfig::new(
+                Self::CLIENT_ID,
+                auth_url,
+                Self::TOKEN_URL,
+                Self::REDIRECT_URL,
+                Self::SCOPES.iter().map(|s| s.to_string()).collect(),
+            )
+            .with_authorization_request_mode(
+                crate::oauth::config::AuthorizationRequestMode::LegacyCode,
+            ),
+        )
     }
 
     async fn post_authorize(
@@ -169,7 +147,8 @@ impl OAuthProvider for AnthropicProvider {
 
                 // Try to determine subscription tier from JWT claims
                 let mut name = "Claude Pro/Max".to_string();
-                if let Some(claims) = Self::decode_jwt_payload(&tokens.access_token)
+                if let Some(claims) =
+                    crate::jwt::decode_jwt_payload_unverified(&tokens.access_token)
                     && let Some(tier) = claims.get("tier").and_then(|v| v.as_str())
                 {
                     match tier {
@@ -236,6 +215,7 @@ impl OAuthProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oauth::config::AuthorizationRequestMode;
 
     #[test]
     fn test_provider_id_and_name() {
@@ -271,6 +251,10 @@ mod tests {
         assert_eq!(
             config.token_url,
             "https://console.anthropic.com/v1/oauth/token"
+        );
+        assert_eq!(
+            config.authorization_request_mode,
+            AuthorizationRequestMode::LegacyCode
         );
     }
 
