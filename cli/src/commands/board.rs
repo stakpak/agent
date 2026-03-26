@@ -15,6 +15,7 @@ fn get_board_plugin_config() -> PluginConfig {
         repo: Some("agent-board".to_string()),
         owner: Some("stakpak".to_string()),
         version_arg: None,
+        prefer_server_version: false,
     }
 }
 

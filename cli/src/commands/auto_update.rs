@@ -357,6 +357,7 @@ async fn update_binary_atomic(
         repo: Some("agent".to_string()),
         owner: Some("stakpak".to_string()),
         version_arg: None,
+        prefer_server_version: false,
     };
 
     // 3. Get current executable path
