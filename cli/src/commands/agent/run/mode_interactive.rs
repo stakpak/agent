@@ -417,7 +417,8 @@ pub async fn run_interactive(
                 let _ = send_input_event(
                     &input_tx,
                     InputEvent::SetBannerMessage(
-                        " ⚠️ System not scanned - context limited. Run /init to unlock full capabilities ".to_string(),
+                        "System not scanned - context limited. Run /init to unlock full capabilities ".to_string(),
+                        stakpak_tui::BannerStyle::Info,
                     ),
                 )
                 .await;
