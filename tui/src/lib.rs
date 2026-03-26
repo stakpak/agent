@@ -14,7 +14,7 @@ pub use app::{
 };
 pub use event_loop::{RulebookConfig, run_tui};
 pub use ratatui::style::Color;
-pub use services::banner::BannerStyle;
+pub use services::banner::{BannerMessage, BannerStyle};
 
 pub mod services;
 

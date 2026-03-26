@@ -3,6 +3,7 @@
 //! Contains the main TUI event loop and related helper functions.
 
 use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
+use crate::services::banner::BannerMessage;
 use crate::services::detect_term::ThemeColors;
 use crate::services::handlers::tool::{
     clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
@@ -56,6 +57,7 @@ pub async fn run_tui(
     init_prompt_content: Option<String>,
     send_init_prompt_on_start: bool,
     recent_models: Vec<String>,
+    banner_message: Option<BannerMessage>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -99,6 +101,8 @@ pub async fn run_tui(
         init_prompt_content,
         recent_models,
     });
+
+    state.banner_message = banner_message;
 
     // Mouse capture is always enabled
     state.mouse_capture_enabled = true;
