@@ -8,8 +8,8 @@ use stakpak_shared::models::{
 use uuid::Uuid;
 
 use crate::app::{ExistingPlanPrompt, LoadingOperation, SessionInfo};
-use crate::services::board_tasks::FetchTasksResult;
 use crate::services::banner::BannerStyle;
+use crate::services::board_tasks::FetchTasksResult;
 
 #[derive(Debug)]
 pub enum InputEvent {
