@@ -32,6 +32,11 @@ pub fn handle_banner_mouse_click(
             };
             if let Err(e) = execute_command(&cmd, ctx) {
                 crate::services::helper_block::push_error_message(state, &e, None);
+            } else {
+                // Clear banner after successful command execution
+                state.banner_message = None;
+                state.banner_click_regions.clear();
+                state.banner_area = None;
             }
         }
     }
