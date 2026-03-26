@@ -16,7 +16,10 @@ set -e
 
 IMAGE_UID=1000
 IMAGE_GID=1000
-export HOME=/home/agent
+HOME_DIR="${STAKPAK_HOME_DIR:-/home/agent}"
+AQUA_CACHE_DIR="${STAKPAK_AQUA_CACHE_DIR:-${HOME_DIR}/.local/share/aquaproj-aqua}"
+AQUA_OWNERSHIP_MARKER="${AQUA_CACHE_DIR}/.stakpak-owner"
+export HOME="$HOME_DIR"
 
 CURRENT_UID=$(id -u)
 
@@ -33,17 +36,21 @@ if [ "$CURRENT_UID" = "0" ] && [ -n "$STAKPAK_TARGET_UID" ]; then
         # (which may be read-only).  -xdev prevents crossing filesystem
         # boundaries, so :ro mounts like .stakpak/config.toml, .ssh/, etc.
         # are untouched.  The predicate catches both UID and GID mismatches.
-        find /home/agent -xdev \( -not -user "$TARGET_UID" -o -not -group "$TARGET_GID" \) \
+        find "$HOME" -xdev \( -not -user "$TARGET_UID" -o -not -group "$TARGET_GID" \) \
             -exec chown "$TARGET_UID:$TARGET_GID" {} + 2>/dev/null || true
 
         # Explicitly fix writable named volumes that -xdev skips above.
-        # These are Stakpak-managed caches, not user bind mounts.
-        for dir in /home/agent/.local/share/aquaproj-aqua; do
-            if [ -d "$dir" ]; then
-                find "$dir" \( -not -user "$TARGET_UID" -o -not -group "$TARGET_GID" \) \
+        # These are Stakpak-managed caches, not user bind mounts. Cache the
+        # last successful remap so repeated sandbox startups for the same
+        # UID/GID can skip a recursive walk of the persistent aqua cache.
+        if [ -d "$AQUA_CACHE_DIR" ]; then
+            CACHE_OWNER="$(cat "$AQUA_OWNERSHIP_MARKER" 2>/dev/null || true)"
+            if [ "$CACHE_OWNER" != "$TARGET_UID:$TARGET_GID" ]; then
+                find "$AQUA_CACHE_DIR" \( -not -user "$TARGET_UID" -o -not -group "$TARGET_GID" \) \
                     -exec chown "$TARGET_UID:$TARGET_GID" {} + 2>/dev/null || true
+                printf '%s:%s\n' "$TARGET_UID" "$TARGET_GID" > "$AQUA_OWNERSHIP_MARKER" 2>/dev/null || true
             fi
-        done
+        fi
     fi
 
     # Drop to the (now-remapped) agent user.

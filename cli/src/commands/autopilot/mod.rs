@@ -3624,24 +3624,7 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
     ]);
 
     let exec_cmd = shell_join(&exec_parts);
-
-    let user_in_docker_group = is_user_in_group("docker");
-    let sg_path = if user_in_docker_group {
-        let path = resolve_sg_path();
-        if !std::path::Path::new(&path).exists() {
-            return Err(format!(
-                "You are in the docker group but `sg` was not found at {}. \
-                 Install the `shadow-utils` / `login` package, or remove yourself \
-                 from the docker group to skip the sg wrapper.",
-                path
-            ));
-        }
-        path
-    } else {
-        String::new() // unused when not in docker group
-    };
-    let (exec_start, no_new_privileges) =
-        build_systemd_exec_start(&exec_cmd, user_in_docker_group, &sg_path);
+    let (exec_start, no_new_privileges) = build_systemd_exec_start(&exec_cmd);
 
     let unit = format!(
         "[Unit]\nDescription=Stakpak Autopilot Runtime\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=5\nWorkingDirectory={}\nEnvironment=HOME={}\nEnvironment=PATH=/usr/local/bin:/usr/bin:/bin\nStandardOutput=append:{}/stdout.log\nStandardError=append:{}/stderr.log\nNoNewPrivileges={}\n\n[Install]\nWantedBy=default.target\n",
@@ -3672,54 +3655,10 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
 
 /// Build the `ExecStart=` value for the systemd unit file.
 ///
-/// When the user is in the `docker` group, wraps the command with
-/// `sg docker -c "..."` so the service inherits the group.  The command
-/// string passes through two parsing layers (systemd C-escapes, then
-/// `/bin/sh`), so backslashes and double quotes must be escaped for the
-/// outer `"..."` wrapper.
-///
-/// Returns `(exec_start, no_new_privileges)` — the latter must be `"false"`
-/// when `sg` is used because `sg` requires `NoNewPrivileges=false`.
-fn build_systemd_exec_start(
-    exec_cmd: &str,
-    user_in_docker_group: bool,
-    sg_path: &str,
-) -> (String, &'static str) {
-    if user_in_docker_group {
-        let systemd_escaped = exec_cmd.replace('\\', "\\\\").replace('"', "\\\"");
-        (
-            format!("{} docker -c \"{}\"", sg_path, systemd_escaped),
-            "false",
-        )
-    } else {
-        (exec_cmd.to_string(), "true")
-    }
-}
-
-/// Check if the current user belongs to a given Unix group.
-fn is_user_in_group(group_name: &str) -> bool {
-    std::process::Command::new("id")
-        .args(["-nG"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|groups| groups.split_whitespace().any(|g| g == group_name))
-        .unwrap_or(false)
-}
-
-/// Resolve the absolute path to the `sg` binary.
-///
-/// Uses the Rust `which` crate so PATH lookup follows normal executable
-/// resolution semantics (including executable-bit checks), without depending
-/// on an external `which` binary being installed.
-///
-/// Falls back to `/usr/bin/sg` if the binary is not found in PATH (covers the
-/// vast majority of Linux distros).
-fn resolve_sg_path() -> String {
-    which::which("sg")
-        .ok()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| "/usr/bin/sg".to_string())
+/// Autopilot now always uses a direct exec path so the service can keep
+/// `NoNewPrivileges=true` regardless of docker-group membership.
+fn build_systemd_exec_start(exec_cmd: &str) -> (String, &'static str) {
+    (exec_cmd.to_string(), "true")
 }
 
 fn uninstall_systemd_service() -> Result<(), String> {
@@ -5089,326 +5028,26 @@ max_turns = 12
         args
     }
 
-    /// Simulate what /bin/sh -c does with a command string: POSIX shell
-    /// word splitting and quote removal.
-    fn simulate_shell_parse(cmd: &str) -> Vec<String> {
-        let mut args = Vec::new();
-        let mut chars = cmd.chars().peekable();
-
-        while chars.peek().is_some() {
-            while chars.peek() == Some(&' ') {
-                chars.next();
-            }
-            if chars.peek().is_none() {
-                break;
-            }
-
-            let mut word = String::new();
-            while let Some(&c) = chars.peek() {
-                if c == ' ' {
-                    break;
-                }
-                match c {
-                    '\'' => {
-                        chars.next(); // consume opening '
-                        while let Some(&inner) = chars.peek() {
-                            if inner == '\'' {
-                                chars.next(); // consume closing '
-                                break;
-                            }
-                            word.push(inner);
-                            chars.next();
-                        }
-                    }
-                    '"' => {
-                        chars.next(); // consume opening "
-                        while let Some(&inner) = chars.peek() {
-                            if inner == '"' {
-                                chars.next(); // consume closing "
-                                break;
-                            }
-                            if inner == '\\' {
-                                chars.next();
-                                if let Some(&escaped) = chars.peek() {
-                                    word.push(escaped);
-                                    chars.next();
-                                }
-                            } else {
-                                word.push(inner);
-                                chars.next();
-                            }
-                        }
-                    }
-                    '\\' => {
-                        chars.next(); // consume backslash
-                        if let Some(&escaped) = chars.peek() {
-                            word.push(escaped);
-                            chars.next();
-                        }
-                    }
-                    _ => {
-                        word.push(c);
-                        chars.next();
-                    }
-                }
-            }
-            if !word.is_empty() {
-                args.push(word);
-            }
-        }
-        args
-    }
-
-    /// Build the sg-wrapped ExecStart value using the extracted helper.
-    fn build_sg_exec_start(exec_parts: &[String], sg_path: &str) -> String {
-        let exec_cmd = shell_join(exec_parts);
-        let (exec_start, _) = build_systemd_exec_start(&exec_cmd, true, sg_path);
-        exec_start
-    }
-
-    /// End-to-end: given exec_parts, verify the final argv that stakpak
-    /// receives after systemd parsing → sg → /bin/sh -c.
-    fn assert_sg_roundtrip(exec_parts: &[String], expected_argv: &[&str]) {
-        let exec_start = build_sg_exec_start(exec_parts, "/usr/bin/sg");
-
-        // Layer 1: systemd parses ExecStart
-        let systemd_argv = simulate_systemd_unescape(&exec_start);
-        assert_eq!(systemd_argv[0], "/usr/bin/sg", "sg binary path");
-        assert_eq!(systemd_argv[1], "docker", "sg group arg");
-        assert_eq!(systemd_argv[2], "-c", "sg -c flag");
-        assert!(
-            systemd_argv.len() == 4,
-            "systemd should produce exactly 4 argv entries, got {}: {:?}",
-            systemd_argv.len(),
-            systemd_argv
-        );
-
-        // Layer 2: sg passes argv[3] to /bin/sh -c
-        let shell_argv = simulate_shell_parse(&systemd_argv[3]);
-        let expected: Vec<String> = expected_argv.iter().map(|s| s.to_string()).collect();
-        assert_eq!(
-            shell_argv, expected,
-            "final argv after systemd + shell parsing"
-        );
+    #[test]
+    fn build_systemd_exec_start_ignores_docker_group_wrapper_and_keeps_hardening() {
+        let exec_cmd = "/usr/local/bin/stakpak autopilot up --foreground";
+        let (exec_start, no_new_privileges) = build_systemd_exec_start(exec_cmd);
+        assert_eq!(exec_start, exec_cmd);
+        assert_eq!(no_new_privileges, "true");
     }
 
     #[test]
-    fn sg_roundtrip_simple_args() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-            "--foreground".to_string(),
-            "--from-service".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "autopilot",
-                "up",
-                "--foreground",
-                "--from-service",
-            ],
-        );
+    fn build_systemd_exec_start_preserves_quoted_arguments_without_shell_wrapper() {
+        let exec_cmd = "/usr/local/bin/stakpak --profile 'my profile' autopilot up";
+        let (exec_start, no_new_privileges) = build_systemd_exec_start(exec_cmd);
+        assert_eq!(exec_start, exec_cmd);
+        assert_eq!(no_new_privileges, "true");
     }
 
-    #[test]
-    fn sg_roundtrip_profile_with_spaces() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--profile".to_string(),
-            "my profile".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-            "--foreground".to_string(),
-            "--from-service".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--profile",
-                "my profile",
-                "autopilot",
-                "up",
-                "--foreground",
-                "--from-service",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_config_path_with_spaces() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--config".to_string(),
-            "/home/user/my configs/config.toml".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-            "--foreground".to_string(),
-            "--from-service".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--config",
-                "/home/user/my configs/config.toml",
-                "autopilot",
-                "up",
-                "--foreground",
-                "--from-service",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_single_quote_in_profile() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--profile".to_string(),
-            "it's-a-test".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-            "--foreground".to_string(),
-            "--from-service".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--profile",
-                "it's-a-test",
-                "autopilot",
-                "up",
-                "--foreground",
-                "--from-service",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_multiple_single_quotes() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--profile".to_string(),
-            "it's a 'test'".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--profile",
-                "it's a 'test'",
-                "autopilot",
-                "up",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_path_with_single_quote() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--config".to_string(),
-            "/home/o'brien/.stakpak/config.toml".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--config",
-                "/home/o'brien/.stakpak/config.toml",
-                "autopilot",
-                "up",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_special_chars_in_args() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--profile".to_string(),
-            "test & run".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--profile",
-                "test & run",
-                "autopilot",
-                "up",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_double_quote_in_profile() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--profile".to_string(),
-            "my \"quoted\" profile".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--profile",
-                "my \"quoted\" profile",
-                "autopilot",
-                "up",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_roundtrip_double_quote_in_config_path() {
-        let parts = vec![
-            "/usr/local/bin/stakpak".to_string(),
-            "--config".to_string(),
-            "/home/user/my \"configs\"/config.toml".to_string(),
-            "autopilot".to_string(),
-            "up".to_string(),
-        ];
-        assert_sg_roundtrip(
-            &parts,
-            &[
-                "/usr/local/bin/stakpak",
-                "--config",
-                "/home/user/my \"configs\"/config.toml",
-                "autopilot",
-                "up",
-            ],
-        );
-    }
-
-    #[test]
-    fn sg_exec_start_uses_provided_sg_path() {
-        let parts = vec!["/usr/local/bin/stakpak".to_string(), "up".to_string()];
-        let exec_start = build_sg_exec_start(&parts, "/run/current-system/sw/bin/sg");
-        assert!(
-            exec_start.starts_with("/run/current-system/sw/bin/sg "),
-            "should use the provided sg path, got: {}",
-            exec_start
-        );
-    }
-
-    // ── non-sg direct ExecStart quoting tests ───────────────────────────────
+    // ── direct ExecStart quoting tests ──────────────────────────────────────
     //
-    // When the user is NOT in the docker group, shell_join output goes
-    // directly into ExecStart=. Systemd execs the binary directly (no shell).
-    // Systemd's own parser handles the quoting.
+    // Autopilot now always uses the direct ExecStart path. Systemd execs the
+    // binary directly (no shell), so systemd's own parser handles quoting.
 
     /// For the non-sg path, verify systemd correctly parses shell_join output.
     fn assert_direct_exec_roundtrip(exec_parts: &[String], expected_argv: &[&str]) {

@@ -675,23 +675,14 @@ mod tests {
         std::fs::set_permissions(path, permissions).expect("chmod script");
     }
 
-    #[test]
-    fn config_has_any_auth_flags_false_when_no_credentials() {
-        assert!(!config_has_any_auth_flags(false, false));
-    }
-
-    #[test]
-    fn config_has_any_auth_flags_true_when_provider_is_configured() {
-        assert!(config_has_any_auth_flags(false, true));
+    #[cfg(unix)]
+    fn entrypoint_script_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/entrypoint.sh")
     }
 
     #[cfg(unix)]
-    #[test]
-    fn entrypoint_remap_path_preserves_home_and_drops_via_gosu() {
-        let temp_dir = tempfile::TempDir::new().expect("temp dir");
-        let fake_bin = temp_dir.path().join("fake-bin");
-        std::fs::create_dir_all(&fake_bin).expect("create fake bin");
-        let log_path = temp_dir.path().join("entrypoint.log");
+    fn setup_fake_entrypoint_bin(fake_bin: &std::path::Path) -> String {
+        std::fs::create_dir_all(fake_bin).expect("create fake bin");
 
         write_executable_script(
             &fake_bin.join("id"),
@@ -710,16 +701,33 @@ mod tests {
             "#!/bin/sh\nprintf 'gosu:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nprintf 'home:%s\\n' \"$HOME\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
         );
 
-        let script_path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/entrypoint.sh");
-        let path_env = format!(
+        format!(
             "{}:{}",
             fake_bin.display(),
             std::env::var("PATH").unwrap_or_default()
-        );
+        )
+    }
+
+    #[test]
+    fn config_has_any_auth_flags_false_when_no_credentials() {
+        assert!(!config_has_any_auth_flags(false, false));
+    }
+
+    #[test]
+    fn config_has_any_auth_flags_true_when_provider_is_configured() {
+        assert!(config_has_any_auth_flags(false, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_remap_path_preserves_home_and_drops_via_gosu() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+        let path_env = setup_fake_entrypoint_bin(&fake_bin);
 
         let output = std::process::Command::new("sh")
-            .arg(script_path)
+            .arg(entrypoint_script_path())
             .arg("/usr/local/bin/stakpak")
             .arg("mcp")
             .arg("start")
@@ -749,6 +757,93 @@ mod tests {
         assert!(
             log.contains("find:/home/agent -xdev"),
             "expected home-tree ownership fixup, got: {log}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_aqua_cache_fixup_runs_when_marker_is_missing() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+        let path_env = setup_fake_entrypoint_bin(&fake_bin);
+        let home_dir = temp_dir.path().join("agent-home");
+        let aqua_dir = home_dir.join(".local/share/aquaproj-aqua");
+        std::fs::create_dir_all(&aqua_dir).expect("create aqua dir");
+
+        let output = std::process::Command::new("sh")
+            .arg(entrypoint_script_path())
+            .arg("/usr/local/bin/stakpak")
+            .arg("mcp")
+            .arg("start")
+            .env("PATH", path_env)
+            .env("ENTRYPOINT_LOG", &log_path)
+            .env("STAKPAK_TARGET_UID", "1234")
+            .env("STAKPAK_TARGET_GID", "5678")
+            .env("STAKPAK_HOME_DIR", &home_dir)
+            .env("STAKPAK_AQUA_CACHE_DIR", &aqua_dir)
+            .output()
+            .expect("run entrypoint");
+
+        assert!(
+            output.status.success(),
+            "entrypoint failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read entrypoint log");
+        let aqua_log_fragment = format!("find:{}", aqua_dir.display());
+        assert!(
+            log.contains(&aqua_log_fragment),
+            "expected aqua-cache ownership fixup, got: {log}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_skips_aqua_cache_fixup_when_marker_matches() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+        let path_env = setup_fake_entrypoint_bin(&fake_bin);
+        let home_dir = temp_dir.path().join("agent-home");
+        let aqua_dir = home_dir.join(".local/share/aquaproj-aqua");
+        std::fs::create_dir_all(&aqua_dir).expect("create aqua dir");
+        std::fs::write(aqua_dir.join(".stakpak-owner"), "1234:5678\n")
+            .expect("write ownership marker");
+
+        let output = std::process::Command::new("sh")
+            .arg(entrypoint_script_path())
+            .arg("/usr/local/bin/stakpak")
+            .arg("mcp")
+            .arg("start")
+            .env("PATH", path_env)
+            .env("ENTRYPOINT_LOG", &log_path)
+            .env("STAKPAK_TARGET_UID", "1234")
+            .env("STAKPAK_TARGET_GID", "5678")
+            .env("STAKPAK_HOME_DIR", &home_dir)
+            .env("STAKPAK_AQUA_CACHE_DIR", &aqua_dir)
+            .output()
+            .expect("run entrypoint");
+
+        assert!(
+            output.status.success(),
+            "entrypoint failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read entrypoint log");
+        let aqua_log_fragment = format!("find:{}", aqua_dir.display());
+        let expected_home = format!("home:{}", home_dir.display());
+        assert!(
+            log.contains(&expected_home),
+            "expected overridden HOME to be preserved, got: {log}"
+        );
+        assert!(
+            !log.contains(&aqua_log_fragment),
+            "expected aqua-cache ownership fixup to be skipped, got: {log}"
         );
     }
 
