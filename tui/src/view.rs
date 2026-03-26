@@ -32,6 +32,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     banner::render_banner(f, banner_area, state);
 
+    // Store banner area for click detection (None when banner is hidden)
+    state.banner_area = if banner_h > 0 {
+        Some(banner_area)
+    } else {
+        state.banner_click_regions.clear();
+        None
+    };
+
     // Horizontal split for the side panel
     let (main_area, side_panel_area) = if state.show_side_panel {
         // Fixed width of 32 characters for side panel
