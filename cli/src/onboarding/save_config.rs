@@ -3,7 +3,7 @@
 use crate::config::{ConfigFile, ProfileConfig, ProviderType};
 use crate::onboarding::config_templates::config_to_toml_preview;
 use crate::onboarding::styled_output;
-use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
+use stakpak_shared::telemetry::{TelemetryEvent, capture_event, is_telemetry_enabled, is_telemetry_env_enabled};
 use std::fs;
 use std::path::PathBuf;
 
@@ -36,11 +36,21 @@ pub fn save_to_profile(
     let is_local_provider = matches!(profile.provider, Some(ProviderType::Local));
     let is_first_telemetry_setup = config_file.settings.anonymous_id.is_none();
 
-    if is_local_provider && config_file.settings.anonymous_id.is_none() {
+    // SOVEREIGNTY GUARD: Only generate anonymous_id if telemetry is explicitly enabled
+    // Both config AND environment variable must opt-in
+    if is_local_provider 
+        && config_file.settings.anonymous_id.is_none()
+        && is_telemetry_enabled(config_file.settings.collect_telemetry)
+        && is_telemetry_env_enabled()
+    {
         config_file.settings.anonymous_id = Some(uuid::Uuid::new_v4().to_string());
     }
+
+    // DO NOT set collect_telemetry to true by default - maintain opt-in only
+    // If user hasn't explicitly set it, keep it as None (will default to false)
     if is_local_provider && config_file.settings.collect_telemetry.is_none() {
-        config_file.settings.collect_telemetry = Some(true);
+        // Never auto-enable telemetry - keep it disabled by default
+        config_file.settings.collect_telemetry = Some(false);
     }
 
     config_file
@@ -56,15 +66,19 @@ pub fn save_to_profile(
         .save_to(&path)
         .map_err(|e| format!("Failed to save config file: {}", e))?;
 
+    // SOVEREIGNTY GUARD: Only capture telemetry if user explicitly enabled it
+    // Requires: config opt-in AND env var opt-in AND anonymous_id generated
     if is_local_provider
         && is_first_telemetry_setup
+        && is_telemetry_enabled(config_file.settings.collect_telemetry)
+        && is_telemetry_env_enabled()
+        && config_file.settings.collect_telemetry.unwrap_or(false)
         && let Some(ref anonymous_id) = config_file.settings.anonymous_id
-        && config_file.settings.collect_telemetry.unwrap_or(true)
     {
         capture_event(
             anonymous_id,
             config_file.settings.machine_name.as_deref(),
-            true,
+            true, // telemetry is enabled
             TelemetryEvent::FirstOpen,
         );
     }

@@ -237,8 +237,14 @@ async fn main() {
         Cli::parse()
     };
 
-    // Only run auto-update in interactive mode (when no command is specified)
-    if cli.command.is_none()
+    // AUTO-UPDATE: BLOCKED BY DEFAULT - requires explicit OPT-IN
+    // Only run auto-update if user sets STAKPAK_ENABLE_UPDATES=1 (dangerous)
+    let should_check_updates = std::env::var("STAKPAK_ENABLE_UPDATES")
+        .unwrap_or_else(|_| "0".to_string())
+        .eq_ignore_ascii_case("1");
+    
+    if should_check_updates
+        && cli.command.is_none()
         && !cli.r#async
         && !cli.print
         && let Err(e) = auto_update().await
@@ -291,8 +297,14 @@ async fn main() {
                 return; // Exit after warden execution completes
             }
 
-            if config.machine_name.is_none() {
-                // Generate a random machine name
+            // MACHINE FINGERPRINTING: BLOCKED BY DEFAULT - requires explicit OPT-IN
+            // Only generate machine name if user sets STAKPAK_GENERATE_MACHINE_ID=1 (dangerous)
+            let should_generate_machine_id = std::env::var("STAKPAK_GENERATE_MACHINE_ID")
+                .unwrap_or_else(|_| "0".to_string())
+                .eq_ignore_ascii_case("1");
+            
+            if should_generate_machine_id && config.machine_name.is_none() {
+                // Generate a random machine name (user opted-in)
                 let random_name = names::Generator::with_naming(Name::Numbered)
                     .next()
                     .unwrap_or_else(|| "unknown-machine".to_string());
@@ -300,8 +312,11 @@ async fn main() {
                 config.machine_name = Some(random_name);
 
                 if let Err(e) = config.save() {
-                    eprintln!("Failed to save config: {}", e);
+                    eprintln!("Failed to save machine name to config: {}", e);
                 }
+            } else if !should_generate_machine_id && config.machine_name.is_none() {
+                // Log warning that machine name is not generated (safe default)
+                tracing::debug!("Machine name not generated - set STAKPAK_GENERATE_MACHINE_ID=1 to enable");
             }
 
             // Run interactive/async agent when no subcommand or Init; otherwise run the subcommand
@@ -380,14 +395,20 @@ async fn main() {
                         std::process::exit(1);
                     }));
 
-                // Parallelize HTTP calls for faster startup
+                // PARALLELIZE ONLY IF OPT-IN: update checks blocked by default
                 let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
                 let client_for_rulebooks = client.clone();
                 let config_for_rulebooks = config.clone();
 
-                let (api_result, update_result, rulebooks_result) = tokio::join!(
+                // Check updates sequentially to avoid type inference issues
+                let update_result = if should_check_updates {
+                    check_update(&current_version).await
+                } else {
+                    Ok(())
+                };
+
+                let (api_result, rulebooks_result) = tokio::join!(
                     client.get_my_account(),
-                    check_update(&current_version),
                     async {
                         client_for_rulebooks
                             .list_rulebooks()

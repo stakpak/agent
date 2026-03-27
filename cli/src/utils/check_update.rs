@@ -4,8 +4,19 @@ use serde::Deserialize;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
 
+// UPDATE CHECKS: DEFAULT DISABLED - requires STAKPAK_ENABLE_UPDATES=1
+// This prevents mandatory external calls during startup
+const UPDATE_CHECK_ENABLED: &str = "STAKPAK_ENABLE_UPDATES";
+
 use crate::commands::auto_update::run_auto_update;
 use crate::utils::cli_colors::CliColors;
+
+/// Check if update checks are enabled (default: disabled for sovereignty)
+fn is_update_check_enabled() -> bool {
+    std::env::var(UPDATE_CHECK_ENABLED)
+        .unwrap_or_else(|_| "0".to_string())
+        .eq_ignore_ascii_case("1")
+}
 
 /// Parse version string (with or without 'v' prefix) into semver Version
 fn parse_version(version_str: &str) -> Option<Version> {
@@ -125,6 +136,11 @@ fn format_changelog(body: &str) -> String {
 }
 
 pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
+    // BLOCKED BY DEFAULT - requires explicit opt-in
+    if !is_update_check_enabled() {
+        return Ok(());
+    }
+
     let release = get_latest_release().await?;
     if is_newer_version(current_version, &release.tag_name) {
         let blue = CliColors::blue();
@@ -141,33 +157,32 @@ pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
             "{}┃{}{}⮕ {} Version Update Available!{}{}┃{}",
             blue, reset, cyan, text, reset, blue, reset
         );
-        println!("{}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛{}", blue, reset);
         println!(
             "{} {}{}{} → {}{}{}",
             text, yellow, current_version, reset, green, release.tag_name, reset
         );
-        println!("{}", sep);
+        println!("{}{}", sep, reset);
 
         if let Some(body) = &release.body
             && !body.trim().is_empty()
         {
             println!("{} What's new in this update:{}", text, reset);
-            println!("{}", sep);
+            println!("{}{}", sep, reset);
             let changelog = format_changelog(body);
-            println!("{}", changelog);
-            println!("{}", sep);
+            println!("{}{}", changelog, reset);
+            println!("{}{}", sep, reset);
             println!(
                 "{} View full changelog: {}{}{}{}",
                 text, reset, cyan, release.html_url, reset
             );
-            println!("{}", sep);
+            println!("{}{}", sep, reset);
         }
 
         println!(
             "{} Upgrade to access the latest features! 🚀{}",
             text, reset
         );
-        println!("{}", sep);
+        println!("{}{}", sep, reset);
     }
 
     Ok(())
@@ -197,6 +212,11 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
 }
 
 pub async fn auto_update() -> Result<(), Box<dyn Error>> {
+    // BLOCKED BY DEFAULT - requires explicit opt-in
+    if !is_update_check_enabled() {
+        return Ok(());
+    }
+
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
     if is_newer_version(&current_version, &release.tag_name) {
@@ -217,7 +237,7 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
             println!("{} What's new in this update:{}", text, reset);
             println!("{}{}{}", cyan, "─".repeat(50), reset);
             let changelog = format_changelog(body);
-            println!("{}", changelog);
+            println!("{}{}", changelog, reset);
             println!("{}{}{}", cyan, "─".repeat(50), reset);
             println!(
                 "{} View full changelog: {}{}{}\n",
@@ -246,6 +266,11 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
 /// Force auto-update without prompting (for ACP mode).
 /// Returns true if an update was performed and the process should restart.
 pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
+    // BLOCKED BY DEFAULT - requires explicit opt-in
+    if !is_update_check_enabled() {
+        return Ok(false);
+    }
+
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
     if is_newer_version(&current_version, &release.tag_name) {

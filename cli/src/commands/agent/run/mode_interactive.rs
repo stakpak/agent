@@ -678,7 +678,7 @@ pub async fn run_interactive(
                         // Capture telemetry when not using Stakpak API (local mode)
                         if !has_stakpak_key
                             && let Some(ref anonymous_id) = ctx_clone.anonymous_id
-                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                            && ctx_clone.collect_telemetry.unwrap_or(false)
                         {
                             capture_event(
                                 anonymous_id,
