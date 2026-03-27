@@ -120,6 +120,7 @@ impl StakpakAcpAgent {
             let stakpak = stakpak_api_key.map(|api_key| StakpakConfig {
                 api_key,
                 api_endpoint: config.api_endpoint.clone(),
+                rulebook_base_url: config.rulebook_base_url.clone(),
             });
 
             let client = AgentClient::new(AgentClientConfig {
@@ -1643,6 +1644,7 @@ impl acp::Agent for StakpakAcpAgent {
                 let stakpak = Some(StakpakConfig {
                     api_key: api_key.clone(),
                     api_endpoint: config.api_endpoint.clone(),
+                    rulebook_base_url: config.rulebook_base_url.clone(),
                 });
                 let new_client = AgentClient::new(AgentClientConfig {
                     stakpak,

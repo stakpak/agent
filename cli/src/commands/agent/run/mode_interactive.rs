@@ -350,9 +350,16 @@ pub async fn run_interactive(
             let mut client_config = AgentClientConfig::new().with_providers(providers);
 
             if let Some(ref key) = api_key_for_client {
+                // Use rulebook_base_url from config if set, otherwise fall back to api_endpoint
+                let rulebook_base_url = ctx_clone
+                    .rulebook_base_url
+                    .clone()
+                    .unwrap_or(api_endpoint_for_client.clone());
+
                 client_config = client_config.with_stakpak(
                     stakpak_api::StakpakConfig::new(key.clone())
-                        .with_endpoint(api_endpoint_for_client.clone()),
+                        .with_endpoint(api_endpoint_for_client.clone())
+                        .with_rulebook_base_url(rulebook_base_url),
                 );
             }
             // Pass unified model as smart_model for AgentClient compatibility
@@ -1614,7 +1621,13 @@ pub async fn run_interactive(
             if let Some(api_key) = new_config.get_stakpak_api_key() {
                 new_client_config = new_client_config.with_stakpak(
                     stakpak_api::StakpakConfig::new(api_key)
-                        .with_endpoint(new_config.api_endpoint.clone()),
+                        .with_endpoint(new_config.api_endpoint.clone())
+                        .with_rulebook_base_url(
+                            new_config
+                                .rulebook_base_url
+                                .clone()
+                                .unwrap_or(new_config.api_endpoint.clone()),
+                        ),
                 );
             }
             // Pass unified model as smart_model for AgentClient compatibility
@@ -1685,7 +1698,13 @@ pub async fn run_interactive(
 
         if let Some(api_key) = ctx.get_stakpak_api_key() {
             final_client_config = final_client_config.with_stakpak(
-                stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
+                stakpak_api::StakpakConfig::new(api_key)
+                    .with_endpoint(ctx.api_endpoint.clone())
+                    .with_rulebook_base_url(
+                        ctx.rulebook_base_url
+                            .clone()
+                            .unwrap_or(ctx.api_endpoint.clone()),
+                    ),
             );
         }
         // Pass unified model as smart_model for AgentClient compatibility

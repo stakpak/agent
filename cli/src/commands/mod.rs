@@ -209,6 +209,7 @@ async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
     let stakpak = config.get_stakpak_api_key().map(|api_key| StakpakConfig {
         api_key,
         api_endpoint: config.api_endpoint.clone(),
+        rulebook_base_url: config.rulebook_base_url.clone(),
     });
 
     AgentClient::new(AgentClientConfig {

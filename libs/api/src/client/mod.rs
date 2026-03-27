@@ -45,6 +45,9 @@ pub struct StakpakConfig {
     pub api_key: String,
     /// Stakpak API endpoint (default: https://apiv2.stakpak.dev)
     pub api_endpoint: String,
+    /// Base URL for downloading rulebooks/skills/playbooks
+    /// If not set, api_endpoint is used for content downloads
+    pub rulebook_base_url: Option<String>,
 }
 
 impl StakpakConfig {
@@ -52,11 +55,18 @@ impl StakpakConfig {
         Self {
             api_key: api_key.into(),
             api_endpoint: DEFAULT_STAKPAK_ENDPOINT.to_string(),
+            rulebook_base_url: None,
         }
     }
 
     pub fn with_endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.api_endpoint = endpoint.into();
+        self
+    }
+
+    /// Set rulebook base URL
+    pub fn with_rulebook_base_url(mut self, url: impl Into<String>) -> Self {
+        self.rulebook_base_url = Some(url.into());
         self
     }
 }
@@ -188,6 +198,7 @@ impl AgentClient {
                     StakpakApiClient::new(&StakpakApiConfig {
                         api_key: stakpak.api_key.clone(),
                         api_endpoint: stakpak.api_endpoint.clone(),
+                        rulebook_base_url: stakpak.rulebook_base_url.clone(),
                     })
                     .map_err(|e| format!("Failed to create Stakpak API client: {}", e))?,
                 )

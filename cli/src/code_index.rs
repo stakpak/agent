@@ -318,6 +318,7 @@ async fn build_local_code_index(
         .map(|api_key| StakpakConfig {
             api_key,
             api_endpoint: app_config.api_endpoint.clone(),
+            rulebook_base_url: app_config.rulebook_base_url.clone(),
         });
 
     let client = AgentClient::new(AgentClientConfig {
@@ -692,6 +693,7 @@ async fn execute_code_index_update(
                 .map(|api_key| StakpakConfig {
                     api_key,
                     api_endpoint: app_config.api_endpoint.clone(),
+                    rulebook_base_url: app_config.rulebook_base_url.clone(),
                 });
 
             let client = AgentClient::new(AgentClientConfig {

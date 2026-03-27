@@ -24,6 +24,7 @@ impl StakpakStorage {
         let client = StakpakApiClient::new(&StakpakApiConfig {
             api_key: api_key.to_string(),
             api_endpoint: api_endpoint.to_string(),
+            rulebook_base_url: None,
         })
         .map_err(StorageError::Connection)?;
 

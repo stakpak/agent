@@ -364,9 +364,14 @@ async fn main() {
                 let mut client_config = AgentClientConfig::new().with_providers(providers);
 
                 if let Some(api_key) = config.get_stakpak_api_key() {
+                    let rulebook_base_url = config
+                        .rulebook_base_url
+                        .clone()
+                        .unwrap_or(config.api_endpoint.clone());
                     client_config = client_config.with_stakpak(
                         stakpak_api::StakpakConfig::new(api_key)
-                            .with_endpoint(config.api_endpoint.clone()),
+                            .with_endpoint(config.api_endpoint.clone())
+                            .with_rulebook_base_url(rulebook_base_url),
                     );
                 }
                 // Pass unified model as smart_model for AgentClient compatibility
