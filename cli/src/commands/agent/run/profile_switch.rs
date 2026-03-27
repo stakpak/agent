@@ -36,6 +36,7 @@ pub async fn validate_profile_switch(
             .map(|api_key| StakpakConfig {
                 api_key,
                 api_endpoint: new_config.api_endpoint.clone(),
+                rulebook_base_url: new_config.rulebook_base_url.clone(),
             });
 
         let client = AgentClient::new(AgentClientConfig {
