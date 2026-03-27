@@ -71,19 +71,19 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let input_lines = calculate_input_lines(state, input_area_width);
     let input_height = (input_lines + 2) as u16;
     let margin_height = 1;
-    let dropdown_showing = state.show_helper_dropdown
-        && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-            || !state.filtered_files.is_empty());
+    let dropdown_showing = state.input_state.show_helper_dropdown
+        && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+            || !state.input_state.filtered_files.is_empty());
     let dropdown_height = if dropdown_showing {
-        if !state.filtered_files.is_empty() {
+        if !state.input_state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
             // Use compact height calculation matching helper_dropdown.rs
             const MAX_VISIBLE_ITEMS: usize = 5;
-            let visible_height = MAX_VISIBLE_ITEMS.min(state.filtered_helpers.len());
-            let has_content_above = state.helper_scroll > 0;
+            let visible_height = MAX_VISIBLE_ITEMS.min(state.input_state.filtered_helpers.len());
+            let has_content_above = state.input_state.helper_scroll > 0;
             let has_content_below =
-                state.helper_scroll < state.filtered_helpers.len().saturating_sub(visible_height);
+                state.input_state.helper_scroll < state.input_state.filtered_helpers.len().saturating_sub(visible_height);
             let arrow_lines =
                 if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
             let counter_line = if has_content_above || has_content_below {
@@ -96,7 +96,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else {
         0
     };
-    let hint_height = if state.show_helper_dropdown {
+    let hint_height = if state.input_state.show_helper_dropdown {
         0
     } else {
         margin_height
@@ -237,7 +237,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_file_search_dropdown(f, state, dropdown_area);
     }
     // Render hint/shortcuts if not hiding for dropdown, not showing collapsed messages, and not showing approval bar
-    if !state.show_helper_dropdown
+    if !state.input_state.show_helper_dropdown
         && !state.show_collapsed_messages
         && !approval_bar_visible
         && !ask_user_visible
@@ -446,7 +446,7 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
     }
 
     // Use TextArea's desired_height method for accurate line calculation
-    state.text_area.desired_height(available_width as u16) as usize
+    state.input_state.text_area.desired_height(available_width as u16) as usize
 }
 
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
@@ -709,14 +709,14 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Render the TextArea with state, handling password masking if needed
     if state.show_shell_mode && state.waiting_for_shell_input {
-        state.text_area.render_with_state(
+        state.input_state.text_area.render_with_state(
             content_area,
             f.buffer_mut(),
-            &mut state.text_area_state,
+            &mut state.input_state.text_area_state,
             state.waiting_for_shell_input,
         );
     } else {
-        f.render_stateful_widget_ref(&state.text_area, content_area, &mut state.text_area_state);
+        f.render_stateful_widget_ref(&state.input_state.text_area, content_area, &mut state.input_state.text_area_state);
     }
 }
 

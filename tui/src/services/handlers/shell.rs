@@ -276,7 +276,7 @@ pub fn handle_run_shell_command(
     invalidate_message_lines_cache(state);
     // Also set legacy alias for backward compatibility
     state.show_shell_mode = true;
-    state.text_area.set_shell_mode(true);
+    state.input_state.text_area.set_shell_mode(true);
 }
 
 /// Handle run shell with command event - runs the command in an interactive shell
@@ -312,7 +312,7 @@ pub fn background_shell_session(state: &mut AppState) {
     state.shell_popup_expanded = false;
     state.show_shell_mode = false;
     // Update textarea shell mode
-    state.text_area.set_shell_mode(false);
+    state.input_state.text_area.set_shell_mode(false);
 
     let command_name = state
         .active_shell_command
@@ -359,7 +359,7 @@ pub fn background_shell_session(state: &mut AppState) {
     }
 
     // Clear text area but persist shell
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
 
     // Invalidate cache
     invalidate_message_lines_cache(state);
@@ -384,7 +384,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     if state.shell_popup_visible && !state.shell_popup_expanded {
         state.shell_popup_expanded = true;
         state.show_shell_mode = true;
-        state.text_area.set_shell_mode(true);
+        state.input_state.text_area.set_shell_mode(true);
 
         // Update message to show focused state
         if let Some(id) = state.interactive_shell_message_id {
@@ -425,7 +425,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
         state.shell_popup_visible = true;
         state.shell_popup_expanded = true;
         state.show_shell_mode = true;
-        state.text_area.set_shell_mode(true);
+        state.input_state.text_area.set_shell_mode(true);
         invalidate_message_lines_cache(state);
         return;
     }
@@ -777,7 +777,7 @@ pub fn handle_shell_waiting_for_input(
 ) {
     state.waiting_for_shell_input = true;
     // Set textarea to shell mode when waiting for input
-    state.text_area.set_shell_mode(true);
+    state.input_state.text_area.set_shell_mode(true);
     // Allow user input when command is waiting
     adjust_scroll(state, message_area_height, message_area_width);
 }
@@ -832,7 +832,7 @@ pub fn handle_shell_completed(
         // Invalidate cache to restore normal message display
         invalidate_message_lines_cache(state);
         state.show_shell_mode = false;
-        state.text_area.set_shell_mode(false);
+        state.input_state.text_area.set_shell_mode(false);
 
         if let Some(dialog_command) = saved_dialog_command {
             let dialog_command_id = dialog_command.id.clone();
@@ -901,7 +901,7 @@ pub fn handle_shell_completed(
         state.messages.retain(|m| m.id != shell_msg_id);
     }
     state.interactive_shell_message_id = None;
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
     state.is_tool_call_shell_command = false;
     adjust_scroll(state, message_area_height, message_area_width);
 }
@@ -965,7 +965,7 @@ pub fn handle_shell_kill(state: &mut AppState) {
     state.interactive_shell_message_id = None;
     state.waiting_for_shell_input = false;
     // Reset textarea shell mode
-    state.text_area.set_shell_mode(false);
+    state.input_state.text_area.set_shell_mode(false);
 }
 
 /// Convert shell command to tool call result

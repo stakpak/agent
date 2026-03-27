@@ -3,12 +3,15 @@
 //! This module contains all type definitions used throughout the TUI application.
 //! Types are organized here for better maintainability and code organization.
 
+use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
+use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{ContentPart, ToolCallResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 // Type alias to reduce complexity - now stores processed lines for better performance
@@ -195,6 +198,56 @@ pub struct ExistingPlanPrompt {
     pub inline_prompt: Option<String>,
     /// Metadata parsed from the existing plan file (for display in the modal).
     pub metadata: Option<crate::services::plan::PlanMetadata>,
+}
+
+/// Input & TextArea state - handles user input, autocomplete dropdowns, and file search
+#[derive(Debug)]
+pub struct InputState {
+    pub text_area: TextArea,
+    pub text_area_state: TextAreaState,
+    pub cursor_visible: bool,
+    pub helpers: Vec<HelperCommand>,
+    pub show_helper_dropdown: bool,
+    pub helper_selected: usize,
+    pub helper_scroll: usize,
+    pub filtered_helpers: Vec<HelperCommand>,
+    pub filtered_files: Vec<String>,
+    pub file_search: FileSearch,
+    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
+    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
+    pub is_pasting: bool,
+    pub pasted_long_text: Option<String>,
+    pub pasted_placeholder: Option<String>,
+    pub pending_pastes: Vec<(String, String)>,
+    pub attached_images: Vec<AttachedImage>,
+    pub pending_path_start: Option<usize>,
+    pub interactive_commands: Vec<String>,
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self {
+            text_area: TextArea::new(),
+            text_area_state: TextAreaState::default(),
+            cursor_visible: true,
+            helpers: Vec::new(),
+            show_helper_dropdown: false,
+            helper_selected: 0,
+            helper_scroll: 0,
+            filtered_helpers: Vec::new(),
+            filtered_files: Vec::new(),
+            file_search: FileSearch::default(),
+            file_search_tx: None,
+            file_search_rx: None,
+            is_pasting: false,
+            pasted_long_text: None,
+            pasted_placeholder: None,
+            pending_pastes: Vec::new(),
+            attached_images: Vec::new(),
+            pending_path_start: None,
+            interactive_commands: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]

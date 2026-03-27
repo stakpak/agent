@@ -219,9 +219,9 @@ pub async fn run_tui(
                        };
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let margin_height: u16 = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                        let hint_height = if dropdown_showing { 0 } else { margin_height };
 
                        // Account for approval bar height (will be shown after this tool call)
@@ -392,11 +392,11 @@ pub async fn run_tui(
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                         let dropdown_height = if dropdown_showing {
-                            state.filtered_helpers.len() as u16
+                            state.input_state.filtered_helpers.len() as u16
                         } else {
                             0
                         };
@@ -479,11 +479,11 @@ pub async fn run_tui(
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                        let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
+                           state.input_state.filtered_helpers.len() as u16
                        } else {
                            0
                        };

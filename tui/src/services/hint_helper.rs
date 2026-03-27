@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if state.is_pasting {
+    if state.input_state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
             Style::default().fg(ThemeColors::dark_gray()),

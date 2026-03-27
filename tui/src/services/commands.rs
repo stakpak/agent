@@ -336,36 +336,36 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
     match command_id {
         "/help" => {
             push_help_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/model" => {
             // Show model switcher popup
             ctx.state.show_model_switcher = true;
             ctx.state.model_switcher_selected = 0;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             // Request available models from the output handler
             let _ = ctx.output_tx.try_send(OutputEvent::RequestAvailableModels);
             Ok(())
         }
         "/clear" => {
             push_clear_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/status" => {
             push_status_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/sessions" => {
             let _ = ctx.output_tx.try_send(OutputEvent::ListSessions);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/resume" => {
@@ -379,8 +379,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         "/memorize" => {
             push_memorize_message(ctx.state);
             let _ = ctx.output_tx.try_send(OutputEvent::Memorize);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/summarize" => {
@@ -397,59 +397,59 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 None,       // No revert index
             ));
             ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/usage" => {
             push_usage_message(ctx.state);
             let _ = ctx.output_tx.try_send(OutputEvent::RequestTotalUsage);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/issue" => {
             push_issue_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/support" => {
             push_support_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/quit" => {
-            ctx.state.show_helper_dropdown = false;
-            ctx.state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
             let _ = ctx.input_tx.try_send(InputEvent::Quit);
             Ok(())
         }
         "/toggle_auto_approve" => {
             // Special case: keep input for user to specify tool name
             let input = "/toggle_auto_approve ".to_string();
-            ctx.state.text_area.set_text(&input);
-            ctx.state.text_area.set_cursor(input.len());
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text(&input);
+            ctx.state.input_state.text_area.set_cursor(input.len());
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/profiles" => {
             ctx.state.show_profile_switcher = true;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowProfileSwitcher);
             Ok(())
         }
         "/list_approved_tools" => {
             list_auto_approved_tools(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/mouse_capture" => {
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ToggleMouseCapture);
             Ok(())
         }
@@ -480,30 +480,30 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 if resolved_path.exists() {
                     ctx.state.pending_editor_open =
                         Some(resolved_path.to_string_lossy().to_string());
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                 } else {
                     push_error_message(
                         ctx.state,
                         &format!("File not found: {}", resolved_path.display()),
                         None,
                     );
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                 }
             } else {
                 // No path provided - keep /editor with space so user can type path
                 // This makes /editor a standalone feature, not tied to changeset
                 let new_text = "/editor ";
-                ctx.state.text_area.set_text(new_text);
-                ctx.state.text_area.set_cursor(new_text.len());
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text(new_text);
+                ctx.state.input_state.text_area.set_cursor(new_text.len());
+                ctx.state.input_state.show_helper_dropdown = false;
             }
             Ok(())
         }
         "/shortcuts" => {
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
@@ -517,8 +517,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                     "⚠ ",
                     ThemeColors::yellow(),
                 );
-                ctx.state.text_area.set_text("");
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text("");
+                ctx.state.input_state.show_helper_dropdown = false;
                 return Ok(());
             }
 
@@ -530,8 +530,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
 
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
 
             // Check for existing plan — show modal if one exists
             let session_dir = std::path::Path::new(".stakpak/session");
@@ -559,8 +559,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                         "Internal error: init prompt not available",
                         None,
                     );
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                     return Ok(());
                 }
             };
@@ -573,8 +573,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 None,       // No revert index
             ));
             ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
@@ -588,6 +588,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             // the placeholder is replaced at runtime. Otherwise extra text is appended.
             let prompt_match = ctx
                 .state
+                .input_state
                 .helpers
                 .iter()
                 .find(|h| h.command == command_id)
@@ -623,9 +624,9 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             // firing so the user can append a ref / argument.
             if has_input_placeholder && extra.is_none() && raw_input.trim() == command_id {
                 let new_text = format!("{} ", command_id);
-                ctx.state.text_area.set_text(&new_text);
-                ctx.state.text_area.set_cursor(new_text.len());
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text(&new_text);
+                ctx.state.input_state.text_area.set_cursor(new_text.len());
+                ctx.state.input_state.show_helper_dropdown = false;
                 return Ok(());
             }
 
@@ -653,8 +654,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 None,
             ));
             ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
@@ -688,7 +689,7 @@ fn terminate_active_shell(state: &mut AppState) {
     state.shell_pending_command_output = None;
     state.shell_pending_command_output_count = 0;
     state.dialog_command = None;
-    state.text_area.set_shell_mode(false);
+    state.input_state.text_area.set_shell_mode(false);
 }
 
 pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
@@ -737,8 +738,8 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
+    state.input_state.text_area.set_text("");
+    state.input_state.show_helper_dropdown = false;
 
     // Clear plan mode state
     state.plan_mode_active = false;
@@ -762,7 +763,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     terminate_active_shell(state);
 
     let _ = output_tx.try_send(OutputEvent::NewSession);
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
     state.messages.clear();
     state
         .messages
@@ -795,7 +796,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         prompt_tokens_details: None,
     };
 
-    state.show_helper_dropdown = false;
+    state.input_state.show_helper_dropdown = false;
 }
 
 pub fn build_summarize_prompt(state: &AppState) -> String {

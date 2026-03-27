@@ -77,7 +77,7 @@ pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
 
 /// Handle toggle cursor visible event
 pub fn handle_toggle_cursor_visible(state: &mut AppState) {
-    state.cursor_visible = !state.cursor_visible;
+    state.input_state.cursor_visible = !state.input_state.cursor_visible;
 }
 
 /// Handle toggle auto approve event
@@ -138,18 +138,19 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
     // If side panel is visible and input is empty, cycle sections
-    if state.show_side_panel && state.text_area.text().is_empty() {
+    if state.show_side_panel && state.input_state.text_area.text().is_empty() {
         state.side_panel_focus = state.side_panel_focus.next();
         return;
     }
 
     // Check if we're already in helper dropdown mode
-    if state.show_helper_dropdown {
+    if state.input_state.show_helper_dropdown {
         // If in file file_search mode, handle file selection
-        if state.file_search.is_active() {
+        if state.input_state.file_search.is_active() {
             let selected_file = state
+                .input_state
                 .file_search
-                .get_file_at_index(state.helper_selected)
+                .get_file_at_index(state.input_state.helper_selected)
                 .map(|s| s.to_string());
             if let Some(selected_file) = selected_file {
                 handle_file_selection(state, &selected_file);
@@ -157,8 +158,8 @@ fn handle_tab_normal(state: &mut AppState) {
             return;
         }
         // Handle helper selection - auto-complete the selected helper
-        if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
-            let selected_helper = &state.filtered_helpers[state.helper_selected];
+        if !state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/') {
+            let selected_helper = &state.input_state.filtered_helpers[state.input_state.helper_selected];
             // Commands that take arguments should have a trailing space
             let needs_space = matches!(
                 selected_helper.command.as_str(),
@@ -176,13 +177,13 @@ fn handle_tab_normal(state: &mut AppState) {
             } else {
                 selected_helper.command.to_string()
             };
-            state.text_area.set_text(&new_text);
+            state.input_state.text_area.set_text(&new_text);
             // Position cursor at the end of the text
-            state.text_area.set_cursor(new_text.len());
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
-            state.helper_selected = 0;
-            state.helper_scroll = 0;
+            state.input_state.text_area.set_cursor(new_text.len());
+            state.input_state.show_helper_dropdown = false;
+            state.input_state.filtered_helpers.clear();
+            state.input_state.helper_selected = 0;
+            state.input_state.helper_scroll = 0;
             return;
         }
         return;
@@ -252,7 +253,7 @@ pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::S
         || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
     {
         // First press or timer expired: clear input, move cursor, set timer
-        state.text_area.set_text("");
+        state.input_state.text_area.set_text("");
         state.ctrl_c_pressed_once = true;
         state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
     } else {
@@ -285,7 +286,7 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.shell_popup_visible = false;
     state.shell_popup_expanded = false;
     state.waiting_for_shell_input = false;
-    state.text_area.set_shell_mode(false);
+    state.input_state.text_area.set_shell_mode(false);
 
     state.sessions = sessions;
     state.session_selected = 0; // Reset selection to first item

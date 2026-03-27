@@ -58,8 +58,9 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
         // Click was in input area - start input selection
         if let Some(input_area) = state.input_content_area {
             state
+                .input_state
                 .text_area
-                .start_selection(col, row, input_area, &state.text_area_state);
+                .start_selection(col, row, input_area, &state.input_state.text_area_state);
         }
         // Clear message area selection
         state.selection = SelectionState::default();
@@ -67,7 +68,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Clear any input area selection when clicking outside
-    state.text_area.clear_selection();
+    state.input_state.text_area.clear_selection();
 
     // Check if click is within message area
     // Message area starts at message_area_y and extends for message_area_height rows
@@ -143,11 +144,12 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     let message_area_height = state.message_area_height as usize;
 
     // Check if we're dragging in input area selection mode
-    if state.text_area.selection.is_active() {
+    if state.input_state.text_area.selection.is_active() {
         if let Some(input_area) = state.input_content_area {
             state
+                .input_state
                 .text_area
-                .update_selection(col, row, input_area, &state.text_area_state);
+                .update_selection(col, row, input_area, &state.input_state.text_area_state);
         }
         return;
     }
@@ -256,8 +258,8 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Check if we're ending an input area selection
-    if state.text_area.selection.is_active() {
-        if let Some(selected_text) = state.text_area.end_selection()
+    if state.input_state.text_area.selection.is_active() {
+        if let Some(selected_text) = state.input_state.text_area.end_selection()
             && !selected_text.is_empty()
         {
             // Copy to clipboard

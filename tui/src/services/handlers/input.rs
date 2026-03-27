@@ -219,7 +219,7 @@ pub fn handle_input_submitted_event(
 
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    if state.show_side_panel && !state.is_dialog_open && state.text_area.text().is_empty() {
+    if state.show_side_panel && !state.is_dialog_open && state.input_state.text_area.text().is_empty() {
         let current = state
             .side_panel_section_collapsed
             .get(&state.side_panel_focus)
@@ -231,7 +231,7 @@ pub fn handle_input_submitted_event(
         return;
     }
 
-    if !state.is_pasting {
+    if !state.input_state.is_pasting {
         handle_input_submitted(
             state,
             message_area_height,
@@ -248,14 +248,14 @@ pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<Inp
     state.show_shortcuts = false;
 
     if c == '$' && state.input().is_empty() {
-        state.text_area.set_text("");
+        state.input_state.text_area.set_text("");
         // Shell mode toggle will be handled by shell module
         use super::shell;
         shell::handle_shell_mode(state, input_tx);
         return;
     }
 
-    state.text_area.insert_str(&c.to_string());
+    state.input_state.text_area.insert_str(&c.to_string());
 
     // Check if editing inside a placeholder - reveal original path
     check_placeholder_edit(state);
@@ -264,91 +264,92 @@ pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<Inp
     detect_and_convert_paths(state);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder
+    if let Some(placeholder) = &state.input_state.pasted_placeholder
         && !state.input().contains(placeholder)
     {
-        state.pasted_long_text = None;
-        state.pasted_placeholder = None;
+        state.input_state.pasted_long_text = None;
+        state.input_state.pasted_placeholder = None;
     }
 
     if state.input().starts_with('/') {
-        if state.file_search.is_active() {
-            state.file_search.reset();
+        if state.input_state.file_search.is_active() {
+            state.input_state.file_search.reset();
         }
         // Hot-reload custom commands from disk only when the input is
         // exactly "/". This avoids filesystem I/O on every subsequent
         // keystroke while still picking up new/removed .md files each
         // time the user opens the slash-command dropdown.
         if state.input() == "/" {
-            state.helpers = AppState::get_helper_commands();
+            state.input_state.helpers = AppState::get_helper_commands();
         }
-        state.show_helper_dropdown = true;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = true;
+        state.input_state.helper_scroll = 0;
         // Synchronously filter slash commands — no async race condition
         filter_helpers_sync(state);
     }
 
     // Send input to async file_search worker for @ file completion only
-    if let Some(tx) = &state.file_search_tx {
+    if let Some(tx) = &state.input_state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
     if state.input().is_empty() {
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.filtered_files.clear();
-        state.helper_selected = 0;
-        state.helper_scroll = 0;
-        state.file_search.reset();
+        state.input_state.show_helper_dropdown = false;
+        state.input_state.filtered_helpers.clear();
+        state.input_state.filtered_files.clear();
+        state.input_state.helper_selected = 0;
+        state.input_state.helper_scroll = 0;
+        state.input_state.file_search.reset();
     }
 }
 
 /// Handle backspace input
 pub fn handle_input_backspace(state: &mut AppState) {
-    state.text_area.delete_backward(1);
+    state.input_state.text_area.delete_backward(1);
 
     // Check if editing inside a placeholder - reveal original path
     check_placeholder_edit(state);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder
+    if let Some(placeholder) = &state.input_state.pasted_placeholder
         && !state.input().contains(placeholder)
     {
-        state.pasted_long_text = None;
-        state.pasted_placeholder = None;
+        state.input_state.pasted_long_text = None;
+        state.input_state.pasted_placeholder = None;
     }
 
     // Clean up attached_images when their placeholders are no longer in the input
     // This prevents orphaned image references when user backspaces over placeholders
     let current_input = state.input().to_string();
     state
+        .input_state
         .attached_images
         .retain(|img| current_input.contains(&img.placeholder));
 
     // Send input to file_search worker (async, non-blocking)
-    if let Some(tx) = &state.file_search_tx {
+    if let Some(tx) = &state.input_state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
     // Handle helper filtering after backspace
     if state.input().starts_with('/') {
-        if state.file_search.is_active() {
-            state.file_search.reset();
+        if state.input_state.file_search.is_active() {
+            state.input_state.file_search.reset();
         }
-        state.show_helper_dropdown = true;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = true;
+        state.input_state.helper_scroll = 0;
         // Synchronously filter slash commands — no async race condition
         filter_helpers_sync(state);
     }
 
     // Hide dropdown if input is empty
     if state.input().is_empty() {
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.filtered_files.clear();
-        state.helper_selected = 0;
-        state.helper_scroll = 0;
-        state.file_search.reset();
+        state.input_state.show_helper_dropdown = false;
+        state.input_state.filtered_helpers.clear();
+        state.input_state.filtered_files.clear();
+        state.input_state.helper_selected = 0;
+        state.input_state.helper_scroll = 0;
+        state.input_state.file_search.reset();
     }
 }
 
@@ -364,7 +365,7 @@ fn handle_input_submitted(
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let input = state.input().to_string();
-            state.text_area.set_text("");
+            state.input_state.text_area.set_text("");
 
             // Send the input to the shell command
             if let Some(cmd) = &state.active_shell_command {
@@ -380,8 +381,8 @@ fn handle_input_submitted(
         // Otherwise, it's a new shell command
         if !state.input().trim().is_empty() {
             let command = state.input().to_string();
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
+            state.input_state.text_area.set_text("");
+            state.input_state.show_helper_dropdown = false;
 
             // Run the shell command via event
             let _ = shell_tx.try_send(InputEvent::RunShellCommand(command.clone()));
@@ -437,8 +438,8 @@ fn handle_input_submitted(
         } else {
             push_error_message(state, "Usage: /toggle_auto_approve <tool_name>", None);
         }
-        state.text_area.set_text("");
-        state.show_helper_dropdown = false;
+        state.input_state.text_area.set_text("");
+        state.input_state.show_helper_dropdown = false;
         return;
     }
 
@@ -447,31 +448,32 @@ fn handle_input_submitted(
         state.is_dialog_open = true;
         state.dialog_selected = 0;
         state.dialog_focused = false;
-        state.text_area.set_text("");
+        state.input_state.text_area.set_text("");
     // Reset focus when dialog closes
-    } else if state.show_helper_dropdown {
-        if state.file_search.is_active() {
+    } else if state.input_state.show_helper_dropdown {
+        if state.input_state.file_search.is_active() {
             let selected_file = state
+                .input_state
                 .file_search
-                .get_file_at_index(state.helper_selected)
+                .get_file_at_index(state.input_state.helper_selected)
                 .map(|s| s.to_string());
             if let Some(selected_file) = selected_file {
                 handle_file_selection(state, &selected_file);
             }
             return;
         }
-        if !state.filtered_helpers.is_empty() {
-            let selected = &state.filtered_helpers[state.helper_selected];
+        if !state.input_state.filtered_helpers.is_empty() {
+            let selected = &state.input_state.filtered_helpers[state.input_state.helper_selected];
 
             // Custom commands: autocomplete into input on Enter (let user add extra text)
             if matches!(selected.source, crate::app::CommandSource::Custom { .. }) {
                 let new_text = format!("{} ", selected.command);
-                state.text_area.set_text(&new_text);
-                state.text_area.set_cursor(new_text.len());
-                state.show_helper_dropdown = false;
-                state.filtered_helpers.clear();
-                state.helper_selected = 0;
-                state.helper_scroll = 0;
+                state.input_state.text_area.set_text(&new_text);
+                state.input_state.text_area.set_cursor(new_text.len());
+                state.input_state.show_helper_dropdown = false;
+                state.input_state.filtered_helpers.clear();
+                state.input_state.helper_selected = 0;
+                state.input_state.helper_scroll = 0;
                 return;
             }
 
@@ -491,7 +493,7 @@ fn handle_input_submitted(
 
         // IMPORTANT: If no matching helpers and not in file search,
         // fall through to check for commands with arguments below
-        state.show_helper_dropdown = false;
+        state.input_state.show_helper_dropdown = false;
     }
 
     // Defense-in-depth: if the input starts with '/' try to match it as a slash command,
@@ -526,6 +528,7 @@ fn handle_input_submitted(
         // arguments appended (e.g., "/review abc123", "/audit focus on auth").
         if input_trimmed.starts_with('/') {
             let prompt_with_args = state
+                .input_state
                 .helpers
                 .iter()
                 .find(|h| {
@@ -553,6 +556,7 @@ fn handle_input_submitted(
         // Then check if input exactly matches a known slash command (no args)
         if input_trimmed.starts_with('/') {
             let matched_command = state
+                .input_state
                 .helpers
                 .iter()
                 .find(|h| h.command == input_trimmed)
@@ -572,12 +576,12 @@ fn handle_input_submitted(
         }
     }
 
-    if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
+    if !state.input_state.text_area.text().trim().is_empty() || !state.input_state.attached_images.is_empty() {
         // Allow submission if there's text input OR attached images
 
         log::debug!(
             "Submitting message with {} attached images",
-            state.attached_images.len()
+            state.input_state.attached_images.len()
         );
 
         // Convert any pending image paths before submission
@@ -708,24 +712,24 @@ fn handle_input_submitted(
         }
 
         // Process any pending pastes first
-        for (placeholder, long_text) in state.pending_pastes.drain(..) {
+        for (placeholder, long_text) in state.input_state.pending_pastes.drain(..) {
             if final_input.contains(&placeholder) {
                 final_input = final_input.replace(&placeholder, &long_text);
-                state.text_area.set_text(&final_input);
+                state.input_state.text_area.set_text(&final_input);
                 break; // Only process the first matching paste
             }
         }
 
         // Also handle the existing pasted_placeholder system
         if let (Some(placeholder), Some(long_text)) =
-            (&state.pasted_placeholder, &state.pasted_long_text)
+            (&state.input_state.pasted_placeholder, &state.input_state.pasted_long_text)
             && final_input.contains(placeholder)
         {
             final_input = final_input.replace(placeholder, long_text);
-            state.text_area.set_text(&final_input);
+            state.input_state.text_area.set_text(&final_input);
         }
-        state.pasted_long_text = None;
-        state.pasted_placeholder = None;
+        state.input_state.pasted_long_text = None;
+        state.input_state.pasted_placeholder = None;
 
         // Scan for secrets typed character-by-character
         let final_input = state
@@ -746,7 +750,7 @@ fn handle_input_submitted(
 
         if utilization_pct < 92 {
             // Process all images and create ContentParts
-            let attached_paths: Vec<_> = state
+            let attached_paths: Vec<_> = state.input_state
                 .attached_images
                 .iter()
                 .map(|img| img.path.clone())
@@ -764,7 +768,7 @@ fn handle_input_submitted(
 
             // Check for image processing errors
             let mut image_errors = Vec::new();
-            for img in &state.attached_images {
+            for img in &state.input_state.attached_images {
                 if !img.path.exists() {
                     image_errors.push(format!("Image file not found: {}", img.path.display()));
                 } else if !is_supported_format(&img.path) {
@@ -838,9 +842,9 @@ fn handle_input_submitted(
 
         // Always clear attached images and reset state after submission
         state.shell_tool_calls = None;
-        state.text_area.set_text("");
-        state.attached_images.clear();
-        state.pending_path_start = None;
+        state.input_state.text_area.set_text("");
+        state.input_state.attached_images.clear();
+        state.input_state.pending_path_start = None;
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
@@ -872,7 +876,7 @@ pub fn handle_input_submitted_with(
         color.map(|c| Style::default().fg(c)),
     ));
     // Loading will be managed by stream processing
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
 
     // If content changed while user is scrolled up, mark it
     if !was_at_bottom {
@@ -924,30 +928,30 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     let char_count = redacted_pasted.chars().count();
     if char_count > MAX_PASTE_CHAR_COUNT {
         let placeholder = format!("[Pasted Content {char_count} chars]");
-        state.text_area.insert_element(&placeholder);
+        state.input_state.text_area.insert_element(&placeholder);
         // Store the redacted version (with placeholders) for later expansion
-        state.pending_pastes.push((placeholder, redacted_pasted));
+        state.input_state.pending_pastes.push((placeholder, redacted_pasted));
     } else if char_count > 1 && handle_paste_image_path(state, redacted_pasted.clone()) {
         // Path inserted - conversion will happen when user types or hits Enter
     } else {
-        state.text_area.insert_str(&redacted_pasted);
+        state.input_state.text_area.insert_str(&redacted_pasted);
     }
 
     // After paste, update slash command filtering synchronously so dropdown reflects
     // pasted content (e.g. pasting "/model" should show the dropdown immediately)
     if state.input().starts_with('/') {
-        if state.file_search.is_active() {
-            state.file_search.reset();
+        if state.input_state.file_search.is_active() {
+            state.input_state.file_search.reset();
         }
-        state.show_helper_dropdown = true;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = true;
+        state.input_state.helper_scroll = 0;
         filter_helpers_sync(state);
     } else {
         // Input doesn't start with '/' (or is empty) — dismiss slash command dropdown
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.helper_selected = 0;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = false;
+        state.input_state.filtered_helpers.clear();
+        state.input_state.helper_selected = 0;
+        state.input_state.helper_scroll = 0;
     }
 
     true
@@ -955,7 +959,7 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
 
 /// Handle Ctrl+V clipboard image paste (non-text clipboard images).
 pub fn handle_clipboard_image_paste(state: &mut AppState) {
-    state.is_pasting = true;
+    state.input_state.is_pasting = true;
     #[cfg(not(target_os = "android"))]
     {
         match paste_image_to_temp_png() {
@@ -994,7 +998,7 @@ pub fn handle_clipboard_image_paste(state: &mut AppState) {
     {
         push_error_message(state, "Image paste is not supported on Android.", None);
     }
-    state.is_pasting = false;
+    state.input_state.is_pasting = false;
 }
 
 fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
@@ -1004,6 +1008,7 @@ fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
     {
         // Just insert the path as text - let detection logic handle conversion
         state
+            .input_state
             .text_area
             .insert_str(path_buf.display().to_string().as_str());
         return true;
@@ -1016,6 +1021,7 @@ fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
         if image::image_dimensions(&path_buf).is_ok() {
             // Just insert the path as text - let detection logic handle conversion
             state
+                .input_state
                 .text_area
                 .insert_str(path_buf.display().to_string().as_str());
             return true;
@@ -1031,6 +1037,7 @@ fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
             if image::image_dimensions(&path_buf).is_ok() {
                 // Just insert the path as text - let detection logic handle conversion
                 state
+                    .input_state
                     .text_area
                     .insert_str(path_buf.display().to_string().as_str());
                 return true;
@@ -1083,8 +1090,8 @@ fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, fo
         .to_string();
     let placeholder = format!("[Image {} {}x{} {}]", filename, width, height, format_label);
     let cursor = state.cursor_position();
-    state.text_area.insert_element(&placeholder);
-    state.attached_images.push(AttachedImage {
+    state.input_state.text_area.insert_element(&placeholder);
+    state.input_state.attached_images.push(AttachedImage {
         placeholder: placeholder.clone(),
         path: path.clone(),
         filename,
@@ -1096,55 +1103,57 @@ fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, fo
 
 /// Handle input delete (clear input)
 pub fn handle_input_delete(state: &mut AppState) {
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
-    state.filtered_helpers.clear();
-    state.helper_selected = 0;
-    state.helper_scroll = 0;
+    state.input_state.text_area.set_text("");
+    state.input_state.show_helper_dropdown = false;
+    state.input_state.filtered_helpers.clear();
+    state.input_state.helper_selected = 0;
+    state.input_state.helper_scroll = 0;
 }
 
 /// Handle input delete word
 pub fn handle_input_delete_word(state: &mut AppState) {
-    state.text_area.delete_backward_word();
+    state.input_state.text_area.delete_backward_word();
     // Re-evaluate slash command state after word deletion
     if state.input().starts_with('/') {
-        state.show_helper_dropdown = true;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = true;
+        state.input_state.helper_scroll = 0;
         filter_helpers_sync(state);
     } else {
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.helper_selected = 0;
-        state.helper_scroll = 0;
+        state.input_state.show_helper_dropdown = false;
+        state.input_state.filtered_helpers.clear();
+        state.input_state.helper_selected = 0;
+        state.input_state.helper_scroll = 0;
     }
     // Send to async file search worker so @ file completion also updates
-    if let Some(tx) = &state.file_search_tx {
+    if let Some(tx) = &state.input_state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 }
 
 /// Handle cursor move to start of line
 pub fn handle_input_cursor_start(state: &mut AppState) {
-    state.text_area.move_cursor_to_beginning_of_line(false);
+    state.input_state.text_area.move_cursor_to_beginning_of_line(false);
 }
 
 /// Handle cursor move to end of line
 pub fn handle_input_cursor_end(state: &mut AppState) {
-    state.text_area.move_cursor_to_end_of_line(false);
+    state.input_state.text_area.move_cursor_to_end_of_line(false);
 }
 
 /// Handle cursor move to previous word
 pub fn handle_input_cursor_prev_word(state: &mut AppState) {
     state
+        .input_state
         .text_area
-        .set_cursor(state.text_area.beginning_of_previous_word());
+        .set_cursor(state.input_state.text_area.beginning_of_previous_word());
 }
 
 /// Handle cursor move to next word
 pub fn handle_input_cursor_next_word(state: &mut AppState) {
     state
+        .input_state
         .text_area
-        .set_cursor(state.text_area.end_of_next_word());
+        .set_cursor(state.input_state.text_area.end_of_next_word());
 }
 
 /// Handle cursor left movement (with approval bar check)
@@ -1153,7 +1162,7 @@ pub fn handle_cursor_left(state: &mut AppState) {
         state.approval_bar.select_prev();
         return; // Event was consumed by approval bar
     }
-    state.text_area.move_cursor_left();
+    state.input_state.text_area.move_cursor_left();
 }
 
 /// Handle cursor right movement (with approval bar check)
@@ -1162,7 +1171,7 @@ pub fn handle_cursor_right(state: &mut AppState) {
         state.approval_bar.select_next();
         return; // Event was consumed by approval bar
     }
-    state.text_area.move_cursor_right();
+    state.input_state.text_area.move_cursor_right();
 }
 
 /// Check if user is editing inside a placeholder and reveal original path
@@ -1171,7 +1180,7 @@ fn check_placeholder_edit(state: &mut AppState) {
     let cursor = state.cursor_position();
 
     // Check if any placeholder is modified
-    for img in state.attached_images.clone().iter() {
+    for img in state.input_state.attached_images.clone().iter() {
         if cursor >= img.start_pos && cursor <= img.end_pos {
             // Check if placeholder still matches
             if img.end_pos <= input.len() {
@@ -1180,10 +1189,12 @@ fn check_placeholder_edit(state: &mut AppState) {
                     // Placeholder modified - reveal path
                     let path_str = img.path.display().to_string();
                     state
+                        .input_state
                         .text_area
                         .replace_range(img.start_pos..img.end_pos, &path_str);
-                    state.text_area.set_cursor(img.start_pos + path_str.len());
+                    state.input_state.text_area.set_cursor(img.start_pos + path_str.len());
                     state
+                        .input_state
                         .attached_images
                         .retain(|p| p.start_pos != img.start_pos);
                     return;
@@ -1241,9 +1252,9 @@ fn detect_and_convert_paths(state: &mut AppState) {
         if success {
             update_placeholder_positions_after_replacement(state);
         }
-        state.pending_path_start = None;
+        state.input_state.pending_path_start = None;
     } else if let Some(start) = pending_start {
-        state.pending_path_start = Some(start);
+        state.input_state.pending_path_start = Some(start);
     }
 }
 
@@ -1406,7 +1417,7 @@ fn convert_all_pending_paths(state: &mut AppState) {
         }
     }
 
-    state.pending_path_start = None;
+    state.input_state.pending_path_start = None;
 }
 
 /// Check if image format is supported by the API
@@ -1425,7 +1436,7 @@ fn update_placeholder_positions_after_replacement(state: &mut AppState) {
     let input = state.input().to_string();
 
     // Recalculate all placeholder positions based on current input
-    for img in &mut state.attached_images {
+    for img in &mut state.input_state.attached_images {
         // Find where this placeholder actually is in the current input
         if let Some(pos) = input.find(&img.placeholder) {
             img.start_pos = pos;
@@ -1494,20 +1505,22 @@ fn convert_path_to_placeholder(
     let placeholder = format!("[Image {} {}x{} JPEG]", filename, width, height);
 
     // Replace path with placeholder
-    state.text_area.replace_range(start..end, &placeholder);
+    state.input_state.text_area.replace_range(start..end, &placeholder);
     state
+        .input_state
         .text_area
         .register_element(start..start + placeholder.len());
 
     // Check if this path is already attached (avoid duplicates)
     let already_attached = state
+        .input_state
         .attached_images
         .iter()
         .any(|img| img.path == resolved_path);
 
     if !already_attached {
         // Store original path - processing will happen on submission
-        state.attached_images.push(AttachedImage {
+        state.input_state.attached_images.push(AttachedImage {
             placeholder: placeholder.clone(),
             path: resolved_path,
             filename,
@@ -1529,7 +1542,8 @@ fn filter_helpers_sync(state: &mut AppState) {
     let input = state.input().to_string();
     if input.starts_with('/') && input.len() > 1 {
         let query = input[1..].to_lowercase();
-        state.filtered_helpers = state
+        state.input_state.filtered_helpers = state
+            .input_state
             .helpers
             .iter()
             .filter(|h| h.command.to_lowercase().contains(&query))
@@ -1537,8 +1551,8 @@ fn filter_helpers_sync(state: &mut AppState) {
             .collect();
     } else {
         // Input is just "/" — show all commands
-        state.filtered_helpers = state.helpers.clone();
+        state.input_state.filtered_helpers = state.input_state.helpers.clone();
     }
     // Always reset selection when filter changes to avoid pointing at wrong command
-    state.helper_selected = 0;
+    state.input_state.helper_selected = 0;
 }

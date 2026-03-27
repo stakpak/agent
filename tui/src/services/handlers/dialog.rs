@@ -178,8 +178,8 @@ pub fn handle_esc(
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
         state.selection = crate::services::text_selection::SelectionState::default();
-    } else if state.show_helper_dropdown {
-        state.show_helper_dropdown = false;
+    } else if state.input_state.show_helper_dropdown {
+        state.input_state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
@@ -240,7 +240,7 @@ pub fn handle_esc(
         state.is_dialog_open = false;
         state.dialog_command = None;
         state.dialog_focused = false; // Reset focus when dialog closes
-        state.text_area.set_text("");
+        state.input_state.text_area.set_text("");
     } else if state.show_shell_mode {
         if state.dialog_command.is_some() {
             // Interactive stall shell: resolve it correctly with captured history
@@ -277,8 +277,8 @@ pub fn handle_esc(
             state.show_shell_mode = false;
             state.shell_popup_visible = false;
             state.shell_popup_expanded = false;
-            state.text_area.set_shell_mode(false);
-            state.text_area.set_text("");
+            state.input_state.text_area.set_shell_mode(false);
+            state.input_state.text_area.set_text("");
             state.dialog_command = None;
 
             // Reset interactive stall tracking state
@@ -300,7 +300,7 @@ pub fn handle_esc(
         if was_streaming {
             state.cancel_requested = true;
         }
-        state.text_area.set_text("");
+        state.input_state.text_area.set_text("");
     }
 
     state.messages.retain(|m| {

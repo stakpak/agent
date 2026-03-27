@@ -13,7 +13,7 @@ use crate::services::message::{
 fn update_helper_dropdown_scroll(state: &mut AppState) {
     // filtered_helpers is maintained synchronously and already contains all
     // commands when input is just "/", so no special-case needed
-    let total_commands = state.filtered_helpers.len();
+    let total_commands = state.input_state.filtered_helpers.len();
     if total_commands == 0 {
         return;
     }
@@ -22,18 +22,18 @@ fn update_helper_dropdown_scroll(state: &mut AppState) {
     let visible_height = MAX_VISIBLE_ITEMS.min(total_commands);
 
     // Calculate the scroll position to keep the selected item visible
-    if state.helper_selected < state.helper_scroll {
+    if state.input_state.helper_selected < state.input_state.helper_scroll {
         // Selected item is above visible area, scroll up
-        state.helper_scroll = state.helper_selected;
-    } else if state.helper_selected >= state.helper_scroll + visible_height {
+        state.input_state.helper_scroll = state.input_state.helper_selected;
+    } else if state.input_state.helper_selected >= state.input_state.helper_scroll + visible_height {
         // Selected item is below visible area, scroll down
-        state.helper_scroll = state.helper_selected - visible_height + 1;
+        state.input_state.helper_scroll = state.input_state.helper_selected - visible_height + 1;
     }
 
     // Ensure scroll doesn't go beyond bounds
     let max_scroll = total_commands.saturating_sub(visible_height);
-    if state.helper_scroll > max_scroll {
-        state.helper_scroll = max_scroll;
+    if state.input_state.helper_scroll > max_scroll {
+        state.input_state.helper_scroll = max_scroll;
     }
 }
 
@@ -67,14 +67,14 @@ fn update_command_palette_scroll(state: &mut AppState) {
 
 /// Handle dropdown up navigation
 pub fn handle_dropdown_up(state: &mut AppState) {
-    if state.show_helper_dropdown && state.helper_selected > 0 {
-        if state.file_search.is_active() {
+    if state.input_state.show_helper_dropdown && state.input_state.helper_selected > 0 {
+        if state.input_state.file_search.is_active() {
             // File file_search mode
-            state.helper_selected -= 1;
+            state.input_state.helper_selected -= 1;
         } else {
             // Regular helper mode
-            if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
-                state.helper_selected -= 1;
+            if !state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/') {
+                state.input_state.helper_selected -= 1;
                 update_helper_dropdown_scroll(state);
             }
         }
@@ -83,20 +83,20 @@ pub fn handle_dropdown_up(state: &mut AppState) {
 
 /// Handle dropdown down navigation
 pub fn handle_dropdown_down(state: &mut AppState) {
-    if state.show_helper_dropdown {
-        if state.file_search.is_active() {
+    if state.input_state.show_helper_dropdown {
+        if state.input_state.file_search.is_active() {
             // File file_search mode
-            if state.helper_selected + 1 < state.file_search.filtered_count() {
-                state.helper_selected += 1;
+            if state.input_state.helper_selected + 1 < state.input_state.file_search.filtered_count() {
+                state.input_state.helper_selected += 1;
             }
         } else {
             // Regular helper mode — filtered_helpers is maintained synchronously
             // and already contains all commands when input is just "/"
-            if !state.filtered_helpers.is_empty()
+            if !state.input_state.filtered_helpers.is_empty()
                 && state.input().starts_with('/')
-                && state.helper_selected + 1 < state.filtered_helpers.len()
+                && state.input_state.helper_selected + 1 < state.input_state.filtered_helpers.len()
             {
-                state.helper_selected += 1;
+                state.input_state.helper_selected += 1;
                 update_helper_dropdown_scroll(state);
             }
         }
@@ -172,7 +172,7 @@ pub fn handle_up_navigation(state: &mut AppState) {
     }
 
     // Handle different UI states
-    if state.show_helper_dropdown {
+    if state.input_state.show_helper_dropdown {
         handle_dropdown_up(state);
     } else if state.is_dialog_open && state.dialog_focused {
         // Handle dialog navigation only when dialog is focused
@@ -260,7 +260,7 @@ pub fn handle_down_navigation(
     }
 
     // Handle different UI states
-    if state.show_helper_dropdown {
+    if state.input_state.show_helper_dropdown {
         handle_dropdown_down(state);
     } else if state.is_dialog_open && state.dialog_focused {
         // Handle dialog navigation only when dialog is focused

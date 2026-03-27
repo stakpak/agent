@@ -350,7 +350,7 @@ pub fn handle_retry_tool_call(
         state.shell_screen = vt100::Parser::new(rows, cols, 0);
 
         // Set textarea shell mode to match app state
-        state.text_area.set_shell_mode(true);
+        state.input_state.text_area.set_shell_mode(true);
 
         // Automatically execute the command
         let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
@@ -500,8 +500,8 @@ pub fn execute_command_palette_selection(
                 // Should not happen - all slash commands should be handled above
             }
         }
-        state.text_area.set_text("");
-        state.show_helper_dropdown = false;
+        state.input_state.text_area.set_text("");
+        state.input_state.show_helper_dropdown = false;
     }
 }
 

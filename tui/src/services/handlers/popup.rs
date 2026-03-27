@@ -165,7 +165,7 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.ondemand_shell_mode = false;
 
     // Clear file search
-    state.filtered_files.clear();
+    state.input_state.filtered_files.clear();
 
     // Clear dialog state
     state.is_dialog_open = false;
@@ -234,7 +234,7 @@ pub fn handle_show_rulebook_switcher(state: &mut AppState, output_tx: &Sender<Ou
     }
 
     // Clear any pending input to prevent empty message submission
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
 
     // Request current active rulebooks to pre-select them
     let _ = output_tx.try_send(OutputEvent::RequestCurrentRulebooks);
@@ -883,7 +883,7 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
     }
 
     // Clear any pending input
-    state.text_area.set_text("");
+    state.input_state.text_area.set_text("");
 
     // Request available models from the backend
     let _ = output_tx.try_send(OutputEvent::RequestAvailableModels);
@@ -1079,7 +1079,7 @@ pub fn handle_message_action_popup_close(state: &mut AppState) {
     state.message_action_target_text = None;
     // Clear any stuck text selection (popup may have intercepted drag end)
     state.selection = SelectionState::default();
-    state.text_area.clear_selection();
+    state.input_state.text_area.clear_selection();
 }
 
 /// Navigate within the message action popup

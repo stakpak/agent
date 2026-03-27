@@ -556,8 +556,8 @@ pub fn welcome_messages(
 
 pub fn push_clear_message(state: &mut AppState) {
     state.messages.clear();
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
+    state.input_state.text_area.set_text("");
+    state.input_state.show_helper_dropdown = false;
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
     state.messages.extend(welcome_msg);
     invalidate_message_lines_cache(state);

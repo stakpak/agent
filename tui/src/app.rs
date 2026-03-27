@@ -35,27 +35,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub struct AppState {
-    // ========== Input & TextArea State ==========
-    pub text_area: TextArea,
-    pub text_area_state: TextAreaState,
-    pub cursor_visible: bool,
-    pub helpers: Vec<HelperCommand>,
-    pub show_helper_dropdown: bool,
-    pub helper_selected: usize,
-    pub helper_scroll: usize,
-    pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>,
-    pub file_search: FileSearch,
-    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
-    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
-    pub is_pasting: bool,
-    pub pasted_long_text: Option<String>,
-    pub pasted_placeholder: Option<String>,
-    pub pending_pastes: Vec<(String, String)>,
-    /// Images attached via pasted file paths (and future clipboard image support).
-    pub attached_images: Vec<AttachedImage>,
-    pub pending_path_start: Option<usize>,
-    pub interactive_commands: Vec<String>,
+    // ========== Input State (TextArea + helpers + file search) ==========
+    pub input_state: InputState,
 
     // ========== Messages & Scrolling State ==========
     pub messages: Vec<Message>,
@@ -481,9 +462,30 @@ impl AppState {
         let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
 
         AppState {
-            text_area: TextArea::new(),
-            text_area_state: TextAreaState::default(),
-            cursor_visible: true,
+            input_state: InputState {
+                text_area: TextArea::new(),
+                text_area_state: TextAreaState::default(),
+                cursor_visible: true,
+                helpers,
+                show_helper_dropdown: false,
+                helper_selected: 0,
+                helper_scroll: 0,
+                filtered_helpers: Vec::new(),
+                filtered_files: Vec::new(),
+                file_search: FileSearch::default(),
+                file_search_tx: Some(file_search_tx),
+                file_search_rx: Some(result_rx),
+                is_pasting: false,
+                pasted_long_text: None,
+                pasted_placeholder: None,
+                pending_pastes: Vec::new(),
+                attached_images: Vec::new(),
+                pending_path_start: None,
+                interactive_commands: crate::constants::INTERACTIVE_COMMANDS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            },
             messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
@@ -492,12 +494,6 @@ impl AppState {
             block_stay_at_bottom_frames: 0,
             scroll_lines_from_end: None,
             content_changed_while_scrolled_up: false,
-            helpers: helpers.clone(),
-            show_helper_dropdown: false,
-            helper_selected: 0,
-            helper_scroll: 0,
-            filtered_helpers: Vec::new(),
-            filtered_files: Vec::new(),
             show_shortcuts: false,
             is_dialog_open: false,
             dialog_command: None,
@@ -521,13 +517,11 @@ impl AppState {
             active_shell_command: None,
             active_shell_command_output: None,
             waiting_for_shell_input: false,
-            is_pasting: false,
             shell_tool_calls: None,
             shell_loading: false,
             shell_pending_command_value: None,
             shell_pending_command_executed: false,
             shell_pending_command_output: None,
-            // Backward compatibility aliases
             show_shell_mode: false,
             shell_mode_input: String::new(),
             is_tool_call_shell_command: false,
@@ -536,24 +530,13 @@ impl AppState {
             shell_pending_command_output_count: 0,
             shell_initial_prompt_shown: false,
             shell_command_typed: false,
-            attached_images: Vec::new(),
-            pending_path_start: None,
             dialog_message_id: None,
-            file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
-            pasted_long_text: None,
-            pasted_placeholder: None,
-            file_search_tx: Some(file_search_tx),
-            file_search_rx: Some(result_rx),
             is_streaming: false,
             cancel_requested: false,
-            interactive_commands: crate::constants::INTERACTIVE_COMMANDS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
@@ -577,8 +560,7 @@ impl AppState {
             render_metrics: RenderMetrics::new(),
             last_render_width: 0,
             line_to_message_map: Vec::new(),
-            pending_pastes: Vec::new(),
-            mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
+            mouse_capture_enabled: false,
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
@@ -750,9 +732,8 @@ impl AppState {
     }
 
     pub fn update_session_empty_status(&mut self) {
-        // Check if there are any user messages (not just any messages)
-        let session_empty = !self.has_user_messages && self.text_area.text().is_empty();
-        self.text_area.set_session_empty(session_empty);
+        let session_empty = !self.has_user_messages && self.input_state.text_area.text().is_empty();
+        self.input_state.text_area.set_session_empty(session_empty);
     }
 
     /// Poll `.stakpak/session/plan.md` for changes and update cached metadata.
@@ -810,33 +791,33 @@ impl AppState {
         None
     }
 
-    // Convenience methods for accessing input and cursor
+// Convenience methods for accessing input and cursor (using input_state)
     pub fn input(&self) -> &str {
-        self.text_area.text()
+        self.input_state.text_area.text()
     }
 
     pub fn cursor_position(&self) -> usize {
-        self.text_area.cursor()
+        self.input_state.text_area.cursor()
     }
 
     pub fn set_input(&mut self, input: &str) {
-        self.text_area.set_text(input);
+        self.input_state.text_area.set_text(input);
     }
 
     pub fn set_cursor_position(&mut self, pos: usize) {
-        self.text_area.set_cursor(pos);
+        self.input_state.text_area.set_cursor(pos);
     }
 
     pub fn insert_char(&mut self, c: char) {
-        self.text_area.insert_str(&c.to_string());
+        self.input_state.text_area.insert_str(&c.to_string());
     }
 
     pub fn insert_str(&mut self, s: &str) {
-        self.text_area.insert_str(s);
+        self.input_state.text_area.insert_str(s);
     }
 
     pub fn clear_input(&mut self) {
-        self.text_area.set_text("");
+        self.input_state.text_area.set_text("");
     }
 
     /// Check if user input should be blocked (during profile switch)
@@ -906,16 +887,16 @@ impl AppState {
 
     // --- Poll file_search results and update state (for @ file completion only) ---
     pub fn poll_file_search_results(&mut self) {
-        if let Some(rx) = &mut self.file_search_rx {
+        if let Some(rx) = &mut self.input_state.file_search_rx {
             while let Ok(result) = rx.try_recv() {
                 // Get input text before any mutable operations
-                let input_text = self.text_area.text().to_string();
+                let input_text = self.input_state.text_area.text().to_string();
 
                 let filtered_files = result.filtered_files.clone();
-                self.filtered_files = filtered_files;
-                self.file_search.filtered_files = self.filtered_files.clone();
-                self.file_search.is_file_mode = !self.filtered_files.is_empty();
-                self.file_search.trigger_char = if !self.filtered_files.is_empty() {
+                self.input_state.filtered_files = filtered_files;
+                self.input_state.file_search.filtered_files = self.input_state.filtered_files.clone();
+                self.input_state.file_search.is_file_mode = !self.input_state.filtered_files.is_empty();
+                self.input_state.file_search.trigger_char = if !self.input_state.filtered_files.is_empty() {
                     Some('@')
                 } else {
                     None
@@ -930,20 +911,20 @@ impl AppState {
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
                 if has_at_trigger && !self.waiting_for_shell_input {
-                    self.show_helper_dropdown = true;
+                    self.input_state.show_helper_dropdown = true;
                 }
                 // If we have file results, reset selection if out of bounds
-                if !self.filtered_files.is_empty()
-                    && self.helper_selected >= self.filtered_files.len()
+                if !self.input_state.filtered_files.is_empty()
+                    && self.input_state.helper_selected >= self.input_state.filtered_files.len()
                 {
-                    self.helper_selected = 0;
+                    self.input_state.helper_selected = 0;
                 }
 
                 // Don't overwrite show_helper_dropdown for slash commands —
                 // that state is already set synchronously by the input handlers.
                 // Only hide if input is completely empty (safety net).
                 if input_text.is_empty() {
-                    self.show_helper_dropdown = false;
+                    self.input_state.show_helper_dropdown = false;
                 }
             }
         }
