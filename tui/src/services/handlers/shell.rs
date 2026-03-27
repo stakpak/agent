@@ -194,7 +194,7 @@ pub fn handle_run_shell_command(
     // For tool call shell mode (is_tool_call_shell_command), we type the pending command
     // For on-demand shell mode, we don't type anything
     let command_to_execute = if state.shell_popup_state.is_tool_call_shell_command {
-        state.shell_popup_state.shell_pending_command_value.clone()
+        state.shell_popup_state.pending_command_value.clone()
     } else {
         None
     };
@@ -213,13 +213,13 @@ pub fn handle_run_shell_command(
     state.shell_popup_state.active_shell_command_output = Some(String::new());
 
     // Create a new vt100 parser for the session with 1000 lines of scrollback
-    state.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 1000);
+    state.shell_runtime_state.screen = vt100::Parser::new(rows, cols, 1000);
     // Reset interaction flag for new command
     state.shell_session_state.shell_interaction_occurred = false;
     // Show loading indicator while shell initializes
-    state.shell_popup_state.shell_loading = true;
+    state.shell_popup_state.is_loading = true;
     // Clear history for new session
-    state.shell_runtime_state.shell_history_lines.clear();
+    state.shell_runtime_state.history_lines.clear();
 
     // Create initial shell message with loading indicator
     let loading_colors = BubbleColors {
@@ -270,9 +270,9 @@ pub fn handle_run_shell_command(
     });
 
     // Set new popup state fields
-    state.shell_popup_state.shell_popup_visible = true;
-    state.shell_popup_state.shell_popup_expanded = true;
-    state.shell_popup_state.shell_popup_scroll = 0; // Reset scroll to show bottom
+    state.shell_popup_state.is_visible = true;
+    state.shell_popup_state.is_expanded = true;
+    state.shell_popup_state.scroll = 0; // Reset scroll to show bottom
     // Invalidate cache so old bordered message is hidden
     invalidate_message_lines_cache(state);
     // Also set legacy alias for backward compatibility
@@ -290,10 +290,10 @@ pub fn handle_run_shell_with_command(
     // Mark this as a tool call shell command for proper UI state
     state.shell_popup_state.is_tool_call_shell_command = true;
     // Store the command value for later tool call result
-    state.shell_popup_state.shell_pending_command_value = Some(command.clone());
+    state.shell_popup_state.pending_command_value = Some(command.clone());
     // Initially false - will become true when command starts executing
-    state.shell_popup_state.shell_pending_command_executed = false;
-    state.shell_popup_state.shell_pending_command_output = Some(String::new());
+    state.shell_popup_state.pending_command_executed = false;
+    state.shell_popup_state.pending_command_output = Some(String::new());
     state.shell_popup_state.shell_pending_command_output_count = 0;
     // Reset prompt detection state for auto-completion
     state.shell_popup_state.shell_initial_prompt_shown = false;
@@ -310,7 +310,7 @@ pub fn background_shell_session(state: &mut AppState) {
     }
 
     // Collapse popup (shrink, not hide)
-    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.show_shell_mode = false;
     // Update textarea shell mode
     state.input_state.text_area.set_shell_mode(false);
@@ -324,9 +324,9 @@ pub fn background_shell_session(state: &mut AppState) {
 
     // state.shell_runtime_state.shell_history_lines already contains the full history including active view
     // We trim it for the message bubble preview
-    let mut fresh_lines = trim_shell_lines(state.shell_runtime_state.shell_history_lines.clone());
+    let mut fresh_lines = trim_shell_lines(state.shell_runtime_state.history_lines.clone());
 
-    if let Some(cmd) = state.shell_popup_state.shell_pending_command_value.clone() {
+    if let Some(cmd) = state.shell_popup_state.pending_command_value.clone() {
         let command_line = Line::from(vec![
             Span::styled(
                 "$ ",
@@ -372,7 +372,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     // Only Esc can exit shell mode (handled elsewhere)
 
     // If already expanded, '$' IS TYPED INTO SHELL
-    if state.shell_popup_state.show_shell_mode && state.shell_popup_state.shell_popup_expanded {
+    if state.shell_popup_state.show_shell_mode && state.shell_popup_state.is_expanded {
         if let Some(shell_cmd) = &state.shell_popup_state.active_shell_command {
             let stdin_tx = shell_cmd.stdin_tx.clone();
             tokio::spawn(async move {
@@ -383,9 +383,8 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     }
 
     // If popup is visible but shrunk (backgrounded), expand it back
-    if state.shell_popup_state.shell_popup_visible && !state.shell_popup_state.shell_popup_expanded
-    {
-        state.shell_popup_state.shell_popup_expanded = true;
+    if state.shell_popup_state.is_visible && !state.shell_popup_state.is_expanded {
+        state.shell_popup_state.is_expanded = true;
         state.shell_popup_state.show_shell_mode = true;
         state.input_state.text_area.set_shell_mode(true);
 
@@ -398,7 +397,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 .map(|c| c.command.clone())
                 .unwrap_or_else(|| "shell".to_string());
 
-            let current_screen = capture_styled_screen(&mut state.shell_runtime_state.shell_screen);
+            let current_screen = capture_styled_screen(&mut state.shell_runtime_state.screen);
 
             let focused_colors = BubbleColors {
                 border_color: ThemeColors::cyan(),
@@ -426,8 +425,8 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
 
     // If we have an existing session, resume it
     if state.shell_popup_state.active_shell_command.is_some() {
-        state.shell_popup_state.shell_popup_visible = true;
-        state.shell_popup_state.shell_popup_expanded = true;
+        state.shell_popup_state.is_visible = true;
+        state.shell_popup_state.is_expanded = true;
         state.shell_popup_state.show_shell_mode = true;
         state.input_state.text_area.set_shell_mode(true);
         invalidate_message_lines_cache(state);
@@ -436,8 +435,8 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
 
     // Start a new on-demand shell (no command - just interactive)
     state.shell_popup_state.ondemand_shell_mode = true;
-    state.shell_popup_state.shell_pending_command_value = None; // No command to type
-    state.shell_popup_state.shell_pending_command_executed = false;
+    state.shell_popup_state.pending_command_value = None; // No command to type
+    state.shell_popup_state.pending_command_executed = false;
     state.shell_popup_state.is_tool_call_shell_command = false;
 
     let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
@@ -456,9 +455,9 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
 
         // If this was from an interactive stall, add the result to shell_tool_calls
         // so it gets sent with the user's message
-        if state.shell_popup_state.shell_pending_command_executed {
-            let cmd_value = state.shell_popup_state.shell_pending_command_value.take();
-            let shell_output = state.shell_popup_state.shell_pending_command_output.take();
+        if state.shell_popup_state.pending_command_executed {
+            let cmd_value = state.shell_popup_state.pending_command_value.take();
+            let shell_output = state.shell_popup_state.pending_command_output.take();
 
             // Build the tool call result with captured output
             let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
@@ -476,7 +475,7 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
             }
 
             // Reset the tracking state
-            state.shell_popup_state.shell_pending_command_executed = false;
+            state.shell_popup_state.pending_command_executed = false;
             state.shell_popup_state.shell_pending_command_output_count = 0;
             state.dialog_approval_state.dialog_command = None;
         }
@@ -528,23 +527,19 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     }
 
     // First output received - hide loading indicator
-    state.shell_popup_state.shell_loading = false;
+    state.shell_popup_state.is_loading = false;
 
     // For tool call shell mode: first output means initialization is complete
     if state.shell_popup_state.is_tool_call_shell_command
-        && !state.shell_popup_state.shell_pending_command_executed
+        && !state.shell_popup_state.pending_command_executed
     {
-        state.shell_popup_state.shell_pending_command_executed = true;
+        state.shell_popup_state.pending_command_executed = true;
     }
 
     // If we're tracking a pending command (from interactive stall), capture all output
-    if state.shell_popup_state.shell_pending_command_executed {
+    if state.shell_popup_state.pending_command_executed {
         state.shell_popup_state.shell_pending_command_output_count += 1;
-        if let Some(output) = state
-            .shell_popup_state
-            .shell_pending_command_output
-            .as_mut()
-        {
+        if let Some(output) = state.shell_popup_state.pending_command_output.as_mut() {
             output.push_str(&raw_data);
         }
     }
@@ -558,7 +553,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     // Process raw output into Virtual Terminal Screen
     state
         .shell_runtime_state
-        .shell_screen
+        .screen
         .process(raw_data.as_bytes());
 
     // 3. Determine Styling based on Focus
@@ -603,29 +598,26 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     };
 
     // 4. Capture styled screen content at scroll=0 (safe)
-    let screen_lines = capture_styled_screen(&mut state.shell_runtime_state.shell_screen);
+    let screen_lines = capture_styled_screen(&mut state.shell_runtime_state.screen);
 
-    let (term_rows, _) = state.shell_runtime_state.shell_screen.screen().size();
+    let (term_rows, _) = state.shell_runtime_state.screen.screen().size();
 
     // Probe actual scrollback size
-    state
-        .shell_runtime_state
-        .shell_screen
-        .set_scrollback(usize::MAX);
-    let scrollback_count = state.shell_runtime_state.shell_screen.screen().scrollback();
-    state.shell_runtime_state.shell_screen.set_scrollback(0); // Reset to normal view
+    state.shell_runtime_state.screen.set_scrollback(usize::MAX);
+    let scrollback_count = state.shell_runtime_state.screen.screen().scrollback();
+    state.shell_runtime_state.screen.set_scrollback(0); // Reset to normal view
 
     // Calculate expected total lines (scrollback + visible)
     let expected_total = scrollback_count + term_rows as usize;
 
     // If we have more expected lines than current history, we need to grow
     // But we can only safely capture the visible screen, so we track growth
-    if state.shell_runtime_state.shell_history_lines.is_empty() {
+    if state.shell_runtime_state.history_lines.is_empty() {
         // First capture - just set it
-        state.shell_runtime_state.shell_history_lines = screen_lines.clone();
+        state.shell_runtime_state.history_lines = screen_lines.clone();
     } else if !screen_lines.is_empty() {
         // Check if content has grown beyond what we have
-        let current_history_len = state.shell_runtime_state.shell_history_lines.len();
+        let current_history_len = state.shell_runtime_state.history_lines.len();
 
         if expected_total > current_history_len {
             // Content has grown - we need to shift and add new lines
@@ -642,39 +634,36 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
                 // Take only the NEW lines from screen (the bottom portion)
                 let new_lines_start = screen_lines.len() - lines_to_add;
                 for line in screen_lines[new_lines_start..].iter() {
-                    state
-                        .shell_runtime_state
-                        .shell_history_lines
-                        .push(line.clone());
+                    state.shell_runtime_state.history_lines.push(line.clone());
                 }
             } else {
                 // All lines are new (e.g. huge output dump)
                 state
                     .shell_runtime_state
-                    .shell_history_lines
+                    .history_lines
                     .extend(screen_lines.iter().cloned());
             }
 
             // Trim history if too large
-            if state.shell_runtime_state.shell_history_lines.len() > MAX_HISTORY {
-                let trim_amount = state.shell_runtime_state.shell_history_lines.len() - MAX_HISTORY;
+            if state.shell_runtime_state.history_lines.len() > MAX_HISTORY {
+                let trim_amount = state.shell_runtime_state.history_lines.len() - MAX_HISTORY;
                 state
                     .shell_runtime_state
-                    .shell_history_lines
+                    .history_lines
                     .drain(0..trim_amount);
             }
         } else {
             // No scrolling happened, just update the visible portion
             // Replace the last term_rows lines with current screen
-            let history_len = state.shell_runtime_state.shell_history_lines.len();
+            let history_len = state.shell_runtime_state.history_lines.len();
             let replace_start = history_len.saturating_sub(term_rows as usize);
             state
                 .shell_runtime_state
-                .shell_history_lines
+                .history_lines
                 .truncate(replace_start);
             state
                 .shell_runtime_state
-                .shell_history_lines
+                .history_lines
                 .extend(screen_lines.iter().cloned());
         }
     }
@@ -682,7 +671,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     // 5. Update UI
     // Prepended lines (like command injection) that are NOT part of terminal history
     let mut display_lines = trim_shell_lines(screen_lines.clone());
-    if let Some(cmd) = state.shell_popup_state.shell_pending_command_value.clone() {
+    if let Some(cmd) = state.shell_popup_state.pending_command_value.clone() {
         let command_line = Line::from(vec![
             Span::styled(
                 "$ ",
@@ -827,16 +816,16 @@ pub fn handle_shell_completed(
     state.shell_popup_state.waiting_for_shell_input = false;
 
     // If this was from an interactive stall command OR a tool call shell, capture and log the result
-    if state.shell_popup_state.shell_pending_command_executed
+    if state.shell_popup_state.pending_command_executed
         || state.shell_popup_state.is_tool_call_shell_command
     {
         // CRITICAL: Capture values BEFORE calling terminate_active_shell_session
         // because it clears them!
-        let cmd_value = state.shell_popup_state.shell_pending_command_value.clone();
+        let cmd_value = state.shell_popup_state.pending_command_value.clone();
 
         // Capture output from either pending command or active shell command
         let shell_output =
-            if let Some(output) = state.shell_popup_state.shell_pending_command_output.clone() {
+            if let Some(output) = state.shell_popup_state.pending_command_output.clone() {
                 Some(output)
             } else {
                 state.shell_popup_state.active_shell_command_output.clone()
@@ -862,8 +851,8 @@ pub fn handle_shell_completed(
         terminate_active_shell_session(state);
 
         // Hide shell popup on completion
-        state.shell_popup_state.shell_popup_visible = false;
-        state.shell_popup_state.shell_popup_expanded = false;
+        state.shell_popup_state.is_visible = false;
+        state.shell_popup_state.is_expanded = false;
         // Request terminal clear to remove any leaked output (e.g., sudo password prompts)
         state.shell_popup_state.needs_terminal_clear = true;
         // Invalidate cache to restore normal message display

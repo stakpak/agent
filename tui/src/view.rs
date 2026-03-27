@@ -33,15 +33,15 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     banner::render_banner(f, banner_area, state);
 
     // Store banner area for click detection (None when banner is hidden)
-    state.banner_state.banner_area = if banner_h > 0 {
+    state.banner_state.area = if banner_h > 0 {
         Some(banner_area)
     } else {
-        state.banner_state.banner_click_regions.clear();
+        state.banner_state.click_regions.clear();
         None
     };
 
     // Horizontal split for the side panel
-    let (main_area, side_panel_area) = if state.side_panel_state.show_side_panel {
+    let (main_area, side_panel_area) = if state.side_panel_state.is_shown {
         // Fixed width of 32 characters for side panel
         let panel_width = 32u16;
         let horizontal_chunks = Layout::default()
@@ -117,11 +117,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let approval_bar_visible = state.dialog_approval_state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let ask_user_visible = state.ask_user_state.show_ask_user_popup
-        && !state.ask_user_state.ask_user_questions.is_empty();
+    let ask_user_visible =
+        state.ask_user_state.is_visible && !state.ask_user_state.questions.is_empty();
     let input_visible = !(approval_bar_visible
-        || state.shell_popup_state.shell_popup_visible
-            && state.shell_popup_state.shell_popup_expanded);
+        || state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded);
     let effective_input_height = if input_visible { input_height } else { 0 };
     let queue_count = state.user_message_queue_state.pending_user_messages.len();
     let queue_preview_height = if input_visible && queue_count > 0 {
@@ -209,7 +208,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render shell popup above input area (if visible)
-    if state.shell_popup_state.shell_popup_visible {
+    if state.shell_popup_state.is_visible {
         let padded_shell_popup_area = Rect {
             x: shell_popup_area.x + 1,
             y: shell_popup_area.y,
@@ -240,9 +239,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.messages_scrolling_state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.dialog_approval_state.is_dialog_open {
-    } else if state.shell_popup_state.shell_popup_visible
-        && state.shell_popup_state.shell_popup_expanded
-    {
+    } else if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
         // Don't render input when popup is expanded - popup takes over input
     } else if !approval_bar_visible {
         // Only render input/dropdown when approval bar is NOT visible
@@ -273,12 +270,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render file changes popup
-    if state.file_changes_popup_state.show_file_changes_popup {
+    if state.file_changes_popup_state.is_visible {
         crate::services::file_changes_popup::render_file_changes_popup(f, state);
     }
 
     // Render shortcuts popup (now includes commands)
-    if state.shortcuts_panel_state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.is_visible {
         crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
     }
     // Render rulebook switcher
@@ -292,12 +289,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render model switcher
-    if state.model_switcher_state.show_model_switcher {
+    if state.model_switcher_state.is_visible {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
     }
 
     // Render profile switch overlay
-    if state.profile_switcher_state.profile_switching_in_progress {
+    if state.profile_switcher_state.switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
 
@@ -305,12 +302,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     render_toast(f, state);
 
     // Render "existing plan found" modal
-    if state.plan_mode_state.existing_plan_prompt.is_some() {
+    if state.plan_mode_state.existing_prompt.is_some() {
         render_existing_plan_modal(f, state);
     }
 
     // Render plan review overlay (full-screen, on top of everything)
-    if state.plan_review_state.show_plan_review {
+    if state.plan_review_state.is_visible {
         crate::services::plan_review::render_plan_review(f, state, f.area());
     }
 }
@@ -375,7 +372,7 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
 
     let (title_text, status_text) = state
         .plan_mode_state
-        .existing_plan_prompt
+        .existing_prompt
         .as_ref()
         .and_then(|p| p.metadata.as_ref())
         .map(|m| {

@@ -179,7 +179,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.model_switcher_state.model_switcher_search.is_empty() {
+    let search_spans = if state.model_switcher_state.search.is_empty() {
         vec![
             Span::raw(" "),
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -194,7 +194,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.model_switcher_state.model_switcher_search,
+                &state.model_switcher_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -210,8 +210,8 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     // Get filtered model indices
     let filtered_indices = filter_models(
         &state.model_switcher_state.available_models,
-        state.model_switcher_state.model_switcher_mode,
-        &state.model_switcher_state.model_switcher_search,
+        state.model_switcher_state.mode,
+        &state.model_switcher_state.search,
     );
 
     // Render model list
@@ -341,8 +341,8 @@ fn render_model_line(
 fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize], list_area: Rect) {
     // Show empty state if no models match
     if filtered_indices.is_empty() {
-        let empty_message = if state.model_switcher_state.model_switcher_search.is_empty() {
-            match state.model_switcher_state.model_switcher_mode {
+        let empty_message = if state.model_switcher_state.search.is_empty() {
+            match state.model_switcher_state.mode {
                 ModelSwitcherMode::All => " No models available",
                 ModelSwitcherMode::Reasoning => " No reasoning models available",
             }
@@ -391,7 +391,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         // Recent model items
         for &model_idx in &recent_model_indices {
             let model = &state.model_switcher_state.available_models[model_idx];
-            let is_selected = model_idx == state.model_switcher_state.model_switcher_selected;
+            let is_selected = model_idx == state.model_switcher_state.is_selected;
             let is_current = state
                 .model_switcher_state
                 .current_model
@@ -449,7 +449,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         // Model items
         for &model_idx in model_indices {
             let model = &state.model_switcher_state.available_models[model_idx];
-            let is_selected = model_idx == state.model_switcher_state.model_switcher_selected;
+            let is_selected = model_idx == state.model_switcher_state.is_selected;
             let is_current = state
                 .model_switcher_state
                 .current_model
@@ -470,7 +470,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
     let height = list_area.height as usize;
     let selected_line = line_to_model_idx
         .iter()
-        .position(|idx| *idx == Some(state.model_switcher_state.model_switcher_selected))
+        .position(|idx| *idx == Some(state.model_switcher_state.is_selected))
         .unwrap_or(0);
 
     let scroll = if selected_line >= height {

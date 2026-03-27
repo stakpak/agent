@@ -40,7 +40,7 @@ fn update_helper_dropdown_scroll(state: &mut AppState) {
 
 /// Updates command palette scroll position to keep selected item visible
 fn update_command_palette_scroll(state: &mut AppState) {
-    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.search);
     let total_commands = filtered_commands.len();
 
     if total_commands == 0 {
@@ -51,24 +51,21 @@ fn update_command_palette_scroll(state: &mut AppState) {
     let visible_height = 6; // Adjust this based on your actual popup height
 
     // Calculate the scroll position to keep the selected item visible
-    if state.command_palette_state.command_palette_selected
-        < state.command_palette_state.command_palette_scroll
-    {
+    if state.command_palette_state.is_selected < state.command_palette_state.scroll {
         // Selected item is above visible area, scroll up
-        state.command_palette_state.command_palette_scroll =
-            state.command_palette_state.command_palette_selected;
-    } else if state.command_palette_state.command_palette_selected
-        >= state.command_palette_state.command_palette_scroll + visible_height
+        state.command_palette_state.scroll = state.command_palette_state.is_selected;
+    } else if state.command_palette_state.is_selected
+        >= state.command_palette_state.scroll + visible_height
     {
         // Selected item is below visible area, scroll down
-        state.command_palette_state.command_palette_scroll =
-            state.command_palette_state.command_palette_selected - visible_height + 1;
+        state.command_palette_state.scroll =
+            state.command_palette_state.is_selected - visible_height + 1;
     }
 
     // Ensure scroll doesn't go beyond bounds
     let max_scroll = total_commands.saturating_sub(visible_height);
-    if state.command_palette_state.command_palette_scroll > max_scroll {
-        state.command_palette_state.command_palette_scroll = max_scroll;
+    if state.command_palette_state.scroll > max_scroll {
+        state.command_palette_state.scroll = max_scroll;
     }
 }
 
@@ -115,10 +112,10 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
     if state.profile_switcher_state.show_profile_switcher {
-        if state.profile_switcher_state.profile_switcher_selected > 0 {
-            state.profile_switcher_state.profile_switcher_selected -= 1;
+        if state.profile_switcher_state.is_selected > 0 {
+            state.profile_switcher_state.is_selected -= 1;
         } else {
-            state.profile_switcher_state.profile_switcher_selected = state
+            state.profile_switcher_state.is_selected = state
                 .profile_switcher_state
                 .available_profiles
                 .len()
@@ -126,43 +123,36 @@ pub fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        match state.shortcuts_panel_state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.is_visible {
+        match state.shortcuts_panel_state.mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands =
-                    filter_commands(&state.command_palette_state.command_palette_search);
-                if state.command_palette_state.command_palette_selected > 0 {
-                    state.command_palette_state.command_palette_selected -= 1;
+                let filtered_commands = filter_commands(&state.command_palette_state.search);
+                if state.command_palette_state.is_selected > 0 {
+                    state.command_palette_state.is_selected -= 1;
                 } else {
-                    state.command_palette_state.command_palette_selected =
+                    state.command_palette_state.is_selected =
                         filtered_commands.len().saturating_sub(1);
                 }
                 update_command_palette_scroll(state);
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_panel_state.shortcuts_scroll = state
+                state.shortcuts_panel_state.scroll = state
                     .shortcuts_panel_state
-                    .shortcuts_scroll
+                    .scroll
                     .saturating_sub(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state
-                    .command_palette_state
-                    .command_palette_search
-                    .to_lowercase();
+                let search_lower = state.command_palette_state.search.to_lowercase();
                 let filtered_indices: Vec<usize> = state
                     .sessions_state
                     .sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state
-                            .command_palette_state
-                            .command_palette_search
-                            .is_empty()
+                        state.command_palette_state.search.is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -188,10 +178,10 @@ pub fn handle_up_navigation(state: &mut AppState) {
         return;
     }
     if state.rulebook_switcher_state.show_rulebook_switcher {
-        if state.rulebook_switcher_state.rulebook_switcher_selected > 0 {
-            state.rulebook_switcher_state.rulebook_switcher_selected -= 1;
+        if state.rulebook_switcher_state.is_selected > 0 {
+            state.rulebook_switcher_state.is_selected -= 1;
         } else {
-            state.rulebook_switcher_state.rulebook_switcher_selected = state
+            state.rulebook_switcher_state.is_selected = state
                 .rulebook_switcher_state
                 .filtered_rulebooks
                 .len()
@@ -225,57 +215,50 @@ pub fn handle_down_navigation(
     message_area_width: usize,
 ) {
     if state.profile_switcher_state.show_profile_switcher {
-        if state.profile_switcher_state.profile_switcher_selected
+        if state.profile_switcher_state.is_selected
             < state
                 .profile_switcher_state
                 .available_profiles
                 .len()
                 .saturating_sub(1)
         {
-            state.profile_switcher_state.profile_switcher_selected += 1;
+            state.profile_switcher_state.is_selected += 1;
         } else {
-            state.profile_switcher_state.profile_switcher_selected = 0;
+            state.profile_switcher_state.is_selected = 0;
         }
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        match state.shortcuts_panel_state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.is_visible {
+        match state.shortcuts_panel_state.mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands =
-                    filter_commands(&state.command_palette_state.command_palette_search);
-                if state.command_palette_state.command_palette_selected
+                let filtered_commands = filter_commands(&state.command_palette_state.search);
+                if state.command_palette_state.is_selected
                     < filtered_commands.len().saturating_sub(1)
                 {
-                    state.command_palette_state.command_palette_selected += 1;
+                    state.command_palette_state.is_selected += 1;
                 } else {
-                    state.command_palette_state.command_palette_selected = 0;
+                    state.command_palette_state.is_selected = 0;
                 }
                 update_command_palette_scroll(state);
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_panel_state.shortcuts_scroll = state
+                state.shortcuts_panel_state.scroll = state
                     .shortcuts_panel_state
-                    .shortcuts_scroll
+                    .scroll
                     .saturating_add(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state
-                    .command_palette_state
-                    .command_palette_search
-                    .to_lowercase();
+                let search_lower = state.command_palette_state.search.to_lowercase();
                 let filtered_indices: Vec<usize> = state
                     .sessions_state
                     .sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state
-                            .command_palette_state
-                            .command_palette_search
-                            .is_empty()
+                        state.command_palette_state.search.is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -301,16 +284,16 @@ pub fn handle_down_navigation(
         return;
     }
     if state.rulebook_switcher_state.show_rulebook_switcher {
-        if state.rulebook_switcher_state.rulebook_switcher_selected
+        if state.rulebook_switcher_state.is_selected
             < state
                 .rulebook_switcher_state
                 .filtered_rulebooks
                 .len()
                 .saturating_sub(1)
         {
-            state.rulebook_switcher_state.rulebook_switcher_selected += 1;
+            state.rulebook_switcher_state.is_selected += 1;
         } else {
-            state.rulebook_switcher_state.rulebook_switcher_selected = 0;
+            state.rulebook_switcher_state.is_selected = 0;
         }
         return;
     }

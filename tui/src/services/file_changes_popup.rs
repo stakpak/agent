@@ -54,10 +54,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         .split(inner_area);
 
     // Filter files
-    let query = state
-        .file_changes_popup_state
-        .file_changes_search
-        .to_lowercase();
+    let query = state.file_changes_popup_state.search.to_lowercase();
     let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
@@ -100,11 +97,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state
-        .file_changes_popup_state
-        .file_changes_search
-        .is_empty()
-    {
+    let search_spans = if state.file_changes_popup_state.search.is_empty() {
         vec![
             Span::raw(" "),
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -118,7 +111,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.file_changes_popup_state.file_changes_search,
+                &state.file_changes_popup_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -137,7 +130,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     // Render Content
     let height = chunks[2].height as usize;
     let total_items = filtered_files.len();
-    let scroll = state.file_changes_popup_state.file_changes_scroll;
+    let scroll = state.file_changes_popup_state.scroll;
 
     let mut visible_lines = Vec::new();
 
@@ -148,7 +141,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         }
 
         let file = filtered_files[idx];
-        let is_selected = idx == state.file_changes_popup_state.file_changes_selected;
+        let is_selected = idx == state.file_changes_popup_state.is_selected;
 
         let bg_color = if is_selected {
             ThemeColors::highlight_bg()

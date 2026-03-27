@@ -176,9 +176,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     // Create list state for highlighting
     // Since we now use Text for multi-line items, we can use the rulebook index directly
     let mut list_state = ListState::default();
-    list_state.select(Some(
-        state.rulebook_switcher_state.rulebook_switcher_selected,
-    ));
+    list_state.select(Some(state.rulebook_switcher_state.is_selected));
 
     // Render list in left column with left/right padding
     let list_area = Rect {
@@ -200,7 +198,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     let rulebook_to_show = state
         .rulebook_switcher_state
         .filtered_rulebooks
-        .get(state.rulebook_switcher_state.rulebook_switcher_selected);
+        .get(state.rulebook_switcher_state.is_selected);
 
     if let Some(selected_rulebook) = rulebook_to_show {
         // Add padding to details area

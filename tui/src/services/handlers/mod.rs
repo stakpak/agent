@@ -193,11 +193,11 @@ pub fn update(
     }
 
     // Intercept keys for "existing plan found" modal
-    if state.plan_mode_state.existing_plan_prompt.is_some() && !skip_popup_interception {
+    if state.plan_mode_state.existing_prompt.is_some() && !skip_popup_interception {
         match event {
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
-                if let Some(prompt) = state.plan_mode_state.existing_plan_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.existing_prompt.take() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -207,7 +207,7 @@ pub fn update(
                 // Start new — archive existing plan, then activate
                 let session_dir = std::path::Path::new(".stakpak/session");
                 crate::services::plan::archive_plan_file(session_dir);
-                if let Some(prompt) = state.plan_mode_state.existing_plan_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.existing_prompt.take() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -215,7 +215,7 @@ pub fn update(
             }
             InputEvent::HandleEsc => {
                 // Cancel — dismiss modal, don't enter plan mode
-                state.plan_mode_state.existing_plan_prompt = None;
+                state.plan_mode_state.existing_prompt = None;
                 return;
             }
             InputEvent::AttemptQuit | InputEvent::Quit => {
@@ -228,9 +228,9 @@ pub fn update(
     }
 
     // Intercept keys for Plan Review overlay
-    if state.plan_review_state.show_plan_review && !skip_popup_interception {
+    if state.plan_review_state.is_visible && !skip_popup_interception {
         // Sub-intercept: comment modal is open
-        if state.plan_review_state.plan_review_show_comment_modal {
+        if state.plan_review_state.show_comment_modal {
             match event {
                 InputEvent::HandleEsc => {
                     crate::services::plan_review::close_comment_modal(state);
@@ -261,11 +261,11 @@ pub fn update(
                     return; // Consume everything else
                 }
             }
-        } else if state.plan_review_state.plan_review_confirm.is_some() {
+        } else if state.plan_review_state.confirm.is_some() {
             // Confirmation dialog is open — y/Enter confirms, n/Esc cancels
             match event {
                 InputEvent::HandleEsc | InputEvent::InputChanged('n') => {
-                    state.plan_review_state.plan_review_confirm = None;
+                    state.plan_review_state.confirm = None;
                     return;
                 }
                 InputEvent::InputSubmitted
@@ -369,7 +369,7 @@ pub fn update(
     }
 
     // Intercept keys for File Changes Popup
-    if state.file_changes_popup_state.show_file_changes_popup && !skip_popup_interception {
+    if state.file_changes_popup_state.is_visible && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_file_changes_popup_cancel(state);
@@ -427,7 +427,7 @@ pub fn update(
     // Mouse wheel (ScrollUp/ScrollDown) scrolls the viewport.
     // ←/→ switch question tabs (except in custom input).
     // Enter selects/toggles. Esc cancels.
-    if state.ask_user_state.show_ask_user_popup && !skip_popup_interception {
+    if state.ask_user_state.is_visible && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc | InputEvent::AskUserCancel => {
                 ask_user::handle_ask_user_cancel(state, output_tx);
@@ -563,7 +563,7 @@ pub fn update(
     }
 
     // Intercept keys for Model Switcher Popup
-    if state.model_switcher_state.show_model_switcher && !skip_popup_interception {
+    if state.model_switcher_state.is_visible && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_model_switcher_cancel(state);
@@ -577,8 +577,8 @@ pub fn update(
                 // Navigate up in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.model_switcher_state.available_models,
-                    state.model_switcher_state.model_switcher_mode,
-                    &state.model_switcher_state.model_switcher_search,
+                    state.model_switcher_state.mode,
+                    &state.model_switcher_state.search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
@@ -586,7 +586,7 @@ pub fn update(
                     // Find current position in navigation order
                     let current_pos = nav_order
                         .iter()
-                        .position(|&idx| idx == state.model_switcher_state.model_switcher_selected)
+                        .position(|&idx| idx == state.model_switcher_state.is_selected)
                         .unwrap_or(0);
                     // Move up (with wrap)
                     let new_pos = if current_pos > 0 {
@@ -594,7 +594,7 @@ pub fn update(
                     } else {
                         nav_order.len() - 1
                     };
-                    state.model_switcher_state.model_switcher_selected = nav_order[new_pos];
+                    state.model_switcher_state.is_selected = nav_order[new_pos];
                 }
                 return;
             }
@@ -602,8 +602,8 @@ pub fn update(
                 // Navigate down in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.model_switcher_state.available_models,
-                    state.model_switcher_state.model_switcher_mode,
-                    &state.model_switcher_state.model_switcher_search,
+                    state.model_switcher_state.mode,
+                    &state.model_switcher_state.search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
@@ -611,7 +611,7 @@ pub fn update(
                     // Find current position in navigation order
                     let current_pos = nav_order
                         .iter()
-                        .position(|&idx| idx == state.model_switcher_state.model_switcher_selected)
+                        .position(|&idx| idx == state.model_switcher_state.is_selected)
                         .unwrap_or(0);
                     // Move down (with wrap)
                     let new_pos = if current_pos < nav_order.len() - 1 {
@@ -619,7 +619,7 @@ pub fn update(
                     } else {
                         0
                     };
-                    state.model_switcher_state.model_switcher_selected = nav_order[new_pos];
+                    state.model_switcher_state.is_selected = nav_order[new_pos];
                 }
                 return;
             }
@@ -629,32 +629,30 @@ pub fn update(
             }
             InputEvent::InputChanged(c) | InputEvent::ModelSwitcherSearchInputChanged(c) => {
                 // Add character to search
-                state.model_switcher_state.model_switcher_search.push(c);
+                state.model_switcher_state.search.push(c);
                 // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.model_switcher_state.available_models,
-                    state.model_switcher_state.model_switcher_mode,
-                    &state.model_switcher_state.model_switcher_search,
+                    state.model_switcher_state.mode,
+                    &state.model_switcher_state.search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
-                state.model_switcher_state.model_switcher_selected =
-                    nav_order.first().copied().unwrap_or(0);
+                state.model_switcher_state.is_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::InputBackspace | InputEvent::ModelSwitcherSearchBackspace => {
                 // Remove character from search
-                state.model_switcher_state.model_switcher_search.pop();
+                state.model_switcher_state.search.pop();
                 // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
                     &state.model_switcher_state.available_models,
-                    state.model_switcher_state.model_switcher_mode,
-                    &state.model_switcher_state.model_switcher_search,
+                    state.model_switcher_state.mode,
+                    &state.model_switcher_state.search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
-                state.model_switcher_state.model_switcher_selected =
-                    nav_order.first().copied().unwrap_or(0);
+                state.model_switcher_state.is_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::AvailableModelsLoaded(_) | InputEvent::RecentModelsUpdated(_) => {
@@ -807,21 +805,21 @@ pub fn update(
         && state.shell_popup_state.active_shell_command.is_some()
         && !state.dialog_approval_state.is_dialog_open
         && !state.dialog_approval_state.approval_bar.is_visible()
-        && !state.shell_popup_state.shell_loading
+        && !state.shell_popup_state.is_loading
     {
         match event {
             InputEvent::InputChanged(c) => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, &c.to_string());
                 return;
             }
             InputEvent::InputBackspace => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x7f");
                 return;
             }
             InputEvent::InputSubmitted => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 // Windows ConPTY expects carriage return, Unix expects newline
                 #[cfg(windows)]
                 shell::send_shell_input(state, "\r");
@@ -830,44 +828,42 @@ pub fn update(
                 return;
             }
             InputEvent::CursorLeft => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x1b[D");
                 return;
             }
             InputEvent::CursorRight => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x1b[C");
                 return;
             }
             InputEvent::Up => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x1b[A");
                 return;
             }
             InputEvent::Down => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x1b[B");
                 return;
             }
 
             InputEvent::ScrollUp => {
                 // Scroll popup up (show older content)
-                if state.shell_popup_state.shell_popup_visible
-                    && state.shell_popup_state.shell_popup_expanded
-                {
-                    state.shell_popup_state.shell_popup_scroll =
-                        state.shell_popup_state.shell_popup_scroll.saturating_add(1);
+                if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
+                    state.shell_popup_state.scroll =
+                        state.shell_popup_state.scroll.saturating_add(1);
                 } else {
                     let visible_height = state
                         .terminal_ui_state
                         .terminal_size
                         .height
                         .saturating_sub(2) as usize;
-                    let total_lines = state.shell_runtime_state.shell_history_lines.len();
+                    let total_lines = state.shell_runtime_state.history_lines.len();
                     let max_scroll = total_lines.saturating_sub(visible_height) as u16;
-                    state.shell_runtime_state.shell_scroll = state
+                    state.shell_runtime_state.scroll = state
                         .shell_runtime_state
-                        .shell_scroll
+                        .scroll
                         .saturating_add(1)
                         .min(max_scroll);
                 }
@@ -875,25 +871,21 @@ pub fn update(
             }
             InputEvent::ScrollDown => {
                 // Scroll popup down (show newer content)
-                if state.shell_popup_state.shell_popup_visible
-                    && state.shell_popup_state.shell_popup_expanded
-                {
-                    state.shell_popup_state.shell_popup_scroll =
-                        state.shell_popup_state.shell_popup_scroll.saturating_sub(1);
+                if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
+                    state.shell_popup_state.scroll =
+                        state.shell_popup_state.scroll.saturating_sub(1);
                 } else {
-                    state.shell_runtime_state.shell_scroll =
-                        state.shell_runtime_state.shell_scroll.saturating_sub(1);
+                    state.shell_runtime_state.scroll =
+                        state.shell_runtime_state.scroll.saturating_sub(1);
                 }
                 return;
             }
             InputEvent::PageUp => {
-                if state.shell_popup_state.shell_popup_visible
-                    && state.shell_popup_state.shell_popup_expanded
-                {
+                if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
                     let page_size = state.terminal_ui_state.terminal_size.height / 4;
-                    state.shell_popup_state.shell_popup_scroll = state
+                    state.shell_popup_state.scroll = state
                         .shell_popup_state
-                        .shell_popup_scroll
+                        .scroll
                         .saturating_add(page_size as usize);
                 } else {
                     let visible_height = state
@@ -901,32 +893,28 @@ pub fn update(
                         .terminal_size
                         .height
                         .saturating_sub(2) as usize;
-                    let total_lines = state.shell_runtime_state.shell_history_lines.len();
+                    let total_lines = state.shell_runtime_state.history_lines.len();
                     let max_scroll = total_lines.saturating_sub(visible_height) as u16;
                     let page_size = state.terminal_ui_state.terminal_size.height / 2;
-                    state.shell_runtime_state.shell_scroll = state
+                    state.shell_runtime_state.scroll = state
                         .shell_runtime_state
-                        .shell_scroll
+                        .scroll
                         .saturating_add(page_size)
                         .min(max_scroll);
                 }
                 return;
             }
             InputEvent::PageDown => {
-                if state.shell_popup_state.shell_popup_visible
-                    && state.shell_popup_state.shell_popup_expanded
-                {
+                if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
                     let page_size = state.terminal_ui_state.terminal_size.height / 4;
-                    state.shell_popup_state.shell_popup_scroll = state
+                    state.shell_popup_state.scroll = state
                         .shell_popup_state
-                        .shell_popup_scroll
+                        .scroll
                         .saturating_sub(page_size as usize);
                 } else {
                     let page_size = state.terminal_ui_state.terminal_size.height / 2;
-                    state.shell_runtime_state.shell_scroll = state
-                        .shell_runtime_state
-                        .shell_scroll
-                        .saturating_sub(page_size);
+                    state.shell_runtime_state.scroll =
+                        state.shell_runtime_state.scroll.saturating_sub(page_size);
                 }
                 return;
             }
@@ -944,12 +932,12 @@ pub fn update(
                 return;
             }
             InputEvent::InputDelete => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x15");
                 return;
             }
             InputEvent::InputDeleteWord => {
-                state.shell_runtime_state.shell_scroll = 0;
+                state.shell_runtime_state.scroll = 0;
                 shell::send_shell_input(state, "\x17");
                 return;
             }
@@ -1406,7 +1394,7 @@ pub fn update(
                 // When collapsed popup is open, route directly to text selection
                 // (which handles popup geometry internally)
                 text_selection::handle_drag_start(state, col, row);
-            } else if state.file_changes_popup_state.show_file_changes_popup {
+            } else if state.file_changes_popup_state.is_visible {
                 // Check if click is on file changes popup first
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
             } else {
@@ -1440,8 +1428,8 @@ pub fn update(
         InputEvent::PlanModeChanged(active) => {
             use crate::services::helper_block::push_styled_message;
 
-            let was_active = state.plan_mode_state.plan_mode_active;
-            state.plan_mode_state.plan_mode_active = active;
+            let was_active = state.plan_mode_state.is_active;
+            state.plan_mode_state.is_active = active;
 
             // Show system message when entering plan mode
             if active && !was_active {
@@ -1457,14 +1445,14 @@ pub fn update(
         InputEvent::ExistingPlanFound(prompt) => {
             // Backend detected an existing plan at --plan startup.
             // Show the modal so the user can choose to resume or start fresh.
-            state.plan_mode_state.existing_plan_prompt = Some(prompt);
+            state.plan_mode_state.existing_prompt = Some(prompt);
         }
 
         // Plan review events
         InputEvent::TogglePlanReview => {
-            if state.plan_review_state.show_plan_review {
+            if state.plan_review_state.is_visible {
                 crate::services::plan_review::close_plan_review(state);
-            } else if state.plan_mode_state.plan_mode_active {
+            } else if state.plan_mode_state.is_active {
                 crate::services::plan_review::open_plan_review(state);
             } else {
                 // Fall through to command palette when not in plan mode
@@ -1585,6 +1573,7 @@ mod tests {
     async fn flush_pending_messages_merges_queue_into_single_user_message() {
         let mut state = build_state();
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "first".to_string(),
@@ -1593,6 +1582,7 @@ mod tests {
                 "first".to_string(),
             ));
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "second".to_string(),
@@ -1640,6 +1630,7 @@ mod tests {
         state.loading_state.is_loading = true;
 
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "queued".to_string(),
@@ -1665,6 +1656,7 @@ mod tests {
     async fn flush_pending_messages_requeues_when_output_channel_is_full() {
         let mut state = build_state();
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "queued".to_string(),
@@ -1704,6 +1696,7 @@ mod tests {
     async fn flush_pending_messages_falls_back_to_local_user_message_when_input_channel_is_full() {
         let mut state = build_state();
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "queued".to_string(),
@@ -1744,6 +1737,7 @@ mod tests {
     async fn update_invokes_flush_when_idle() {
         let mut state = build_state();
         state
+            .user_message_queue_state
             .pending_user_messages
             .push_back(PendingUserMessage::new(
                 "from-update".to_string(),
@@ -1831,8 +1825,8 @@ mod tests {
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
-        assert!(state.ask_user_state.show_ask_user_popup);
-        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
+        assert!(state.ask_user_state.is_visible);
+        assert_eq!(state.ask_user_state.selected_option, 0);
 
         // Down arrow — should move to next option
         update(
@@ -1847,7 +1841,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 1,
+            state.ask_user_state.selected_option, 1,
             "Down should move to next option"
         );
 
@@ -1864,7 +1858,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 2,
+            state.ask_user_state.selected_option, 2,
             "Down should move to next option again"
         );
 
@@ -1881,7 +1875,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 1,
+            state.ask_user_state.selected_option, 1,
             "Up should move to prev option"
         );
     }
@@ -1932,7 +1926,7 @@ mod tests {
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
-        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.current_tab, 0);
 
         // Right arrow — should move to next tab
         update(
@@ -1947,7 +1941,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_current_tab, 1,
+            state.ask_user_state.current_tab, 1,
             "Right should move to next tab"
         );
 
@@ -1964,7 +1958,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_current_tab, 0,
+            state.ask_user_state.current_tab, 0,
             "Left should move to prev tab"
         );
     }
@@ -2025,7 +2019,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 1,
+            state.ask_user_state.selected_option, 1,
             "Down should navigate to option 1"
         );
 
@@ -2042,7 +2036,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 1,
+            state.ask_user_state.selected_option, 1,
             "Down at bottom should clamp at last option"
         );
         // stay_at_bottom is unchanged — arrows no longer affect scroll state
@@ -2064,7 +2058,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 0,
+            state.ask_user_state.selected_option, 0,
             "Up should navigate to option 0"
         );
 
@@ -2081,7 +2075,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 0,
+            state.ask_user_state.selected_option, 0,
             "Up at top should clamp at first option"
         );
         assert!(
@@ -2103,7 +2097,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_state.ask_user_selected_option, 1,
+            state.ask_user_state.selected_option, 1,
             "Down should navigate even when scrolled up"
         );
     }

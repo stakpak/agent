@@ -937,11 +937,8 @@ fn compute_cache_key(state: &AppState, width: usize) -> u64 {
     width.hash(&mut hasher);
 
     // Include visibility states
-    state
-        .shell_popup_state
-        .shell_popup_visible
-        .hash(&mut hasher);
-    state.side_panel_state.show_side_panel.hash(&mut hasher);
+    state.shell_popup_state.is_visible.hash(&mut hasher);
+    state.side_panel_state.is_shown.hash(&mut hasher);
 
     // Include message count (filters out collapsed messages)
     let visible_messages: Vec<&Message> = state
@@ -1114,7 +1111,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     let mut cache_misses = 0usize;
 
     // Filter messages based on shell popup visibility
-    let message_refs: Vec<&Message> = if state.shell_popup_state.shell_popup_visible {
+    let message_refs: Vec<&Message> = if state.shell_popup_state.is_visible {
         state
             .messages_scrolling_state
             .messages

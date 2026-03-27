@@ -113,17 +113,17 @@ pub fn handle_esc_event(
         state.rulebook_switcher_state.show_rulebook_switcher = false;
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        state.shortcuts_panel_state.show_shortcuts_popup = false;
-        state.command_palette_state.command_palette_search.clear();
+    if state.shortcuts_panel_state.is_visible {
+        state.shortcuts_panel_state.is_visible = false;
+        state.command_palette_state.search.clear();
         return;
     }
     if state.profile_switcher_state.show_profile_switcher {
         state.profile_switcher_state.show_profile_switcher = false;
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        state.shortcuts_panel_state.show_shortcuts_popup = false;
+    if state.shortcuts_panel_state.is_visible {
+        state.shortcuts_panel_state.is_visible = false;
         return;
     }
     if state.messages_scrolling_state.show_collapsed_messages {
@@ -270,9 +270,8 @@ pub fn handle_esc(
             // instead of just rejecting it.
             if let Some(_tool_call) = &state.dialog_approval_state.dialog_command {
                 // Capture history for context
-                let history_lines = super::shell::trim_shell_lines(
-                    state.shell_runtime_state.shell_history_lines.clone(),
-                );
+                let history_lines =
+                    super::shell::trim_shell_lines(state.shell_runtime_state.history_lines.clone());
                 let history_text = history_lines
                     .iter()
                     .map(|l| l.to_string())
@@ -281,7 +280,7 @@ pub fn handle_esc(
 
                 let result = super::shell::shell_command_to_tool_call_result(
                     state,
-                    state.shell_popup_state.shell_pending_command_value.clone(),
+                    state.shell_popup_state.pending_command_value.clone(),
                     Some(history_text),
                 );
 
@@ -299,16 +298,16 @@ pub fn handle_esc(
             state.shell_popup_state.is_tool_call_shell_command = false;
 
             state.shell_popup_state.show_shell_mode = false;
-            state.shell_popup_state.shell_popup_visible = false;
-            state.shell_popup_state.shell_popup_expanded = false;
+            state.shell_popup_state.is_visible = false;
+            state.shell_popup_state.is_expanded = false;
             state.input_state.text_area.set_shell_mode(false);
             state.input_state.text_area.set_text("");
             state.dialog_approval_state.dialog_command = None;
 
             // Reset interactive stall tracking state
-            state.shell_popup_state.shell_pending_command_executed = false;
-            state.shell_popup_state.shell_pending_command_value = None;
-            state.shell_popup_state.shell_pending_command_output = None;
+            state.shell_popup_state.pending_command_executed = false;
+            state.shell_popup_state.pending_command_value = None;
+            state.shell_popup_state.pending_command_output = None;
             state.shell_popup_state.shell_pending_command_output_count = 0;
 
             // Invalidate cache to update the display

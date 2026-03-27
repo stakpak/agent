@@ -12,7 +12,7 @@ pub fn handle_banner_mouse_click(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    if let Some(banner_area) = state.banner_state.banner_area
+    if let Some(banner_area) = state.banner_state.area
         && row >= banner_area.y
         && row < banner_area.y + banner_area.height
         && col >= banner_area.x
@@ -20,7 +20,7 @@ pub fn handle_banner_mouse_click(
     {
         let clicked_cmd = state
             .banner_state
-            .banner_click_regions
+            .click_regions
             .iter()
             .find(|(_, rect)| col >= rect.x && col < rect.x + rect.width && row == rect.y)
             .map(|(cmd, _)| cmd.clone());
@@ -35,9 +35,9 @@ pub fn handle_banner_mouse_click(
                 crate::services::helper_block::push_error_message(state, &e, None);
             } else {
                 // Clear banner after successful command execution
-                state.banner_state.banner_message = None;
-                state.banner_state.banner_click_regions.clear();
-                state.banner_state.banner_area = None;
+                state.banner_state.message = None;
+                state.banner_state.click_regions.clear();
+                state.banner_state.area = None;
             }
         }
     }

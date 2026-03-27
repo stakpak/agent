@@ -44,44 +44,40 @@ pub fn open_plan_review(state: &mut AppState) {
     // Extract body (skip front matter)
     let body = crate::services::plan::extract_plan_body(&content);
 
-    state.plan_review_state.plan_review_content = content.clone();
-    state.plan_review_state.plan_review_lines = body.lines().map(String::from).collect();
-    state.plan_review_state.plan_review_scroll = 0;
-    state.plan_review_state.plan_review_cursor_line = 0;
-    state.plan_review_state.plan_review_show_comment_modal = false;
-    state.plan_review_state.plan_review_comment_input.clear();
-    state.plan_review_state.plan_review_selected_comment = None;
+    state.plan_review_state.content = content.clone();
+    state.plan_review_state.lines = body.lines().map(String::from).collect();
+    state.plan_review_state.scroll = 0;
+    state.plan_review_state.cursor_line = 0;
+    state.plan_review_state.show_comment_modal = false;
+    state.plan_review_state.comment_input.clear();
+    state.plan_review_state.selected_comment = None;
 
     // Start with empty comments (in-memory only, no persistence)
-    state.plan_review_state.plan_review_resolved_anchors.clear();
-    state.plan_review_state.plan_review_comments = None;
+    state.plan_review_state.resolved_anchors.clear();
+    state.plan_review_state.comments = None;
 
-    state.plan_review_state.show_plan_review = true;
+    state.plan_review_state.is_visible = true;
 }
 
 /// Close the plan review overlay.
 pub fn close_plan_review(state: &mut AppState) {
-    state.plan_review_state.show_plan_review = false;
-    state.plan_review_state.plan_review_confirm = None;
+    state.plan_review_state.is_visible = false;
+    state.plan_review_state.confirm = None;
 }
 
 /// Move cursor up in the plan review.
 pub fn cursor_up(state: &mut AppState) {
-    if state.plan_review_state.plan_review_cursor_line > 0 {
-        state.plan_review_state.plan_review_cursor_line -= 1;
+    if state.plan_review_state.cursor_line > 0 {
+        state.plan_review_state.cursor_line -= 1;
         ensure_cursor_visible(state);
     }
 }
 
 /// Move cursor down in the plan review.
 pub fn cursor_down(state: &mut AppState) {
-    let max_line = state
-        .plan_review_state
-        .plan_review_lines
-        .len()
-        .saturating_sub(1);
-    if state.plan_review_state.plan_review_cursor_line < max_line {
-        state.plan_review_state.plan_review_cursor_line += 1;
+    let max_line = state.plan_review_state.lines.len().saturating_sub(1);
+    if state.plan_review_state.cursor_line < max_line {
+        state.plan_review_state.cursor_line += 1;
         ensure_cursor_visible(state);
     }
 }
@@ -89,33 +85,22 @@ pub fn cursor_down(state: &mut AppState) {
 /// Scroll up by a page.
 pub fn page_up(state: &mut AppState, visible_height: usize) {
     let jump = visible_height.saturating_sub(2); // overlap 2 lines for context
-    state.plan_review_state.plan_review_cursor_line = state
-        .plan_review_state
-        .plan_review_cursor_line
-        .saturating_sub(jump);
-    state.plan_review_state.plan_review_scroll = state
-        .plan_review_state
-        .plan_review_scroll
-        .saturating_sub(jump);
+    state.plan_review_state.cursor_line = state.plan_review_state.cursor_line.saturating_sub(jump);
+    state.plan_review_state.scroll = state.plan_review_state.scroll.saturating_sub(jump);
 }
 
 /// Scroll down by a page.
 pub fn page_down(state: &mut AppState, visible_height: usize) {
-    let max_line = state
-        .plan_review_state
-        .plan_review_lines
-        .len()
-        .saturating_sub(1);
+    let max_line = state.plan_review_state.lines.len().saturating_sub(1);
     let jump = visible_height.saturating_sub(2);
-    state.plan_review_state.plan_review_cursor_line =
-        (state.plan_review_state.plan_review_cursor_line + jump).min(max_line);
+    state.plan_review_state.cursor_line =
+        (state.plan_review_state.cursor_line + jump).min(max_line);
     let max_scroll = state
         .plan_review_state
-        .plan_review_lines
+        .lines
         .len()
         .saturating_sub(visible_height);
-    state.plan_review_state.plan_review_scroll =
-        (state.plan_review_state.plan_review_scroll + jump).min(max_scroll);
+    state.plan_review_state.scroll = (state.plan_review_state.scroll + jump).min(max_scroll);
 }
 
 /// Jump to the next line that has comments.
@@ -123,13 +108,13 @@ pub fn next_comment(state: &mut AppState) {
     let comment_lines = commented_line_numbers(state);
     if let Some(&next) = comment_lines
         .iter()
-        .find(|&&ln| ln > state.plan_review_state.plan_review_cursor_line)
+        .find(|&&ln| ln > state.plan_review_state.cursor_line)
     {
-        state.plan_review_state.plan_review_cursor_line = next;
+        state.plan_review_state.cursor_line = next;
         ensure_cursor_visible(state);
     } else if let Some(&first) = comment_lines.first() {
         // Wrap around
-        state.plan_review_state.plan_review_cursor_line = first;
+        state.plan_review_state.cursor_line = first;
         ensure_cursor_visible(state);
     }
 }
@@ -140,13 +125,13 @@ pub fn prev_comment(state: &mut AppState) {
     if let Some(&prev) = comment_lines
         .iter()
         .rev()
-        .find(|&&ln| ln < state.plan_review_state.plan_review_cursor_line)
+        .find(|&&ln| ln < state.plan_review_state.cursor_line)
     {
-        state.plan_review_state.plan_review_cursor_line = prev;
+        state.plan_review_state.cursor_line = prev;
         ensure_cursor_visible(state);
     } else if let Some(&last) = comment_lines.last() {
         // Wrap around
-        state.plan_review_state.plan_review_cursor_line = last;
+        state.plan_review_state.cursor_line = last;
         ensure_cursor_visible(state);
     }
 }
@@ -155,10 +140,8 @@ pub fn prev_comment(state: &mut AppState) {
 fn ensure_cursor_visible(state: &mut AppState) {
     // We don't know the viewport height here, so use a reasonable default.
     // The actual clamping happens in render, but we do basic bounds:
-    if state.plan_review_state.plan_review_cursor_line < state.plan_review_state.plan_review_scroll
-    {
-        state.plan_review_state.plan_review_scroll =
-            state.plan_review_state.plan_review_cursor_line;
+    if state.plan_review_state.cursor_line < state.plan_review_state.scroll {
+        state.plan_review_state.scroll = state.plan_review_state.cursor_line;
     }
     // Upper bound will be clamped during render when we know viewport height
 }
@@ -167,7 +150,7 @@ fn ensure_cursor_visible(state: &mut AppState) {
 fn commented_line_numbers(state: &AppState) -> Vec<usize> {
     let mut lines: Vec<usize> = state
         .plan_review_state
-        .plan_review_resolved_anchors
+        .resolved_anchors
         .iter()
         .filter(|(_, a)| a.match_quality != MatchQuality::Orphaned)
         .map(|(_, a)| a.line_number)
@@ -180,7 +163,7 @@ fn commented_line_numbers(state: &AppState) -> Vec<usize> {
 /// Build a map: line_number → count of comments anchored there.
 fn comment_counts_by_line(state: &AppState) -> HashMap<usize, usize> {
     let mut counts: HashMap<usize, usize> = HashMap::new();
-    for (_, anchor) in &state.plan_review_state.plan_review_resolved_anchors {
+    for (_, anchor) in &state.plan_review_state.resolved_anchors {
         if anchor.match_quality != MatchQuality::Orphaned {
             *counts.entry(anchor.line_number).or_insert(0) += 1;
         }
@@ -318,22 +301,19 @@ pub fn render_plan_review(f: &mut Frame, state: &mut AppState, area: Rect) {
     let visible_height = plan_area.height as usize;
 
     // Build visual rows (soft-wrapped) for the plan width
-    let (visual_rows, first_visual_row) = build_visual_rows(
-        &state.plan_review_state.plan_review_lines,
-        plan_area.width as usize,
-    );
+    let (visual_rows, first_visual_row) =
+        build_visual_rows(&state.plan_review_state.lines, plan_area.width as usize);
 
     // Convert logical cursor/scroll to visual row space
-    let cursor_visual = if state.plan_review_state.plan_review_cursor_line < first_visual_row.len()
-    {
-        first_visual_row[state.plan_review_state.plan_review_cursor_line]
+    let cursor_visual = if state.plan_review_state.cursor_line < first_visual_row.len() {
+        first_visual_row[state.plan_review_state.cursor_line]
     } else {
         0
     };
 
     // Scroll is stored in logical lines — convert to visual row for rendering
-    let mut scroll_visual = if state.plan_review_state.plan_review_scroll < first_visual_row.len() {
-        first_visual_row[state.plan_review_state.plan_review_scroll]
+    let mut scroll_visual = if state.plan_review_state.scroll < first_visual_row.len() {
+        first_visual_row[state.plan_review_state.scroll]
     } else {
         0
     };
@@ -349,7 +329,7 @@ pub fn render_plan_review(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Write back logical scroll from visual position
     // Find which logical line owns scroll_visual
     if let Some(row) = visual_rows.get(scroll_visual) {
-        state.plan_review_state.plan_review_scroll = row.logical_line;
+        state.plan_review_state.scroll = row.logical_line;
     }
 
     let comment_counts = comment_counts_by_line(state);
@@ -408,7 +388,7 @@ fn render_gutter(
 
         let vrow = &visual_rows[vrow_idx];
         let logical = vrow.logical_line;
-        let is_cursor = logical == state.plan_review_state.plan_review_cursor_line;
+        let is_cursor = logical == state.plan_review_state.cursor_line;
 
         // Only show gutter content on the first visual row of a logical line
         if !vrow.is_first {
@@ -465,11 +445,8 @@ fn render_plan_content(
     let last_visible_logical = visual_rows
         .get(scroll_visual + visible_height)
         .map(|r| r.logical_line)
-        .unwrap_or(state.plan_review_state.plan_review_lines.len());
-    let code_block_map = build_code_block_map(
-        &state.plan_review_state.plan_review_lines,
-        last_visible_logical,
-    );
+        .unwrap_or(state.plan_review_state.lines.len());
+    let code_block_map = build_code_block_map(&state.plan_review_state.lines, last_visible_logical);
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_height);
 
@@ -482,13 +459,13 @@ fn render_plan_content(
 
         let vrow = &visual_rows[vrow_idx];
         let logical = vrow.logical_line;
-        let is_cursor = logical == state.plan_review_state.plan_review_cursor_line;
+        let is_cursor = logical == state.plan_review_state.cursor_line;
         let in_code_block = code_block_map.get(logical).copied().unwrap_or(false);
 
         // Use the original logical line text for block-level markdown detection
         let original_trimmed = state
             .plan_review_state
-            .plan_review_lines
+            .lines
             .get(logical)
             .map(|s| s.trim())
             .unwrap_or("");
@@ -831,12 +808,12 @@ fn parse_link_at(text: &str, start: usize) -> Option<(&str, &str, usize)> {
 
 /// Render the right panel showing comments for the current cursor line.
 fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
-    let cursor_line = state.plan_review_state.plan_review_cursor_line;
+    let cursor_line = state.plan_review_state.cursor_line;
 
     // Find comments anchored to this line
     let comment_ids: Vec<&str> = state
         .plan_review_state
-        .plan_review_resolved_anchors
+        .resolved_anchors
         .iter()
         .filter(|(_, a)| a.line_number == cursor_line && a.match_quality != MatchQuality::Orphaned)
         .map(|(id, _)| id.as_str())
@@ -863,7 +840,7 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let Some(ref pc) = state.plan_review_state.plan_review_comments else {
+    let Some(ref pc) = state.plan_review_state.comments else {
         return;
     };
 
@@ -879,7 +856,7 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
             let resolved_mark = if comment.resolved { " ✓" } else { "" };
             let match_info = state
                 .plan_review_state
-                .plan_review_resolved_anchors
+                .resolved_anchors
                 .iter()
                 .find(|(id, _)| id == cid)
                 .map(|(_, a)| match &a.match_quality {
@@ -929,7 +906,7 @@ fn render_comment_panel(f: &mut Frame, state: &AppState, area: Rect) {
 
 /// Render a lightweight confirmation dialog.
 fn render_confirm_modal(f: &mut Frame, state: &AppState, area: Rect) {
-    let Some(ref action) = state.plan_review_state.plan_review_confirm else {
+    let Some(ref action) = state.plan_review_state.confirm else {
         return;
     };
 
@@ -1061,12 +1038,11 @@ pub fn handle_feedback(
     state: &mut AppState,
     output_tx: &tokio::sync::mpsc::Sender<crate::app::OutputEvent>,
 ) {
-    let Some(ref pc) = state.plan_review_state.plan_review_comments else {
+    let Some(ref pc) = state.plan_review_state.comments else {
         return;
     };
 
-    let Some(feedback) = format_feedback_message(pc, &state.plan_review_state.plan_review_content)
-    else {
+    let Some(feedback) = format_feedback_message(pc, &state.plan_review_state.content) else {
         // No unresolved comments — show message
         crate::services::helper_block::push_styled_message(
             state,
@@ -1611,14 +1587,14 @@ pub enum ConfirmAction {
 
 /// Open the comment modal for a new comment on the current cursor line.
 pub fn open_comment_modal(state: &mut AppState) {
-    if state.plan_review_state.plan_review_lines.is_empty() {
+    if state.plan_review_state.lines.is_empty() {
         return;
     }
 
-    let cursor = state.plan_review_state.plan_review_cursor_line;
+    let cursor = state.plan_review_state.cursor_line;
     let anchor_text = state
         .plan_review_state
-        .plan_review_lines
+        .lines
         .get(cursor)
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
@@ -1627,22 +1603,17 @@ pub fn open_comment_modal(state: &mut AppState) {
         return; // Don't comment on blank lines
     }
 
-    state.plan_review_state.plan_review_comment_input.clear();
-    state.plan_review_state.plan_review_show_comment_modal = true;
-    state.plan_review_state.plan_review_selected_comment = None; // new comment, not a reply
-    state.plan_review_state.plan_review_modal_kind =
-        Some(CommentModalKind::NewComment { anchor_text });
+    state.plan_review_state.comment_input.clear();
+    state.plan_review_state.show_comment_modal = true;
+    state.plan_review_state.selected_comment = None; // new comment, not a reply
+    state.plan_review_state.modal_kind = Some(CommentModalKind::NewComment { anchor_text });
 }
 
 /// Submit the comment from the modal.
 ///
 /// Adds comment to in-memory state and refreshes resolved anchors.
 pub fn submit_comment(state: &mut AppState) {
-    let text = state
-        .plan_review_state
-        .plan_review_comment_input
-        .trim()
-        .to_string();
+    let text = state.plan_review_state.comment_input.trim().to_string();
     if text.is_empty() {
         return;
     }
@@ -1650,17 +1621,15 @@ pub fn submit_comment(state: &mut AppState) {
     // Initialize PlanComments if it doesn't exist yet
     let mut pc = state
         .plan_review_state
-        .plan_review_comments
+        .comments
         .take()
         .unwrap_or_else(|| PlanComments {
             plan_file: "plan.md".to_string(),
-            plan_hash: crate::services::plan::compute_plan_hash(
-                &state.plan_review_state.plan_review_content,
-            ),
+            plan_hash: crate::services::plan::compute_plan_hash(&state.plan_review_state.content),
             comments: Vec::new(),
         });
 
-    match &state.plan_review_state.plan_review_modal_kind {
+    match &state.plan_review_state.modal_kind {
         Some(CommentModalKind::NewComment { anchor_text }) => {
             let anchor_type = if anchor_text.starts_with('#') {
                 AnchorType::Heading
@@ -1681,12 +1650,11 @@ pub fn submit_comment(state: &mut AppState) {
     }
 
     // Refresh anchors
-    let body =
-        crate::services::plan::extract_plan_body(&state.plan_review_state.plan_review_content);
-    state.plan_review_state.plan_review_resolved_anchors =
+    let body = crate::services::plan::extract_plan_body(&state.plan_review_state.content);
+    state.plan_review_state.resolved_anchors =
         crate::services::plan_comments::resolve_anchors(body, &pc.comments);
 
-    state.plan_review_state.plan_review_comments = Some(pc);
+    state.plan_review_state.comments = Some(pc);
     close_comment_modal(state);
 }
 
@@ -1694,28 +1662,28 @@ pub fn submit_comment(state: &mut AppState) {
 pub fn open_submit_confirm(state: &mut AppState) {
     let unresolved_count = state
         .plan_review_state
-        .plan_review_comments
+        .comments
         .as_ref()
         .map(|pc| pc.comments.iter().filter(|c| !c.resolved).count())
         .unwrap_or(0);
 
     if unresolved_count > 0 {
-        state.plan_review_state.plan_review_confirm = Some(ConfirmAction::Feedback {
+        state.plan_review_state.confirm = Some(ConfirmAction::Feedback {
             count: unresolved_count,
         });
     } else {
-        state.plan_review_state.plan_review_confirm = Some(ConfirmAction::Approve);
+        state.plan_review_state.confirm = Some(ConfirmAction::Approve);
     }
 }
 
 /// Open confirmation dialog for deleting comments on the current line.
 pub fn open_delete_confirm(state: &mut AppState) {
-    let cursor = state.plan_review_state.plan_review_cursor_line;
+    let cursor = state.plan_review_state.cursor_line;
 
     // Collect all comment IDs anchored to this line
     let comment_ids: Vec<String> = state
         .plan_review_state
-        .plan_review_resolved_anchors
+        .resolved_anchors
         .iter()
         .filter(|(_, a)| a.line_number == cursor && a.match_quality != MatchQuality::Orphaned)
         .map(|(id, _)| id.clone())
@@ -1725,7 +1693,7 @@ pub fn open_delete_confirm(state: &mut AppState) {
         return; // No comments on this line
     }
 
-    state.plan_review_state.plan_review_confirm = Some(ConfirmAction::DeleteComments {
+    state.plan_review_state.confirm = Some(ConfirmAction::DeleteComments {
         line: cursor,
         comment_ids,
     });
@@ -1736,7 +1704,7 @@ pub fn execute_confirm(
     state: &mut AppState,
     output_tx: &tokio::sync::mpsc::Sender<crate::app::OutputEvent>,
 ) {
-    let Some(action) = state.plan_review_state.plan_review_confirm.take() else {
+    let Some(action) = state.plan_review_state.confirm.take() else {
         return;
     };
 
@@ -1748,7 +1716,7 @@ pub fn execute_confirm(
             handle_feedback(state, output_tx);
         }
         ConfirmAction::DeleteComments { comment_ids, .. } => {
-            let Some(ref mut pc) = state.plan_review_state.plan_review_comments else {
+            let Some(ref mut pc) = state.plan_review_state.comments else {
                 return;
             };
 
@@ -1756,10 +1724,8 @@ pub fn execute_confirm(
             pc.comments.retain(|c| !comment_ids.contains(&c.id));
 
             // Refresh resolved anchors
-            let body = crate::services::plan::extract_plan_body(
-                &state.plan_review_state.plan_review_content,
-            );
-            state.plan_review_state.plan_review_resolved_anchors =
+            let body = crate::services::plan::extract_plan_body(&state.plan_review_state.content);
+            state.plan_review_state.resolved_anchors =
                 crate::services::plan_comments::resolve_anchors(body, &pc.comments);
         }
     }
@@ -1767,36 +1733,36 @@ pub fn execute_confirm(
 
 /// Close the comment modal without saving.
 pub fn close_comment_modal(state: &mut AppState) {
-    state.plan_review_state.plan_review_show_comment_modal = false;
-    state.plan_review_state.plan_review_comment_input.clear();
-    state.plan_review_state.plan_review_selected_comment = None;
-    state.plan_review_state.plan_review_modal_kind = None;
+    state.plan_review_state.show_comment_modal = false;
+    state.plan_review_state.comment_input.clear();
+    state.plan_review_state.selected_comment = None;
+    state.plan_review_state.modal_kind = None;
 }
 
 /// Handle a character input in the comment modal.
 pub fn modal_input_char(state: &mut AppState, c: char) {
-    if state.plan_review_state.plan_review_show_comment_modal {
-        state.plan_review_state.plan_review_comment_input.push(c);
+    if state.plan_review_state.show_comment_modal {
+        state.plan_review_state.comment_input.push(c);
     }
 }
 
 /// Handle backspace in the comment modal.
 pub fn modal_input_backspace(state: &mut AppState) {
-    if state.plan_review_state.plan_review_show_comment_modal {
-        state.plan_review_state.plan_review_comment_input.pop();
+    if state.plan_review_state.show_comment_modal {
+        state.plan_review_state.comment_input.pop();
     }
 }
 
 /// Handle newline in the comment modal (Enter key adds newline).
 pub fn modal_input_newline(state: &mut AppState) {
-    if state.plan_review_state.plan_review_show_comment_modal {
-        state.plan_review_state.plan_review_comment_input.push('\n');
+    if state.plan_review_state.show_comment_modal {
+        state.plan_review_state.comment_input.push('\n');
     }
 }
 
 /// Render the comment modal overlay.
 pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
-    if !state.plan_review_state.plan_review_show_comment_modal {
+    if !state.plan_review_state.show_comment_modal {
         return;
     }
 
@@ -1809,8 +1775,7 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
     let title = " Add Comment ";
 
     // Anchor preview
-    if let Some(CommentModalKind::NewComment { anchor_text }) =
-        &state.plan_review_state.plan_review_modal_kind
+    if let Some(CommentModalKind::NewComment { anchor_text }) = &state.plan_review_state.modal_kind
     {
         let max_chars = (modal_width as usize).saturating_sub(17);
         let display: String = anchor_text.chars().take(max_chars).collect();
@@ -1822,7 +1787,7 @@ pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
     }
 
     // Input area with inline cursor
-    let input_text = &state.plan_review_state.plan_review_comment_input;
+    let input_text = &state.plan_review_state.comment_input;
     if input_text.is_empty() {
         lines.push(Line::from(vec![
             Span::styled("> ", Style::default().fg(ThemeColors::dark_gray())),

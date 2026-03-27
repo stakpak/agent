@@ -55,10 +55,10 @@ fn filter_rulebooks(state: &mut AppState) {
     }
 
     // Reset selection if it's out of bounds
-    if state.rulebook_switcher_state.rulebook_switcher_selected
+    if state.rulebook_switcher_state.is_selected
         >= state.rulebook_switcher_state.filtered_rulebooks.len()
     {
-        state.rulebook_switcher_state.rulebook_switcher_selected = 0;
+        state.rulebook_switcher_state.is_selected = 0;
     }
 }
 
@@ -67,7 +67,7 @@ fn filter_rulebooks(state: &mut AppState) {
 /// Handle show profile switcher event
 pub fn handle_show_profile_switcher(state: &mut AppState) {
     // Don't show profile switcher if input is blocked or dialog is open
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
     {
@@ -75,7 +75,7 @@ pub fn handle_show_profile_switcher(state: &mut AppState) {
     }
 
     state.profile_switcher_state.show_profile_switcher = true;
-    state.profile_switcher_state.profile_switcher_selected = 0;
+    state.profile_switcher_state.is_selected = 0;
 
     // Pre-select current profile
     if let Some(idx) = state
@@ -84,14 +84,14 @@ pub fn handle_show_profile_switcher(state: &mut AppState) {
         .iter()
         .position(|p| p == &state.profile_switcher_state.current_profile_name)
     {
-        state.profile_switcher_state.profile_switcher_selected = idx;
+        state.profile_switcher_state.is_selected = idx;
     }
 }
 
 /// Handle profile switcher select event
 pub fn handle_profile_switcher_select(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Don't process if switching is already in progress
-    if state.profile_switcher_state.profile_switching_in_progress {
+    if state.profile_switcher_state.switching_in_progress {
         return;
     }
 
@@ -99,7 +99,7 @@ pub fn handle_profile_switcher_select(state: &mut AppState, output_tx: &Sender<O
         && !state.profile_switcher_state.available_profiles.is_empty()
     {
         let selected_profile = state.profile_switcher_state.available_profiles
-            [state.profile_switcher_state.profile_switcher_selected]
+            [state.profile_switcher_state.is_selected]
             .clone();
 
         // Don't switch if already on this profile
@@ -131,13 +131,13 @@ pub fn handle_profiles_loaded(
 
 /// Handle profile switch requested event
 pub fn handle_profile_switch_requested(state: &mut AppState, profile: String) {
-    state.profile_switcher_state.profile_switching_in_progress = true;
+    state.profile_switcher_state.switching_in_progress = true;
     state.profile_switcher_state.show_profile_switcher = false;
 
     // Clear profile switcher state immediately to prevent stray selects
-    state.profile_switcher_state.profile_switcher_selected = 0;
+    state.profile_switcher_state.is_selected = 0;
 
-    state.profile_switcher_state.profile_switch_status_message =
+    state.profile_switcher_state.switch_status_message =
         Some(format!("🔄 Switching to profile: {}", profile));
 
     state.messages_scrolling_state.messages.push(Message::info(
@@ -148,7 +148,7 @@ pub fn handle_profile_switch_requested(state: &mut AppState, profile: String) {
 
 /// Handle profile switch progress event
 pub fn handle_profile_switch_progress(state: &mut AppState, message: String) {
-    state.profile_switcher_state.profile_switch_status_message = Some(message.clone());
+    state.profile_switcher_state.switch_status_message = Some(message.clone());
     state
         .messages_scrolling_state
         .messages
@@ -185,8 +185,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
 
     // Clear shell mode state
     state.shell_popup_state.show_shell_mode = false;
-    state.shell_popup_state.shell_popup_visible = false;
-    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.is_visible = false;
+    state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.shell_mode_input.clear();
     state.shell_popup_state.waiting_for_shell_input = false;
     state.shell_popup_state.active_shell_command_output = None;
@@ -214,12 +214,12 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
 
     // CRITICAL: Close profile switcher to prevent stray selects
     state.profile_switcher_state.show_profile_switcher = false;
-    state.profile_switcher_state.profile_switcher_selected = 0;
+    state.profile_switcher_state.is_selected = 0;
 
     // Update profile info
     state.profile_switcher_state.current_profile_name = profile.clone();
-    state.profile_switcher_state.profile_switching_in_progress = false;
-    state.profile_switcher_state.profile_switch_status_message = None;
+    state.profile_switcher_state.switching_in_progress = false;
+    state.profile_switcher_state.switch_status_message = None;
 
     // Show success and welcome messages
     state.messages_scrolling_state.messages.push(Message::info(
@@ -236,8 +236,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
 
 /// Handle profile switch failed event
 pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
-    state.profile_switcher_state.profile_switching_in_progress = false;
-    state.profile_switcher_state.profile_switch_status_message = None;
+    state.profile_switcher_state.switching_in_progress = false;
+    state.profile_switcher_state.switch_status_message = None;
     state.profile_switcher_state.show_profile_switcher = false;
 
     state.messages_scrolling_state.messages.push(Message::info(
@@ -255,7 +255,7 @@ pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
 /// Handle show rulebook switcher event
 pub fn handle_show_rulebook_switcher(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Don't show rulebook switcher if input is blocked or dialog is open
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
     {
@@ -269,7 +269,7 @@ pub fn handle_show_rulebook_switcher(state: &mut AppState, output_tx: &Sender<Ou
     let _ = output_tx.try_send(OutputEvent::RequestCurrentRulebooks);
 
     state.rulebook_switcher_state.show_rulebook_switcher = true;
-    state.rulebook_switcher_state.rulebook_switcher_selected = 0;
+    state.rulebook_switcher_state.is_selected = 0;
     state.rulebook_switcher_state.rulebook_search_input.clear();
     filter_rulebooks(state);
 }
@@ -280,7 +280,7 @@ pub fn handle_rulebook_switcher_select(state: &mut AppState) {
         && !state.rulebook_switcher_state.filtered_rulebooks.is_empty()
     {
         let selected_rulebook = &state.rulebook_switcher_state.filtered_rulebooks
-            [state.rulebook_switcher_state.rulebook_switcher_selected];
+            [state.rulebook_switcher_state.is_selected];
 
         // Toggle selection
         if state
@@ -307,7 +307,7 @@ pub fn handle_rulebook_switcher_toggle(state: &mut AppState) {
         && !state.rulebook_switcher_state.filtered_rulebooks.is_empty()
     {
         let selected_rulebook = &state.rulebook_switcher_state.filtered_rulebooks
-            [state.rulebook_switcher_state.rulebook_switcher_selected];
+            [state.rulebook_switcher_state.is_selected];
 
         // Toggle selection
         if state
@@ -420,33 +420,28 @@ pub fn handle_current_rulebooks_loaded(state: &mut AppState, current_uris: Vec<S
 /// Handle show command palette event - opens unified popup with Commands tab
 pub fn handle_show_command_palette(state: &mut AppState) {
     // Don't show if input is blocked or dialog is open
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }
 
-    state.shortcuts_panel_state.show_shortcuts_popup = true;
-    state.shortcuts_panel_state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Commands;
-    state.command_palette_state.command_palette_selected = 0;
-    state.command_palette_state.command_palette_scroll = 0;
-    state.command_palette_state.command_palette_search = String::new();
+    state.shortcuts_panel_state.is_visible = true;
+    state.shortcuts_panel_state.mode = crate::app::ShortcutsPopupMode::Commands;
+    state.command_palette_state.is_selected = 0;
+    state.command_palette_state.scroll = 0;
+    state.command_palette_state.search = String::new();
 }
 
 /// Handle command palette search input changed event
 pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char) {
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        state.command_palette_state.command_palette_search.push(c);
-        state.command_palette_state.command_palette_selected = 0;
+    if state.shortcuts_panel_state.is_visible {
+        state.command_palette_state.search.push(c);
+        state.command_palette_state.is_selected = 0;
         // Also reset session selection to first matching result
-        if state.shortcuts_panel_state.shortcuts_popup_mode
-            == crate::app::ShortcutsPopupMode::Sessions
-        {
-            let search_lower = state
-                .command_palette_state
-                .command_palette_search
-                .to_lowercase();
+        if state.shortcuts_panel_state.mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_state.search.to_lowercase();
             if let Some(first_match) = state
                 .sessions_state
                 .sessions
@@ -463,32 +458,19 @@ pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char
 
 /// Handle command palette search backspace event
 pub fn handle_command_palette_search_backspace(state: &mut AppState) {
-    if state.shortcuts_panel_state.show_shortcuts_popup
-        && !state
-            .command_palette_state
-            .command_palette_search
-            .is_empty()
-    {
-        state.command_palette_state.command_palette_search.pop();
-        state.command_palette_state.command_palette_selected = 0;
+    if state.shortcuts_panel_state.is_visible && !state.command_palette_state.search.is_empty() {
+        state.command_palette_state.search.pop();
+        state.command_palette_state.is_selected = 0;
         // Also reset session selection to first matching result
-        if state.shortcuts_panel_state.shortcuts_popup_mode
-            == crate::app::ShortcutsPopupMode::Sessions
-        {
-            let search_lower = state
-                .command_palette_state
-                .command_palette_search
-                .to_lowercase();
+        if state.shortcuts_panel_state.mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_state.search.to_lowercase();
             if let Some(first_match) = state
                 .sessions_state
                 .sessions
                 .iter()
                 .enumerate()
                 .find(|(_, s)| {
-                    state
-                        .command_palette_state
-                        .command_palette_search
-                        .is_empty()
+                    state.command_palette_state.search.is_empty()
                         || s.title.to_lowercase().contains(&search_lower)
                 })
                 .map(|(i, _)| i)
@@ -504,7 +486,7 @@ pub fn handle_command_palette_search_backspace(state: &mut AppState) {
 /// Handle show shortcuts event - opens unified popup with Shortcuts tab
 pub fn handle_show_shortcuts(state: &mut AppState) {
     // Don't show shortcuts popup if input is blocked or dialog is open
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
         || state.profile_switcher_state.show_profile_switcher
@@ -512,14 +494,14 @@ pub fn handle_show_shortcuts(state: &mut AppState) {
         return;
     }
 
-    state.shortcuts_panel_state.show_shortcuts_popup = true;
-    state.shortcuts_panel_state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Shortcuts;
-    state.shortcuts_panel_state.shortcuts_scroll = 0;
+    state.shortcuts_panel_state.is_visible = true;
+    state.shortcuts_panel_state.mode = crate::app::ShortcutsPopupMode::Shortcuts;
+    state.shortcuts_panel_state.scroll = 0;
 }
 
 /// Handle shortcuts cancel event
 pub fn handle_shortcuts_cancel(state: &mut AppState) {
-    state.shortcuts_panel_state.show_shortcuts_popup = false;
+    state.shortcuts_panel_state.is_visible = false;
 }
 
 /// Handle toggle more shortcuts event
@@ -580,46 +562,46 @@ pub fn handle_toggle_side_panel(
     state: &mut AppState,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
-    state.side_panel_state.show_side_panel = !state.side_panel_state.show_side_panel;
+    state.side_panel_state.is_shown = !state.side_panel_state.is_shown;
     // Refresh board tasks when showing the side panel
     // The handler will extract agent_id from messages if not already set
-    if state.side_panel_state.show_side_panel {
+    if state.side_panel_state.is_shown {
         let _ = input_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 }
 
 /// Handle side panel section navigation
 pub fn handle_side_panel_next_section(state: &mut AppState) {
-    if state.side_panel_state.show_side_panel {
-        state.side_panel_state.side_panel_focus = state.side_panel_state.side_panel_focus.next();
+    if state.side_panel_state.is_shown {
+        state.side_panel_state.is_focused = state.side_panel_state.is_focused.next();
     }
 }
 
 /// Handle side panel section toggle collapse
 pub fn handle_side_panel_toggle_section(state: &mut AppState) {
-    if state.side_panel_state.show_side_panel {
+    if state.side_panel_state.is_shown {
         let current = state
             .side_panel_state
-            .side_panel_section_collapsed
-            .get(&state.side_panel_state.side_panel_focus)
+            .is_collapsed
+            .get(&state.side_panel_state.is_focused)
             .copied()
             .unwrap_or(false);
         state
             .side_panel_state
-            .side_panel_section_collapsed
-            .insert(state.side_panel_state.side_panel_focus, !current);
+            .is_collapsed
+            .insert(state.side_panel_state.is_focused, !current);
     }
 }
 
 /// Handle side panel toggle section via mouse click
 pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
-    if !state.side_panel_state.show_side_panel {
+    if !state.side_panel_state.is_shown {
         return;
     }
 
     // Check which section was clicked
     let mut clicked_section = None;
-    for (section, area) in &state.side_panel_state.side_panel_areas {
+    for (section, area) in &state.side_panel_state.areas {
         if col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
         {
             clicked_section = Some(*section);
@@ -628,11 +610,11 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
     }
 
     if let Some(section) = clicked_section {
-        state.side_panel_state.side_panel_focus = section;
+        state.side_panel_state.is_focused = section;
 
         // Special handling for Changeset section
         if section == crate::services::changeset::SidePanelSection::Changeset {
-            let Some(area) = state.side_panel_state.side_panel_areas.get(&section) else {
+            let Some(area) = state.side_panel_state.areas.get(&section) else {
                 return;
             };
             let relative_y = row.saturating_sub(area.y);
@@ -641,19 +623,19 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
             if relative_y == 0 {
                 let current = state
                     .side_panel_state
-                    .side_panel_section_collapsed
+                    .is_collapsed
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
                 state
                     .side_panel_state
-                    .side_panel_section_collapsed
+                    .is_collapsed
                     .insert(section, !current);
             } else {
                 // Content click - if not collapsed, open file changes popup
                 let collapsed = state
                     .side_panel_state
-                    .side_panel_section_collapsed
+                    .is_collapsed
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
@@ -674,13 +656,13 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
         } else {
             let current = state
                 .side_panel_state
-                .side_panel_section_collapsed
+                .is_collapsed
                 .get(&section)
                 .copied()
                 .unwrap_or(false);
             state
                 .side_panel_state
-                .side_panel_section_collapsed
+                .is_collapsed
                 .insert(section, !current);
         }
     }
@@ -689,7 +671,7 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
 // ========== File Changes Popup Handlers ==========
 
 pub fn handle_show_file_changes_popup(state: &mut AppState) {
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
     {
@@ -701,40 +683,33 @@ pub fn handle_show_file_changes_popup(state: &mut AppState) {
         return;
     }
 
-    state.file_changes_popup_state.show_file_changes_popup = true;
-    state.file_changes_popup_state.file_changes_selected = 0;
-    state.file_changes_popup_state.file_changes_scroll = 0;
-    state.file_changes_popup_state.file_changes_search = String::new();
+    state.file_changes_popup_state.is_visible = true;
+    state.file_changes_popup_state.is_selected = 0;
+    state.file_changes_popup_state.scroll = 0;
+    state.file_changes_popup_state.search = String::new();
 }
 
 pub fn handle_file_changes_popup_cancel(state: &mut AppState) {
-    state.file_changes_popup_state.show_file_changes_popup = false;
+    state.file_changes_popup_state.is_visible = false;
 }
 
 pub fn handle_file_changes_popup_search_input(state: &mut AppState, c: char) {
-    state.file_changes_popup_state.file_changes_search.push(c);
-    state.file_changes_popup_state.file_changes_selected = 0;
-    state.file_changes_popup_state.file_changes_scroll = 0;
+    state.file_changes_popup_state.search.push(c);
+    state.file_changes_popup_state.is_selected = 0;
+    state.file_changes_popup_state.scroll = 0;
 }
 
 pub fn handle_file_changes_popup_backspace(state: &mut AppState) {
-    if !state
-        .file_changes_popup_state
-        .file_changes_search
-        .is_empty()
-    {
-        state.file_changes_popup_state.file_changes_search.pop();
-        state.file_changes_popup_state.file_changes_selected = 0;
-        state.file_changes_popup_state.file_changes_scroll = 0;
+    if !state.file_changes_popup_state.search.is_empty() {
+        state.file_changes_popup_state.search.pop();
+        state.file_changes_popup_state.is_selected = 0;
+        state.file_changes_popup_state.scroll = 0;
     }
 }
 
 pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
     // Get filtered count
-    let query = state
-        .file_changes_popup_state
-        .file_changes_search
-        .to_lowercase();
+    let query = state.file_changes_popup_state.search.to_lowercase();
     let count = state
         .side_panel_state
         .changeset
@@ -747,9 +722,8 @@ pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
         return;
     }
 
-    let new_selected = state.file_changes_popup_state.file_changes_selected as i32 + delta;
-    state.file_changes_popup_state.file_changes_selected =
-        new_selected.clamp(0, count as i32 - 1) as usize;
+    let new_selected = state.file_changes_popup_state.is_selected as i32 + delta;
+    state.file_changes_popup_state.is_selected = new_selected.clamp(0, count as i32 - 1) as usize;
 
     // Adjust scroll
     // Simple logic: keep selected in view
@@ -757,29 +731,20 @@ pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
     // In render function we calculated height dynamically.
     // Ideally we track scroll separately.
     // For now, simple scroll following selection.
-    if state.file_changes_popup_state.file_changes_selected
-        < state.file_changes_popup_state.file_changes_scroll
-    {
-        state.file_changes_popup_state.file_changes_scroll =
-            state.file_changes_popup_state.file_changes_selected;
+    if state.file_changes_popup_state.is_selected < state.file_changes_popup_state.scroll {
+        state.file_changes_popup_state.scroll = state.file_changes_popup_state.is_selected;
     }
     // Note: We don't know the window height here easily without passing it.
     // We'll let the render function clamp scroll if needed, or implement better scroll logic later.
     // For now, ensuring scroll is at least close to selection.
-    if state.file_changes_popup_state.file_changes_selected
-        > state.file_changes_popup_state.file_changes_scroll + 10
-    {
-        state.file_changes_popup_state.file_changes_scroll =
-            state.file_changes_popup_state.file_changes_selected - 10;
+    if state.file_changes_popup_state.is_selected > state.file_changes_popup_state.scroll + 10 {
+        state.file_changes_popup_state.scroll = state.file_changes_popup_state.is_selected - 10;
     }
 }
 
 pub fn handle_file_changes_popup_revert(state: &mut AppState) {
     // Revert selected file
-    let query = state
-        .file_changes_popup_state
-        .file_changes_search
-        .to_lowercase();
+    let query = state.file_changes_popup_state.search.to_lowercase();
     let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
@@ -789,7 +754,7 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
     // Import FileState
     use crate::services::changeset::FileState;
 
-    if let Some(file) = filtered_files.get(state.file_changes_popup_state.file_changes_selected) {
+    if let Some(file) = filtered_files.get(state.file_changes_popup_state.is_selected) {
         if file.state == FileState::Deleted && file.backup_path.is_none() {
             return;
         }
@@ -828,13 +793,13 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
 
                 // Close popup if no more non-reverted files
                 if state.side_panel_state.changeset.file_count() == 0 {
-                    state.file_changes_popup_state.show_file_changes_popup = false;
+                    state.file_changes_popup_state.is_visible = false;
                 } else {
                     // Adjust selection if needed
-                    if state.file_changes_popup_state.file_changes_selected
+                    if state.file_changes_popup_state.is_selected
                         >= state.side_panel_state.changeset.file_count()
                     {
-                        state.file_changes_popup_state.file_changes_selected = state
+                        state.file_changes_popup_state.is_selected = state
                             .side_panel_state
                             .changeset
                             .file_count()
@@ -923,23 +888,20 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
 
     // Close popup if no more non-reverted files
     if state.side_panel_state.changeset.file_count() == 0 {
-        state.file_changes_popup_state.show_file_changes_popup = false;
+        state.file_changes_popup_state.is_visible = false;
     }
 }
 
 /// Handle opening the selected file in an external editor
 pub fn handle_file_changes_popup_open_editor(state: &mut AppState) {
-    let query = state
-        .file_changes_popup_state
-        .file_changes_search
-        .to_lowercase();
+    let query = state.file_changes_popup_state.search.to_lowercase();
     let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
         .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
         .collect();
 
-    if let Some(file) = filtered_files.get(state.file_changes_popup_state.file_changes_selected) {
+    if let Some(file) = filtered_files.get(state.file_changes_popup_state.is_selected) {
         if file.state == crate::services::changeset::FileState::Deleted {
             return;
         }
@@ -982,14 +944,11 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
 
     if relative_row >= file_list_start && relative_row < file_list_end {
         // Calculate which file was clicked
-        let file_index = (relative_row - file_list_start) as usize
-            + state.file_changes_popup_state.file_changes_scroll;
+        let file_index =
+            (relative_row - file_list_start) as usize + state.file_changes_popup_state.scroll;
 
         // Get filtered files
-        let query = state
-            .file_changes_popup_state
-            .file_changes_search
-            .to_lowercase();
+        let query = state.file_changes_popup_state.search.to_lowercase();
         let binding = state.side_panel_state.changeset.files_in_order();
         let filtered_files: Vec<_> = binding
             .iter()
@@ -1011,7 +970,7 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
 /// Handle show model switcher event
 pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Don't show model switcher if input is blocked or dialog is open
-    if state.profile_switcher_state.profile_switching_in_progress
+    if state.profile_switcher_state.switching_in_progress
         || state.dialog_approval_state.is_dialog_open
         || state.dialog_approval_state.approval_bar.is_visible()
     {
@@ -1024,11 +983,11 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
     // Request available models from the backend
     let _ = output_tx.try_send(OutputEvent::RequestAvailableModels);
 
-    state.model_switcher_state.show_model_switcher = true;
-    state.model_switcher_state.model_switcher_selected = 0;
+    state.model_switcher_state.is_visible = true;
+    state.model_switcher_state.is_selected = 0;
     // Reset filter mode and search when opening
-    state.model_switcher_state.model_switcher_mode = crate::app::ModelSwitcherMode::default();
-    state.model_switcher_state.model_switcher_search.clear();
+    state.model_switcher_state.mode = crate::app::ModelSwitcherMode::default();
+    state.model_switcher_state.search.clear();
 }
 
 /// Add custom models from recent_models to available_models.
@@ -1146,8 +1105,8 @@ pub fn handle_available_models_loaded(
     // Pre-select current model if available and it's in the filtered list
     let filtered = crate::services::model_switcher::filter_models(
         &state.model_switcher_state.available_models,
-        state.model_switcher_state.model_switcher_mode,
-        &state.model_switcher_state.model_switcher_search,
+        state.model_switcher_state.mode,
+        &state.model_switcher_state.search,
     );
 
     if let Some(current) = &state.model_switcher_state.current_model {
@@ -1159,41 +1118,39 @@ pub fn handle_available_models_loaded(
             .position(|m| m.id == current.id)
         {
             if filtered.contains(&idx) {
-                state.model_switcher_state.model_switcher_selected = idx;
+                state.model_switcher_state.is_selected = idx;
             } else {
                 // Current model not in filter, select first filtered item
-                state.model_switcher_state.model_switcher_selected =
-                    filtered.first().copied().unwrap_or(0);
+                state.model_switcher_state.is_selected = filtered.first().copied().unwrap_or(0);
             }
         } else {
-            state.model_switcher_state.model_switcher_selected =
-                filtered.first().copied().unwrap_or(0);
+            state.model_switcher_state.is_selected = filtered.first().copied().unwrap_or(0);
         }
     } else {
-        state.model_switcher_state.model_switcher_selected = filtered.first().copied().unwrap_or(0);
+        state.model_switcher_state.is_selected = filtered.first().copied().unwrap_or(0);
     }
 }
 
 /// Handle model switcher select event
 pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if state.model_switcher_state.show_model_switcher
+    if state.model_switcher_state.is_visible
         && !state.model_switcher_state.available_models.is_empty()
-        && state.model_switcher_state.model_switcher_selected
+        && state.model_switcher_state.is_selected
             < state.model_switcher_state.available_models.len()
     {
         // Verify the selected index is in the current filtered set
         let filtered = crate::services::model_switcher::filter_models(
             &state.model_switcher_state.available_models,
-            state.model_switcher_state.model_switcher_mode,
-            &state.model_switcher_state.model_switcher_search,
+            state.model_switcher_state.mode,
+            &state.model_switcher_state.search,
         );
-        if !filtered.contains(&state.model_switcher_state.model_switcher_selected) {
+        if !filtered.contains(&state.model_switcher_state.is_selected) {
             // Selected model is not in the filtered list, ignore selection
             return;
         }
 
         let selected_model = state.model_switcher_state.available_models
-            [state.model_switcher_state.model_switcher_selected]
+            [state.model_switcher_state.is_selected]
             .clone();
 
         // Don't switch if already on this model
@@ -1203,8 +1160,8 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
             .as_ref()
             .is_some_and(|m| m.id == selected_model.id)
         {
-            state.model_switcher_state.show_model_switcher = false;
-            state.model_switcher_state.model_switcher_search.clear();
+            state.model_switcher_state.is_visible = false;
+            state.model_switcher_state.search.clear();
             return;
         }
 
@@ -1212,8 +1169,8 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
         state.model_switcher_state.current_model = Some(selected_model.clone());
 
         // Close the switcher and clear search
-        state.model_switcher_state.show_model_switcher = false;
-        state.model_switcher_state.model_switcher_search.clear();
+        state.model_switcher_state.is_visible = false;
+        state.model_switcher_state.search.clear();
 
         // Send request to switch model
         let _ = output_tx.try_send(OutputEvent::SwitchToModel(selected_model.clone()));
@@ -1222,9 +1179,9 @@ pub fn handle_model_switcher_select(state: &mut AppState, output_tx: &Sender<Out
 
 /// Handle model switcher cancel event
 pub fn handle_model_switcher_cancel(state: &mut AppState) {
-    state.model_switcher_state.show_model_switcher = false;
+    state.model_switcher_state.is_visible = false;
     // Clear search when closing
-    state.model_switcher_state.model_switcher_search.clear();
+    state.model_switcher_state.search.clear();
 }
 // ========== Message Action Popup Handlers ==========
 

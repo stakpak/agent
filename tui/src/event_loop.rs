@@ -102,7 +102,7 @@ pub async fn run_tui(
         recent_models,
     });
 
-    state.banner_state.banner_message = banner_message;
+    state.banner_state.message = banner_message;
 
     // Mouse capture is always enabled
     state.terminal_ui_state.mouse_capture_enabled = true;
@@ -217,7 +217,7 @@ pub async fn run_tui(
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        // Calculate actual message area dimensions (same as view.rs)
-                       let main_area_width = if state.side_panel_state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1)
                        } else {
                            term_size.width
@@ -324,7 +324,7 @@ pub async fn run_tui(
 
                                     // If shell is visible/running, insert cancelled block BEFORE the shell message
                                     // so the order is: cancelled command -> shell box
-                                    if is_cancelled && state.shell_popup_state.shell_popup_visible {
+                                    if is_cancelled && state.shell_popup_state.is_visible {
                                         if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
                                             // Find the position of the shell message
                                             if let Some(pos) = state.messages_scrolling_state.messages.iter().position(|m| m.id == shell_msg_id) {
@@ -389,7 +389,7 @@ pub async fn run_tui(
                    }
                    else {
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.side_panel_state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -476,7 +476,7 @@ pub async fn run_tui(
                    else {
                        let term_size = terminal.size()?;
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.side_panel_state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -627,8 +627,8 @@ pub async fn run_tui(
                        match new_status {
                            PlanStatus::PendingReview => {
                                // Auto-open plan review when agent sets status to pending_review
-                               if !state.plan_mode_state.plan_review_auto_opened {
-                                   state.plan_mode_state.plan_review_auto_opened = true;
+                               if !state.plan_mode_state.review_auto_opened {
+                                   state.plan_mode_state.review_auto_opened = true;
                                    crate::services::plan_review::open_plan_review(&mut state);
                                    // Show system message
                                    crate::services::helper_block::push_styled_message(
@@ -646,7 +646,7 @@ pub async fn run_tui(
                            }
                            PlanStatus::Drafting => {
                                // New revision — reset auto-open flag so next pending_review triggers it
-                               state.plan_mode_state.plan_review_auto_opened = false;
+                               state.plan_mode_state.review_auto_opened = false;
                            }
                        }
                    }

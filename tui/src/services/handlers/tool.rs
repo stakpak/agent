@@ -387,8 +387,8 @@ pub fn handle_retry_tool_call(
         };
         // Enable shell mode and popup
         state.shell_popup_state.show_shell_mode = true;
-        state.shell_popup_state.shell_popup_visible = true;
-        state.shell_popup_state.shell_popup_expanded = true;
+        state.shell_popup_state.is_visible = true;
+        state.shell_popup_state.is_expanded = true;
         state.dialog_approval_state.is_dialog_open = false;
         state.shell_popup_state.ondemand_shell_mode = false;
         state.dialog_approval_state.dialog_command = Some(tool_call.clone());
@@ -399,7 +399,7 @@ pub fn handle_retry_tool_call(
         // Clear any existing shell state
         state.shell_popup_state.active_shell_command = None;
         state.shell_popup_state.active_shell_command_output = None;
-        state.shell_runtime_state.shell_history_lines.clear(); // Clear history for fresh retry
+        state.shell_runtime_state.history_lines.clear(); // Clear history for fresh retry
 
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
         let rows = state
@@ -414,7 +414,7 @@ pub fn handle_retry_tool_call(
             .width
             .saturating_sub(4)
             .max(1);
-        state.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 0);
+        state.shell_runtime_state.screen = vt100::Parser::new(rows, cols, 0);
 
         // Set textarea shell mode to match app state
         state.input_state.text_area.set_shell_mode(true);
@@ -544,18 +544,18 @@ pub fn execute_command_palette_selection(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.search);
     if filtered_commands.is_empty()
-        || state.command_palette_state.command_palette_selected >= filtered_commands.len()
+        || state.command_palette_state.is_selected >= filtered_commands.len()
     {
         return;
     }
 
-    let selected_command = &filtered_commands[state.command_palette_state.command_palette_selected];
+    let selected_command = &filtered_commands[state.command_palette_state.is_selected];
 
     // Close command palette
-    state.command_palette_state.show_command_palette = false;
-    state.command_palette_state.command_palette_search.clear();
+    state.command_palette_state.is_visible = false;
+    state.command_palette_state.search.clear();
 
     // Execute the command - use unified executor for slash commands
     if let Some(command_id) = selected_command.action.to_command_id() {

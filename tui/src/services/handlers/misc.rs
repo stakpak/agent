@@ -74,7 +74,7 @@ pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
     let shell_cols = width.saturating_sub(4).max(1);
     state
         .shell_runtime_state
-        .shell_screen
+        .screen
         .set_size(shell_rows, shell_cols);
 }
 
@@ -126,11 +126,8 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        state.shortcuts_panel_state.shortcuts_popup_mode = match state
-            .shortcuts_panel_state
-            .shortcuts_popup_mode
-        {
+    if state.shortcuts_panel_state.is_visible {
+        state.shortcuts_panel_state.mode = match state.shortcuts_panel_state.mode {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
             crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
             crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
@@ -148,8 +145,8 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
     // If side panel is visible and input is empty, cycle sections
-    if state.side_panel_state.show_side_panel && state.input_state.text_area.text().is_empty() {
-        state.side_panel_state.side_panel_focus = state.side_panel_state.side_panel_focus.next();
+    if state.side_panel_state.is_shown && state.input_state.text_area.text().is_empty() {
+        state.side_panel_state.is_focused = state.side_panel_state.is_focused.next();
         return;
     }
 
@@ -305,16 +302,16 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.shell_popup_state.active_shell_command_output = None;
     state.shell_session_state.interactive_shell_message_id = None;
     state.shell_popup_state.show_shell_mode = false;
-    state.shell_popup_state.shell_popup_visible = false;
-    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.is_visible = false;
+    state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.waiting_for_shell_input = false;
     state.input_state.text_area.set_shell_mode(false);
 
     state.sessions_state.sessions = sessions;
     state.sessions_state.session_selected = 0; // Reset selection to first item
     // Open unified popup at Sessions tab instead of separate sessions dialog
-    state.shortcuts_panel_state.show_shortcuts_popup = true;
-    state.shortcuts_panel_state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
+    state.shortcuts_panel_state.is_visible = true;
+    state.shortcuts_panel_state.mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
 /// Handle set banner message event
@@ -323,8 +320,7 @@ pub fn handle_set_banner_message(
     text: String,
     style: crate::services::banner::BannerStyle,
 ) {
-    state.banner_state.banner_message =
-        Some(crate::services::banner::BannerMessage::new(text, style));
+    state.banner_state.message = Some(crate::services::banner::BannerMessage::new(text, style));
 }
 
 /// Handle start loading operation event

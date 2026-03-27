@@ -342,8 +342,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/model" => {
             // Show model switcher popup
-            ctx.state.model_switcher_state.show_model_switcher = true;
-            ctx.state.model_switcher_state.model_switcher_selected = 0;
+            ctx.state.model_switcher_state.is_visible = true;
+            ctx.state.model_switcher_state.is_selected = 0;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             // Request available models from the output handler
@@ -515,7 +515,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/plan" => {
             // Already in plan mode? Show a message instead
-            if ctx.state.plan_mode_state.plan_mode_active {
+            if ctx.state.plan_mode_state.is_active {
                 crate::services::helper_block::push_styled_message(
                     ctx.state,
                     " Already in plan mode. Use ctrl+p to review the plan.",
@@ -543,11 +543,10 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             let session_dir = std::path::Path::new(".stakpak/session");
             if crate::services::plan::plan_file_exists(session_dir) {
                 let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
-                ctx.state.plan_mode_state.existing_plan_prompt =
-                    Some(crate::app::ExistingPlanPrompt {
-                        inline_prompt,
-                        metadata: meta,
-                    });
+                ctx.state.plan_mode_state.existing_prompt = Some(crate::app::ExistingPlanPrompt {
+                    inline_prompt,
+                    metadata: meta,
+                });
             } else {
                 let _ = ctx
                     .output_tx
@@ -695,12 +694,12 @@ fn terminate_active_shell(state: &mut AppState) {
     state.shell_popup_state.active_shell_command_output = None;
     state.shell_session_state.interactive_shell_message_id = None;
     state.shell_popup_state.show_shell_mode = false;
-    state.shell_popup_state.shell_popup_visible = false;
-    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.is_visible = false;
+    state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.waiting_for_shell_input = false;
-    state.shell_popup_state.shell_pending_command_executed = false;
-    state.shell_popup_state.shell_pending_command_value = None;
-    state.shell_popup_state.shell_pending_command_output = None;
+    state.shell_popup_state.pending_command_executed = false;
+    state.shell_popup_state.pending_command_value = None;
+    state.shell_popup_state.pending_command_output = None;
     state.shell_popup_state.shell_pending_command_output_count = 0;
     state.dialog_approval_state.dialog_command = None;
     state.input_state.text_area.set_shell_mode(false);
@@ -766,20 +765,20 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.input_state.show_helper_dropdown = false;
 
     // Clear plan mode state
-    state.plan_mode_state.plan_mode_active = false;
-    state.plan_mode_state.plan_metadata = None;
-    state.plan_mode_state.plan_content_hash = None;
-    state.plan_mode_state.plan_previous_status = None;
-    state.plan_mode_state.plan_review_auto_opened = false;
-    state.plan_review_state.show_plan_review = false;
-    state.plan_review_state.plan_review_content.clear();
-    state.plan_review_state.plan_review_lines.clear();
-    state.plan_review_state.plan_review_comments = None;
-    state.plan_review_state.plan_review_resolved_anchors.clear();
-    state.plan_review_state.plan_review_show_comment_modal = false;
-    state.plan_review_state.plan_review_comment_input.clear();
-    state.plan_review_state.plan_review_selected_comment = None;
-    state.plan_review_state.plan_review_modal_kind = None;
+    state.plan_mode_state.is_active = false;
+    state.plan_mode_state.metadata = None;
+    state.plan_mode_state.content_hash = None;
+    state.plan_mode_state.previous_status = None;
+    state.plan_mode_state.review_auto_opened = false;
+    state.plan_review_state.is_visible = false;
+    state.plan_review_state.content.clear();
+    state.plan_review_state.lines.clear();
+    state.plan_review_state.comments = None;
+    state.plan_review_state.resolved_anchors.clear();
+    state.plan_review_state.show_comment_modal = false;
+    state.plan_review_state.comment_input.clear();
+    state.plan_review_state.selected_comment = None;
+    state.plan_review_state.modal_kind = None;
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
@@ -1005,11 +1004,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state
-        .command_palette_state
-        .command_palette_search
-        .is_empty()
-    {
+    let search_spans = if state.command_palette_state.search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -1024,7 +1019,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.command_palette_state.command_palette_search,
+                &state.command_palette_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -1043,17 +1038,17 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     f.render_widget(search_paragraph, chunks[1]);
 
     // Get filtered commands
-    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.search);
     let total_commands = filtered_commands.len();
     let height = chunks[2].height as usize;
 
     // Calculate scroll position
     use crate::constants::SCROLL_BUFFER_LINES;
     let max_scroll = total_commands.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
-    let scroll = if state.command_palette_state.command_palette_scroll > max_scroll {
+    let scroll = if state.command_palette_state.scroll > max_scroll {
         max_scroll
     } else {
-        state.command_palette_state.command_palette_scroll
+        state.command_palette_state.scroll
     };
 
     // Add top arrow indicator if there are hidden items above
@@ -1072,7 +1067,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
         if line_index < total_commands {
             let command = &filtered_commands[line_index];
             let available_width = area.width as usize - 2; // Account for borders
-            let is_selected = line_index == state.command_palette_state.command_palette_selected;
+            let is_selected = line_index == state.command_palette_state.is_selected;
             let bg_color = if is_selected {
                 ThemeColors::highlight_bg()
             } else {

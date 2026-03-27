@@ -22,7 +22,7 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
         .iter()
         .enumerate()
         .map(|(idx, profile_name)| {
-            let is_selected = idx == state.profile_switcher_state.profile_switcher_selected;
+            let is_selected = idx == state.profile_switcher_state.is_selected;
             let is_current = profile_name == &state.profile_switcher_state.current_profile_name;
 
             // Build the display line
@@ -100,7 +100,7 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Create list state for highlighting
     let mut list_state = ListState::default();
-    list_state.select(Some(state.profile_switcher_state.profile_switcher_selected));
+    list_state.select(Some(state.profile_switcher_state.is_selected));
 
     // Render list with proper padding
     let list_area = Rect {
@@ -144,7 +144,7 @@ pub fn render_profile_switch_overlay(f: &mut Frame, state: &AppState) {
 
     let status_text = state
         .profile_switcher_state
-        .profile_switch_status_message
+        .switch_status_message
         .as_deref()
         .unwrap_or("Switching profile...");
 

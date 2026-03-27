@@ -187,7 +187,7 @@ impl AppState {
             },
             session_tool_calls_state: SessionToolCallsState::default(),
             shell_popup_state: ShellPopupState {
-                shell_cursor_visible: true,
+                cursor_visible: true,
                 shell_mode_input: String::new(),
                 ..Default::default()
             },
@@ -254,7 +254,7 @@ impl AppState {
             plan_review_state: PlanReviewState::default(),
             // Ask User inline block initialization
             ask_user_state: AskUserState {
-                ask_user_focused: true,
+                is_focused: true,
                 ..Default::default()
             },
         }
@@ -280,7 +280,7 @@ impl AppState {
         use crate::services::plan;
 
         // Only poll when plan mode is active
-        if !self.plan_mode_state.plan_mode_active {
+        if !self.plan_mode_state.is_active {
             return None;
         }
 
@@ -289,9 +289,9 @@ impl AppState {
 
         let Ok(content) = std::fs::read_to_string(&path) else {
             // File doesn't exist (yet) — clear stale cache
-            if self.plan_mode_state.plan_metadata.is_some() {
-                self.plan_mode_state.plan_metadata = None;
-                self.plan_mode_state.plan_content_hash = None;
+            if self.plan_mode_state.metadata.is_some() {
+                self.plan_mode_state.metadata = None;
+                self.plan_mode_state.content_hash = None;
             }
             return None;
         };
@@ -299,21 +299,21 @@ impl AppState {
         let new_hash = plan::compute_plan_hash(&content);
 
         // Skip re-parse if content unchanged
-        if self.plan_mode_state.plan_content_hash.as_deref() == Some(&new_hash) {
+        if self.plan_mode_state.content_hash.as_deref() == Some(&new_hash) {
             return None;
         }
 
-        self.plan_mode_state.plan_content_hash = Some(new_hash);
+        self.plan_mode_state.content_hash = Some(new_hash);
         let new_meta = plan::parse_plan_front_matter(&content);
-        self.plan_mode_state.plan_metadata = new_meta.clone();
+        self.plan_mode_state.metadata = new_meta.clone();
 
         // Detect status transitions
         if let Some(ref meta) = new_meta {
             let new_status = meta.status;
-            let old_status = self.plan_mode_state.plan_previous_status;
+            let old_status = self.plan_mode_state.previous_status;
 
             if old_status != Some(new_status) {
-                self.plan_mode_state.plan_previous_status = Some(new_status);
+                self.plan_mode_state.previous_status = Some(new_status);
                 return Some((old_status, new_status));
             }
         }
@@ -352,7 +352,7 @@ impl AppState {
 
     /// Check if user input should be blocked (during profile switch)
     pub fn is_input_blocked(&self) -> bool {
-        self.profile_switcher_state.profile_switching_in_progress
+        self.profile_switcher_state.switching_in_progress
     }
 
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
@@ -395,7 +395,7 @@ impl AppState {
 
         self.shell_popup_state.active_shell_command = Some(shell_cmd.clone());
         self.shell_popup_state.active_shell_command_output = Some(String::new());
-        self.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 0);
+        self.shell_runtime_state.screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {
@@ -467,9 +467,9 @@ impl AppState {
         }
     }
     pub fn auto_show_side_panel(&mut self) {
-        if !self.side_panel_state.side_panel_auto_shown && !self.side_panel_state.show_side_panel {
-            self.side_panel_state.show_side_panel = true;
-            self.side_panel_state.side_panel_auto_shown = true;
+        if !self.side_panel_state.auto_shown && !self.side_panel_state.is_shown {
+            self.side_panel_state.is_shown = true;
+            self.side_panel_state.auto_shown = true;
         }
     }
 }

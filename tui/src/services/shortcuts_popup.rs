@@ -221,7 +221,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
 
     // Render tabs
     let tab_titles = vec![" Commands ", " Shortcuts ", " Sessions "];
-    let selected_tab = match state.shortcuts_panel_state.shortcuts_popup_mode {
+    let selected_tab = match state.shortcuts_panel_state.mode {
         ShortcutsPopupMode::Commands => 0,
         ShortcutsPopupMode::Shortcuts => 1,
         ShortcutsPopupMode::Sessions => 2,
@@ -237,7 +237,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         .divider(" | ");
 
     // Render content based on mode with mode-specific layouts
-    match state.shortcuts_panel_state.shortcuts_popup_mode {
+    match state.shortcuts_panel_state.mode {
         ShortcutsPopupMode::Commands => {
             // Commands mode: Title, Tabs, Search, Content, Scroll, Help
             let chunks = Layout::default()
@@ -318,11 +318,7 @@ fn render_commands_section(
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state
-        .command_palette_state
-        .command_palette_search
-        .is_empty()
-    {
+    let search_spans = if state.command_palette_state.search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -337,7 +333,7 @@ fn render_commands_section(
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.command_palette_state.command_palette_search,
+                &state.command_palette_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -356,16 +352,16 @@ fn render_commands_section(
     f.render_widget(search_paragraph, search_area);
 
     // Get filtered commands
-    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.search);
     let total_commands = filtered_commands.len();
     let height = content_area.height as usize;
 
     // Calculate scroll position
     let max_scroll = total_commands.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
-    let scroll = if state.command_palette_state.command_palette_scroll > max_scroll {
+    let scroll = if state.command_palette_state.scroll > max_scroll {
         max_scroll
     } else {
-        state.command_palette_state.command_palette_scroll
+        state.command_palette_state.scroll
     };
 
     // Add top arrow indicator if there are hidden items above
@@ -384,7 +380,7 @@ fn render_commands_section(
         if line_index < total_commands {
             let command = &filtered_commands[line_index];
             let available_width = area.width as usize - 2; // Account for borders
-            let is_selected = line_index == state.command_palette_state.command_palette_selected;
+            let is_selected = line_index == state.command_palette_state.is_selected;
             let bg_color = if is_selected {
                 ThemeColors::highlight_bg()
             } else {
@@ -486,7 +482,7 @@ fn render_shortcuts_section(
     area: Rect,
 ) {
     // Render search input
-    let search_term = &state.command_palette_state.command_palette_search;
+    let search_term = &state.command_palette_state.search;
     let search_prompt = ">";
     let cursor = "|";
     let placeholder = "Type to filter (e.g. 'ctrl+')";
@@ -612,9 +608,8 @@ fn render_shortcuts_section(
     // Calculate scroll position (similar to collapsed messages)
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
-    state.shortcuts_panel_state.shortcuts_scroll =
-        state.shortcuts_panel_state.shortcuts_scroll.min(max_scroll);
-    let scroll = state.shortcuts_panel_state.shortcuts_scroll;
+    state.shortcuts_panel_state.scroll = state.shortcuts_panel_state.scroll.min(max_scroll);
+    let scroll = state.shortcuts_panel_state.scroll;
 
     // Add top arrow indicator if there are hidden items above
     let mut visible_lines = Vec::new();
@@ -713,7 +708,7 @@ fn render_sessions_section(
     help_area: Rect,
 ) {
     // Render search input (reuse command_palette_search since tabs are mutually exclusive)
-    let search_term = &state.command_palette_state.command_palette_search;
+    let search_term = &state.command_palette_state.search;
     let search_prompt = ">";
     let cursor = "|";
     let placeholder = "Type to filter sessions";

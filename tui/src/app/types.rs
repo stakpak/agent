@@ -335,18 +335,17 @@ impl Default for MessagesScrollingState {
 }
 
 pub struct SidePanelState {
-    pub show_side_panel: bool,
-    pub side_panel_focus: crate::services::changeset::SidePanelSection,
-    pub side_panel_section_collapsed: HashMap<crate::services::changeset::SidePanelSection, bool>,
-    pub side_panel_areas:
-        HashMap<crate::services::changeset::SidePanelSection, ratatui::layout::Rect>,
+    pub is_shown: bool,
+    pub is_focused: crate::services::changeset::SidePanelSection,
+    pub is_collapsed: HashMap<crate::services::changeset::SidePanelSection, bool>,
+    pub areas: HashMap<crate::services::changeset::SidePanelSection, ratatui::layout::Rect>,
     pub session_id: String,
     pub session_id_copied_at: Option<std::time::Instant>,
     pub changeset: crate::services::changeset::Changeset,
     pub todos: Vec<crate::services::changeset::TodoItem>,
     pub task_progress: Option<crate::services::board_tasks::TaskProgress>,
     pub session_start_time: std::time::Instant,
-    pub side_panel_auto_shown: bool,
+    pub auto_shown: bool,
     pub board_agent_id: Option<String>,
     pub editor_command: String,
     pub pending_editor_open: Option<String>,
@@ -365,17 +364,17 @@ impl Default for SidePanelState {
         );
 
         Self {
-            show_side_panel: false,
-            side_panel_focus: crate::services::changeset::SidePanelSection::Context,
-            side_panel_section_collapsed: collapsed,
-            side_panel_areas: HashMap::new(),
+            is_shown: false,
+            is_focused: crate::services::changeset::SidePanelSection::Context,
+            is_collapsed: collapsed,
+            areas: HashMap::new(),
             session_id: String::new(),
             session_id_copied_at: None,
             changeset: crate::services::changeset::Changeset::new(),
             todos: Vec::new(),
             task_progress: None,
             session_start_time: std::time::Instant::now(),
-            side_panel_auto_shown: false,
+            auto_shown: false,
             board_agent_id: None,
             editor_command: "nano".to_string(),
             pending_editor_open: None,
@@ -419,17 +418,17 @@ impl Default for TerminalUiState {
 }
 
 pub struct ShellRuntimeState {
-    pub shell_screen: vt100::Parser,
-    pub shell_scroll: u16,
-    pub shell_history_lines: Vec<Line<'static>>,
+    pub screen: vt100::Parser,
+    pub scroll: u16,
+    pub history_lines: Vec<Line<'static>>,
 }
 
 impl Default for ShellRuntimeState {
     fn default() -> Self {
         Self {
-            shell_screen: vt100::Parser::new(24, 80, 1000),
-            shell_scroll: 0,
-            shell_history_lines: Vec::new(),
+            screen: vt100::Parser::new(24, 80, 1000),
+            scroll: 0,
+            history_lines: Vec::new(),
         }
     }
 }
@@ -442,9 +441,9 @@ pub struct ShellSessionState {
 
 #[derive(Default)]
 pub struct BannerState {
-    pub banner_message: Option<BannerMessage>,
-    pub banner_area: Option<ratatui::layout::Rect>,
-    pub banner_click_regions: Vec<(String, ratatui::layout::Rect)>,
+    pub message: Option<BannerMessage>,
+    pub area: Option<ratatui::layout::Rect>,
+    pub click_regions: Vec<(String, ratatui::layout::Rect)>,
 }
 
 #[derive(Default)]
@@ -480,21 +479,21 @@ pub struct MessageInteractionState {
 /// Shell popup and shell-command execution UI state.
 #[derive(Default)]
 pub struct ShellPopupState {
-    pub shell_popup_visible: bool,
-    pub shell_popup_expanded: bool,
-    pub shell_popup_scroll: usize,
+    pub is_visible: bool,
+    pub is_expanded: bool,
+    pub scroll: usize,
     /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
     pub needs_terminal_clear: bool,
-    pub shell_cursor_visible: bool,
-    pub shell_cursor_blink_timer: u8,
+    pub cursor_visible: bool,
+    pub cursor_blink_timer: u8,
     pub active_shell_command: Option<ShellCommand>,
     pub active_shell_command_output: Option<String>,
     pub waiting_for_shell_input: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
-    pub shell_loading: bool,
-    pub shell_pending_command_value: Option<String>,
-    pub shell_pending_command_executed: bool,
-    pub shell_pending_command_output: Option<String>,
+    pub is_loading: bool,
+    pub pending_command_value: Option<String>,
+    pub pending_command_executed: bool,
+    pub pending_command_output: Option<String>,
     // Backward compatibility aliases (to be removed after full migration)
     pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
     pub shell_mode_input: String, // unused, kept for compatibility
@@ -580,10 +579,10 @@ pub struct SessionToolCallsState {
 pub struct ProfileSwitcherState {
     pub show_profile_switcher: bool,
     pub available_profiles: Vec<String>,
-    pub profile_switcher_selected: usize,
+    pub is_selected: usize,
     pub current_profile_name: String,
-    pub profile_switching_in_progress: bool,
-    pub profile_switch_status_message: Option<String>,
+    pub switching_in_progress: bool,
+    pub switch_status_message: Option<String>,
 }
 
 #[derive(Default)]
@@ -591,7 +590,7 @@ pub struct RulebookSwitcherState {
     pub show_rulebook_switcher: bool,
     pub available_rulebooks: Vec<ListRuleBook>,
     pub selected_rulebooks: HashSet<String>,
-    pub rulebook_switcher_selected: usize,
+    pub is_selected: usize,
     pub rulebook_search_input: String,
     pub filtered_rulebooks: Vec<ListRuleBook>,
     pub rulebook_config: Option<crate::RulebookConfig>,
@@ -599,36 +598,36 @@ pub struct RulebookSwitcherState {
 
 #[derive(Default)]
 pub struct ModelSwitcherState {
-    pub show_model_switcher: bool,
+    pub is_visible: bool,
+    pub is_selected: usize,
+    pub mode: ModelSwitcherMode,
+    pub search: String,
     pub available_models: Vec<Model>,
-    pub model_switcher_selected: usize,
     pub current_model: Option<Model>,
-    pub model_switcher_mode: ModelSwitcherMode,
-    pub model_switcher_search: String,
     pub recent_models: Vec<String>,
 }
 
 #[derive(Default)]
 pub struct CommandPaletteState {
-    pub show_command_palette: bool,
-    pub command_palette_selected: usize,
-    pub command_palette_scroll: usize,
-    pub command_palette_search: String,
+    pub is_visible: bool,
+    pub is_selected: usize,
+    pub scroll: usize,
+    pub search: String,
 }
 
 #[derive(Default)]
 pub struct ShortcutsPanelState {
-    pub show_shortcuts_popup: bool,
-    pub shortcuts_scroll: usize,
-    pub shortcuts_popup_mode: ShortcutsPopupMode,
+    pub is_visible: bool,
+    pub scroll: usize,
+    pub mode: ShortcutsPopupMode,
 }
 
 #[derive(Default)]
 pub struct FileChangesPopupState {
-    pub show_file_changes_popup: bool,
-    pub file_changes_selected: usize,
-    pub file_changes_scroll: usize,
-    pub file_changes_search: String,
+    pub is_visible: bool,
+    pub is_selected: usize,
+    pub scroll: usize,
+    pub search: String,
 }
 
 pub struct UsageTrackingState {
@@ -640,71 +639,70 @@ pub struct UsageTrackingState {
 #[derive(Default)]
 pub struct PlanModeState {
     /// Whether plan mode is active (set by /plan command, cleared by /new session)
-    pub plan_mode_active: bool,
+    pub is_active: bool,
     /// Cached plan metadata from `.stakpak/session/plan.md` front matter
-    pub plan_metadata: Option<crate::services::plan::PlanMetadata>,
+    pub metadata: Option<crate::services::plan::PlanMetadata>,
     /// SHA-256 hash of the last-read plan content (for change detection)
-    pub plan_content_hash: Option<String>,
+    pub content_hash: Option<String>,
     /// Previous plan status (for detecting transitions)
-    pub plan_previous_status: Option<crate::services::plan::PlanStatus>,
+    pub previous_status: Option<crate::services::plan::PlanStatus>,
     /// Whether plan review was auto-opened for current reviewing transition
-    pub plan_review_auto_opened: bool,
+    pub review_auto_opened: bool,
     /// When set, the "existing plan found" modal is visible.
     /// Contains the stashed prompt and plan metadata for the modal to display.
-    pub existing_plan_prompt: Option<ExistingPlanPrompt>,
+    pub existing_prompt: Option<ExistingPlanPrompt>,
 }
 
 #[derive(Default)]
 pub struct PlanReviewState {
     /// Whether the plan review overlay is visible
-    pub show_plan_review: bool,
+    pub is_visible: bool,
     /// Scroll offset (line index of the top visible line)
-    pub plan_review_scroll: usize,
+    pub scroll: usize,
     /// Currently selected line (0-indexed)
-    pub plan_review_cursor_line: usize,
+    pub cursor_line: usize,
     /// Cached plan content (loaded when review opens)
-    pub plan_review_content: String,
+    pub content: String,
     /// Cached split lines of plan content
-    pub plan_review_lines: Vec<String>,
+    pub lines: Vec<String>,
     /// Cached plan comments (loaded when review opens)
-    pub plan_review_comments: Option<crate::services::plan_comments::PlanComments>,
+    pub comments: Option<crate::services::plan_comments::PlanComments>,
     /// Resolved anchors mapping comment IDs to line numbers
-    pub plan_review_resolved_anchors: Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
+    pub resolved_anchors: Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
     /// Whether the comment input modal is open
-    pub plan_review_show_comment_modal: bool,
+    pub show_comment_modal: bool,
     /// Text buffer for composing a new comment
-    pub plan_review_comment_input: String,
+    pub comment_input: String,
     /// Selected comment ID (for reply targeting)
-    pub plan_review_selected_comment: Option<String>,
+    pub selected_comment: Option<String>,
     /// Kind of comment modal currently open
-    pub plan_review_modal_kind: Option<crate::services::plan_review::CommentModalKind>,
+    pub modal_kind: Option<crate::services::plan_review::CommentModalKind>,
     /// Confirmation dialog currently shown (approve, feedback, delete)
-    pub plan_review_confirm: Option<crate::services::plan_review::ConfirmAction>,
+    pub confirm: Option<crate::services::plan_review::ConfirmAction>,
 }
 
 #[derive(Default)]
 pub struct AskUserState {
     /// Whether the ask user interaction is active
-    pub show_ask_user_popup: bool,
+    pub is_visible: bool,
     /// Questions to display in the inline block
-    pub ask_user_questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+    pub questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
     /// User's answers (question label -> answer)
-    pub ask_user_answers:
-        HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
+    pub answers: HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
     /// Currently selected tab index (question index, or questions.len() for Submit)
-    pub ask_user_current_tab: usize,
+    pub current_tab: usize,
     /// Currently selected option index within the current question
-    pub ask_user_selected_option: usize,
+    pub selected_option: usize,
     /// Custom input text when "Type something..." is selected
-    pub ask_user_custom_input: String,
+    pub custom_input: String,
     /// The tool call that triggered this (for sending result back)
-    pub ask_user_tool_call: Option<ToolCall>,
+    pub tool_call: Option<ToolCall>,
     /// Message ID for the inline ask_user block in the messages list
-    pub ask_user_message_id: Option<Uuid>,
+    pub message_id: Option<Uuid>,
     /// Whether the ask_user block has keyboard focus (Tab toggles)
-    pub ask_user_focused: bool,
+    pub is_focused: bool,
     /// Multi-select toggle state: question label -> list of currently selected option values
-    pub ask_user_multi_selections: HashMap<String, Vec<String>>,
+    pub multi_selections: HashMap<String, Vec<String>>,
 }
 
 impl Default for UsageTrackingState {

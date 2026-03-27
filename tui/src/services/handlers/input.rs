@@ -30,7 +30,7 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         // Block all typing when approval bar is visible
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.is_visible {
         // Handle search input for command palette / shortcuts
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
         return;
@@ -53,7 +53,7 @@ pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<Inpu
         // Block backspace when approval bar is visible
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.is_visible {
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
         return;
     }
@@ -77,8 +77,8 @@ pub fn handle_input_submitted_event(
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
         return;
     }
-    if state.shortcuts_panel_state.show_shortcuts_popup {
-        match state.shortcuts_panel_state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.is_visible {
+        match state.shortcuts_panel_state.mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Execute the selected command
                 use super::tool::execute_command_palette_selection;
@@ -140,7 +140,7 @@ pub fn handle_input_submitted_event(
                         state,
                         &format!("Switching to session . {}", selected_title),
                     );
-                    state.shortcuts_panel_state.show_shortcuts_popup = false;
+                    state.shortcuts_panel_state.is_visible = false;
                 }
                 return;
             }
@@ -242,20 +242,20 @@ pub fn handle_input_submitted_event(
 
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    if state.side_panel_state.show_side_panel
+    if state.side_panel_state.is_shown
         && !state.dialog_approval_state.is_dialog_open
         && state.input_state.text_area.text().is_empty()
     {
         let current = state
             .side_panel_state
-            .side_panel_section_collapsed
-            .get(&state.side_panel_state.side_panel_focus)
+            .is_collapsed
+            .get(&state.side_panel_state.is_focused)
             .copied()
             .unwrap_or(false);
         state
             .side_panel_state
-            .side_panel_section_collapsed
-            .insert(state.side_panel_state.side_panel_focus, !current);
+            .is_collapsed
+            .insert(state.side_panel_state.is_focused, !current);
         return;
     }
 
@@ -639,7 +639,7 @@ fn handle_input_submitted(
 
             // 2. Capture history and resolve as success result
             let history_lines = crate::services::handlers::shell::trim_shell_lines(
-                state.shell_runtime_state.shell_history_lines.clone(),
+                state.shell_runtime_state.history_lines.clone(),
             );
             if !history_lines.is_empty() {
                 let history_text = history_lines
@@ -651,7 +651,7 @@ fn handle_input_submitted(
                 // Form a successful tool call result with history
                 let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
                     state,
-                    state.shell_popup_state.shell_pending_command_value.clone(),
+                    state.shell_popup_state.pending_command_value.clone(),
                     Some(history_text),
                 );
 
@@ -670,7 +670,7 @@ fn handle_input_submitted(
             && !state.shell_popup_state.show_shell_mode
         {
             let mut history_lines = crate::services::handlers::shell::trim_shell_lines(
-                state.shell_runtime_state.shell_history_lines.clone(),
+                state.shell_runtime_state.history_lines.clone(),
             );
 
             if !history_lines.is_empty() {
@@ -729,10 +729,10 @@ fn handle_input_submitted(
             // Full clear of shell variables
             state.shell_popup_state.active_shell_command = None;
             state.shell_popup_state.active_shell_command_output = None;
-            state.shell_runtime_state.shell_history_lines.clear();
+            state.shell_runtime_state.history_lines.clear();
             state.shell_popup_state.show_shell_mode = false;
-            state.shell_popup_state.shell_popup_visible = false;
-            state.shell_popup_state.shell_popup_expanded = false;
+            state.shell_popup_state.is_visible = false;
+            state.shell_popup_state.is_expanded = false;
             state.shell_popup_state.ondemand_shell_mode = false; // Reset on-demand mode
 
             // Note: We don't call terminate_active_shell_session here because we manually cleaned up
