@@ -275,26 +275,26 @@ pub fn handle_down_navigation(
 
 /// Handle scroll up
 fn handle_scroll_up(state: &mut AppState) {
-    if state.show_collapsed_messages {
-        if state.collapsed_messages_scroll >= SCROLL_LINES {
-            state.collapsed_messages_scroll -= SCROLL_LINES;
+    if state.messages_scrolling_state.show_collapsed_messages {
+        if state.messages_scrolling_state.collapsed_messages_scroll >= SCROLL_LINES {
+            state.messages_scrolling_state.collapsed_messages_scroll -= SCROLL_LINES;
         } else {
-            state.collapsed_messages_scroll = 0;
+            state.messages_scrolling_state.collapsed_messages_scroll = 0;
         }
-    } else if state.scroll >= SCROLL_LINES {
-        state.scroll -= SCROLL_LINES;
-        state.stay_at_bottom = false;
+    } else if state.messages_scrolling_state.scroll >= SCROLL_LINES {
+        state.messages_scrolling_state.scroll -= SCROLL_LINES;
+        state.messages_scrolling_state.stay_at_bottom = false;
     } else {
-        state.scroll = 0;
-        state.stay_at_bottom = false;
+        state.messages_scrolling_state.scroll = 0;
+        state.messages_scrolling_state.stay_at_bottom = false;
     }
 }
 
 /// Handle scroll down
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         // For collapsed messages popup, we need to calculate scroll based on collapsed messages only
-        let total_lines = if let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache {
+        let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.collapsed_message_lines_cache {
             cached_lines.len()
         } else {
             // Fallback: calculate once and cache
@@ -303,14 +303,14 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
         };
 
         let max_scroll = total_lines.saturating_sub(message_area_height);
-        if state.collapsed_messages_scroll + SCROLL_LINES < max_scroll {
-            state.collapsed_messages_scroll += SCROLL_LINES;
+        if state.messages_scrolling_state.collapsed_messages_scroll + SCROLL_LINES < max_scroll {
+            state.messages_scrolling_state.collapsed_messages_scroll += SCROLL_LINES;
         } else {
-            state.collapsed_messages_scroll = max_scroll;
+            state.messages_scrolling_state.collapsed_messages_scroll = max_scroll;
         }
     } else {
         // Use cached line count instead of recalculating every scroll
-        let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+        let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.message_lines_cache {
             cached_lines.len()
         } else {
             // Fallback: calculate once and cache
@@ -319,18 +319,18 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
         };
 
         let max_scroll = total_lines.saturating_sub(message_area_height);
-        if state.scroll + SCROLL_LINES < max_scroll {
-            state.scroll += SCROLL_LINES;
-            state.stay_at_bottom = false;
+        if state.messages_scrolling_state.scroll + SCROLL_LINES < max_scroll {
+            state.messages_scrolling_state.scroll += SCROLL_LINES;
+            state.messages_scrolling_state.stay_at_bottom = false;
         } else {
-            state.scroll = max_scroll;
-            state.stay_at_bottom = true;
+            state.messages_scrolling_state.scroll = max_scroll;
+            state.messages_scrolling_state.stay_at_bottom = true;
 
             // If content changed while we were scrolled up, invalidate cache once
             // to catch up with new content that arrived while scrolled up
-            if state.content_changed_while_scrolled_up {
+            if state.messages_scrolling_state.content_changed_while_scrolled_up {
                 crate::services::message::invalidate_message_lines_cache(state);
-                state.content_changed_while_scrolled_up = false;
+                state.messages_scrolling_state.content_changed_while_scrolled_up = false;
             }
         }
     }
@@ -338,13 +338,13 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
 
 /// Handle page up navigation
 pub fn handle_page_up(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    state.stay_at_bottom = false; // unlock from bottom
+    state.messages_scrolling_state.stay_at_bottom = false; // unlock from bottom
     let input_height = 3;
     let page = std::cmp::max(1, message_area_height.saturating_sub(input_height));
-    if state.scroll >= page {
-        state.scroll -= page;
+    if state.messages_scrolling_state.scroll >= page {
+        state.messages_scrolling_state.scroll -= page;
     } else {
-        state.scroll = 0;
+        state.messages_scrolling_state.scroll = 0;
     }
     adjust_scroll(state, message_area_height, message_area_width);
 }
@@ -355,9 +355,9 @@ pub fn handle_page_down(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    state.stay_at_bottom = false; // unlock from bottom
+    state.messages_scrolling_state.stay_at_bottom = false; // unlock from bottom
     // Use cached line count instead of recalculating every page operation
-    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+    let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.message_lines_cache {
         cached_lines.len()
     } else {
         // Fallback: calculate once and cache
@@ -367,19 +367,19 @@ pub fn handle_page_down(
 
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
-    if state.scroll < max_scroll {
-        state.scroll = (state.scroll + page).min(max_scroll);
-        if state.scroll == max_scroll {
-            state.stay_at_bottom = true;
+    if state.messages_scrolling_state.scroll < max_scroll {
+        state.messages_scrolling_state.scroll = (state.messages_scrolling_state.scroll + page).min(max_scroll);
+        if state.messages_scrolling_state.scroll == max_scroll {
+            state.messages_scrolling_state.stay_at_bottom = true;
 
             // If content changed while we were scrolled up, invalidate cache once
-            if state.content_changed_while_scrolled_up {
+            if state.messages_scrolling_state.content_changed_while_scrolled_up {
                 crate::services::message::invalidate_message_lines_cache(state);
-                state.content_changed_while_scrolled_up = false;
+                state.messages_scrolling_state.content_changed_while_scrolled_up = false;
             }
         }
     } else {
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
     }
     adjust_scroll(state, message_area_height, message_area_width);
 }
@@ -394,21 +394,20 @@ pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_a
     let max_scroll = total_lines.saturating_sub(message_area_height);
 
     // Decrement block counter if active
-    if state.block_stay_at_bottom_frames > 0 {
-        state.block_stay_at_bottom_frames -= 1;
+    if state.messages_scrolling_state.block_stay_at_bottom_frames > 0 {
+        state.messages_scrolling_state.block_stay_at_bottom_frames -= 1;
         // Clear the lines_from_end when block expires
-        if state.block_stay_at_bottom_frames == 0 {
-            state.scroll_lines_from_end = None;
+        if state.messages_scrolling_state.block_stay_at_bottom_frames == 0 {
+            state.messages_scrolling_state.scroll_lines_from_end = None;
         }
     }
 
     // scroll_to_last_message_start takes priority - user explicitly navigating tool calls
-    if state.scroll_to_last_message_start {
+    if state.messages_scrolling_state.scroll_to_last_message_start {
         // Get the last message's rendered line count from cache
-        let last_message_lines = state
-            .messages
+        let last_message_lines = state.messages_scrolling_state.messages
             .last()
-            .and_then(|msg| state.per_message_cache.get(&msg.id))
+            .and_then(|msg| state.messages_scrolling_state.per_message_cache.get(&msg.id))
             .map(|cache| cache.rendered_lines.len())
             .unwrap_or(0);
 
@@ -428,33 +427,33 @@ pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_a
             // Store the target line (from start of content, not from end)
             // We'll use lines_from_end to maintain position as content changes
             let lines_from_end = total_lines.saturating_sub(scroll_target);
-            state.scroll_lines_from_end = Some(lines_from_end);
+            state.messages_scrolling_state.scroll_lines_from_end = Some(lines_from_end);
 
-            state.scroll = scroll_target.min(max_scroll);
-            state.scroll_to_last_message_start = false;
+            state.messages_scrolling_state.scroll = scroll_target.min(max_scroll);
+            state.messages_scrolling_state.scroll_to_last_message_start = false;
             // Block stay_at_bottom for a few frames to prevent override
-            state.block_stay_at_bottom_frames = 10;
+            state.messages_scrolling_state.block_stay_at_bottom_frames = 10;
         }
         // Disable stay_at_bottom so it doesn't override on next frame
-        state.stay_at_bottom = false;
-    } else if state.block_stay_at_bottom_frames > 0 {
+        state.messages_scrolling_state.stay_at_bottom = false;
+    } else if state.messages_scrolling_state.block_stay_at_bottom_frames > 0 {
         // Recalculate scroll based on lines_from_end to maintain relative position
         // even as total_lines changes
-        if let Some(lines_from_end) = state.scroll_lines_from_end {
+        if let Some(lines_from_end) = state.messages_scrolling_state.scroll_lines_from_end {
             let scroll_target = total_lines.saturating_sub(lines_from_end);
-            state.scroll = scroll_target.min(max_scroll);
+            state.messages_scrolling_state.scroll = scroll_target.min(max_scroll);
         } else {
             // Fallback: just cap to max_scroll
-            if state.scroll > max_scroll {
-                state.scroll = max_scroll;
+            if state.messages_scrolling_state.scroll > max_scroll {
+                state.messages_scrolling_state.scroll = max_scroll;
             }
         }
-    } else if state.stay_at_bottom {
-        state.scroll = max_scroll;
-    } else if state.scroll_to_bottom {
-        state.scroll = max_scroll;
-        state.scroll_to_bottom = false;
-    } else if state.scroll > max_scroll {
-        state.scroll = max_scroll;
+    } else if state.messages_scrolling_state.stay_at_bottom {
+        state.messages_scrolling_state.scroll = max_scroll;
+    } else if state.messages_scrolling_state.scroll_to_bottom {
+        state.messages_scrolling_state.scroll = max_scroll;
+        state.messages_scrolling_state.scroll_to_bottom = false;
+    } else if state.messages_scrolling_state.scroll > max_scroll {
+        state.messages_scrolling_state.scroll = max_scroll;
     }
 }

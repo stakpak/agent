@@ -45,7 +45,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     state.selection_auto_scroll = 0;
 
     // When collapsed messages popup is open, use popup geometry for selection
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         handle_popup_drag_start(state, col, row);
         return;
     }
@@ -95,7 +95,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Convert screen row to absolute line index (row_in_message_area already calculated above)
-    let absolute_line = state.scroll + row_in_message_area;
+    let absolute_line = state.messages_scrolling_state.scroll + row_in_message_area;
     // Convert terminal column to content-relative column
     let rel_col = content_col(state, col);
 
@@ -120,7 +120,7 @@ fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Convert screen row to absolute line index using popup's own scroll
-    let absolute_line = state.collapsed_messages_scroll + row_in_popup;
+    let absolute_line = state.messages_scrolling_state.collapsed_messages_scroll + row_in_popup;
     let rel_col = popup_content_col(state, col);
 
     state.selection = SelectionState {
@@ -135,7 +135,7 @@ fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
 /// Handle mouse drag - updates selection in message area, input area, or collapsed popup
 pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     // When collapsed messages popup is open, use popup geometry
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         handle_popup_drag(state, col, row);
         return;
     }
@@ -166,30 +166,29 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     let msg_top = state.message_area_y as usize;
     let msg_bottom = msg_top + message_area_height;
 
-    if (row as usize) <= msg_top && state.scroll > 0 {
+    if (row as usize) <= msg_top && state.messages_scrolling_state.scroll > 0 {
         // Mouse is at or above the top edge — trigger auto-scroll up
         // (only if there's content above to scroll to)
         state.selection_auto_scroll = -1;
         // Update selection to the topmost visible line
-        let absolute_line = state.scroll;
+        let absolute_line = state.messages_scrolling_state.scroll;
         let rel_col = content_col(state, col);
         state.selection.end_line = Some(absolute_line);
         state.selection.end_col = Some(rel_col);
         return;
     } else if message_area_height > 0 && (row as usize) >= msg_bottom.saturating_sub(1) {
         // Mouse is at or below the bottom edge — check if there's content below to scroll to
-        let total_lines = state
-            .assembled_lines_cache
+        let total_lines = state.messages_scrolling_state.assembled_lines_cache
             .as_ref()
             .map(|(_, lines, _)| lines.len())
             .unwrap_or(0);
         let max_scroll = total_lines.saturating_sub(message_area_height);
 
-        if state.scroll < max_scroll {
+        if state.messages_scrolling_state.scroll < max_scroll {
             // There's content below — trigger auto-scroll down
             state.selection_auto_scroll = 1;
             // Update selection to the bottommost visible line
-            let absolute_line = state.scroll + message_area_height.saturating_sub(1);
+            let absolute_line = state.messages_scrolling_state.scroll + message_area_height.saturating_sub(1);
             let rel_col = content_col(state, col);
             state.selection.end_line = Some(absolute_line);
             state.selection.end_col = Some(rel_col);
@@ -206,7 +205,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     let clamped_row = row_in_message_area.min(message_area_height.saturating_sub(1));
 
     // Convert screen row to absolute line index
-    let absolute_line = state.scroll + clamped_row;
+    let absolute_line = state.messages_scrolling_state.scroll + clamped_row;
 
     // Clamp col to main area if side panel is visible, then convert to content-relative
     let clamped_col = if state.show_side_panel {
@@ -238,7 +237,7 @@ fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
     let clamped_row = row_in_popup.min(popup_height.saturating_sub(1));
 
     // Convert screen row to absolute line index using popup's own scroll
-    let absolute_line = state.collapsed_messages_scroll + clamped_row;
+    let absolute_line = state.messages_scrolling_state.collapsed_messages_scroll + clamped_row;
     let rel_col = popup_content_col(state, col);
 
     state.selection.end_line = Some(absolute_line);
@@ -252,7 +251,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     state.selection_auto_scroll = 0;
 
     // When collapsed messages popup is open, use popup-specific logic
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         handle_popup_drag_end(state, col, row);
         return;
     }
@@ -301,7 +300,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
         // Just a click, not a selection - check if it's on a user message
         // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
         let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
-        let absolute_line = state.scroll + row_in_message_area;
+        let absolute_line = state.messages_scrolling_state.scroll + row_in_message_area;
 
         // Clear selection first
         state.selection = SelectionState::default();
@@ -405,15 +404,13 @@ pub fn handle_scroll_during_selection(
     };
 
     // Choose the correct cache depending on whether the collapsed popup is open
-    let cached_lines: Option<&Vec<ratatui::text::Line<'static>>> = if state.show_collapsed_messages
+    let cached_lines: Option<&Vec<ratatui::text::Line<'static>>> = if state.messages_scrolling_state.show_collapsed_messages
     {
-        state
-            .collapsed_message_lines_cache
+        state.messages_scrolling_state.collapsed_message_lines_cache
             .as_ref()
             .map(|(_, _, lines)| lines)
     } else {
-        state
-            .assembled_lines_cache
+        state.messages_scrolling_state.assembled_lines_cache
             .as_ref()
             .map(|(_, lines, _)| lines)
     };
@@ -469,7 +466,7 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
     }
 
     // Don't auto-scroll for collapsed popup (it has bounded content and its own scroll)
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         state.selection_auto_scroll = 0;
         return;
     }
@@ -477,8 +474,7 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
     let direction = state.selection_auto_scroll;
 
     // Get total content lines from cache for bounds checking
-    let total_lines = state
-        .assembled_lines_cache
+    let total_lines = state.messages_scrolling_state.assembled_lines_cache
         .as_ref()
         .map(|(_, lines, _)| lines.len())
         .unwrap_or(0);
@@ -493,19 +489,19 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
     // Perform the scroll
     if direction < 0 {
         // Scroll up
-        if state.scroll == 0 {
+        if state.messages_scrolling_state.scroll == 0 {
             return; // Already at top, nothing to do
         }
-        state.scroll = state.scroll.saturating_sub(1);
-        state.stay_at_bottom = false;
+        state.messages_scrolling_state.scroll = state.messages_scrolling_state.scroll.saturating_sub(1);
+        state.messages_scrolling_state.stay_at_bottom = false;
     } else {
         // Scroll down
-        if state.scroll >= max_scroll {
+        if state.messages_scrolling_state.scroll >= max_scroll {
             return; // Already at bottom, nothing to do
         }
-        state.scroll = (state.scroll + 1).min(max_scroll);
-        if state.scroll >= max_scroll {
-            state.stay_at_bottom = true;
+        state.messages_scrolling_state.scroll = (state.messages_scrolling_state.scroll + 1).min(max_scroll);
+        if state.messages_scrolling_state.scroll >= max_scroll {
+            state.messages_scrolling_state.stay_at_bottom = true;
         }
     }
 

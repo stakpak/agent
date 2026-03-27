@@ -236,7 +236,7 @@ pub fn handle_run_shell_command(
     )])];
     let new_id = Uuid::new_v4();
     state.interactive_shell_message_id = Some(new_id);
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: new_id,
         content: MessageContent::RenderRefreshedTerminal(
             format!("Shell Command {} [Initializing]", command),
@@ -341,7 +341,7 @@ pub fn background_shell_session(state: &mut AppState) {
 
     // Update the message bubble to gray (background)
     if let Some(id) = state.interactive_shell_message_id {
-        for msg in &mut state.messages {
+        for msg in &mut state.messages_scrolling_state.messages {
             if msg.id == id {
                 let new_colors = BubbleColors {
                     border_color: ThemeColors::dark_gray(),
@@ -406,7 +406,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 tool_type: "Interactive Bash".to_string(),
             };
 
-            for msg in &mut state.messages {
+            for msg in &mut state.messages_scrolling_state.messages {
                 if msg.id == id {
                     msg.content = MessageContent::RenderRefreshedTerminal(
                         format!("Shell Command {} [Focused]", command_name),
@@ -482,7 +482,7 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
 
         // Update the message in chat to reflect termination
         if let Some(id) = state.interactive_shell_message_id {
-            for msg in &mut state.messages {
+            for msg in &mut state.messages_scrolling_state.messages {
                 if msg.id == id {
                     if let MessageContent::RenderRefreshedTerminal(_, lines, _, width) =
                         &msg.content
@@ -688,12 +688,12 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
             ),
             is_collapsed: None,
         };
-        state.messages.push(new_message);
+        state.messages_scrolling_state.messages.push(new_message);
         None // Already pushed
     };
 
     if let Some(id) = target_id
-        && let Some(msg) = state.messages.iter_mut().find(|m| m.id == id)
+        && let Some(msg) = state.messages_scrolling_state.messages.iter_mut().find(|m| m.id == id)
     {
         msg.content = MessageContent::RenderRefreshedTerminal(
             title,
@@ -900,7 +900,7 @@ pub fn handle_shell_completed(
     state.shell_popup_state.active_shell_command_output = None;
     // Remove the RefreshedTerminal message when shell completes
     if let Some(shell_msg_id) = state.interactive_shell_message_id {
-        state.messages.retain(|m| m.id != shell_msg_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
     }
     state.interactive_shell_message_id = None;
     state.input_state.text_area.set_text("");
@@ -921,7 +921,7 @@ pub fn handle_shell_clear(
 
     // Find the last non-shell message to determine where current shell session started
     let mut last_non_shell_index = None;
-    for (i, message) in state.messages.iter().enumerate().rev() {
+    for (i, message) in state.messages_scrolling_state.messages.iter().enumerate().rev() {
         let is_shell_message = match &message.content {
             crate::services::message::MessageContent::Styled(line) => line
                 .spans
@@ -945,10 +945,10 @@ pub fn handle_shell_clear(
     // If we found a non-shell message, clear everything after it (the current shell session)
     if let Some(index) = last_non_shell_index {
         // Keep messages up to and including the last non-shell message
-        state.messages.truncate(index + 1);
+        state.messages_scrolling_state.messages.truncate(index + 1);
     } else {
         // If no non-shell messages found, clear all messages (entire session is shell)
-        state.messages.clear();
+        state.messages_scrolling_state.messages.clear();
     }
 
     // Scroll to the bottom to show the cleared state

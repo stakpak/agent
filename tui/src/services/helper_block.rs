@@ -90,7 +90,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(format!("  L Name: {}", name)),
         Line::from(""),
     ];
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -183,7 +183,7 @@ pub fn push_usage_message(state: &mut AppState) {
         ]));
     }
 
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -222,7 +222,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         )]),
         Line::from(""),
     ];
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -340,7 +340,7 @@ pub fn push_help_message(state: &mut AppState) {
         ]));
     }
     lines.push(Line::from(""));
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -366,7 +366,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
     lines.push(message);
     lines.push(Line::from(vec![Span::raw(" ")]));
 
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -418,7 +418,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
@@ -437,7 +437,7 @@ pub fn push_styled_message(
         Span::styled(icon.to_string(), Style::default().fg(icon_color)),
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
-    state.messages.push(Message::styled(line));
+    state.messages_scrolling_state.messages.push(Message::styled(line));
     invalidate_message_lines_cache(state);
 }
 
@@ -555,11 +555,11 @@ pub fn welcome_messages(
 }
 
 pub fn push_clear_message(state: &mut AppState) {
-    state.messages.clear();
+    state.messages_scrolling_state.messages.clear();
     state.input_state.text_area.set_text("");
     state.input_state.show_helper_dropdown = false;
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
-    state.messages.extend(welcome_msg);
+    state.messages_scrolling_state.messages.extend(welcome_msg);
     invalidate_message_lines_cache(state);
 }
 
@@ -592,7 +592,7 @@ pub fn push_issue_message(state: &mut AppState) {
                 ),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
         Err(e) => {
             let message = Message::styled(Line::from(vec![
@@ -604,7 +604,7 @@ pub fn push_issue_message(state: &mut AppState) {
                 Span::raw(" - "),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
     }
     invalidate_message_lines_cache(state);
@@ -623,7 +623,7 @@ pub fn push_support_message(state: &mut AppState) {
                 ),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
         Err(e) => {
             let message = Message::styled(Line::from(vec![
@@ -635,7 +635,7 @@ pub fn push_support_message(state: &mut AppState) {
                 Span::raw(" - "),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
     }
     invalidate_message_lines_cache(state);

@@ -385,8 +385,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/summarize" => {
             let prompt = build_summarize_prompt(ctx.state);
-            ctx.state.messages.push(Message::info("".to_string(), None));
-            ctx.state.messages.push(Message::info(
+            ctx.state.messages_scrolling_state.messages.push(Message::info("".to_string(), None));
+            ctx.state.messages_scrolling_state.messages.push(Message::info(
                 "Requesting session summary (summary.md)...",
                 Some(Style::default().fg(ThemeColors::cyan())),
             ));
@@ -565,7 +565,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
-            ctx.state.messages.push(Message::user(prompt.clone(), None));
+            ctx.state.messages_scrolling_state.messages.push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
                 ctx.state.shell_popup_state.shell_tool_calls.clone(),
@@ -644,8 +644,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
-            ctx.state
-                .messages
+            ctx.state.messages_scrolling_state.messages
                 .push(Message::user(full_prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 full_prompt,
@@ -673,7 +672,7 @@ fn terminate_active_shell(state: &mut AppState) {
 
     // Remove the shell message box if it exists
     if let Some(shell_msg_id) = state.interactive_shell_message_id {
-        state.messages.retain(|m| m.id != shell_msg_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
     }
 
     // Reset all shell-related state
@@ -704,16 +703,15 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.dialog_approval_state.approval_bar.clear();
     state.dialog_approval_state.toggle_approved_message = true;
 
-    state.messages.clear();
-    state
-        .messages
+    state.messages_scrolling_state.messages.clear();
+    state.messages_scrolling_state.messages
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "Resuming last session.");
 
     // Reset scroll state to show bottom when messages are loaded
-    state.scroll = 0;
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll = 0;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
     state.changeset = crate::services::changeset::Changeset::default();
@@ -764,16 +762,15 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     let _ = output_tx.try_send(OutputEvent::NewSession);
     state.input_state.text_area.set_text("");
-    state.messages.clear();
-    state
-        .messages
+    state.messages_scrolling_state.messages.clear();
+    state.messages_scrolling_state.messages
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "New session started.");
 
     // Reset scroll state
-    state.scroll = 0;
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll = 0;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
     state.changeset = crate::services::changeset::Changeset::default();
@@ -855,7 +852,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
 
 fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
     let mut entries = Vec::new();
-    for message in state.messages.iter().rev() {
+    for message in state.messages_scrolling_state.messages.iter().rev() {
         match &message.content {
             MessageContent::Plain(text, _) | MessageContent::PlainText(text) => {
                 let trimmed = text.trim();
@@ -908,7 +905,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
             .collect::<Vec<_>>()
             .join(", ");
         // add a spacing marker
-        state.messages.push(Message::plain_text(""));
+        state.messages_scrolling_state.messages.push(Message::plain_text(""));
         push_styled_message(
             state,
             &format!("Tools currently set to auto-approve: {}", tool_list),

@@ -35,7 +35,7 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
         let rendered_lines =
             render_bash_block_rejected("Interrupted by user", "System", None, None);
-        state.messages.push(Message {
+        state.messages_scrolling_state.messages.push(Message {
             id: Uuid::new_v4(),
             content: crate::services::message::MessageContent::StyledBlock(rendered_lines),
             is_collapsed: None,
@@ -43,7 +43,7 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
         // Invalidate cache and scroll to bottom so the cancelled message is visible
         crate::services::message::invalidate_message_lines_cache(state);
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
         return;
     }
     let mut error_message = handle_errors(err);
@@ -128,7 +128,7 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
         return;
     }
 
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         handle_collapsed_messages_tab(state, message_area_height, message_area_width);
     } else {
         handle_tab_normal(state);
@@ -198,8 +198,7 @@ fn handle_collapsed_messages_tab(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    let collapsed_messages: Vec<Message> = state
-        .messages
+    let collapsed_messages: Vec<Message> = state.messages_scrolling_state.messages
         .iter()
         .filter(|m| m.is_collapsed == Some(true))
         .cloned()
@@ -210,16 +209,16 @@ fn handle_collapsed_messages_tab(
     }
 
     // Move to next message
-    state.collapsed_messages_selected =
-        (state.collapsed_messages_selected + 1) % collapsed_messages.len();
+    state.messages_scrolling_state.collapsed_messages_selected =
+        (state.messages_scrolling_state.collapsed_messages_selected + 1) % collapsed_messages.len();
 
     // Calculate scroll position to show the top of the selected message
     let mut line_count = 0;
 
     for (i, _message) in collapsed_messages.iter().enumerate() {
-        if i == state.collapsed_messages_selected {
+        if i == state.messages_scrolling_state.collapsed_messages_selected {
             // This is our target message, set scroll to show its top
-            state.collapsed_messages_scroll = line_count;
+            state.messages_scrolling_state.collapsed_messages_scroll = line_count;
             break;
         }
 
@@ -232,7 +231,7 @@ fn handle_collapsed_messages_tab(
     let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    state.collapsed_messages_scroll = state.collapsed_messages_scroll.min(max_scroll);
+    state.messages_scrolling_state.collapsed_messages_scroll = state.messages_scrolling_state.collapsed_messages_scroll.min(max_scroll);
 }
 
 /// Handle Ctrl+S event
@@ -277,7 +276,7 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
         let _ = cmd.kill();
     }
     if let Some(shell_msg_id) = state.interactive_shell_message_id {
-        state.messages.retain(|m| m.id != shell_msg_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
     }
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
@@ -325,8 +324,8 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 
     // After checkpoint resume completes, ensure we scroll to show the latest messages
     if is_checkpoint_resume {
-        state.scroll_to_bottom = true;
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.scroll_to_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
         // Invalidate cache to ensure fresh render with correct scroll
         crate::services::message::invalidate_message_lines_cache(state);
     }
@@ -336,14 +335,14 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     // Clear any pending cancellation since a new assistant message arrived
     state.tool_call_state.cancel_requested = false;
-    state.messages.push(Message::assistant(None, msg, None));
+    state.messages_scrolling_state.messages.push(Message::assistant(None, msg, None));
 
     // Invalidate cache since messages changed
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Scroll to bottom to show the new message
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Auto-show side panel on first message (assistant)
     state.auto_show_side_panel();
@@ -376,7 +375,7 @@ pub fn handle_refresh_board_tasks(
     let agent_id = state
         .board_agent_id
         .clone()
-        .or_else(|| extract_board_agent_id_from_messages(&state.messages));
+        .or_else(|| extract_board_agent_id_from_messages(&state.messages_scrolling_state.messages));
 
     let Some(agent_id) = agent_id else {
         return;

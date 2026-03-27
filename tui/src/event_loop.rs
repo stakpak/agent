@@ -126,7 +126,7 @@ pub async fn run_tui(
     // Add welcome messages after state is created
     let welcome_msg =
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
-    state.messages.extend(welcome_msg);
+    state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Trigger initial board tasks refresh if agent ID is configured
     if state.board_agent_id.is_some() {
@@ -138,7 +138,7 @@ pub async fn run_tui(
         && let Some(prompt) = state.init_prompt_content.clone()
         && !prompt.trim().is_empty()
     {
-        state.messages.push(Message::user(prompt.clone(), None));
+        state.messages_scrolling_state.messages.push(Message::user(prompt.clone(), None));
         crate::services::message::invalidate_message_lines_cache(&mut state);
         let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new(), None));
     }
@@ -260,7 +260,7 @@ pub async fn run_tui(
                        // (handles case where streaming message uses tool_call_id directly)
                        // The tool call ID is a String, but message IDs are Uuid
                        if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
-                           state.messages.retain(|m| m.id != tool_call_uuid);
+                           state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_uuid);
                        }
 
                        state.session_tool_calls_state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
@@ -277,23 +277,23 @@ pub async fn run_tui(
 
                        if (is_cancelled || is_error) && !is_fg_cmd {
                            // For non-command tools with cancelled/error, use old renderer
-                           state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                           state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                           state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                           state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                        } else {
                            match tool_name {
                                "str_replace" | "create" => {
                                    // TUI: Show diff result block with yellow border (is_collapsed: None)
-                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
                                    // Use render_full_content_message which stores the full ToolCallResult including the result
                                    // (needed for extracting line numbers from the diff output)
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                "run_command_task" | "run_remote_command_task" => {
                                    // TUI: bordered result block (is_collapsed: None)
-                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: full content without border (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                 "run_command" | "run_remote_command" => {
                                     // Use unified run command block with appropriate state
@@ -322,24 +322,24 @@ pub async fn run_tui(
                                     if is_cancelled && state.shell_popup_state.shell_popup_visible {
                                         if let Some(shell_msg_id) = state.interactive_shell_message_id {
                                             // Find the position of the shell message
-                                            if let Some(pos) = state.messages.iter().position(|m| m.id == shell_msg_id) {
+                                            if let Some(pos) = state.messages_scrolling_state.messages.iter().position(|m| m.id == shell_msg_id) {
                                                 // Insert cancelled block and popup before shell message
-                                                state.messages.insert(pos, popup_msg);
-                                                state.messages.insert(pos, run_cmd_msg);
+                                                state.messages_scrolling_state.messages.insert(pos, popup_msg);
+                                                state.messages_scrolling_state.messages.insert(pos, run_cmd_msg);
                                             } else {
                                                 // Shell message not found, just push normally
-                                                state.messages.push(run_cmd_msg);
-                                                state.messages.push(popup_msg);
+                                                state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                                state.messages_scrolling_state.messages.push(popup_msg);
                                             }
                                         } else {
                                             // No shell message ID, just push normally
-                                            state.messages.push(run_cmd_msg);
-                                            state.messages.push(popup_msg);
+                                            state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                            state.messages_scrolling_state.messages.push(popup_msg);
                                         }
                                     } else {
                                         // Normal case: just push to the end
-                                        state.messages.push(run_cmd_msg);
-                                        state.messages.push(popup_msg);
+                                        state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                        state.messages_scrolling_state.messages.push(popup_msg);
                                     }
                                 }
                                 "read" | "view" | "read_file" => {
@@ -348,15 +348,15 @@ pub async fn run_tui(
                                     let (file_path, grep, glob) = crate::services::handlers::tool::extract_view_params_from_tool_call(&tool_call_result.call);
                                     let file_path = file_path.unwrap_or_else(|| "file".to_string());
                                     let total_lines = tool_call_result.result.lines().count();
-                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
+                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
                                     // Full screen popup: same compact view without borders
-                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
+                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
                                 }
                                _ => {
                                    // TUI: collapsed command message - last 3 lines (is_collapsed: None)
-                                   state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
                                    // Full screen popup: full content (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                            }
 
@@ -367,7 +367,7 @@ pub async fn run_tui(
                        }
                        // Invalidate cache and scroll to bottom to show the result
                        crate::services::message::invalidate_message_lines_cache(&mut state);
-                       state.stay_at_bottom = true;
+                       state.messages_scrolling_state.stay_at_bottom = true;
 
                        // Refresh board tasks after tool execution (agent may have updated tasks)
                        // Always trigger refresh - the handler will extract agent_id from messages if needed
@@ -438,7 +438,7 @@ pub async fn run_tui(
                                }
                                Err(error) => {
                                    // Show error message
-                                   state.messages.push(Message::info(
+                                   state.messages_scrolling_state.messages.push(Message::info(
                                        format!("Failed to open editor: {}", error),
                                         Some(ratatui::style::Style::default().fg(ThemeColors::red())),
                                     ));
@@ -583,7 +583,7 @@ pub async fn run_tui(
                                  }
                                  Err(error) => {
                                      // Show error message
-                                     state.messages.push(Message::info(
+                                     state.messages_scrolling_state.messages.push(Message::info(
                                          format!("Failed to open editor: {}", error),
                                           Some(ratatui::style::Style::default().fg(ThemeColors::red())),
                                      ));

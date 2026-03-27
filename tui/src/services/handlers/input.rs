@@ -101,10 +101,10 @@ pub fn handle_input_submitted_event(
                     state.session_tool_calls_state.session_tool_calls_queue.clear();
                     state.dialog_approval_state.approval_bar.clear();
                     state.dialog_approval_state.toggle_approved_message = true;
-                    state.messages.clear();
-                    state.scroll = 0;
-                    state.scroll_to_bottom = true;
-                    state.stay_at_bottom = true;
+                    state.messages_scrolling_state.messages.clear();
+                    state.messages_scrolling_state.scroll = 0;
+                    state.messages_scrolling_state.scroll_to_bottom = true;
+                    state.messages_scrolling_state.stay_at_bottom = true;
 
                     // Clear changeset and todos from previous session
                     state.changeset = crate::services::changeset::Changeset::default();
@@ -588,10 +588,10 @@ fn handle_input_submitted(
         convert_all_pending_paths(state);
 
         let input_height = 3;
-        let total_lines = state.messages.len() * 2;
+        let total_lines = state.messages_scrolling_state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        let was_at_bottom = state.scroll == max_scroll;
+        let was_at_bottom = state.messages_scrolling_state.scroll == max_scroll;
 
         let mut final_input = state.input().to_string();
 
@@ -647,7 +647,7 @@ fn handle_input_submitted(
 
             if !history_lines.is_empty() {
                 // Add history message for UI
-                state.messages.push(Message {
+                state.messages_scrolling_state.messages.push(Message {
                     id: Uuid::new_v4(),
                     content: MessageContent::RenderRefreshedTerminal(
                         "Shell history".to_string(),
@@ -687,7 +687,7 @@ fn handle_input_submitted(
 
             // Remove the active shell message bubble
             if let Some(shell_msg_id) = state.interactive_shell_message_id {
-                state.messages.retain(|m| m.id != shell_msg_id);
+                state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
             }
             state.interactive_shell_message_id = None;
 
@@ -822,22 +822,22 @@ fn handle_input_submitted(
                 }
             }
         } else {
-            if !state.messages.is_empty() {
-                state.messages.push(Message::plain_text(""));
+            if !state.messages_scrolling_state.messages.is_empty() {
+                state.messages_scrolling_state.messages.push(Message::plain_text(""));
             }
 
-            state.messages.push(Message::user(final_input, None));
+            state.messages_scrolling_state.messages.push(Message::user(final_input, None));
 
             // Add spacing after user message
-            state.messages.push(Message::plain_text(""));
-            state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(ThemeColors::yellow()))));
-            state.messages.push(Message::plain_text(""));
-            state.messages.push(Message::info(
+            state.messages_scrolling_state.messages.push(Message::plain_text(""));
+            state.messages_scrolling_state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(ThemeColors::yellow()))));
+            state.messages_scrolling_state.messages.push(Message::plain_text(""));
+            state.messages_scrolling_state.messages.push(Message::info(
                 "Start a new session or /summarize to export compressed summary to be resued"
                     .to_string(),
                 Some(Style::default().fg(ThemeColors::green())),
             ));
-            state.messages.push(Message::plain_text(""));
+            state.messages_scrolling_state.messages.push(Message::plain_text(""));
         }
 
         // Always clear attached images and reset state after submission
@@ -845,12 +845,12 @@ fn handle_input_submitted(
         state.input_state.text_area.set_text("");
         state.input_state.attached_images.clear();
         state.input_state.pending_path_start = None;
-        let total_lines = state.messages.len() * 2;
+        let total_lines = state.messages_scrolling_state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
-            state.scroll = max_scroll;
-            state.scroll_to_bottom = true;
-            state.stay_at_bottom = true;
+            state.messages_scrolling_state.scroll = max_scroll;
+            state.messages_scrolling_state.scroll_to_bottom = true;
+            state.messages_scrolling_state.stay_at_bottom = true;
         }
         // Loading will be managed by stream processing
         state.loading_state.spinner_frame = 0;
@@ -866,11 +866,11 @@ pub fn handle_input_submitted_with(
 ) {
     state.shell_popup_state.shell_tool_calls = None;
     let input_height = 3;
-    let total_lines = state.messages.len() * 2;
+    let total_lines = state.messages_scrolling_state.messages.len() * 2;
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
-    let was_at_bottom = state.scroll == max_scroll;
-    state.messages.push(Message::submitted_with(
+    let was_at_bottom = state.messages_scrolling_state.scroll == max_scroll;
+    state.messages_scrolling_state.messages.push(Message::submitted_with(
         None,
         s.clone(),
         color.map(|c| Style::default().fg(c)),
@@ -880,15 +880,15 @@ pub fn handle_input_submitted_with(
 
     // If content changed while user is scrolled up, mark it
     if !was_at_bottom {
-        state.content_changed_while_scrolled_up = true;
+        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
     }
 
-    let total_lines = state.messages.len() * 2;
+    let total_lines = state.messages_scrolling_state.messages.len() * 2;
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     if was_at_bottom {
-        state.scroll = max_scroll;
-        state.scroll_to_bottom = true;
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.scroll = max_scroll;
+        state.messages_scrolling_state.scroll_to_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
     }
 }
 

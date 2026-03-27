@@ -154,7 +154,7 @@ pub fn get_selected_action(state: &AppState) -> Option<MessageAction> {
 /// Uses the line_to_message_map that was built during rendering
 pub fn find_user_message_at_line(state: &AppState, absolute_line: usize) -> Option<(Uuid, String)> {
     // Search through the line-to-message map to find which user message contains this line
-    for (start_line, end_line, msg_id, is_user, text, _user_idx) in &state.line_to_message_map {
+    for (start_line, end_line, msg_id, is_user, text, _user_idx) in &state.messages_scrolling_state.line_to_message_map {
         if *is_user && absolute_line >= *start_line && absolute_line < *end_line {
             return Some((*msg_id, text.clone()));
         }

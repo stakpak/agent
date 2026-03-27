@@ -262,6 +262,72 @@ pub struct LoadingState {
     pub loading_manager: LoadingStateManager
 }
 
+pub struct MessagesScrollingState {
+    pub messages: Vec<Message>,
+    pub scroll: usize,
+    pub scroll_to_bottom: bool,
+    pub scroll_to_last_message_start: bool,
+    pub stay_at_bottom: bool,
+    /// Counter to block stay_at_bottom for N frames (used when scroll_to_last_message_start needs to persist)
+    pub block_stay_at_bottom_frames: u8,
+    /// When scroll is locked, this stores how many lines from the end we want to show at top of viewport
+    /// This allows us to maintain relative position even as total_lines changes
+    pub scroll_lines_from_end: Option<usize>,
+    pub content_changed_while_scrolled_up: bool,
+    pub message_lines_cache: Option<MessageLinesCache>,
+    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
+    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
+    pub show_collapsed_messages: bool,
+    pub collapsed_messages_scroll: usize,
+    pub collapsed_messages_selected: usize,
+    pub has_user_messages: bool,
+    /// Per-message rendered line cache for efficient incremental rendering
+    pub per_message_cache: PerMessageCache,
+    /// Assembled lines cache (the final combined output of all message lines)
+    /// Format: (cache_key_hash, lines, generation_counter)
+    pub assembled_lines_cache: Option<(u64, Vec<Line<'static>>, u64)>,
+    /// Cache for visible lines on screen (avoids cloning on every frame)
+    pub visible_lines_cache: Option<VisibleLinesCache>,
+    /// Generation counter for assembled cache (increments on each rebuild)
+    pub cache_generation: u64,
+    /// Performance metrics for render operations
+    pub render_metrics: RenderMetrics,
+    /// Last width used for rendering (to detect width changes)
+    pub last_render_width: usize,
+    /// Maps line ranges to message info for click detection
+    /// Format: Vec<(start_line, end_line, message_id, is_user_message, message_text, user_message_index)>
+    pub line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)>,
+}
+
+impl Default for MessagesScrollingState {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            scroll: 0,
+            scroll_to_bottom: false,
+            scroll_to_last_message_start: false,
+            stay_at_bottom: true,
+            block_stay_at_bottom_frames: 0,
+            scroll_lines_from_end: None,
+            content_changed_while_scrolled_up: false,
+            message_lines_cache: None,
+            collapsed_message_lines_cache: None,
+            processed_lines_cache: None,
+            show_collapsed_messages: false,
+            collapsed_messages_scroll: 0,
+            collapsed_messages_selected: 0,
+            has_user_messages: false,
+            per_message_cache: HashMap::new(),
+            assembled_lines_cache: None,
+            visible_lines_cache: None,
+            cache_generation: 0,
+            render_metrics: RenderMetrics::new(),
+            last_render_width: 0,
+            line_to_message_map: Vec::new(),
+        }
+    }
+}
+
 /// Shell popup and shell-command execution UI state.
 #[derive(Default)]
 pub struct ShellPopupState {

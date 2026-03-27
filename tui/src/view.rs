@@ -225,7 +225,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_queue_preview_line(f, state, padded_queue_area);
     }
 
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.dialog_approval_state.is_dialog_open {
     } else if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
@@ -238,7 +238,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
     // Render hint/shortcuts if not hiding for dropdown, not showing collapsed messages, and not showing approval bar
     if !state.input_state.show_helper_dropdown
-        && !state.show_collapsed_messages
+        && !state.messages_scrolling_state.show_collapsed_messages
         && !approval_bar_visible
         && !ask_user_visible
     {
@@ -470,13 +470,13 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     // IMPORTANT: Write the computed scroll back to state so that event handlers
     // (hover highlighting, text selection, click detection) use the same scroll
     // value that was used for rendering. Without this, stay_at_bottom causes
-    // state.scroll to diverge from the actual rendered scroll.
-    let scroll = if state.stay_at_bottom {
+    // state.messages_scrolling_state.scroll to diverge from the actual rendered scroll.
+    let scroll = if state.messages_scrolling_state.stay_at_bottom {
         max_scroll
     } else {
-        state.scroll.min(max_scroll)
+        state.messages_scrolling_state.scroll.min(max_scroll)
     };
-    state.scroll = scroll;
+    state.messages_scrolling_state.scroll = scroll;
 
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
@@ -501,7 +501,7 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
                 let absolute_line = scroll + row_in_message_area;
 
                 // Find the user message range that contains the hovered line
-                let hovered_message_range = state.line_to_message_map.iter().find(
+                let hovered_message_range = state.messages_scrolling_state.line_to_message_map.iter().find(
                     |(start, end, _, is_user, _, _user_idx)| {
                         *is_user && absolute_line >= *start && absolute_line < *end
                     },
@@ -643,16 +643,16 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Use collapsed_messages_scroll for this popup
-    let scroll = if state.collapsed_messages_scroll > max_scroll {
+    let scroll = if state.messages_scrolling_state.collapsed_messages_scroll > max_scroll {
         max_scroll
     } else {
-        state.collapsed_messages_scroll
+        state.messages_scrolling_state.collapsed_messages_scroll
     };
 
     // Write the clamped scroll back to state so that event handlers (text selection,
     // click detection) use the same scroll value that was used for rendering.
-    // This mirrors the pattern in render_messages() for state.scroll.
-    state.collapsed_messages_scroll = scroll;
+    // This mirrors the pattern in render_messages() for state.messages_scrolling_state.scroll.
+    state.messages_scrolling_state.collapsed_messages_scroll = scroll;
 
     // Create visible lines
     let mut visible_lines = Vec::new();

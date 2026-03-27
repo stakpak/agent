@@ -46,7 +46,7 @@ pub fn handle_stream_tool_result(
 
         // Update the pending/running bash message to show stall warning
         if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-            for msg in &mut state.messages {
+            for msg in &mut state.messages_scrolling_state.messages {
                 if msg.id == pending_id {
                     // Update to the stall warning variant - handle both old and new block types
                     match &msg.content {
@@ -127,10 +127,10 @@ pub fn handle_stream_tool_result(
 
     // 3. Remove the pending message with pending_bash_message_id (not the streaming message id)
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages.retain(|m| m.id != pending_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
     }
     // Also remove any old streaming message with this id
-    state.messages.retain(|m| m.id != tool_call_id);
+    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_id);
 
     // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
@@ -143,14 +143,14 @@ pub fn handle_stream_tool_result(
     // 5. Use unified run command block for run_command, otherwise use the default streaming block
     if is_run_command {
         let cmd = command_str.unwrap_or_else(|| "command".to_string());
-        state.messages.push(Message::render_run_command_block(
+        state.messages_scrolling_state.messages.push(Message::render_run_command_block(
             cmd,
             Some(buffer_content),
             crate::services::bash_block::RunCommandState::Running,
             Some(tool_call_id),
         ));
     } else {
-        state.messages.push(Message::render_streaming_border_block(
+        state.messages_scrolling_state.messages.push(Message::render_streaming_border_block(
             &buffer_content,
             "Tool Streaming",
             "Result",
@@ -162,8 +162,8 @@ pub fn handle_stream_tool_result(
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
-    if !state.stay_at_bottom {
-        state.content_changed_while_scrolled_up = true;
+    if !state.messages_scrolling_state.stay_at_bottom {
+        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
     }
 
     None
@@ -185,10 +185,10 @@ fn handle_task_wait_progress(
 
     // Remove the pending message if exists
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages.retain(|m| m.id != pending_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
     }
     // Remove any old message with this id (replace mode)
-    state.messages.retain(|m| m.id != tool_call_id);
+    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_id);
 
     // Use structured task updates if available, otherwise fall back to message
     if let Some(task_updates) = progress.task_updates {
@@ -213,7 +213,7 @@ fn handle_task_wait_progress(
         let overall_progress = progress.progress.unwrap_or(0.0);
 
         // Use dedicated task wait block
-        state.messages.push(Message::render_task_wait_block(
+        state.messages_scrolling_state.messages.push(Message::render_task_wait_block(
             task_updates,
             overall_progress,
             target_task_ids,
@@ -227,7 +227,7 @@ fn handle_task_wait_progress(
             .streaming_tool_results
             .insert(tool_call_id, progress.message.clone());
 
-        state.messages.push(Message::render_streaming_border_block(
+        state.messages_scrolling_state.messages.push(Message::render_streaming_border_block(
             &progress.message,
             "Wait for Tasks",
             "Progress",
@@ -240,8 +240,8 @@ fn handle_task_wait_progress(
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
-    if !state.stay_at_bottom {
-        state.content_changed_while_scrolled_up = true;
+    if !state.messages_scrolling_state.stay_at_bottom {
+        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
     }
 
     None
@@ -251,7 +251,7 @@ fn handle_task_wait_progress(
 pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>) {
     // Clear the streaming preview block now that tool calls are finalized
     if let Some(preview_id) = state.tool_call_state.tool_call_stream_preview_id.take() {
-        state.messages.retain(|m| m.id != preview_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != preview_id);
         invalidate_message_lines_cache(state);
     }
 
@@ -295,18 +295,18 @@ pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCal
     state.tool_call_state.is_streaming = true;
 
     // Remove old preview message (replace mode)
-    state.messages.retain(|m| m.id != preview_id);
+    state.messages_scrolling_state.messages.retain(|m| m.id != preview_id);
 
     // Add updated preview
-    state.messages.push(Message::render_tool_call_stream_block(
+    state.messages_scrolling_state.messages.push(Message::render_tool_call_stream_block(
         infos,
         Some(preview_id),
     ));
 
     invalidate_message_lines_cache(state);
 
-    if !state.stay_at_bottom {
-        state.content_changed_while_scrolled_up = true;
+    if !state.messages_scrolling_state.stay_at_bottom {
+        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
     }
 }
 
@@ -364,8 +364,8 @@ pub fn handle_retry_tool_call(
 
 /// Handle retry mechanism
 pub fn handle_retry_mechanism(state: &mut AppState) {
-    if state.messages.len() >= 2 {
-        state.messages.pop();
+    if state.messages_scrolling_state.messages.len() >= 2 {
+        state.messages_scrolling_state.messages.pop();
     }
 }
 
@@ -401,16 +401,16 @@ pub fn handle_toggle_approval_status(state: &mut AppState) {
 pub fn handle_approval_popup_next_tab(state: &mut AppState) {
     state.dialog_approval_state.approval_bar.select_next();
     // Scroll to show the beginning of the tool call block
-    state.scroll_to_last_message_start = true;
-    state.stay_at_bottom = false;
+    state.messages_scrolling_state.scroll_to_last_message_start = true;
+    state.messages_scrolling_state.stay_at_bottom = false;
 }
 
 /// Handle approval bar prev tab event
 pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
     state.dialog_approval_state.approval_bar.select_prev();
     // Scroll to show the beginning of the tool call block
-    state.scroll_to_last_message_start = true;
-    state.stay_at_bottom = false;
+    state.messages_scrolling_state.scroll_to_last_message_start = true;
+    state.messages_scrolling_state.stay_at_bottom = false;
 }
 
 /// Handle approval bar toggle approval event
@@ -435,7 +435,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 
     // Clear the streaming data and remove the streaming message and pending bash message id
     state.tool_call_state.streaming_tool_results.clear();
-    state.messages.retain(|m| {
+    state.messages_scrolling_state.messages.retain(|m| {
         m.id != state.tool_call_state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.tool_call_state.pending_bash_message_id.unwrap_or_default()
     });
@@ -900,7 +900,7 @@ pub fn handle_approval_bar_collapse(state: &mut AppState) {
 fn update_pending_tool_display(state: &mut AppState) {
     // Remove any existing pending tool block
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages.retain(|m| m.id != pending_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
     }
 
     // Create a new pending block for the currently selected tool
@@ -909,13 +909,13 @@ fn update_pending_tool_display(state: &mut AppState) {
     // Force-invalidate cache — bypass the streaming guard in invalidate_message_lines_cache
     // because the user is actively cycling through tool call tabs and needs to see the
     // updated preview immediately, even if is_streaming is still true from the LLM stream.
-    state.assembled_lines_cache = None;
-    state.visible_lines_cache = None;
-    state.message_lines_cache = None;
-    state.collapsed_message_lines_cache = None;
+    state.messages_scrolling_state.assembled_lines_cache = None;
+    state.messages_scrolling_state.visible_lines_cache = None;
+    state.messages_scrolling_state.message_lines_cache = None;
+    state.messages_scrolling_state.collapsed_message_lines_cache = None;
 
     // Don't auto-scroll - let user control scroll position
-    state.stay_at_bottom = false;
+    state.messages_scrolling_state.stay_at_bottom = false;
 }
 
 /// Create a pending block in messages for the currently selected tool in the approval bar.
@@ -946,7 +946,7 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
 
             let msg = Message::render_run_command_block(command, None, run_state, None);
             state.tool_call_state.pending_bash_message_id = Some(msg.id);
-            state.messages.push(msg);
+            state.messages_scrolling_state.messages.push(msg);
         } else if tool_name == "resume_subagent_task" {
             // For resume_subagent_task, use the special subagent pending block
             let pause_info =
@@ -966,12 +966,12 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
                 None,
             );
             state.tool_call_state.pending_bash_message_id = Some(msg.id);
-            state.messages.push(msg);
+            state.messages_scrolling_state.messages.push(msg);
         } else {
             // For other tools, use the standard pending block
             let msg = Message::render_pending_border_block(tool_call.clone(), auto_approve, None);
             state.tool_call_state.pending_bash_message_id = Some(msg.id);
-            state.messages.push(msg);
+            state.messages_scrolling_state.messages.push(msg);
         }
 
         // Update dialog_command to the selected tool

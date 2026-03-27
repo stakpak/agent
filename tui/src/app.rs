@@ -24,7 +24,6 @@ use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use ratatui::layout::{Rect, Size};
-use ratatui::text::Line;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
@@ -35,40 +34,7 @@ pub struct AppState {
     pub input_state: InputState,
 
     // ========== Messages & Scrolling State ==========
-    pub messages: Vec<Message>,
-    pub scroll: usize,
-    pub scroll_to_bottom: bool,
-    pub scroll_to_last_message_start: bool,
-    pub stay_at_bottom: bool,
-    /// Counter to block stay_at_bottom for N frames (used when scroll_to_last_message_start needs to persist)
-    pub block_stay_at_bottom_frames: u8,
-    /// When scroll is locked, this stores how many lines from the end we want to show at top of viewport
-    /// This allows us to maintain relative position even as total_lines changes
-    pub scroll_lines_from_end: Option<usize>,
-    pub content_changed_while_scrolled_up: bool,
-    pub message_lines_cache: Option<MessageLinesCache>,
-    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
-    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
-    pub show_collapsed_messages: bool,
-    pub collapsed_messages_scroll: usize,
-    pub collapsed_messages_selected: usize,
-    pub has_user_messages: bool,
-    /// Per-message rendered line cache for efficient incremental rendering
-    pub per_message_cache: PerMessageCache,
-    /// Assembled lines cache (the final combined output of all message lines)
-    /// Format: (cache_key_hash, lines, generation_counter)
-    pub assembled_lines_cache: Option<(u64, Vec<Line<'static>>, u64)>,
-    /// Cache for visible lines on screen (avoids cloning on every frame)
-    pub visible_lines_cache: Option<VisibleLinesCache>,
-    /// Generation counter for assembled cache (increments on each rebuild)
-    pub cache_generation: u64,
-    /// Performance metrics for render operations
-    pub render_metrics: RenderMetrics,
-    /// Last width used for rendering (to detect width changes)
-    pub last_render_width: usize,
-    /// Maps line ranges to message info for click detection
-    /// Format: Vec<(start_line, end_line, message_id, is_user_message, message_text, user_message_index)>
-    pub line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)>,
+    pub messages_scrolling_state: MessagesScrollingState,
 
     // ========== Loading State ==========
     pub loading_state: LoadingState,
@@ -344,14 +310,7 @@ impl AppState {
                     .collect(),
             },
             loading_state: LoadingState::default(),
-            messages: Vec::new(), // Will be populated after state is created
-            scroll: 0,
-            scroll_to_bottom: false,
-            scroll_to_last_message_start: false,
-            stay_at_bottom: true,
-            block_stay_at_bottom_frames: 0,
-            scroll_lines_from_end: None,
-            content_changed_while_scrolled_up: false,
+            messages_scrolling_state: MessagesScrollingState::default(),
             dialog_approval_state: DialogApprovalState::default(),
             sessions_state: SessionsState::default(),
             tool_call_state: ToolCallState {
@@ -371,22 +330,8 @@ impl AppState {
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             // Default to messages view focused
-            show_collapsed_messages: false,
-            collapsed_messages_scroll: 0,
-            collapsed_messages_selected: 0,
             is_git_repo,
-            message_lines_cache: None,
-            collapsed_message_lines_cache: None,
-            processed_lines_cache: None,
-            per_message_cache: HashMap::new(),
-            assembled_lines_cache: None,
-            visible_lines_cache: None,
-            cache_generation: 0,
-            render_metrics: RenderMetrics::new(),
-            last_render_width: 0,
-            line_to_message_map: Vec::new(),
             mouse_capture_enabled: false,
-            has_user_messages: false,
             terminal_size: Size {
                 width: 0,
                 height: 0,
@@ -493,7 +438,8 @@ impl AppState {
     }
 
     pub fn update_session_empty_status(&mut self) {
-        let session_empty = !self.has_user_messages && self.input_state.text_area.text().is_empty();
+        let session_empty = !self.messages_scrolling_state.has_user_messages
+            && self.input_state.text_area.text().is_empty();
         self.input_state.text_area.set_session_empty(session_empty);
     }
 
@@ -588,7 +534,9 @@ impl AppState {
 
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
-        self.messages.push(Message::plain_text("SPACING_MARKER"));
+        self.messages_scrolling_state
+            .messages
+            .push(Message::plain_text("SPACING_MARKER"));
         push_styled_message(
             self,
             &command,
@@ -596,7 +544,9 @@ impl AppState {
             SHELL_PROMPT_PREFIX,
             ThemeColors::magenta(),
         );
-        self.messages.push(Message::plain_text("SPACING_MARKER"));
+        self.messages_scrolling_state
+            .messages
+            .push(Message::plain_text("SPACING_MARKER"));
         let rows = if self.terminal_size.height > 0 {
             self.terminal_size.height
         } else {

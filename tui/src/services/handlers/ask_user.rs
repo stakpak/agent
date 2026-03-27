@@ -55,7 +55,7 @@ pub fn handle_show_ask_user_popup(
     // showing the interactive ask_user UI. Without this, both blocks coexist and
     // the user sees a confusing duplicate "Ask User" placeholder.
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id.take() {
-        state.messages.retain(|m| m.id != pending_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
     }
 
     state.ask_user_state.show_ask_user_popup = true;
@@ -108,13 +108,13 @@ pub fn handle_show_ask_user_popup(
         None,
     );
     state.ask_user_state.ask_user_message_id = Some(msg.id);
-    state.messages.push(msg);
+    state.messages_scrolling_state.messages.push(msg);
 
     // Invalidate cache to update display
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Auto-scroll to bottom to show the new block
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 }
 
 /// Public wrapper for refresh (used by handlers/mod.rs for focus toggle)
@@ -126,7 +126,7 @@ pub fn refresh_ask_user_block_pub(state: &mut AppState) {
 fn refresh_ask_user_block(state: &mut AppState) {
     if let Some(msg_id) = state.ask_user_state.ask_user_message_id {
         // Update the existing message in-place
-        for msg in &mut state.messages {
+        for msg in &mut state.messages_scrolling_state.messages {
             if msg.id == msg_id {
                 msg.content = crate::services::message::MessageContent::RenderAskUserBlock {
                     questions: state.ask_user_state.ask_user_questions.clone(),
@@ -143,10 +143,10 @@ fn refresh_ask_user_block(state: &mut AppState) {
         // skips invalidation when stay_at_bottom=false && is_streaming=true (to prevent
         // jitter during streaming). But ask_user refreshes are user-driven interactions
         // that must always be reflected visually.
-        state.assembled_lines_cache = None;
-        state.visible_lines_cache = None;
-        state.message_lines_cache = None;
-        state.collapsed_message_lines_cache = None;
+        state.messages_scrolling_state.assembled_lines_cache = None;
+        state.messages_scrolling_state.visible_lines_cache = None;
+        state.messages_scrolling_state.message_lines_cache = None;
+        state.messages_scrolling_state.collapsed_message_lines_cache = None;
     }
 }
 
@@ -530,7 +530,7 @@ pub fn handle_ask_user_cancel(state: &mut AppState, output_tx: &Sender<OutputEve
 fn close_ask_user_popup(state: &mut AppState) {
     // Remove the inline message block
     if let Some(msg_id) = state.ask_user_state.ask_user_message_id.take() {
-        state.messages.retain(|m| m.id != msg_id);
+        state.messages_scrolling_state.messages.retain(|m| m.id != msg_id);
     }
 
     state.ask_user_state.show_ask_user_popup = false;

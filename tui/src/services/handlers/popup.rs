@@ -121,7 +121,7 @@ pub fn handle_profile_switch_requested(state: &mut AppState, profile: String) {
 
     state.profile_switcher_state.profile_switch_status_message = Some(format!("🔄 Switching to profile: {}", profile));
 
-    state.messages.push(Message::info(
+    state.messages_scrolling_state.messages.push(Message::info(
         format!("🔄 Switching to profile: {}", profile),
         None,
     ));
@@ -130,13 +130,13 @@ pub fn handle_profile_switch_requested(state: &mut AppState, profile: String) {
 /// Handle profile switch progress event
 pub fn handle_profile_switch_progress(state: &mut AppState, message: String) {
     state.profile_switcher_state.profile_switch_status_message = Some(message.clone());
-    state.messages.push(Message::info(message.clone(), None));
+    state.messages_scrolling_state.messages.push(Message::info(message.clone(), None));
 }
 
 /// Handle profile switch complete event
 pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     // Clear EVERYTHING
-    state.messages.clear();
+    state.messages_scrolling_state.messages.clear();
     state.session_tool_calls_state.session_tool_calls_queue.clear();
     state.tool_call_state.completed_tool_calls.clear();
     state.tool_call_state.streaming_tool_results.clear();
@@ -145,10 +145,10 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.dialog_approval_state.message_tool_calls = None;
     state.dialog_approval_state.message_approved_tools.clear();
     state.dialog_approval_state.message_rejected_tools.clear();
-    state.has_user_messages = false;
-    state.scroll = 0;
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.has_user_messages = false;
+    state.messages_scrolling_state.scroll = 0;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
     state.session_tool_calls_state.tool_call_execution_order.clear();
     state.session_tool_calls_state.last_message_tool_calls.clear();
 
@@ -169,7 +169,7 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.dialog_approval_state.is_dialog_open = false;
     state.dialog_approval_state.dialog_command = None;
     state.dialog_approval_state.show_shortcuts = false;
-    state.show_collapsed_messages = false;
+    state.messages_scrolling_state.show_collapsed_messages = false;
     state.dialog_approval_state.approval_bar.clear();
 
     // Clear retry state
@@ -191,13 +191,13 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.profile_switcher_state.profile_switch_status_message = None;
 
     // Show success and welcome messages
-    state.messages.push(Message::info(
+    state.messages_scrolling_state.messages.push(Message::info(
         format!("✅ Successfully switched to profile: {}", profile),
         Some(Style::default().fg(ThemeColors::success())),
     ));
 
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
-    state.messages.extend(welcome_msg);
+    state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Invalidate all caches
     invalidate_message_lines_cache(state);
@@ -209,11 +209,11 @@ pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
     state.profile_switcher_state.profile_switch_status_message = None;
     state.profile_switcher_state.show_profile_switcher = false;
 
-    state.messages.push(Message::info(
+    state.messages_scrolling_state.messages.push(Message::info(
         format!("❌ Profile switch failed: {}", error),
         Some(Style::default().fg(ThemeColors::danger())),
     ));
-    state.messages.push(Message::info(
+    state.messages_scrolling_state.messages.push(Message::info(
         "Staying in current profile. Press ctrl+p to try again.",
         None,
     ));
@@ -290,7 +290,7 @@ pub fn handle_rulebook_switcher_confirm(state: &mut AppState, output_tx: &Sender
 
         // Show confirmation message
         let count = state.rulebook_switcher_state.selected_rulebooks.len();
-        state.messages.push(Message::info(
+        state.messages_scrolling_state.messages.push(Message::info(
             format!(
                 "Selected {} rulebook(s). They will be applied to your next message.",
                 count
@@ -450,11 +450,10 @@ pub fn handle_toggle_collapsed_messages(
     state.selection = crate::services::text_selection::SelectionState::default();
 
     // Handle collapsed messages popup
-    state.show_collapsed_messages = !state.show_collapsed_messages;
-    if state.show_collapsed_messages {
+    state.messages_scrolling_state.show_collapsed_messages = !state.messages_scrolling_state.show_collapsed_messages;
+    if state.messages_scrolling_state.show_collapsed_messages {
         // Calculate scroll position to show the top of the last message
-        let collapsed_messages: Vec<Message> = state
-            .messages
+        let collapsed_messages: Vec<Message> = state.messages_scrolling_state.messages
             .iter()
             .filter(|m| m.is_collapsed == Some(true))
             .cloned()
@@ -462,7 +461,7 @@ pub fn handle_toggle_collapsed_messages(
 
         if !collapsed_messages.is_empty() {
             // Set selected to the last message
-            state.collapsed_messages_selected = collapsed_messages.len() - 1;
+            state.messages_scrolling_state.collapsed_messages_selected = collapsed_messages.len() - 1;
 
             // Get all collapsed message lines once
             let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
@@ -471,10 +470,10 @@ pub fn handle_toggle_collapsed_messages(
             // For now, just scroll to the bottom to show the last message
             let total_lines = all_lines.len();
             let max_scroll = total_lines.saturating_sub(message_area_height);
-            state.collapsed_messages_scroll = max_scroll;
+            state.messages_scrolling_state.collapsed_messages_scroll = max_scroll;
         } else {
-            state.collapsed_messages_scroll = 0;
-            state.collapsed_messages_selected = 0;
+            state.messages_scrolling_state.collapsed_messages_scroll = 0;
+            state.messages_scrolling_state.collapsed_messages_selected = 0;
         }
     }
 }
@@ -1120,8 +1119,7 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
         MessageAction::RevertToMessage => {
             if let Some(target_id) = state.message_action_target_message_id {
                 // Find the user message index from the line_to_message_map
-                let target_user_idx = state
-                    .line_to_message_map
+                let target_user_idx = state.messages_scrolling_state.line_to_message_map
                     .iter()
                     .find(|(_, _, id, is_user, _, user_idx)| {
                         *id == target_id && *is_user && *user_idx > 0
@@ -1136,9 +1134,9 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
                         .revert_from_user_message(target_idx, &state.session_id);
 
                     // Find the TUI message index and truncate
-                    if let Some(msg_idx) = state.messages.iter().position(|m| m.id == target_id) {
+                    if let Some(msg_idx) = state.messages_scrolling_state.messages.iter().position(|m| m.id == target_id) {
                         // Truncate messages - remove target message and everything after
-                        state.messages.truncate(msg_idx);
+                        state.messages_scrolling_state.messages.truncate(msg_idx);
                     }
 
                     // Store pending revert for backend sync

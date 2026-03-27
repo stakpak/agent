@@ -140,9 +140,9 @@ pub fn update(
         }
     }
 
-    state.scroll = state.scroll.max(0);
+    state.messages_scrolling_state.scroll = state.messages_scrolling_state.scroll.max(0);
 
-    state.scroll = state.scroll.max(0);
+    state.messages_scrolling_state.scroll = state.messages_scrolling_state.scroll.max(0);
 
     // Backend events (streaming, loading, tool results, etc.) must always reach
     // their handlers — popup interceptors must never consume them. Skip all popup
@@ -660,7 +660,7 @@ pub fn update(
     // Intercept keys for Approval Bar (inline approval)
     // Controls: ←→ navigate, Space toggle, Enter confirm all, Esc reject all
     // Don't intercept if collapsed messages popup is showing
-    if state.dialog_approval_state.approval_bar.is_visible() && !state.show_collapsed_messages {
+    if state.dialog_approval_state.approval_bar.is_visible() && !state.messages_scrolling_state.show_collapsed_messages {
         match event {
             InputEvent::HandleEsc => {
                 if !state.dialog_approval_state.approval_bar.is_esc_pending() {
@@ -1338,7 +1338,7 @@ pub fn update(
         InputEvent::ApprovalPopupSubmit => {}
         InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
             handle_banner_mouse_click(state, col, row, input_tx, output_tx);
-            if state.show_collapsed_messages {
+            if state.messages_scrolling_state.show_collapsed_messages {
                 // When collapsed popup is open, route directly to text selection
                 // (which handles popup geometry internally)
                 text_selection::handle_drag_start(state, col, row);
@@ -1658,8 +1658,7 @@ mod tests {
         assert!(input_rx.try_recv().is_err());
 
         assert!(
-            state
-                .messages
+            state.messages_scrolling_state.messages
                 .iter()
                 .any(|message| matches!(&message.content, MessageContent::UserMessage(text) if text == "queued"))
         );
@@ -1930,7 +1929,7 @@ mod tests {
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // stay_at_bottom defaults to true
-        assert!(state.stay_at_bottom);
+        assert!(state.messages_scrolling_state.stay_at_bottom);
 
         // Down navigates from option 0 → 1
         update(
@@ -1967,7 +1966,7 @@ mod tests {
         );
         // stay_at_bottom is unchanged — arrows no longer affect scroll state
         assert!(
-            state.stay_at_bottom,
+            state.messages_scrolling_state.stay_at_bottom,
             "Down at boundary should NOT affect stay_at_bottom"
         );
 
@@ -2005,12 +2004,12 @@ mod tests {
             "Up at top should clamp at first option"
         );
         assert!(
-            state.stay_at_bottom,
+            state.messages_scrolling_state.stay_at_bottom,
             "Up at boundary should NOT affect stay_at_bottom"
         );
 
         // Even when stay_at_bottom is false, arrows still navigate options
-        state.stay_at_bottom = false;
+        state.messages_scrolling_state.stay_at_bottom = false;
         update(
             &mut state,
             InputEvent::Down,
