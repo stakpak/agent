@@ -114,6 +114,7 @@ Full setup guide: [cli/README.md](cli/README.md)
 - **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
+- **Privacy-First Defaults** - Auto-update checks, machine fingerprinting, and telemetry collection are disabled by default and require explicit opt-in via environment variables (`STAKPAK_ENABLE_UPDATES=1`, `STAKPAK_GENERATE_MACHINE_ID=1`, `STAKPAK_ENABLE_TELEMETRY=1`)
 
 ## 🛠️ Built for DevOps Work
 
