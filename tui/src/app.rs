@@ -7,8 +7,6 @@ pub use types::*;
 
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::banner::BannerMessage;
-use crate::services::board_tasks::TaskProgress;
-use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 #[cfg(unix)]
@@ -130,36 +128,7 @@ pub struct AppState {
     pub input_content_area: Option<ratatui::layout::Rect>,
 
     // ========== Side Panel State ==========
-    pub show_side_panel: bool,
-    pub side_panel_focus: SidePanelSection,
-    pub side_panel_section_collapsed: std::collections::HashMap<SidePanelSection, bool>,
-    /// Stores the screen area for each side panel section to handle mouse clicks
-    pub side_panel_areas: HashMap<SidePanelSection, ratatui::layout::Rect>,
-    /// Current session ID for backup paths
-    pub session_id: String,
-    /// Timestamp when session ID was last copied (for "Copied!" feedback)
-    pub session_id_copied_at: Option<std::time::Instant>,
-    pub changeset: Changeset,
-
-    pub todos: Vec<TodoItem>,
-    /// Task progress (completed/total checklist items)
-    pub task_progress: Option<TaskProgress>,
-    pub session_start_time: std::time::Instant,
-
-    // Auto-show side panel tracking
-    pub side_panel_auto_shown: bool,
-
-    /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID or created)
-    pub board_agent_id: Option<String>,
-
-    /// External editor command (vim, nvim, or nano)
-    pub editor_command: String,
-
-    /// Pending file to open in editor (set by handler, consumed by event loop)
-    pub pending_editor_open: Option<String>,
-
-    /// Billing info for the side panel
-    pub billing_info: Option<stakpak_shared::models::billing::BillingResponse>,
+    pub side_panel_state: SidePanelState,
 
     /// Cached pause info for subagent tasks (task_id -> pause_info)
     /// Used to display what subagents want to do in the approval bar
@@ -393,30 +362,13 @@ impl AppState {
             model,
 
             // Side panel initialization
-            show_side_panel: false,
-            side_panel_focus: SidePanelSection::Context,
-            side_panel_section_collapsed: {
-                let mut collapsed = std::collections::HashMap::new();
-                collapsed.insert(SidePanelSection::Context, false); // Always expanded
-                collapsed.insert(SidePanelSection::Billing, false); // Expanded by default
-                collapsed.insert(SidePanelSection::Tasks, false); // Expanded by default
-                collapsed.insert(SidePanelSection::Changeset, false); // Expanded by default
-                collapsed
+            side_panel_state: SidePanelState {
+                board_agent_id,
+                editor_command: crate::services::editor::detect_editor(editor_command)
+                    .unwrap_or_else(|| "nano".to_string()),
+                ..Default::default()
             },
-            side_panel_areas: HashMap::new(),
-            changeset: Changeset::new(),
-            todos: Vec::new(),
-            task_progress: None,
-            session_start_time: std::time::Instant::now(),
-            side_panel_auto_shown: false,
-            session_id: String::new(), // Will be set when session starts
-            session_id_copied_at: None,
-            board_agent_id,
-            editor_command: crate::services::editor::detect_editor(editor_command)
-                .unwrap_or_else(|| "nano".to_string()),
-            pending_editor_open: None,
             pending_user_messages: VecDeque::new(),
-            billing_info: None,
             auth_display_info,
 
             // Plan mode/review initialization
@@ -641,9 +593,9 @@ impl AppState {
         }
     }
     pub fn auto_show_side_panel(&mut self) {
-        if !self.side_panel_auto_shown && !self.show_side_panel {
-            self.show_side_panel = true;
-            self.side_panel_auto_shown = true;
+        if !self.side_panel_state.side_panel_auto_shown && !self.side_panel_state.show_side_panel {
+            self.side_panel_state.show_side_panel = true;
+            self.side_panel_state.side_panel_auto_shown = true;
         }
     }
 }

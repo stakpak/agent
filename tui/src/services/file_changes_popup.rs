@@ -55,7 +55,7 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
 
     // Filter files
     let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
-    let binding = state.changeset.files_in_order();
+    let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
         .filter(|file| query.is_empty() || file.display_name().to_lowercase().contains(&query))

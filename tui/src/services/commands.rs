@@ -478,7 +478,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 };
 
                 if resolved_path.exists() {
-                    ctx.state.pending_editor_open =
+                    ctx.state.side_panel_state.pending_editor_open =
                         Some(resolved_path.to_string_lossy().to_string());
                     ctx.state.input_state.text_area.set_text("");
                     ctx.state.input_state.show_helper_dropdown = false;
@@ -714,8 +714,8 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
-    state.changeset = crate::services::changeset::Changeset::default();
-    state.todos.clear();
+    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+    state.side_panel_state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
@@ -773,8 +773,8 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
-    state.changeset = crate::services::changeset::Changeset::default();
-    state.todos.clear();
+    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+    state.side_panel_state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);

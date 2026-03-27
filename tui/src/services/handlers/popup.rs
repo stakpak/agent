@@ -178,8 +178,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.tool_call_state.is_retrying = false;
 
     // Clear changeset and todos from previous session
-    state.changeset = Changeset::default();
-    state.todos.clear();
+    state.side_panel_state.changeset = Changeset::default();
+    state.side_panel_state.todos.clear();
 
     // CRITICAL: Close profile switcher to prevent stray selects
     state.profile_switcher_state.show_profile_switcher = false;
@@ -485,44 +485,44 @@ pub fn handle_toggle_side_panel(
     state: &mut AppState,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
-    state.show_side_panel = !state.show_side_panel;
+    state.side_panel_state.show_side_panel = !state.side_panel_state.show_side_panel;
     // Refresh board tasks when showing the side panel
     // The handler will extract agent_id from messages if not already set
-    if state.show_side_panel {
+    if state.side_panel_state.show_side_panel {
         let _ = input_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 }
 
 /// Handle side panel section navigation
 pub fn handle_side_panel_next_section(state: &mut AppState) {
-    if state.show_side_panel {
-        state.side_panel_focus = state.side_panel_focus.next();
+    if state.side_panel_state.show_side_panel {
+        state.side_panel_state.side_panel_focus = state.side_panel_state.side_panel_focus.next();
     }
 }
 
 /// Handle side panel section toggle collapse
 pub fn handle_side_panel_toggle_section(state: &mut AppState) {
-    if state.show_side_panel {
+    if state.side_panel_state.show_side_panel {
         let current = state
-            .side_panel_section_collapsed
-            .get(&state.side_panel_focus)
+            .side_panel_state.side_panel_section_collapsed
+            .get(&state.side_panel_state.side_panel_focus)
             .copied()
             .unwrap_or(false);
         state
-            .side_panel_section_collapsed
-            .insert(state.side_panel_focus, !current);
+            .side_panel_state.side_panel_section_collapsed
+            .insert(state.side_panel_state.side_panel_focus, !current);
     }
 }
 
 /// Handle side panel toggle section via mouse click
 pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
-    if !state.show_side_panel {
+    if !state.side_panel_state.show_side_panel {
         return;
     }
 
     // Check which section was clicked
     let mut clicked_section = None;
-    for (section, area) in &state.side_panel_areas {
+    for (section, area) in &state.side_panel_state.side_panel_areas {
         if col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
         {
             clicked_section = Some(*section);
@@ -531,11 +531,11 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
     }
 
     if let Some(section) = clicked_section {
-        state.side_panel_focus = section;
+        state.side_panel_state.side_panel_focus = section;
 
         // Special handling for Changeset section
         if section == crate::services::changeset::SidePanelSection::Changeset {
-            let Some(area) = state.side_panel_areas.get(&section) else {
+            let Some(area) = state.side_panel_state.side_panel_areas.get(&section) else {
                 return;
             };
             let relative_y = row.saturating_sub(area.y);
@@ -543,15 +543,15 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
             // Row 0 is the header
             if relative_y == 0 {
                 let current = state
-                    .side_panel_section_collapsed
+                    .side_panel_state.side_panel_section_collapsed
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
-                state.side_panel_section_collapsed.insert(section, !current);
+                state.side_panel_state.side_panel_section_collapsed.insert(section, !current);
             } else {
                 // Content click - if not collapsed, open file changes popup
                 let collapsed = state
-                    .side_panel_section_collapsed
+                    .side_panel_state.side_panel_section_collapsed
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
@@ -571,11 +571,11 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
             }
         } else {
             let current = state
-                .side_panel_section_collapsed
+                .side_panel_state.side_panel_section_collapsed
                 .get(&section)
                 .copied()
                 .unwrap_or(false);
-            state.side_panel_section_collapsed.insert(section, !current);
+            state.side_panel_state.side_panel_section_collapsed.insert(section, !current);
         }
     }
 }
@@ -591,7 +591,7 @@ pub fn handle_show_file_changes_popup(state: &mut AppState) {
     }
 
     // Don't open if there are no changes
-    if state.changeset.file_count() == 0 {
+    if state.side_panel_state.changeset.file_count() == 0 {
         return;
     }
 
@@ -623,7 +623,7 @@ pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
     // Get filtered count
     let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
     let count = state
-        .changeset
+        .side_panel_state.changeset
         .files_in_order()
         .iter()
         .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
@@ -656,7 +656,7 @@ pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
 pub fn handle_file_changes_popup_revert(state: &mut AppState) {
     // Revert selected file
     let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
-    let binding = state.changeset.files_in_order();
+    let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
         .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
@@ -673,10 +673,10 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
         let old_state = file.state;
 
         // Call the revert function
-        match crate::services::changeset::Changeset::revert_file(file, &state.session_id) {
+        match crate::services::changeset::Changeset::revert_file(file, &state.side_panel_state.session_id) {
             Ok(message) => {
                 // Update state based on what happened
-                if let Some(tracked) = state.changeset.files.get_mut(&path) {
+                if let Some(tracked) = state.side_panel_state.changeset.files.get_mut(&path) {
                     if !std::path::Path::new(&path).exists() {
                         // If file is gone, it's definitively Deleted
                         tracked.state = FileState::Deleted;
@@ -700,13 +700,13 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
                 );
 
                 // Close popup if no more non-reverted files
-                if state.changeset.file_count() == 0 {
+                if state.side_panel_state.changeset.file_count() == 0 {
                     state.file_changes_popup_state.show_file_changes_popup = false;
                 } else {
                     // Adjust selection if needed
-                    if state.file_changes_popup_state.file_changes_selected >= state.changeset.file_count() {
+                    if state.file_changes_popup_state.file_changes_selected >= state.side_panel_state.changeset.file_count() {
                         state.file_changes_popup_state.file_changes_selected =
-                            state.changeset.file_count().saturating_sub(1);
+                            state.side_panel_state.changeset.file_count().saturating_sub(1);
                     }
                 }
             }
@@ -722,7 +722,7 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
 
     // Collect all non-reverted and non-deleted files to revert
     let files_to_revert: Vec<_> = state
-        .changeset
+        .side_panel_state.changeset
         .files_in_order()
         .into_iter()
         .filter(|f| {
@@ -737,10 +737,10 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
 
     for (path, file) in files_to_revert {
         let old_state = file.state;
-        match crate::services::changeset::Changeset::revert_file(&file, &state.session_id) {
+        match crate::services::changeset::Changeset::revert_file(&file, &state.side_panel_state.session_id) {
             Ok(_) => {
                 // Update state based on what happened
-                if let Some(tracked) = state.changeset.files.get_mut(&path) {
+                if let Some(tracked) = state.side_panel_state.changeset.files.get_mut(&path) {
                     if !std::path::Path::new(&path).exists() {
                         tracked.state = FileState::Deleted;
                     } else {
@@ -786,7 +786,7 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
     }
 
     // Close popup if no more non-reverted files
-    if state.changeset.file_count() == 0 {
+    if state.side_panel_state.changeset.file_count() == 0 {
         state.file_changes_popup_state.show_file_changes_popup = false;
     }
 }
@@ -794,7 +794,7 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
 /// Handle opening the selected file in an external editor
 pub fn handle_file_changes_popup_open_editor(state: &mut AppState) {
     let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
-    let binding = state.changeset.files_in_order();
+    let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
         .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
@@ -806,7 +806,7 @@ pub fn handle_file_changes_popup_open_editor(state: &mut AppState) {
         }
         let path = file.path.clone();
         // Set the pending editor open request - will be handled by event loop
-        state.pending_editor_open = Some(path);
+        state.side_panel_state.pending_editor_open = Some(path);
     }
 }
 
@@ -847,7 +847,7 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
 
         // Get filtered files
         let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
-        let binding = state.changeset.files_in_order();
+        let binding = state.side_panel_state.changeset.files_in_order();
         let filtered_files: Vec<_> = binding
             .iter()
             .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
@@ -857,7 +857,7 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
             let file = filtered_files[file_index];
             if file.state != crate::services::changeset::FileState::Deleted {
                 // Set the pending editor open for this file
-                state.pending_editor_open = Some(file.path.clone());
+                state.side_panel_state.pending_editor_open = Some(file.path.clone());
             }
         }
     }
@@ -1130,8 +1130,8 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
                     // Revert file changes for edits at or after target_idx
                     // (the clicked message and everything after it)
                     let revert_result = state
-                        .changeset
-                        .revert_from_user_message(target_idx, &state.session_id);
+                        .side_panel_state.changeset
+                        .revert_from_user_message(target_idx, &state.side_panel_state.session_id);
 
                     // Find the TUI message index and truncate
                     if let Some(msg_idx) = state.messages_scrolling_state.messages.iter().position(|m| m.id == target_id) {
@@ -1148,7 +1148,7 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
                     state.user_message_count = target_idx.saturating_sub(1);
 
                     // Clear todos
-                    state.todos.clear();
+                    state.side_panel_state.todos.clear();
 
                     // Invalidate message cache
                     invalidate_message_lines_cache(state);

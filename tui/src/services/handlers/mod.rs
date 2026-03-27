@@ -1225,7 +1225,7 @@ pub fn update(
             // Legacy event - now handled via FileChangesRevertFile (Ctrl+X)
         }
         InputEvent::SetSessionId(session_id) => {
-            state.session_id = session_id;
+            state.side_panel_state.session_id = session_id;
         }
 
         // Message handlers
@@ -1287,13 +1287,13 @@ pub fn update(
         InputEvent::FileChangesRevertFile => {
             // When file changes popup is open, this is handled above.
             // When closed, Ctrl+X copies session ID.
-            if !state.session_id.is_empty() {
+            if !state.side_panel_state.session_id.is_empty() {
                 if let Err(e) =
-                    crate::services::clipboard_paste::copy_to_clipboard(&state.session_id)
+                    crate::services::clipboard_paste::copy_to_clipboard(&state.side_panel_state.session_id)
                 {
                     log::warn!("Failed to copy session ID: {}", e);
                 } else {
-                    state.session_id_copied_at = Some(std::time::Instant::now());
+                    state.side_panel_state.session_id_copied_at = Some(std::time::Instant::now());
                 }
             }
         }

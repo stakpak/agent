@@ -129,7 +129,7 @@ pub async fn run_tui(
     state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Trigger initial board tasks refresh if agent ID is configured
-    if state.board_agent_id.is_some() {
+    if state.side_panel_state.board_agent_id.is_some() {
         let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 
@@ -212,7 +212,7 @@ pub async fn run_tui(
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        // Calculate actual message area dimensions (same as view.rs)
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.show_side_panel {
                            term_size.width.saturating_sub(32 + 1)
                        } else {
                            term_size.width
@@ -384,7 +384,7 @@ pub async fn run_tui(
                    }
                    else {
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.show_side_panel {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -419,7 +419,7 @@ pub async fn run_tui(
                          crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                          state.poll_file_search_results();
                         // Handle pending editor open request
-                       if let Some(file_path) = state.pending_editor_open.take() {
+                       if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
                            // Disable mouse capture before opening editor to prevent weird input
                            let was_mouse_capture_enabled = state.mouse_capture_enabled;
                            if was_mouse_capture_enabled {
@@ -429,7 +429,7 @@ pub async fn run_tui(
 
                            match crate::services::editor::open_in_editor(
                                &mut terminal,
-                               &state.editor_command,
+                               &state.side_panel_state.editor_command,
                                &file_path,
                                None,
                            ) {
@@ -471,7 +471,7 @@ pub async fn run_tui(
                    else {
                        let term_size = terminal.size()?;
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.show_side_panel {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -559,7 +559,7 @@ pub async fn run_tui(
                    state.poll_file_search_results();
 
                         // Handle pending editor open request
-                         if let Some(file_path) = state.pending_editor_open.take() {
+                         if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
                              // Pause input thread to avoid stealing input from editor
                              input_paused.store(true, Ordering::Relaxed);
                              // Small delay to ensure input thread cycle completes
@@ -574,7 +574,7 @@ pub async fn run_tui(
 
                              match crate::services::editor::open_in_editor(
                                  &mut terminal,
-                                 &state.editor_command,
+                                 &state.side_panel_state.editor_command,
                                  &file_path,
                                  None,
                              ) {

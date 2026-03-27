@@ -107,8 +107,8 @@ pub fn handle_input_submitted_event(
                     state.messages_scrolling_state.stay_at_bottom = true;
 
                     // Clear changeset and todos from previous session
-                    state.changeset = crate::services::changeset::Changeset::default();
-                    state.todos.clear();
+                    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+                    state.side_panel_state.todos.clear();
 
                     crate::services::message::invalidate_message_lines_cache(state);
 
@@ -219,15 +219,15 @@ pub fn handle_input_submitted_event(
 
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    if state.show_side_panel && !state.dialog_approval_state.is_dialog_open && state.input_state.text_area.text().is_empty() {
+    if state.side_panel_state.show_side_panel && !state.dialog_approval_state.is_dialog_open && state.input_state.text_area.text().is_empty() {
         let current = state
-            .side_panel_section_collapsed
-            .get(&state.side_panel_focus)
+            .side_panel_state.side_panel_section_collapsed
+            .get(&state.side_panel_state.side_panel_focus)
             .copied()
             .unwrap_or(false);
         state
-            .side_panel_section_collapsed
-            .insert(state.side_panel_focus, !current);
+            .side_panel_state.side_panel_section_collapsed
+            .insert(state.side_panel_state.side_panel_focus, !current);
         return;
     }
 

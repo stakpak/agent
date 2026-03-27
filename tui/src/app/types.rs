@@ -328,6 +328,54 @@ impl Default for MessagesScrollingState {
     }
 }
 
+pub struct SidePanelState {
+    pub show_side_panel: bool,
+    pub side_panel_focus: crate::services::changeset::SidePanelSection,
+    pub side_panel_section_collapsed:
+        HashMap<crate::services::changeset::SidePanelSection, bool>,
+    pub side_panel_areas:
+        HashMap<crate::services::changeset::SidePanelSection, ratatui::layout::Rect>,
+    pub session_id: String,
+    pub session_id_copied_at: Option<std::time::Instant>,
+    pub changeset: crate::services::changeset::Changeset,
+    pub todos: Vec<crate::services::changeset::TodoItem>,
+    pub task_progress: Option<crate::services::board_tasks::TaskProgress>,
+    pub session_start_time: std::time::Instant,
+    pub side_panel_auto_shown: bool,
+    pub board_agent_id: Option<String>,
+    pub editor_command: String,
+    pub pending_editor_open: Option<String>,
+    pub billing_info: Option<stakpak_shared::models::billing::BillingResponse>,
+}
+
+impl Default for SidePanelState {
+    fn default() -> Self {
+        let mut collapsed = HashMap::new();
+        collapsed.insert(crate::services::changeset::SidePanelSection::Context, false);
+        collapsed.insert(crate::services::changeset::SidePanelSection::Billing, false);
+        collapsed.insert(crate::services::changeset::SidePanelSection::Tasks, false);
+        collapsed.insert(crate::services::changeset::SidePanelSection::Changeset, false);
+
+        Self {
+            show_side_panel: false,
+            side_panel_focus: crate::services::changeset::SidePanelSection::Context,
+            side_panel_section_collapsed: collapsed,
+            side_panel_areas: HashMap::new(),
+            session_id: String::new(),
+            session_id_copied_at: None,
+            changeset: crate::services::changeset::Changeset::new(),
+            todos: Vec::new(),
+            task_progress: None,
+            session_start_time: std::time::Instant::now(),
+            side_panel_auto_shown: false,
+            board_agent_id: None,
+            editor_command: "nano".to_string(),
+            pending_editor_open: None,
+            billing_info: None,
+        }
+    }
+}
+
 /// Shell popup and shell-command execution UI state.
 #[derive(Default)]
 pub struct ShellPopupState {

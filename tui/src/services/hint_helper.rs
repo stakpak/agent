@@ -101,7 +101,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             )];
 
             // Add profile info only if side panel is hidden and not loading heavily
-            if !state.show_side_panel && !high_cost_warning && !approaching_max {
+            if !state.side_panel_state.show_side_panel && !high_cost_warning && !approaching_max {
                 right_spans.push(Span::styled(
                     " | profile ",
                     Style::default().fg(ThemeColors::dark_gray()),

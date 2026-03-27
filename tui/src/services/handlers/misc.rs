@@ -138,8 +138,8 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
     // If side panel is visible and input is empty, cycle sections
-    if state.show_side_panel && state.input_state.text_area.text().is_empty() {
-        state.side_panel_focus = state.side_panel_focus.next();
+    if state.side_panel_state.show_side_panel && state.input_state.text_area.text().is_empty() {
+        state.side_panel_state.side_panel_focus = state.side_panel_state.side_panel_focus.next();
         return;
     }
 
@@ -363,7 +363,7 @@ pub fn handle_billing_info_loaded(
     state: &mut AppState,
     billing_info: stakpak_shared::models::billing::BillingResponse,
 ) {
-    state.billing_info = Some(billing_info);
+    state.side_panel_state.billing_info = Some(billing_info);
 }
 
 /// Handle refresh board tasks event - spawns blocking task to fetch from agent-board
@@ -373,7 +373,7 @@ pub fn handle_refresh_board_tasks(
 ) {
     // Try to get agent_id from state, or extract from message history
     let agent_id = state
-        .board_agent_id
+        .side_panel_state.board_agent_id
         .clone()
         .or_else(|| extract_board_agent_id_from_messages(&state.messages_scrolling_state.messages));
 
@@ -382,8 +382,8 @@ pub fn handle_refresh_board_tasks(
     };
 
     // Update state if we found it from messages
-    if state.board_agent_id.is_none() {
-        state.board_agent_id = Some(agent_id.clone());
+    if state.side_panel_state.board_agent_id.is_none() {
+        state.side_panel_state.board_agent_id = Some(agent_id.clone());
     }
 
     let tx = input_tx.clone();
@@ -401,8 +401,8 @@ pub fn handle_refresh_board_tasks(
 
 /// Handle board tasks loaded event
 pub fn handle_board_tasks_loaded(state: &mut AppState, result: FetchTasksResult) {
-    state.todos = result.items;
-    state.task_progress = Some(result.progress);
+    state.side_panel_state.todos = result.items;
+    state.side_panel_state.task_progress = Some(result.progress);
 }
 
 /// Handle board tasks error event

@@ -80,7 +80,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Also check if side panel is shown and click is in side panel area
-    if state.show_side_panel {
+    if state.side_panel_state.show_side_panel {
         // Side panel is on the right, typically 32 chars wide
         let side_panel_width = 32u16;
         let main_area_width = state
@@ -208,7 +208,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     let absolute_line = state.messages_scrolling_state.scroll + clamped_row;
 
     // Clamp col to main area if side panel is visible, then convert to content-relative
-    let clamped_col = if state.show_side_panel {
+    let clamped_col = if state.side_panel_state.show_side_panel {
         let side_panel_width = 32u16;
         let main_area_width = state
             .terminal_size

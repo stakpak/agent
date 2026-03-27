@@ -574,11 +574,11 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     .with_tool_call(result.call.clone())
                     .with_user_message_index(user_msg_index);
 
-                state.changeset.track_file(path, edit);
+                state.side_panel_state.changeset.track_file(path, edit);
 
                 // If file does not exist, mark it as Deleted immediately
                 if !std::path::Path::new(path).exists() {
-                    state.changeset.mark_removed(path, None);
+                    state.side_panel_state.changeset.mark_removed(path, None);
                 }
             }
         }
@@ -600,10 +600,10 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 }
 
                 // Backup original file content before first modification (for reliable revert)
-                let is_first_edit = !state.changeset.files.contains_key(path);
+                let is_first_edit = !state.side_panel_state.changeset.files.contains_key(path);
                 if is_first_edit
                     && std::path::Path::new(path).exists()
-                    && let Some(backup_path) = backup_original_file(path, &state.session_id)
+                    && let Some(backup_path) = backup_original_file(path, &state.side_panel_state.session_id)
                 {
                     // Store backup path on the tracked file (will be created by track_file)
                     // We need to track first, then set the backup path
@@ -626,12 +626,12 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                         edit = edit.with_diff_preview(preview);
                     }
 
-                    state.changeset.track_file(path, edit);
-                    state.changeset.set_original_backup(path, backup_path);
+                    state.side_panel_state.changeset.track_file(path, edit);
+                    state.side_panel_state.changeset.set_original_backup(path, backup_path);
 
                     // If file does not exist, mark it as Deleted immediately
                     if !std::path::Path::new(path).exists() {
-                        state.changeset.mark_removed(path, None);
+                        state.side_panel_state.changeset.mark_removed(path, None);
                     }
                     return;
                 }
@@ -659,11 +659,11 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     edit = edit.with_diff_preview(preview);
                 }
 
-                state.changeset.track_file(path, edit);
+                state.side_panel_state.changeset.track_file(path, edit);
 
                 // If file does not exist, mark it as Deleted immediately
                 if !std::path::Path::new(path).exists() {
-                    state.changeset.mark_removed(path, None);
+                    state.side_panel_state.changeset.mark_removed(path, None);
                 }
             }
         }
@@ -677,7 +677,7 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 // Extract backup path from result.result if available
                 let backup_path = extract_backup_path(&result.result);
 
-                state.changeset.mark_removed(path, backup_path);
+                state.side_panel_state.changeset.mark_removed(path, backup_path);
             }
         }
         _ => {}

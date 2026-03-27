@@ -36,7 +36,7 @@ pub fn handle_stream_message(
             // Extract todos from the accumulated message content
             let extracted_todos = crate::services::todo_extractor::extract_todos(text);
             if !extracted_todos.is_empty() {
-                state.todos = extracted_todos;
+                state.side_panel_state.todos = extracted_todos;
             }
         }
 

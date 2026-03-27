@@ -41,7 +41,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     };
 
     // Horizontal split for the side panel
-    let (main_area, side_panel_area) = if state.show_side_panel {
+    let (main_area, side_panel_area) = if state.side_panel_state.show_side_panel {
         // Fixed width of 32 characters for side panel
         let panel_width = 32u16;
         let horizontal_chunks = Layout::default()

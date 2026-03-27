@@ -938,7 +938,7 @@ fn compute_cache_key(state: &AppState, width: usize) -> u64 {
 
     // Include visibility states
     state.shell_popup_state.shell_popup_visible.hash(&mut hasher);
-    state.show_side_panel.hash(&mut hasher);
+    state.side_panel_state.show_side_panel.hash(&mut hasher);
 
     // Include message count (filters out collapsed messages)
     let visible_messages: Vec<&Message> = state.messages_scrolling_state.messages
