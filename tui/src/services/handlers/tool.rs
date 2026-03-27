@@ -347,12 +347,12 @@ pub fn handle_retry_tool_call(
         // Clear any existing shell state
         state.shell_popup_state.active_shell_command = None;
         state.shell_popup_state.active_shell_command_output = None;
-        state.shell_history_lines.clear(); // Clear history for fresh retry
+        state.shell_runtime_state.shell_history_lines.clear(); // Clear history for fresh retry
 
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
-        let rows = state.terminal_size.height.saturating_sub(2).max(1);
-        let cols = state.terminal_size.width.saturating_sub(4).max(1);
-        state.shell_screen = vt100::Parser::new(rows, cols, 0);
+        let rows = state.terminal_ui_state.terminal_size.height.saturating_sub(2).max(1);
+        let cols = state.terminal_ui_state.terminal_size.width.saturating_sub(4).max(1);
+        state.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 0);
 
         // Set textarea shell mode to match app state
         state.input_state.text_area.set_shell_mode(true);

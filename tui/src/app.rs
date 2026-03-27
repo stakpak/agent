@@ -20,11 +20,9 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
-use ratatui::layout::Size;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 pub struct AppState {
     // ========== Input State (TextArea + helpers + file search) ==========
@@ -75,16 +73,17 @@ pub struct AppState {
     // ========== Configuration State ==========
     pub configuration_state: ConfigurationState,
 
-    // ========== Misc State ==========
-    pub ctrl_c_pressed_once: bool,
-    pub ctrl_c_timer: Option<std::time::Instant>,
-    pub mouse_capture_enabled: bool,
-    pub terminal_size: Size,
-    pub shell_screen: vt100::Parser,
-    pub shell_scroll: u16,
-    pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
-    pub interactive_shell_message_id: Option<Uuid>,
-    pub shell_interaction_occurred: bool,
+    // ========== Quit Intent State ==========
+    pub quit_intent_state: QuitIntentState,
+
+    // ========== Terminal UI State ==========
+    pub terminal_ui_state: TerminalUiState,
+
+    // ========== Shell Runtime State ==========
+    pub shell_runtime_state: ShellRuntimeState,
+
+    // ========== Shell Session State ==========
+    pub shell_session_state: ShellSessionState,
 
     // ========== Text Selection State ==========
     pub selection: SelectionState,
@@ -265,18 +264,10 @@ impl AppState {
                 shell_mode_input: String::new(),
                 ..Default::default()
             },
-            ctrl_c_pressed_once: false,
-            ctrl_c_timer: None,
-            mouse_capture_enabled: false,
-            terminal_size: Size {
-                width: 0,
-                height: 0,
-            },
-            shell_screen: vt100::Parser::new(24, 80, 1000),
-            shell_scroll: 0,
-            shell_history_lines: Vec::new(),
-            interactive_shell_message_id: None,
-            shell_interaction_occurred: false,
+            quit_intent_state: QuitIntentState::default(),
+            terminal_ui_state: TerminalUiState::default(),
+            shell_runtime_state: ShellRuntimeState::default(),
+            shell_session_state: ShellSessionState::default(),
 
             // Text selection initialization
             selection: SelectionState::default(),
@@ -460,13 +451,13 @@ impl AppState {
         self.messages_scrolling_state
             .messages
             .push(Message::plain_text("SPACING_MARKER"));
-        let rows = if self.terminal_size.height > 0 {
-            self.terminal_size.height
+        let rows = if self.terminal_ui_state.terminal_size.height > 0 {
+            self.terminal_ui_state.terminal_size.height
         } else {
             24
         };
-        let cols = if self.terminal_size.width > 0 {
-            self.terminal_size.width
+        let cols = if self.terminal_ui_state.terminal_size.width > 0 {
+            self.terminal_ui_state.terminal_size.width
         } else {
             80
         };
@@ -485,7 +476,7 @@ impl AppState {
 
         self.shell_popup_state.active_shell_command = Some(shell_cmd.clone());
         self.shell_popup_state.active_shell_command_output = Some(String::new());
-        self.shell_screen = vt100::Parser::new(rows, cols, 0);
+        self.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {

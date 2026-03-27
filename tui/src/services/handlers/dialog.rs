@@ -248,7 +248,7 @@ pub fn handle_esc(
             if let Some(_tool_call) = &state.dialog_approval_state.dialog_command {
                 // Capture history for context
                 let history_lines =
-                    super::shell::trim_shell_lines(state.shell_history_lines.clone());
+                    super::shell::trim_shell_lines(state.shell_runtime_state.shell_history_lines.clone());
                 let history_text = history_lines
                     .iter()
                     .map(|l| l.to_string())

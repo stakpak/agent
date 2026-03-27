@@ -27,7 +27,7 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
     }
 
     // Count actual non-empty lines from the screen for dynamic sizing
-    let screen = state.shell_screen.screen();
+    let screen = state.shell_runtime_state.shell_screen.screen();
     let (rows, cols) = screen.size();
 
     // Count non-empty rows from the end
@@ -142,7 +142,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     // Get styled screen content - the PTY already shows the prompt and command naturally
-    let screen_lines = capture_styled_screen(&mut state.shell_screen);
+    let screen_lines = capture_styled_screen(&mut state.shell_runtime_state.shell_screen);
 
     // Build display lines directly from screen content
     // We trim trailing empty lines for display so we don't "scroll to bottom" of empty lines
@@ -190,7 +190,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     {
         // Only show cursor if it should be visible (blink state)
         if state.shell_popup_state.shell_cursor_visible {
-            let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
+            let (cursor_row, cursor_col) = state.shell_runtime_state.shell_screen.screen().cursor_position();
 
             // Calculate screen position for cursor (directly from PTY cursor position)
             let cursor_line_in_content = cursor_row as usize;

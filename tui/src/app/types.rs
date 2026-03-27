@@ -390,6 +390,59 @@ pub struct ConfigurationState {
     pub init_prompt_content: Option<String>,
 }
 
+pub struct QuitIntentState {
+    pub ctrl_c_pressed_once: bool,
+    pub ctrl_c_timer: Option<std::time::Instant>,
+}
+
+impl Default for QuitIntentState {
+    fn default() -> Self {
+        Self {
+            ctrl_c_pressed_once: false,
+            ctrl_c_timer: None,
+        }
+    }
+}
+
+pub struct TerminalUiState {
+    pub mouse_capture_enabled: bool,
+    pub terminal_size: ratatui::layout::Size,
+}
+
+impl Default for TerminalUiState {
+    fn default() -> Self {
+        Self {
+            mouse_capture_enabled: false,
+            terminal_size: ratatui::layout::Size {
+                width: 0,
+                height: 0,
+            },
+        }
+    }
+}
+
+pub struct ShellRuntimeState {
+    pub shell_screen: vt100::Parser,
+    pub shell_scroll: u16,
+    pub shell_history_lines: Vec<Line<'static>>,
+}
+
+impl Default for ShellRuntimeState {
+    fn default() -> Self {
+        Self {
+            shell_screen: vt100::Parser::new(24, 80, 1000),
+            shell_scroll: 0,
+            shell_history_lines: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ShellSessionState {
+    pub interactive_shell_message_id: Option<Uuid>,
+    pub shell_interaction_occurred: bool,
+}
+
 pub struct BannerState {
     pub banner_message: Option<BannerMessage>,
     pub banner_area: Option<ratatui::layout::Rect>,

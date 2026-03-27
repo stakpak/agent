@@ -105,10 +105,10 @@ pub async fn run_tui(
     state.banner_state.banner_message = banner_message;
 
     // Mouse capture is always enabled
-    state.mouse_capture_enabled = true;
+    state.terminal_ui_state.mouse_capture_enabled = true;
 
     // Set initial terminal size
-    state.terminal_size = ratatui::layout::Size {
+    state.terminal_ui_state.terminal_size = ratatui::layout::Size {
         width: term_size.width,
         height: term_size.height,
     };
@@ -187,12 +187,12 @@ pub async fn run_tui(
 
     loop {
         // Check if double Ctrl+C timer expired
-        if state.ctrl_c_pressed_once
-            && let Some(timer) = state.ctrl_c_timer
+        if state.quit_intent_state.ctrl_c_pressed_once
+            && let Some(timer) = state.quit_intent_state.ctrl_c_timer
             && std::time::Instant::now() > timer
         {
-            state.ctrl_c_pressed_once = false;
-            state.ctrl_c_timer = None;
+            state.quit_intent_state.ctrl_c_pressed_once = false;
+            state.quit_intent_state.ctrl_c_timer = None;
         }
         tokio::select! {
                event = input_rx.recv() => {
@@ -320,7 +320,7 @@ pub async fn run_tui(
                                     // If shell is visible/running, insert cancelled block BEFORE the shell message
                                     // so the order is: cancelled command -> shell box
                                     if is_cancelled && state.shell_popup_state.shell_popup_visible {
-                                        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                                        if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
                                             // Find the position of the shell message
                                             if let Some(pos) = state.messages_scrolling_state.messages.iter().position(|m| m.id == shell_msg_id) {
                                                 // Insert cancelled block and popup before shell message
@@ -421,10 +421,10 @@ pub async fn run_tui(
                         // Handle pending editor open request
                        if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
                            // Disable mouse capture before opening editor to prevent weird input
-                           let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                           let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
                            if was_mouse_capture_enabled {
                                let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                               state.mouse_capture_enabled = false;
+                               state.terminal_ui_state.mouse_capture_enabled = false;
                            }
 
                            match crate::services::editor::open_in_editor(
@@ -448,7 +448,7 @@ pub async fn run_tui(
                             // Restore mouse capture if it was enabled before
                             if was_mouse_capture_enabled {
                                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                state.mouse_capture_enabled = true;
+                                state.terminal_ui_state.mouse_capture_enabled = true;
                             }
                         }
                    }
@@ -566,10 +566,10 @@ pub async fn run_tui(
                              std::thread::sleep(Duration::from_millis(10));
 
                              // Disable mouse capture before opening editor to prevent weird input
-                             let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                             let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
                              if was_mouse_capture_enabled {
                                  let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                                 state.mouse_capture_enabled = false;
+                                 state.terminal_ui_state.mouse_capture_enabled = false;
                              }
 
                              match crate::services::editor::open_in_editor(
@@ -593,7 +593,7 @@ pub async fn run_tui(
                              // Restore mouse capture if it was enabled before
                              if was_mouse_capture_enabled {
                                  let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                 state.mouse_capture_enabled = true;
+                                 state.terminal_ui_state.mouse_capture_enabled = true;
                              }
 
                              // Resume input thread
@@ -605,11 +605,11 @@ pub async fn run_tui(
                 }
                _ = spinner_interval.tick() => {
                    // Also check double Ctrl+C timer expiry on every tick
-                   if state.ctrl_c_pressed_once
-                       && let Some(timer) = state.ctrl_c_timer
+                   if state.quit_intent_state.ctrl_c_pressed_once
+                       && let Some(timer) = state.quit_intent_state.ctrl_c_timer
                            && std::time::Instant::now() > timer {
-                               state.ctrl_c_pressed_once = false;
-                               state.ctrl_c_timer = None;
+                               state.quit_intent_state.ctrl_c_pressed_once = false;
+                               state.quit_intent_state.ctrl_c_timer = None;
                            }
                    state.loading_state.spinner_frame = state.loading_state.spinner_frame.wrapping_add(1);
                    // Update shell cursor blink (toggles every ~5 ticks = 500ms)

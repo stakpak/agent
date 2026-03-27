@@ -671,14 +671,14 @@ fn terminate_active_shell(state: &mut AppState) {
     }
 
     // Remove the shell message box if it exists
-    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+    if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
         state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
     }
 
     // Reset all shell-related state
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
-    state.interactive_shell_message_id = None;
+    state.shell_session_state.interactive_shell_message_id = None;
     state.shell_popup_state.show_shell_mode = false;
     state.shell_popup_state.shell_popup_visible = false;
     state.shell_popup_state.shell_popup_expanded = false;

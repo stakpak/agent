@@ -12,12 +12,12 @@ pub fn get_stakpak_version() -> String {
 
 /// Generate a mouse capture hint message based on the terminal type
 pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
-    let status = if state.mouse_capture_enabled {
+    let status = if state.terminal_ui_state.mouse_capture_enabled {
         "enabled"
     } else {
         "disabled"
     };
-    let status_color = if state.mouse_capture_enabled {
+    let status_color = if state.terminal_ui_state.mouse_capture_enabled {
         ThemeColors::success()
     } else {
         ThemeColors::danger()
@@ -547,7 +547,7 @@ pub fn welcome_messages(
 
     messages.push(Message::info("SPACING_MARKER", None));
     #[cfg(unix)]
-    if state.mouse_capture_enabled {
+    if state.terminal_ui_state.mouse_capture_enabled {
         messages.push(mouse_capture_hint_message(state));
         messages.push(Message::info("SPACING_MARKER", None));
     }

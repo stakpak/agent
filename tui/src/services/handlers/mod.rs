@@ -780,17 +780,17 @@ pub fn update(
     {
         match event {
             InputEvent::InputChanged(c) => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, &c.to_string());
                 return;
             }
             InputEvent::InputBackspace => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x7f");
                 return;
             }
             InputEvent::InputSubmitted => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 // Windows ConPTY expects carriage return, Unix expects newline
                 #[cfg(windows)]
                 shell::send_shell_input(state, "\r");
@@ -799,22 +799,22 @@ pub fn update(
                 return;
             }
             InputEvent::CursorLeft => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x1b[D");
                 return;
             }
             InputEvent::CursorRight => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x1b[C");
                 return;
             }
             InputEvent::Up => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x1b[A");
                 return;
             }
             InputEvent::Down => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x1b[B");
                 return;
             }
@@ -824,10 +824,10 @@ pub fn update(
                 if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
                     state.shell_popup_state.shell_popup_scroll = state.shell_popup_state.shell_popup_scroll.saturating_add(1);
                 } else {
-                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
-                    let total_lines = state.shell_history_lines.len();
+                    let visible_height = state.terminal_ui_state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_runtime_state.shell_history_lines.len();
                     let max_scroll = total_lines.saturating_sub(visible_height) as u16;
-                    state.shell_scroll = state.shell_scroll.saturating_add(1).min(max_scroll);
+                    state.shell_runtime_state.shell_scroll = state.shell_runtime_state.shell_scroll.saturating_add(1).min(max_scroll);
                 }
                 return;
             }
@@ -836,33 +836,33 @@ pub fn update(
                 if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
                     state.shell_popup_state.shell_popup_scroll = state.shell_popup_state.shell_popup_scroll.saturating_sub(1);
                 } else {
-                    state.shell_scroll = state.shell_scroll.saturating_sub(1);
+                    state.shell_runtime_state.shell_scroll = state.shell_runtime_state.shell_scroll.saturating_sub(1);
                 }
                 return;
             }
             InputEvent::PageUp => {
                 if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
-                    let page_size = state.terminal_size.height / 4;
+                    let page_size = state.terminal_ui_state.terminal_size.height / 4;
                     state.shell_popup_state.shell_popup_scroll =
                         state.shell_popup_state.shell_popup_scroll.saturating_add(page_size as usize);
                 } else {
-                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
-                    let total_lines = state.shell_history_lines.len();
+                    let visible_height = state.terminal_ui_state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_runtime_state.shell_history_lines.len();
                     let max_scroll = total_lines.saturating_sub(visible_height) as u16;
-                    let page_size = state.terminal_size.height / 2;
-                    state.shell_scroll =
-                        state.shell_scroll.saturating_add(page_size).min(max_scroll);
+                    let page_size = state.terminal_ui_state.terminal_size.height / 2;
+                    state.shell_runtime_state.shell_scroll =
+                        state.shell_runtime_state.shell_scroll.saturating_add(page_size).min(max_scroll);
                 }
                 return;
             }
             InputEvent::PageDown => {
                 if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
-                    let page_size = state.terminal_size.height / 4;
+                    let page_size = state.terminal_ui_state.terminal_size.height / 4;
                     state.shell_popup_state.shell_popup_scroll =
                         state.shell_popup_state.shell_popup_scroll.saturating_sub(page_size as usize);
                 } else {
-                    let page_size = state.terminal_size.height / 2;
-                    state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
+                    let page_size = state.terminal_ui_state.terminal_size.height / 2;
+                    state.shell_runtime_state.shell_scroll = state.shell_runtime_state.shell_scroll.saturating_sub(page_size);
                 }
                 return;
             }
@@ -880,12 +880,12 @@ pub fn update(
                 return;
             }
             InputEvent::InputDelete => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x15");
                 return;
             }
             InputEvent::InputDeleteWord => {
-                state.shell_scroll = 0;
+                state.shell_runtime_state.shell_scroll = 0;
                 shell::send_shell_input(state, "\x17");
                 return;
             }

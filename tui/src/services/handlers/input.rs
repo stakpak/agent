@@ -607,7 +607,7 @@ fn handle_input_submitted(
 
             // 2. Capture history and resolve as success result
             let history_lines = crate::services::handlers::shell::trim_shell_lines(
-                state.shell_history_lines.clone(),
+                state.shell_runtime_state.shell_history_lines.clone(),
             );
             if !history_lines.is_empty() {
                 let history_text = history_lines
@@ -638,7 +638,7 @@ fn handle_input_submitted(
             && !state.shell_popup_state.show_shell_mode
         {
             let mut history_lines = crate::services::handlers::shell::trim_shell_lines(
-                state.shell_history_lines.clone(),
+                state.shell_runtime_state.shell_history_lines.clone(),
             );
 
             if !history_lines.is_empty() {
@@ -658,7 +658,7 @@ fn handle_input_submitted(
                             content_color: Color::Reset,
                             tool_type: "Shell".to_string(),
                         }),
-                        state.terminal_size.width as usize,
+                        state.terminal_ui_state.terminal_size.width as usize,
                     ),
                     is_collapsed: None,
                 });
@@ -686,15 +686,15 @@ fn handle_input_submitted(
             }
 
             // Remove the active shell message bubble
-            if let Some(shell_msg_id) = state.interactive_shell_message_id {
+            if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
                 state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
             }
-            state.interactive_shell_message_id = None;
+            state.shell_session_state.interactive_shell_message_id = None;
 
             // Full clear of shell variables
             state.shell_popup_state.active_shell_command = None;
             state.shell_popup_state.active_shell_command_output = None;
-            state.shell_history_lines.clear();
+            state.shell_runtime_state.shell_history_lines.clear();
             state.shell_popup_state.show_shell_mode = false;
             state.shell_popup_state.shell_popup_visible = false;
             state.shell_popup_state.shell_popup_expanded = false;

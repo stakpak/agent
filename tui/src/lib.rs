@@ -30,21 +30,21 @@ use crate::services::detect_term::ThemeColors;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
-    state.mouse_capture_enabled = !state.mouse_capture_enabled;
+    state.terminal_ui_state.mouse_capture_enabled = !state.terminal_ui_state.mouse_capture_enabled;
 
-    if state.mouse_capture_enabled {
+    if state.terminal_ui_state.mouse_capture_enabled {
         execute!(std::io::stdout(), EnableMouseCapture)?;
     } else {
         execute!(std::io::stdout(), DisableMouseCapture)?;
     }
 
-    let status = if state.mouse_capture_enabled {
+    let status = if state.terminal_ui_state.mouse_capture_enabled {
         "enabled"
     } else {
         "disabled . Ctrl+L to enable"
     };
 
-    let color = if state.mouse_capture_enabled {
+    let color = if state.terminal_ui_state.mouse_capture_enabled {
         ThemeColors::green()
     } else {
         ThemeColors::red()

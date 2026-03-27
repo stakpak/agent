@@ -66,13 +66,13 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
 /// Handle resized event
 pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
-    state.terminal_size = Size { width, height };
+    state.terminal_ui_state.terminal_size = Size { width, height };
 
     // Resize shell parser
     // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
     let shell_rows = height.saturating_sub(2).max(1);
     let shell_cols = width.saturating_sub(4).max(1);
-    state.shell_screen.set_size(shell_rows, shell_cols);
+    state.shell_runtime_state.shell_screen.set_size(shell_rows, shell_cols);
 }
 
 /// Handle toggle cursor visible event
@@ -247,18 +247,18 @@ pub fn handle_ctrl_s(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<
 pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<InputEvent>) {
     use std::time::Instant;
     let now = Instant::now();
-    if !state.ctrl_c_pressed_once
-        || state.ctrl_c_timer.is_none()
-        || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
+    if !state.quit_intent_state.ctrl_c_pressed_once
+        || state.quit_intent_state.ctrl_c_timer.is_none()
+        || state.quit_intent_state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
     {
         // First press or timer expired: clear input, move cursor, set timer
         state.input_state.text_area.set_text("");
-        state.ctrl_c_pressed_once = true;
-        state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
+        state.quit_intent_state.ctrl_c_pressed_once = true;
+        state.quit_intent_state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
     } else {
         // Second press within 2s: trigger quit
-        state.ctrl_c_pressed_once = false;
-        state.ctrl_c_timer = None;
+        state.quit_intent_state.ctrl_c_pressed_once = false;
+        state.quit_intent_state.ctrl_c_timer = None;
         let _ = input_tx.try_send(InputEvent::Quit);
     }
 }
@@ -275,12 +275,12 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     if let Some(cmd) = &state.shell_popup_state.active_shell_command {
         let _ = cmd.kill();
     }
-    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+    if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
         state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
     }
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
-    state.interactive_shell_message_id = None;
+    state.shell_session_state.interactive_shell_message_id = None;
     state.shell_popup_state.show_shell_mode = false;
     state.shell_popup_state.shell_popup_visible = false;
     state.shell_popup_state.shell_popup_expanded = false;

@@ -84,6 +84,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
         // Side panel is on the right, typically 32 chars wide
         let side_panel_width = 32u16;
         let main_area_width = state
+            .terminal_ui_state
             .terminal_size
             .width
             .saturating_sub(side_panel_width + 1);
@@ -211,6 +212,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     let clamped_col = if state.side_panel_state.show_side_panel {
         let side_panel_width = 32u16;
         let main_area_width = state
+            .terminal_ui_state
             .terminal_size
             .width
             .saturating_sub(side_panel_width + 1);

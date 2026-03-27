@@ -18,7 +18,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
         return;
     }
-    if state.ctrl_c_pressed_once && state.ctrl_c_timer.is_some() {
+    if state.quit_intent_state.ctrl_c_pressed_once && state.quit_intent_state.ctrl_c_timer.is_some() {
         let hint = Paragraph::new(Span::styled(
             "Press Ctrl+C again to exit Stakpak",
             Style::default().fg(ThemeColors::dark_gray()),
@@ -59,7 +59,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
         {
             #[cfg(unix)]
-            let select_hint = if state.mouse_capture_enabled {
+            let select_hint = if state.terminal_ui_state.mouse_capture_enabled {
                 "Fn/Option/Shift + drag to select"
             } else {
                 ""
