@@ -33,10 +33,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     banner::render_banner(f, banner_area, state);
 
     // Store banner area for click detection (None when banner is hidden)
-    state.banner_area = if banner_h > 0 {
+    state.banner_state.banner_area = if banner_h > 0 {
         Some(banner_area)
     } else {
-        state.banner_click_regions.clear();
+        state.banner_state.banner_click_regions.clear();
         None
     };
 

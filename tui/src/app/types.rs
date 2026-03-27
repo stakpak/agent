@@ -7,6 +7,7 @@ use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::banner::BannerMessage;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
@@ -387,6 +388,22 @@ pub struct ConfigurationState {
     pub model: Model,
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
     pub init_prompt_content: Option<String>,
+}
+
+pub struct BannerState {
+    pub banner_message: Option<BannerMessage>,
+    pub banner_area: Option<ratatui::layout::Rect>,
+    pub banner_click_regions: Vec<(String, ratatui::layout::Rect)>,
+}
+
+impl Default for BannerState {
+    fn default() -> Self {
+        Self {
+            banner_message: None,
+            banner_area: None,
+            banner_click_regions: Vec::new(),
+        }
+    }
 }
 
 pub struct MessageInteractionState {

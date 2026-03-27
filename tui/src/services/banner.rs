@@ -62,7 +62,7 @@ impl BannerMessage {
 /// Returns the banner height: `BANNER_VISIBLE_HEIGHT` when there is an active
 /// (non-expired) message, `0` otherwise.
 pub fn banner_height(state: &AppState) -> u16 {
-    match &state.banner_message {
+    match &state.banner_state.banner_message {
         Some(msg) if !msg.is_expired() => BANNER_VISIBLE_HEIGHT,
         _ => 0,
     }
@@ -103,14 +103,14 @@ fn find_slash_commands(text: &str) -> Vec<(usize, String)> {
 
 pub fn render_banner(f: &mut Frame, area: Rect, state: &mut AppState) {
     // Clear expired message
-    if let Some(msg) = &state.banner_message
+    if let Some(msg) = &state.banner_state.banner_message
         && msg.is_expired()
     {
-        state.banner_message = None;
+        state.banner_state.banner_message = None;
     }
 
     // No message — nothing to render
-    let Some(msg) = &state.banner_message else {
+    let Some(msg) = &state.banner_state.banner_message else {
         return;
     };
 
@@ -175,5 +175,5 @@ pub fn render_banner(f: &mut Frame, area: Rect, state: &mut AppState) {
         .alignment(Alignment::Left);
 
     f.render_widget(paragraph, area);
-    state.banner_click_regions = click_regions;
+    state.banner_state.banner_click_regions = click_regions;
 }

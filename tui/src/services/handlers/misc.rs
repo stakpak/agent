@@ -300,7 +300,7 @@ pub fn handle_set_banner_message(
     text: String,
     style: crate::services::banner::BannerStyle,
 ) {
-    state.banner_message = Some(crate::services::banner::BannerMessage::new(text, style));
+    state.banner_state.banner_message = Some(crate::services::banner::BannerMessage::new(text, style));
 }
 
 /// Handle start loading operation event

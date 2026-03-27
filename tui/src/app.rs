@@ -6,7 +6,6 @@ use stakai::Model;
 pub use types::*;
 
 use crate::services::auto_approve::AutoApproveManager;
-use crate::services::banner::BannerMessage;
 use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 #[cfg(unix)]
@@ -21,7 +20,7 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
-use ratatui::layout::{Rect, Size};
+use ratatui::layout::Size;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
@@ -89,14 +88,14 @@ pub struct AppState {
 
     // ========== Text Selection State ==========
     pub selection: SelectionState,
-    pub toast: Option<Toast>,
-    pub banner_message: Option<BannerMessage>,
-    /// Stores the banner area rect for mouse click detection
-    pub banner_area: Option<Rect>,
-    /// Clickable command regions within the banner: (command_text, bounding_rect)
-    pub banner_click_regions: Vec<(String, Rect)>,
     /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
     pub selection_auto_scroll: i32,
+
+    // ========== Banner State ==========
+    pub banner_state: BannerState,
+
+    // ========== Toast State ==========
+    pub toast: Option<Toast>,
 
     // ========== Message Interaction State ==========
     pub message_interaction_state: MessageInteractionState,
@@ -282,9 +281,7 @@ impl AppState {
             // Text selection initialization
             selection: SelectionState::default(),
             toast: None,
-            banner_message: None,
-            banner_area: None,
-            banner_click_regions: Vec::new(),
+            banner_state: BannerState::default(),
             selection_auto_scroll: 0,
 
             // Message interaction initialization

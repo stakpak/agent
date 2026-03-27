@@ -102,7 +102,7 @@ pub async fn run_tui(
         recent_models,
     });
 
-    state.banner_message = banner_message;
+    state.banner_state.banner_message = banner_message;
 
     // Mouse capture is always enabled
     state.mouse_capture_enabled = true;
