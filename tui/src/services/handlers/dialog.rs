@@ -34,7 +34,7 @@ pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall)
     }
 
     // Find the pending message by pending_bash_message_id and update it to Running
-    if let Some(pending_id) = state.pending_bash_message_id {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         for msg in &mut state.messages {
             if msg.id == pending_id {
                 if let MessageContent::RenderRunCommandBlock(command, _result, _run_state) =
@@ -63,7 +63,7 @@ pub fn update_pending_tool_to_first(
     is_approved: bool,
 ) {
     // Remove any existing pending tool block
-    if let Some(pending_id) = state.pending_bash_message_id {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state.messages.retain(|m| m.id != pending_id);
     }
 
@@ -81,12 +81,12 @@ pub fn update_pending_tool_to_first(
         };
 
         let msg = Message::render_run_command_block(command, None, run_state, None);
-        state.pending_bash_message_id = Some(msg.id);
+        state.tool_call_state.pending_bash_message_id = Some(msg.id);
         state.messages.push(msg);
     } else {
         // For other tools (str_replace, create, etc.), use the standard pending block
         let msg = Message::render_pending_border_block(first_tool.clone(), is_approved, None);
-        state.pending_bash_message_id = Some(msg.id);
+        state.tool_call_state.pending_bash_message_id = Some(msg.id);
         state.messages.push(msg);
     }
 
@@ -136,7 +136,7 @@ pub fn handle_esc_event(
     if let Some(tool_call) = &state.dialog_command
         && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
     {
-        state.latest_tool_call = Some(tool_call.clone());
+        state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
 
     let channels = EventChannels {
@@ -171,10 +171,10 @@ pub fn handle_esc(
         let _ = cancel_tx.send(());
     }
 
-    let was_streaming = state.is_streaming;
+    let was_streaming = state.tool_call_state.is_streaming;
     let was_dialog_open = state.is_dialog_open;
     let was_shell_mode = state.shell_popup_state.show_shell_mode;
-    state.is_streaming = false;
+    state.tool_call_state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
         state.selection = crate::services::text_selection::SelectionState::default();
@@ -195,7 +195,7 @@ pub fn handle_esc(
                     state.messages.retain(|m| m.id != tool_call_uuid);
                 }
                 // Also remove by pending_bash_message_id
-                if let Some(pending_id) = state.pending_bash_message_id {
+                if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
                     state.messages.retain(|m| m.id != pending_id);
                 }
 
@@ -221,7 +221,7 @@ pub fn handle_esc(
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
                     state.messages.retain(|m| m.id != tool_call_uuid);
                 }
-                if let Some(pending_id) = state.pending_bash_message_id {
+                if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
                     state.messages.retain(|m| m.id != pending_id);
                 }
 
@@ -298,14 +298,14 @@ pub fn handle_esc(
         // Mark cancel_requested so late streaming events that are already queued
         // in the channel get dropped instead of re-creating content.
         if was_streaming {
-            state.cancel_requested = true;
+            state.tool_call_state.cancel_requested = true;
         }
         state.input_state.text_area.set_text("");
     }
 
     state.messages.retain(|m| {
-        m.id != state.streaming_tool_result_id.unwrap_or_default()
-            && m.id != state.pending_bash_message_id.unwrap_or_default()
+        m.id != state.tool_call_state.streaming_tool_result_id.unwrap_or_default()
+            && m.id != state.tool_call_state.pending_bash_message_id.unwrap_or_default()
     });
 
     // Invalidate cache and scroll to bottom when something was actually
@@ -325,7 +325,7 @@ pub fn handle_show_confirmation_dialog(
     output_tx: &Sender<OutputEvent>,
     _terminal_size: Size,
 ) {
-    if state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
+    if state.tool_call_state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
         return;
     }
     if state
@@ -369,7 +369,7 @@ pub fn handle_show_confirmation_dialog(
     state.dialog_command = Some(tool_call.clone());
     let tool_name = strip_tool_name(&tool_call.function.name);
     if is_foreground_command_tool(tool_name) {
-        state.latest_tool_call = Some(tool_call.clone());
+        state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
@@ -384,7 +384,7 @@ pub fn handle_show_confirmation_dialog(
     // Save the previous pending block ID before we overwrite it.
     // This is needed so we can clean up the first tool's pending block when
     // subsequent tools are added to the approval bar (see !was_empty branch below).
-    let previous_pending_bash_message_id = state.pending_bash_message_id;
+    let previous_pending_bash_message_id = state.tool_call_state.pending_bash_message_id;
 
     // Use unified run command block for command tool calls
     if is_foreground_command_tool(tool_name) {
@@ -424,7 +424,7 @@ pub fn handle_show_confirmation_dialog(
             Some(message_id),
         ));
     }
-    state.pending_bash_message_id = Some(message_id);
+    state.tool_call_state.pending_bash_message_id = Some(message_id);
 
     // Invalidate cache so the new message gets rendered
     invalidate_message_lines_cache(state);
@@ -436,7 +436,7 @@ pub fn handle_show_confirmation_dialog(
         state.is_dialog_open = true;
     }
     state.loading_state.is_loading = false;
-    state.is_streaming = false;
+    state.tool_call_state.is_streaming = false;
     state.dialog_focused = false;
 
     // check if its skipped
@@ -541,7 +541,7 @@ pub fn handle_show_confirmation_dialog(
         // new pending blocks - the bar navigation will handle switching between them.
         if !was_empty {
             // Remove the pending block we just created since it's not the selected one
-            if let Some(pending_id) = state.pending_bash_message_id {
+            if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
                 state.messages.retain(|m| m.id != pending_id);
             }
             // Also remove the previous pending block (from the first tool call that
@@ -551,7 +551,7 @@ pub fn handle_show_confirmation_dialog(
             if let Some(prev_id) = previous_pending_bash_message_id {
                 state.messages.retain(|m| m.id != prev_id);
             }
-            state.pending_bash_message_id = None;
+            state.tool_call_state.pending_bash_message_id = None;
 
             // Re-create the pending block for the currently selected tool in the bar
             // so the user always sees a preview for the active tab.

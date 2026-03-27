@@ -21,12 +21,12 @@ pub fn handle_stream_message(
     message_area_height: usize,
 ) {
     // Ignore late streaming events after cancellation was requested
-    if state.cancel_requested {
+    if state.tool_call_state.cancel_requested {
         return;
     }
 
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
-        state.is_streaming = true;
+        state.tool_call_state.is_streaming = true;
         if !state.loading_state.is_loading {
             state.loading_state.is_loading = true;
         }
@@ -58,7 +58,7 @@ pub fn handle_stream_message(
             // Mark that content changed while scrolled up - cache will be rebuilt when user scrolls back
             state.content_changed_while_scrolled_up = true;
         }
-        state.is_streaming = false;
+        state.tool_call_state.is_streaming = false;
     } else {
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
@@ -90,7 +90,7 @@ pub fn handle_stream_message(
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
-        state.is_streaming = false;
+        state.tool_call_state.is_streaming = false;
     }
 }
 
@@ -127,7 +127,7 @@ pub fn handle_has_user_message(state: &mut AppState) {
     state.tool_call_execution_order.clear();
     state.is_dialog_open = false;
     // Clear any pending cancellation from a previous interaction
-    state.cancel_requested = false;
+    state.tool_call_state.cancel_requested = false;
 }
 
 /// Handle stream usage event

@@ -81,21 +81,7 @@ pub struct AppState {
     pub shell_popup_state: ShellPopupState,
 
     // ========== Tool Call State ==========
-    pub pending_bash_message_id: Option<Uuid>,
-    pub streaming_tool_results: HashMap<Uuid, String>,
-    pub streaming_tool_result_id: Option<Uuid>,
-    pub completed_tool_calls: std::collections::HashSet<Uuid>,
-    pub is_streaming: bool,
-    /// When true, cancellation has been requested (ESC pressed) but the final ToolResult
-    /// hasn't arrived yet. Late StreamToolResult/StreamAssistantMessage events should be ignored.
-    pub cancel_requested: bool,
-    pub latest_tool_call: Option<ToolCall>,
-    /// Stable message ID for the tool call streaming preview block
-    pub tool_call_stream_preview_id: Option<Uuid>,
-    pub retry_attempts: usize,
-    pub max_retry_attempts: usize,
-    pub last_user_message_for_retry: Option<String>,
-    pub is_retrying: bool,
+    pub tool_call_state: ToolCallState,
 
     // ========== Dialog & Approval State ==========
     pub is_dialog_open: bool,
@@ -474,10 +460,10 @@ impl AppState {
             sessions: Vec::new(),
             session_selected: 0,
             account_info: String::new(),
-            pending_bash_message_id: None,
-            streaming_tool_results: HashMap::new(),
-            streaming_tool_result_id: None,
-            completed_tool_calls: std::collections::HashSet::new(),
+            tool_call_state: ToolCallState {
+                max_retry_attempts: 3,
+                ..Default::default()
+            },
             shell_popup_state: ShellPopupState {
                 shell_cursor_visible: true,
                 shell_mode_input: String::new(),
@@ -488,17 +474,9 @@ impl AppState {
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
-            is_streaming: false,
-            cancel_requested: false,
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
-            latest_tool_call: None,
-            tool_call_stream_preview_id: None,
-            retry_attempts: 0,
-            max_retry_attempts: 3,
-            last_user_message_for_retry: None,
-            is_retrying: false,
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,

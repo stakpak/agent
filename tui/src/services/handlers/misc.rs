@@ -30,8 +30,8 @@ pub fn handle_error(state: &mut AppState, err: String) {
     }
     if err == "STREAM_CANCELLED" {
         // Clear cancellation flag since we're now handling it
-        state.cancel_requested = false;
-        state.is_streaming = false;
+        state.tool_call_state.cancel_requested = false;
+        state.tool_call_state.is_streaming = false;
 
         let rendered_lines =
             render_bash_block_rejected("Interrupted by user", "System", None, None);
@@ -335,7 +335,7 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     // Clear any pending cancellation since a new assistant message arrived
-    state.cancel_requested = false;
+    state.tool_call_state.cancel_requested = false;
     state.messages.push(Message::assistant(None, msg, None));
 
     // Invalidate cache since messages changed

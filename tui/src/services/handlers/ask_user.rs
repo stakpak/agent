@@ -54,7 +54,7 @@ pub fn handle_show_ask_user_popup(
     // Clean up the pending border block (created by the approval bar flow) before
     // showing the interactive ask_user UI. Without this, both blocks coexist and
     // the user sees a confusing duplicate "Ask User" placeholder.
-    if let Some(pending_id) = state.pending_bash_message_id.take() {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id.take() {
         state.messages.retain(|m| m.id != pending_id);
     }
 

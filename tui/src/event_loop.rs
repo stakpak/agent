@@ -254,7 +254,7 @@ pub async fn run_tui(
                        clear_streaming_tool_results(&mut state);
 
                        // Clear cancel_requested now that the final result has arrived
-                       state.cancel_requested = false;
+                       state.tool_call_state.cancel_requested = false;
 
                        // For run_command, also remove any message that matches the tool call ID
                        // (handles case where streaming message uses tool_call_id directly)
@@ -269,7 +269,7 @@ pub async fn run_tui(
 
                        let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {
-                           state.latest_tool_call = Some(tool_call_result.call.clone());
+                           state.tool_call_state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
                        // Determine the state for command tools
                        let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;

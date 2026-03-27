@@ -140,8 +140,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     // Clear EVERYTHING
     state.messages.clear();
     state.session_tool_calls_queue.clear();
-    state.completed_tool_calls.clear();
-    state.streaming_tool_results.clear();
+    state.tool_call_state.completed_tool_calls.clear();
+    state.tool_call_state.streaming_tool_results.clear();
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.shell_tool_calls = None;
     state.message_tool_calls = None;
@@ -175,9 +175,9 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.approval_bar.clear();
 
     // Clear retry state
-    state.retry_attempts = 0;
-    state.last_user_message_for_retry = None;
-    state.is_retrying = false;
+    state.tool_call_state.retry_attempts = 0;
+    state.tool_call_state.last_user_message_for_retry = None;
+    state.tool_call_state.is_retrying = false;
 
     // Clear changeset and todos from previous session
     state.changeset = Changeset::default();

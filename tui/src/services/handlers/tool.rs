@@ -24,12 +24,12 @@ pub fn handle_stream_tool_result(
 ) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
-    if state.completed_tool_calls.contains(&tool_call_id) {
+    if state.tool_call_state.completed_tool_calls.contains(&tool_call_id) {
         return None;
     }
 
     // Ignore late streaming events after cancellation was requested
-    if state.cancel_requested {
+    if state.tool_call_state.cancel_requested {
         return None;
     }
 
@@ -45,7 +45,7 @@ pub fn handle_stream_tool_result(
             .to_string();
 
         // Update the pending/running bash message to show stall warning
-        if let Some(pending_id) = state.pending_bash_message_id {
+        if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
             for msg in &mut state.messages {
                 if msg.id == pending_id {
                     // Update to the stall warning variant - handle both old and new block types
@@ -92,10 +92,11 @@ pub fn handle_stream_tool_result(
     if !state.loading_state.is_loading {
         state.loading_state.is_loading = true;
     }
-    state.is_streaming = true;
-    state.streaming_tool_result_id = Some(tool_call_id);
+    state.tool_call_state.is_streaming = true;
+    state.tool_call_state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id (append mode for command output)
     state
+        .tool_call_state
         .streaming_tool_results
         .entry(tool_call_id)
         .or_default()
@@ -123,7 +124,7 @@ pub fn handle_stream_tool_result(
     };
 
     // 3. Remove the pending message with pending_bash_message_id (not the streaming message id)
-    if let Some(pending_id) = state.pending_bash_message_id {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state.messages.retain(|m| m.id != pending_id);
     }
     // Also remove any old streaming message with this id
@@ -131,6 +132,7 @@ pub fn handle_stream_tool_result(
 
     // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
+        .tool_call_state
         .streaming_tool_results
         .get(&tool_call_id)
         .cloned()
@@ -176,11 +178,11 @@ fn handle_task_wait_progress(
     if !state.loading_state.is_loading {
         state.loading_state.is_loading = true;
     }
-    state.is_streaming = true;
-    state.streaming_tool_result_id = Some(tool_call_id);
+    state.tool_call_state.is_streaming = true;
+    state.tool_call_state.streaming_tool_result_id = Some(tool_call_id);
 
     // Remove the pending message if exists
-    if let Some(pending_id) = state.pending_bash_message_id {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state.messages.retain(|m| m.id != pending_id);
     }
     // Remove any old message with this id (replace mode)
@@ -219,6 +221,7 @@ fn handle_task_wait_progress(
         // Fallback: use generic streaming block with replace mode
         // Store message directly (not appending)
         state
+            .tool_call_state
             .streaming_tool_results
             .insert(tool_call_id, progress.message.clone());
 
@@ -245,7 +248,7 @@ fn handle_task_wait_progress(
 /// Handle message tool calls event
 pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>) {
     // Clear the streaming preview block now that tool calls are finalized
-    if let Some(preview_id) = state.tool_call_stream_preview_id.take() {
+    if let Some(preview_id) = state.tool_call_state.tool_call_stream_preview_id.take() {
         state.messages.retain(|m| m.id != preview_id);
         invalidate_message_lines_cache(state);
     }
@@ -280,6 +283,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
 /// Uses replace-mode: removes old preview and inserts updated one each time.
 pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCallStreamInfo>) {
     let preview_id = *state
+        .tool_call_state
         .tool_call_stream_preview_id
         .get_or_insert_with(uuid::Uuid::new_v4);
 
@@ -287,7 +291,7 @@ pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCal
     if !state.loading_state.is_loading {
         state.loading_state.is_loading = true;
     }
-    state.is_streaming = true;
+    state.tool_call_state.is_streaming = true;
 
     // Remove old preview message (replace mode)
     state.messages.retain(|m| m.id != preview_id);
@@ -311,7 +315,7 @@ pub fn handle_retry_tool_call(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    if state.latest_tool_call.is_none() {
+    if state.tool_call_state.latest_tool_call.is_none() {
         return;
     }
     let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
@@ -320,7 +324,7 @@ pub fn handle_retry_tool_call(
         let _ = cancel_tx.send(());
     }
 
-    if let Some(tool_call) = &state.latest_tool_call {
+    if let Some(tool_call) = &state.tool_call_state.latest_tool_call {
         // Extract the command from the tool call
         let command = match extract_command_from_tool_call(tool_call) {
             Ok(command) => command,
@@ -374,7 +378,7 @@ pub fn handle_interactive_stall_detected(
     state.is_dialog_open = false;
 
     // Set up shell mode state
-    if let Some(tool_call) = &state.latest_tool_call {
+    if let Some(tool_call) = &state.tool_call_state.latest_tool_call {
         state.dialog_command = Some(tool_call.clone());
     }
     state.shell_popup_state.ondemand_shell_mode = false;
@@ -421,21 +425,21 @@ pub fn handle_approval_popup_escape(state: &mut AppState) {
 
 /// Clear streaming tool results
 pub fn clear_streaming_tool_results(state: &mut AppState) {
-    state.is_streaming = false;
+    state.tool_call_state.is_streaming = false;
 
     // Mark the current streaming tool call as completed
-    if let Some(tool_call_id) = state.streaming_tool_result_id {
-        state.completed_tool_calls.insert(tool_call_id);
+    if let Some(tool_call_id) = state.tool_call_state.streaming_tool_result_id {
+        state.tool_call_state.completed_tool_calls.insert(tool_call_id);
     }
 
     // Clear the streaming data and remove the streaming message and pending bash message id
-    state.streaming_tool_results.clear();
+    state.tool_call_state.streaming_tool_results.clear();
     state.messages.retain(|m| {
-        m.id != state.streaming_tool_result_id.unwrap_or_default()
-            && m.id != state.pending_bash_message_id.unwrap_or_default()
+        m.id != state.tool_call_state.streaming_tool_result_id.unwrap_or_default()
+            && m.id != state.tool_call_state.pending_bash_message_id.unwrap_or_default()
     });
-    state.latest_tool_call = None;
-    state.pending_bash_message_id = None;
+    state.tool_call_state.latest_tool_call = None;
+    state.tool_call_state.pending_bash_message_id = None;
 }
 
 /// Update session tool calls queue
@@ -896,7 +900,7 @@ pub fn handle_approval_bar_collapse(state: &mut AppState) {
 /// Update the pending tool display in messages area based on selected tab
 fn update_pending_tool_display(state: &mut AppState) {
     // Remove any existing pending tool block
-    if let Some(pending_id) = state.pending_bash_message_id {
+    if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state.messages.retain(|m| m.id != pending_id);
     }
 
@@ -942,7 +946,7 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
             };
 
             let msg = Message::render_run_command_block(command, None, run_state, None);
-            state.pending_bash_message_id = Some(msg.id);
+            state.tool_call_state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
         } else if tool_name == "resume_subagent_task" {
             // For resume_subagent_task, use the special subagent pending block
@@ -962,12 +966,12 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
                 pause_info,
                 None,
             );
-            state.pending_bash_message_id = Some(msg.id);
+            state.tool_call_state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
         } else {
             // For other tools, use the standard pending block
             let msg = Message::render_pending_border_block(tool_call.clone(), auto_approve, None);
-            state.pending_bash_message_id = Some(msg.id);
+            state.tool_call_state.pending_bash_message_id = Some(msg.id);
             state.messages.push(msg);
         }
 

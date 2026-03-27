@@ -879,10 +879,10 @@ pub fn handle_shell_completed(
                 tool_calls_after_index.clone(),
             ));
 
-            if let Some(latest_tool_call) = &state.latest_tool_call
+            if let Some(latest_tool_call) = &state.tool_call_state.latest_tool_call
                 && dialog_command.id == latest_tool_call.id
             {
-                state.latest_tool_call = None;
+                state.tool_call_state.latest_tool_call = None;
             }
             state.dialog_command = None;
             state.toggle_approved_message = true;

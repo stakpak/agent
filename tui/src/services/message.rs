@@ -1823,7 +1823,7 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
 pub fn invalidate_message_lines_cache(state: &mut AppState) {
     // If user has scrolled up (reading old messages), don't invalidate cache
     // This prevents jitter when new streaming chunks arrive while scrolled up
-    if !state.stay_at_bottom && state.is_streaming {
+    if !state.stay_at_bottom && state.tool_call_state.is_streaming {
         return;
     }
 

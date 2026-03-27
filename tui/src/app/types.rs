@@ -8,8 +8,8 @@ use crate::services::message::Message;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
-use stakpak_shared::models::integrations::openai::{ContentPart, ToolCallResult};
-use std::collections::HashMap;
+use stakpak_shared::models::integrations::openai::{ContentPart, ToolCall, ToolCallResult};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -287,6 +287,26 @@ pub struct ShellPopupState {
     pub shell_initial_prompt_shown: bool,
     /// Tracks if the command has been typed into the shell (after initial prompt)
     pub shell_command_typed: bool,
+}
+
+/// Tool-call streaming, retry, and cancellation lifecycle state.
+#[derive(Default)]
+pub struct ToolCallState {
+    pub pending_bash_message_id: Option<Uuid>,
+    pub streaming_tool_results: HashMap<Uuid, String>,
+    pub streaming_tool_result_id: Option<Uuid>,
+    pub completed_tool_calls: HashSet<Uuid>,
+    pub is_streaming: bool,
+    /// When true, cancellation has been requested (ESC pressed) but the final ToolResult
+    /// hasn't arrived yet. Late StreamToolResult/StreamAssistantMessage events should be ignored.
+    pub cancel_requested: bool,
+    pub latest_tool_call: Option<ToolCall>,
+    /// Stable message ID for the tool call streaming preview block
+    pub tool_call_stream_preview_id: Option<Uuid>,
+    pub retry_attempts: usize,
+    pub max_retry_attempts: usize,
+    pub last_user_message_for_retry: Option<String>,
+    pub is_retrying: bool,
 }
 
 impl Default for LoadingState {
