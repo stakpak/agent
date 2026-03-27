@@ -185,11 +185,11 @@ pub fn update(
     }
 
     // Intercept keys for "existing plan found" modal
-    if state.existing_plan_prompt.is_some() && !skip_popup_interception {
+    if state.plan_mode_state.existing_plan_prompt.is_some() && !skip_popup_interception {
         match event {
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
-                if let Some(prompt) = state.existing_plan_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.existing_plan_prompt.take() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -199,7 +199,7 @@ pub fn update(
                 // Start new — archive existing plan, then activate
                 let session_dir = std::path::Path::new(".stakpak/session");
                 crate::services::plan::archive_plan_file(session_dir);
-                if let Some(prompt) = state.existing_plan_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.existing_plan_prompt.take() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -207,7 +207,7 @@ pub fn update(
             }
             InputEvent::HandleEsc => {
                 // Cancel — dismiss modal, don't enter plan mode
-                state.existing_plan_prompt = None;
+                state.plan_mode_state.existing_plan_prompt = None;
                 return;
             }
             InputEvent::AttemptQuit | InputEvent::Quit => {
@@ -220,9 +220,9 @@ pub fn update(
     }
 
     // Intercept keys for Plan Review overlay
-    if state.show_plan_review && !skip_popup_interception {
+    if state.plan_review_state.show_plan_review && !skip_popup_interception {
         // Sub-intercept: comment modal is open
-        if state.plan_review_show_comment_modal {
+        if state.plan_review_state.plan_review_show_comment_modal {
             match event {
                 InputEvent::HandleEsc => {
                     crate::services::plan_review::close_comment_modal(state);
@@ -253,11 +253,11 @@ pub fn update(
                     return; // Consume everything else
                 }
             }
-        } else if state.plan_review_confirm.is_some() {
+        } else if state.plan_review_state.plan_review_confirm.is_some() {
             // Confirmation dialog is open — y/Enter confirms, n/Esc cancels
             match event {
                 InputEvent::HandleEsc | InputEvent::InputChanged('n') => {
-                    state.plan_review_confirm = None;
+                    state.plan_review_state.plan_review_confirm = None;
                     return;
                 }
                 InputEvent::InputSubmitted
@@ -419,7 +419,7 @@ pub fn update(
     // Mouse wheel (ScrollUp/ScrollDown) scrolls the viewport.
     // ←/→ switch question tabs (except in custom input).
     // Enter selects/toggles. Esc cancels.
-    if state.show_ask_user_popup && !skip_popup_interception {
+    if state.ask_user_state.show_ask_user_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc | InputEvent::AskUserCancel => {
                 ask_user::handle_ask_user_cancel(state, output_tx);
@@ -1376,8 +1376,8 @@ pub fn update(
         InputEvent::PlanModeChanged(active) => {
             use crate::services::helper_block::push_styled_message;
 
-            let was_active = state.plan_mode_active;
-            state.plan_mode_active = active;
+            let was_active = state.plan_mode_state.plan_mode_active;
+            state.plan_mode_state.plan_mode_active = active;
 
             // Show system message when entering plan mode
             if active && !was_active {
@@ -1393,14 +1393,14 @@ pub fn update(
         InputEvent::ExistingPlanFound(prompt) => {
             // Backend detected an existing plan at --plan startup.
             // Show the modal so the user can choose to resume or start fresh.
-            state.existing_plan_prompt = Some(prompt);
+            state.plan_mode_state.existing_plan_prompt = Some(prompt);
         }
 
         // Plan review events
         InputEvent::TogglePlanReview => {
-            if state.show_plan_review {
+            if state.plan_review_state.show_plan_review {
                 crate::services::plan_review::close_plan_review(state);
-            } else if state.plan_mode_active {
+            } else if state.plan_mode_state.plan_mode_active {
                 crate::services::plan_review::open_plan_review(state);
             } else {
                 // Fall through to command palette when not in plan mode
@@ -1751,8 +1751,8 @@ mod tests {
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
-        assert!(state.show_ask_user_popup);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert!(state.ask_user_state.show_ask_user_popup);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         // Down arrow — should move to next option
         update(
@@ -1767,7 +1767,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 1,
+            state.ask_user_state.ask_user_selected_option, 1,
             "Down should move to next option"
         );
 
@@ -1784,7 +1784,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 2,
+            state.ask_user_state.ask_user_selected_option, 2,
             "Down should move to next option again"
         );
 
@@ -1801,7 +1801,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 1,
+            state.ask_user_state.ask_user_selected_option, 1,
             "Up should move to prev option"
         );
     }
@@ -1852,7 +1852,7 @@ mod tests {
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
 
         // Right arrow — should move to next tab
         update(
@@ -1867,7 +1867,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_current_tab, 1,
+            state.ask_user_state.ask_user_current_tab, 1,
             "Right should move to next tab"
         );
 
@@ -1884,7 +1884,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_current_tab, 0,
+            state.ask_user_state.ask_user_current_tab, 0,
             "Left should move to prev tab"
         );
     }
@@ -1945,7 +1945,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 1,
+            state.ask_user_state.ask_user_selected_option, 1,
             "Down should navigate to option 1"
         );
 
@@ -1962,7 +1962,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 1,
+            state.ask_user_state.ask_user_selected_option, 1,
             "Down at bottom should clamp at last option"
         );
         // stay_at_bottom is unchanged — arrows no longer affect scroll state
@@ -1984,7 +1984,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 0,
+            state.ask_user_state.ask_user_selected_option, 0,
             "Up should navigate to option 0"
         );
 
@@ -2001,7 +2001,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 0,
+            state.ask_user_state.ask_user_selected_option, 0,
             "Up at top should clamp at first option"
         );
         assert!(
@@ -2023,7 +2023,7 @@ mod tests {
             Size::new(80, 24),
         );
         assert_eq!(
-            state.ask_user_selected_option, 1,
+            state.ask_user_state.ask_user_selected_option, 1,
             "Down should navigate even when scrolled up"
         );
     }

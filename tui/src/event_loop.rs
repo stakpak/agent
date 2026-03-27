@@ -622,8 +622,8 @@ pub async fn run_tui(
                        match new_status {
                            PlanStatus::PendingReview => {
                                // Auto-open plan review when agent sets status to pending_review
-                               if !state.plan_review_auto_opened {
-                                   state.plan_review_auto_opened = true;
+                               if !state.plan_mode_state.plan_review_auto_opened {
+                                   state.plan_mode_state.plan_review_auto_opened = true;
                                    crate::services::plan_review::open_plan_review(&mut state);
                                    // Show system message
                                    crate::services::helper_block::push_styled_message(
@@ -641,7 +641,7 @@ pub async fn run_tui(
                            }
                            PlanStatus::Drafting => {
                                // New revision — reset auto-open flag so next pending_review triggers it
-                               state.plan_review_auto_opened = false;
+                               state.plan_mode_state.plan_review_auto_opened = false;
                            }
                        }
                    }

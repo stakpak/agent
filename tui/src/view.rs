@@ -110,7 +110,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let approval_bar_visible = state.dialog_approval_state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let ask_user_visible = state.show_ask_user_popup && !state.ask_user_questions.is_empty();
+    let ask_user_visible = state.ask_user_state.show_ask_user_popup && !state.ask_user_state.ask_user_questions.is_empty();
     let input_visible =
         !(approval_bar_visible || state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded);
     let effective_input_height = if input_visible { input_height } else { 0 };
@@ -291,12 +291,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     render_toast(f, state);
 
     // Render "existing plan found" modal
-    if state.existing_plan_prompt.is_some() {
+    if state.plan_mode_state.existing_plan_prompt.is_some() {
         render_existing_plan_modal(f, state);
     }
 
     // Render plan review overlay (full-screen, on top of everything)
-    if state.show_plan_review {
+    if state.plan_review_state.show_plan_review {
         crate::services::plan_review::render_plan_review(f, state, f.area());
     }
 }
@@ -360,7 +360,7 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
     let area = f.area();
 
     let (title_text, status_text) = state
-        .existing_plan_prompt
+        .plan_mode_state.existing_plan_prompt
         .as_ref()
         .and_then(|p| p.metadata.as_ref())
         .map(|m| {

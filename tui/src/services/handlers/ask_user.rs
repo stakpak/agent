@@ -58,15 +58,15 @@ pub fn handle_show_ask_user_popup(
         state.messages.retain(|m| m.id != pending_id);
     }
 
-    state.show_ask_user_popup = true;
-    state.ask_user_focused = true;
-    state.ask_user_questions = questions.clone();
-    state.ask_user_answers.clear();
-    state.ask_user_current_tab = 0;
-    state.ask_user_selected_option = 0;
-    state.ask_user_custom_input.clear();
-    state.ask_user_tool_call = Some(tool_call);
-    state.ask_user_multi_selections.clear();
+    state.ask_user_state.show_ask_user_popup = true;
+    state.ask_user_state.ask_user_focused = true;
+    state.ask_user_state.ask_user_questions = questions.clone();
+    state.ask_user_state.ask_user_answers.clear();
+    state.ask_user_state.ask_user_current_tab = 0;
+    state.ask_user_state.ask_user_selected_option = 0;
+    state.ask_user_state.ask_user_custom_input.clear();
+    state.ask_user_state.ask_user_tool_call = Some(tool_call);
+    state.ask_user_state.ask_user_multi_selections.clear();
 
     // Initialize multi-select defaults from option.selected flags
     for q in &questions {
@@ -78,14 +78,13 @@ pub fn handle_show_ask_user_popup(
                 .map(|o| o.value.clone())
                 .collect();
             if !defaults.is_empty() {
-                state
-                    .ask_user_multi_selections
+                state.ask_user_state.ask_user_multi_selections
                     .insert(q.label.clone(), defaults.clone());
 
                 // Also pre-populate the answer so the tab shows as answered
                 let answer_json =
                     serde_json::to_string(&defaults).unwrap_or_else(|_| "[]".to_string());
-                state.ask_user_answers.insert(
+                state.ask_user_state.ask_user_answers.insert(
                     q.label.clone(),
                     AskUserAnswer {
                         question_label: q.label.clone(),
@@ -101,14 +100,14 @@ pub fn handle_show_ask_user_popup(
     // Create inline message block
     let msg = crate::services::message::Message::render_ask_user_block(
         questions,
-        state.ask_user_answers.clone(),
-        state.ask_user_current_tab,
-        state.ask_user_selected_option,
-        state.ask_user_custom_input.clone(),
-        state.ask_user_focused,
+        state.ask_user_state.ask_user_answers.clone(),
+        state.ask_user_state.ask_user_current_tab,
+        state.ask_user_state.ask_user_selected_option,
+        state.ask_user_state.ask_user_custom_input.clone(),
+        state.ask_user_state.ask_user_focused,
         None,
     );
-    state.ask_user_message_id = Some(msg.id);
+    state.ask_user_state.ask_user_message_id = Some(msg.id);
     state.messages.push(msg);
 
     // Invalidate cache to update display
@@ -125,17 +124,17 @@ pub fn refresh_ask_user_block_pub(state: &mut AppState) {
 
 /// Refresh the inline ask_user message block to reflect current state
 fn refresh_ask_user_block(state: &mut AppState) {
-    if let Some(msg_id) = state.ask_user_message_id {
+    if let Some(msg_id) = state.ask_user_state.ask_user_message_id {
         // Update the existing message in-place
         for msg in &mut state.messages {
             if msg.id == msg_id {
                 msg.content = crate::services::message::MessageContent::RenderAskUserBlock {
-                    questions: state.ask_user_questions.clone(),
-                    answers: state.ask_user_answers.clone(),
-                    current_tab: state.ask_user_current_tab,
-                    selected_option: state.ask_user_selected_option,
-                    custom_input: state.ask_user_custom_input.clone(),
-                    focused: state.ask_user_focused,
+                    questions: state.ask_user_state.ask_user_questions.clone(),
+                    answers: state.ask_user_state.ask_user_answers.clone(),
+                    current_tab: state.ask_user_state.ask_user_current_tab,
+                    selected_option: state.ask_user_state.ask_user_selected_option,
+                    custom_input: state.ask_user_state.ask_user_custom_input.clone(),
+                    focused: state.ask_user_state.ask_user_focused,
                 };
                 break;
             }
@@ -153,13 +152,13 @@ fn refresh_ask_user_block(state: &mut AppState) {
 
 /// Navigate to the next tab (question or Submit)
 pub fn handle_ask_user_next_tab(state: &mut AppState) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
-    let max_tab = state.ask_user_questions.len(); // questions.len() is the Submit tab
-    if state.ask_user_current_tab < max_tab {
-        state.ask_user_current_tab += 1;
+    let max_tab = state.ask_user_state.ask_user_questions.len(); // questions.len() is the Submit tab
+    if state.ask_user_state.ask_user_current_tab < max_tab {
+        state.ask_user_state.ask_user_current_tab += 1;
         restore_selection_for_current_tab(state);
     }
     refresh_ask_user_block(state);
@@ -167,12 +166,12 @@ pub fn handle_ask_user_next_tab(state: &mut AppState) {
 
 /// Navigate to the previous tab
 pub fn handle_ask_user_prev_tab(state: &mut AppState) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
-    if state.ask_user_current_tab > 0 {
-        state.ask_user_current_tab -= 1;
+    if state.ask_user_state.ask_user_current_tab > 0 {
+        state.ask_user_state.ask_user_current_tab -= 1;
         restore_selection_for_current_tab(state);
     }
     refresh_ask_user_block(state);
@@ -183,48 +182,48 @@ pub fn handle_ask_user_prev_tab(state: &mut AppState) {
 /// If the question was previously answered, place the cursor on the answered
 /// option so the `›` indicator doesn't hide the selection. Otherwise reset to 0.
 fn restore_selection_for_current_tab(state: &mut AppState) {
-    state.ask_user_custom_input.clear();
+    state.ask_user_state.ask_user_custom_input.clear();
 
     // Submit tab — nothing to restore
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
-        state.ask_user_selected_option = 0;
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
+        state.ask_user_state.ask_user_selected_option = 0;
         return;
     }
 
-    let q = &state.ask_user_questions[state.ask_user_current_tab];
+    let q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
 
-    if let Some(answer) = state.ask_user_answers.get(&q.label) {
+    if let Some(answer) = state.ask_user_state.ask_user_answers.get(&q.label) {
         if answer.is_custom {
             // Custom answer — point to the custom input slot
-            state.ask_user_selected_option = q.options.len();
-            state.ask_user_custom_input.clone_from(&answer.answer);
+            state.ask_user_state.ask_user_selected_option = q.options.len();
+            state.ask_user_state.ask_user_custom_input.clone_from(&answer.answer);
         } else if let Some(idx) = q.options.iter().position(|o| o.value == answer.answer) {
-            state.ask_user_selected_option = idx;
+            state.ask_user_state.ask_user_selected_option = idx;
         } else {
-            state.ask_user_selected_option = 0;
+            state.ask_user_state.ask_user_selected_option = 0;
         }
     } else {
-        state.ask_user_selected_option = 0;
+        state.ask_user_state.ask_user_selected_option = 0;
     }
 }
 
 /// Navigate to the next option within the current question.
 /// Returns `true` if the cursor moved, `false` if already at the last option (boundary).
 pub fn handle_ask_user_next_option(state: &mut AppState) -> bool {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return false;
     }
 
     // Can't navigate options on Submit tab
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return false;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
     let total_options = get_total_options(current_q);
 
-    if state.ask_user_selected_option < total_options.saturating_sub(1) {
-        state.ask_user_selected_option += 1;
+    if state.ask_user_state.ask_user_selected_option < total_options.saturating_sub(1) {
+        state.ask_user_state.ask_user_selected_option += 1;
         refresh_ask_user_block(state);
         true
     } else {
@@ -235,17 +234,17 @@ pub fn handle_ask_user_next_option(state: &mut AppState) -> bool {
 /// Navigate to the previous option within the current question.
 /// Returns `true` if the cursor moved, `false` if already at the first option (boundary).
 pub fn handle_ask_user_prev_option(state: &mut AppState) -> bool {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return false;
     }
 
     // Can't navigate options on Submit tab
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return false;
     }
 
-    if state.ask_user_selected_option > 0 {
-        state.ask_user_selected_option -= 1;
+    if state.ask_user_state.ask_user_selected_option > 0 {
+        state.ask_user_state.ask_user_selected_option -= 1;
         refresh_ask_user_block(state);
         true
     } else {
@@ -256,28 +255,27 @@ pub fn handle_ask_user_prev_option(state: &mut AppState) -> bool {
 /// Toggle/select the current option WITHOUT advancing to the next question.
 /// This is triggered by Space. It selects in single-select or toggles in multi-select.
 pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // If on Submit tab, submit (Space on submit = submit)
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         handle_ask_user_submit(state, output_tx);
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
     let question_label = current_q.label.clone();
 
     // --- Multi-select mode: toggle the option ---
     if current_q.multi_select {
         // Custom input is not supported in multi-select mode (allow_custom is ignored)
-        if state.ask_user_selected_option < current_q.options.len() {
-            let opt_value = current_q.options[state.ask_user_selected_option]
+        if state.ask_user_state.ask_user_selected_option < current_q.options.len() {
+            let opt_value = current_q.options[state.ask_user_state.ask_user_selected_option]
                 .value
                 .clone();
-            let selections = state
-                .ask_user_multi_selections
+            let selections = state.ask_user_state.ask_user_multi_selections
                 .entry(question_label.clone())
                 .or_default();
 
@@ -289,8 +287,7 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
             }
 
             // Build the answer from current selections
-            let selected = state
-                .ask_user_multi_selections
+            let selected = state.ask_user_state.ask_user_multi_selections
                 .get(&question_label)
                 .cloned()
                 .unwrap_or_default();
@@ -306,9 +303,9 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
 
             if answer.selected_values.is_empty() {
                 // No selections — remove the answer so "required" validation works
-                state.ask_user_answers.remove(&question_label);
+                state.ask_user_state.ask_user_answers.remove(&question_label);
             } else {
-                state.ask_user_answers.insert(question_label, answer);
+                state.ask_user_state.ask_user_answers.insert(question_label, answer);
             }
         }
         refresh_ask_user_block(state);
@@ -318,17 +315,16 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     // --- Single-select mode: select without advancing ---
 
     // Check if custom input is selected
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
+    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
         // Custom input selected - save the custom answer if not empty (no advance)
-        if !state.ask_user_custom_input.is_empty() {
+        if !state.ask_user_state.ask_user_custom_input.is_empty() {
             let answer = AskUserAnswer {
                 question_label: question_label.clone(),
-                answer: state.ask_user_custom_input.clone(),
+                answer: state.ask_user_state.ask_user_custom_input.clone(),
                 is_custom: true,
                 selected_values: vec![],
             };
-            state
-                .ask_user_answers
+            state.ask_user_state.ask_user_answers
                 .insert(current_q.label.clone(), answer);
         }
         refresh_ask_user_block(state);
@@ -336,15 +332,14 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     }
 
     // Regular option selected (no advance)
-    if let Some(opt) = current_q.options.get(state.ask_user_selected_option) {
+    if let Some(opt) = current_q.options.get(state.ask_user_state.ask_user_selected_option) {
         let answer = AskUserAnswer {
             question_label,
             answer: opt.value.clone(),
             is_custom: false,
             selected_values: vec![],
         };
-        state
-            .ask_user_answers
+        state.ask_user_state.ask_user_answers
             .insert(current_q.label.clone(), answer);
     }
     refresh_ask_user_block(state);
@@ -354,32 +349,31 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
 /// This is triggered by Enter. It ONLY advances — it never selects or toggles.
 /// Use Space to select/toggle options. On the submit tab, Enter submits.
 pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // If on Submit tab, submit
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         handle_ask_user_submit(state, output_tx);
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
 
     // If custom input is selected and has text, save it before advancing
     if !current_q.multi_select
         && current_q.allow_custom
-        && state.ask_user_selected_option == current_q.options.len()
-        && !state.ask_user_custom_input.is_empty()
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+        && !state.ask_user_state.ask_user_custom_input.is_empty()
     {
         let answer = AskUserAnswer {
             question_label: current_q.label.clone(),
-            answer: state.ask_user_custom_input.clone(),
+            answer: state.ask_user_state.ask_user_custom_input.clone(),
             is_custom: true,
             selected_values: vec![],
         };
-        state
-            .ask_user_answers
+        state.ask_user_state.ask_user_answers
             .insert(current_q.label.clone(), answer);
     }
 
@@ -389,87 +383,86 @@ pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender
 
 /// Handle pasted text for custom answer (bulk insert, single refresh)
 pub fn handle_ask_user_custom_input_paste(state: &mut AppState, text: &str) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
         let redacted = state.secret_manager.redact_and_store_secrets(text, None);
-        state.ask_user_custom_input.push_str(&redacted);
+        state.ask_user_state.ask_user_custom_input.push_str(&redacted);
         refresh_ask_user_block(state);
     }
 }
 
 /// Handle character input for custom answer
 pub fn handle_ask_user_custom_input_changed(state: &mut AppState, c: char) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
-        state.ask_user_custom_input.push(c);
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+        state.ask_user_state.ask_user_custom_input.push(c);
         refresh_ask_user_block(state);
     }
 }
 
 /// Handle backspace for custom answer
 pub fn handle_ask_user_custom_input_backspace(state: &mut AppState) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
-        state.ask_user_custom_input.pop();
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+        state.ask_user_state.ask_user_custom_input.pop();
         refresh_ask_user_block(state);
     }
 }
 
 /// Handle delete (clear all) for custom answer
 pub fn handle_ask_user_custom_input_delete(state: &mut AppState) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_selected_option == current_q.options.len() {
-        state.ask_user_custom_input.clear();
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+        state.ask_user_state.ask_user_custom_input.clear();
         refresh_ask_user_block(state);
     }
 }
 
 /// Submit all answers
 pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // Build the structured result as documented in the tool description
-    let answers: Vec<AskUserAnswer> = state
-        .ask_user_questions
+    let answers: Vec<AskUserAnswer> = state.ask_user_state.ask_user_questions
         .iter()
-        .filter_map(|q| state.ask_user_answers.get(&q.label).cloned())
+        .filter_map(|q| state.ask_user_state.ask_user_answers.get(&q.label).cloned())
         .map(|mut answer| {
             answer.answer = state
                 .secret_manager
@@ -489,7 +482,7 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
         .unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize result: {}\"}}", e));
 
     // Send the result back
-    if let Some(tool_call) = state.ask_user_tool_call.take() {
+    if let Some(tool_call) = state.ask_user_state.ask_user_tool_call.take() {
         let tool_result = ToolCallResult {
             call: tool_call,
             result: display_result,
@@ -505,12 +498,12 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
 
 /// Cancel and close the popup
 pub fn handle_ask_user_cancel(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return;
     }
 
     // Send the cancelled result back as JSON (matching the documented format)
-    if let Some(tool_call) = state.ask_user_tool_call.take() {
+    if let Some(tool_call) = state.ask_user_state.ask_user_tool_call.take() {
         let result = AskUserResult {
             answers: vec![],
             completed: false,
@@ -536,19 +529,19 @@ pub fn handle_ask_user_cancel(state: &mut AppState, output_tx: &Sender<OutputEve
 /// Close the ask user interaction and remove the inline block
 fn close_ask_user_popup(state: &mut AppState) {
     // Remove the inline message block
-    if let Some(msg_id) = state.ask_user_message_id.take() {
+    if let Some(msg_id) = state.ask_user_state.ask_user_message_id.take() {
         state.messages.retain(|m| m.id != msg_id);
     }
 
-    state.show_ask_user_popup = false;
-    state.ask_user_focused = false;
-    state.ask_user_questions.clear();
-    state.ask_user_answers.clear();
-    state.ask_user_current_tab = 0;
-    state.ask_user_selected_option = 0;
-    state.ask_user_custom_input.clear();
-    state.ask_user_tool_call = None;
-    state.ask_user_multi_selections.clear();
+    state.ask_user_state.show_ask_user_popup = false;
+    state.ask_user_state.ask_user_focused = false;
+    state.ask_user_state.ask_user_questions.clear();
+    state.ask_user_state.ask_user_answers.clear();
+    state.ask_user_state.ask_user_current_tab = 0;
+    state.ask_user_state.ask_user_selected_option = 0;
+    state.ask_user_state.ask_user_custom_input.clear();
+    state.ask_user_state.ask_user_tool_call = None;
+    state.ask_user_state.ask_user_multi_selections.clear();
 
     // Invalidate cache to update display
     crate::services::message::invalidate_message_lines_cache(state);
@@ -556,16 +549,16 @@ fn close_ask_user_popup(state: &mut AppState) {
 
 /// Check if the current question has custom input selected
 pub fn is_custom_input_selected(state: &AppState) -> bool {
-    if !state.show_ask_user_popup {
+    if !state.ask_user_state.show_ask_user_popup {
         return false;
     }
 
-    if state.ask_user_current_tab >= state.ask_user_questions.len() {
+    if state.ask_user_state.ask_user_current_tab >= state.ask_user_state.ask_user_questions.len() {
         return false;
     }
 
-    let current_q = &state.ask_user_questions[state.ask_user_current_tab];
-    current_q.allow_custom && state.ask_user_selected_option == current_q.options.len()
+    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len()
 }
 
 #[cfg(test)]
@@ -660,16 +653,16 @@ mod tests {
         let questions = create_test_questions();
         let tool_call = create_test_tool_call();
 
-        assert!(!state.show_ask_user_popup);
-        assert!(state.ask_user_questions.is_empty());
+        assert!(!state.ask_user_state.show_ask_user_popup);
+        assert!(state.ask_user_state.ask_user_questions.is_empty());
 
         handle_show_ask_user_popup(&mut state, tool_call.clone(), questions.clone());
 
-        assert!(state.show_ask_user_popup);
-        assert_eq!(state.ask_user_questions.len(), 2);
-        assert_eq!(state.ask_user_current_tab, 0);
-        assert_eq!(state.ask_user_selected_option, 0);
-        assert!(state.ask_user_tool_call.is_some());
+        assert!(state.ask_user_state.show_ask_user_popup);
+        assert_eq!(state.ask_user_state.ask_user_questions.len(), 2);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
+        assert!(state.ask_user_state.ask_user_tool_call.is_some());
     }
 
     #[tokio::test]
@@ -680,7 +673,7 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, vec![]);
 
         // Should not show popup with empty questions
-        assert!(!state.show_ask_user_popup);
+        assert!(!state.ask_user_state.show_ask_user_popup);
     }
 
     #[tokio::test]
@@ -692,30 +685,30 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Start at tab 0
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
 
         // Navigate to next tab
         handle_ask_user_next_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 1);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 1);
 
         // Navigate to Submit tab (index 2 for 2 questions)
         handle_ask_user_next_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 2);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 2);
 
         // Can't go beyond Submit
         handle_ask_user_next_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 2);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 2);
 
         // Navigate back
         handle_ask_user_prev_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 1);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 1);
 
         handle_ask_user_prev_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
 
         // Can't go before first question
         handle_ask_user_prev_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
     }
 
     #[tokio::test]
@@ -727,28 +720,28 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // First question has 2 options + custom = 3 total
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1);
 
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 2); // custom option
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 2); // custom option
 
         // Can't go beyond last option
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 2);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 2);
 
         // Navigate back
         handle_ask_user_prev_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1);
 
         handle_ask_user_prev_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         // Can't go before first option
         handle_ask_user_prev_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
     }
 
     #[tokio::test]
@@ -761,16 +754,16 @@ mod tests {
 
         // Navigate to second question (no custom option)
         handle_ask_user_next_tab(&mut state);
-        assert_eq!(state.ask_user_current_tab, 1);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         // Second question has 2 options only (no custom)
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1);
 
         // Can't go beyond (no custom option)
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1);
     }
 
     #[tokio::test]
@@ -786,17 +779,17 @@ mod tests {
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Should have recorded the answer
-        assert!(state.ask_user_answers.contains_key("Environment"));
-        let answer = &state.ask_user_answers["Environment"];
+        assert!(state.ask_user_state.ask_user_answers.contains_key("Environment"));
+        let answer = &state.ask_user_state.ask_user_answers["Environment"];
         assert_eq!(answer.answer, "dev");
         assert!(!answer.is_custom);
 
         // Should stay on the same tab (no auto-advance)
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
 
         // Now confirm via Enter — should advance to next question
         handle_ask_user_confirm_question(&mut state, &output_tx);
-        assert_eq!(state.ask_user_current_tab, 1);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 1);
     }
 
     #[tokio::test]
@@ -811,7 +804,7 @@ mod tests {
         // Navigate to custom option (index 2)
         handle_ask_user_next_option(&mut state);
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 2);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 2);
 
         // Type custom input
         handle_ask_user_custom_input_changed(&mut state, 's');
@@ -822,14 +815,14 @@ mod tests {
         handle_ask_user_custom_input_changed(&mut state, 'n');
         handle_ask_user_custom_input_changed(&mut state, 'g');
 
-        assert_eq!(state.ask_user_custom_input, "staging");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "staging");
 
         // Select the custom option
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Should have recorded custom answer
-        assert!(state.ask_user_answers.contains_key("Environment"));
-        let answer = &state.ask_user_answers["Environment"];
+        assert!(state.ask_user_state.ask_user_answers.contains_key("Environment"));
+        let answer = &state.ask_user_state.ask_user_answers["Environment"];
         assert_eq!(answer.answer, "staging");
         assert!(answer.is_custom);
     }
@@ -850,18 +843,18 @@ mod tests {
         handle_ask_user_custom_input_changed(&mut state, 'a');
         handle_ask_user_custom_input_changed(&mut state, 'b');
         handle_ask_user_custom_input_changed(&mut state, 'c');
-        assert_eq!(state.ask_user_custom_input, "abc");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "abc");
 
         handle_ask_user_custom_input_backspace(&mut state);
-        assert_eq!(state.ask_user_custom_input, "ab");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "ab");
 
         handle_ask_user_custom_input_backspace(&mut state);
         handle_ask_user_custom_input_backspace(&mut state);
-        assert_eq!(state.ask_user_custom_input, "");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "");
 
         // Backspace on empty is safe
         handle_ask_user_custom_input_backspace(&mut state);
-        assert_eq!(state.ask_user_custom_input, "");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "");
     }
 
     #[tokio::test]
@@ -881,11 +874,11 @@ mod tests {
         handle_ask_user_custom_input_changed(&mut state, 'e');
         handle_ask_user_custom_input_changed(&mut state, 's');
         handle_ask_user_custom_input_changed(&mut state, 't');
-        assert_eq!(state.ask_user_custom_input, "test");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "test");
 
         // Delete clears everything
         handle_ask_user_custom_input_delete(&mut state);
-        assert_eq!(state.ask_user_custom_input, "");
+        assert_eq!(state.ask_user_state.ask_user_custom_input, "");
     }
 
     #[tokio::test]
@@ -909,7 +902,7 @@ mod tests {
 
         // Navigate to second question (no custom)
         handle_ask_user_next_tab(&mut state);
-        state.ask_user_selected_option = 1; // Last option
+        state.ask_user_state.ask_user_selected_option = 1; // Last option
         assert!(!is_custom_input_selected(&state)); // Second question has no custom
     }
 
@@ -923,7 +916,7 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Answer both required questions
-        state.ask_user_answers.insert(
+        state.ask_user_state.ask_user_answers.insert(
             "Environment".to_string(),
             AskUserAnswer {
                 question_label: "Environment".to_string(),
@@ -932,7 +925,7 @@ mod tests {
                 selected_values: vec![],
             },
         );
-        state.ask_user_answers.insert(
+        state.ask_user_state.ask_user_answers.insert(
             "Confirm".to_string(),
             AskUserAnswer {
                 question_label: "Confirm".to_string(),
@@ -943,15 +936,15 @@ mod tests {
         );
 
         // Go to Submit tab
-        state.ask_user_current_tab = 2;
+        state.ask_user_state.ask_user_current_tab = 2;
 
         // Submit
         handle_ask_user_submit(&mut state, &output_tx);
 
         // Popup should be closed
-        assert!(!state.show_ask_user_popup);
-        assert!(state.ask_user_questions.is_empty());
-        assert!(state.ask_user_answers.is_empty());
+        assert!(!state.ask_user_state.show_ask_user_popup);
+        assert!(state.ask_user_state.ask_user_questions.is_empty());
+        assert!(state.ask_user_state.ask_user_answers.is_empty());
 
         // Should have sent response
         let event = output_rx.try_recv().unwrap();
@@ -978,7 +971,7 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Only answer first question
-        state.ask_user_answers.insert(
+        state.ask_user_state.ask_user_answers.insert(
             "Environment".to_string(),
             AskUserAnswer {
                 question_label: "Environment".to_string(),
@@ -989,7 +982,7 @@ mod tests {
         );
 
         // Go to Submit tab
-        state.ask_user_current_tab = 2;
+        state.ask_user_state.ask_user_current_tab = 2;
 
         // Try to submit — should succeed even with unanswered questions
         handle_ask_user_submit(&mut state, &output_tx);
@@ -1006,7 +999,7 @@ mod tests {
             }
             _ => panic!("Expected AskUserResponse event"),
         }
-        assert!(!state.show_ask_user_popup); // Popup closed
+        assert!(!state.ask_user_state.show_ask_user_popup); // Popup closed
     }
 
     #[tokio::test]
@@ -1022,7 +1015,7 @@ mod tests {
         handle_ask_user_cancel(&mut state, &output_tx);
 
         // Popup should be closed
-        assert!(!state.show_ask_user_popup);
+        assert!(!state.ask_user_state.show_ask_user_popup);
 
         // Should have sent cancelled response
         let event = output_rx.try_recv().unwrap();
@@ -1057,8 +1050,8 @@ mod tests {
         handle_ask_user_cancel(&mut state, &output_tx);
 
         // State should be unchanged
-        assert!(!state.show_ask_user_popup);
-        assert!(state.ask_user_questions.is_empty());
+        assert!(!state.ask_user_state.show_ask_user_popup);
+        assert!(state.ask_user_state.ask_user_questions.is_empty());
     }
 
     #[tokio::test]
@@ -1070,14 +1063,14 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Navigate to Submit tab
-        state.ask_user_current_tab = 2;
+        state.ask_user_state.ask_user_current_tab = 2;
 
         // Option navigation should be no-op on Submit tab
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         handle_ask_user_prev_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
     }
 
     // ========== Multi-select tests ==========
@@ -1121,13 +1114,13 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Should have pre-populated multi-select state from option.selected
-        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
         assert_eq!(selections.len(), 2);
         assert!(selections.contains(&"repo:api".to_string()));
         assert!(selections.contains(&"repo:web".to_string()));
 
         // Should also have pre-populated the answer
-        let answer = state.ask_user_answers.get("Scope").unwrap();
+        let answer = state.ask_user_state.ask_user_answers.get("Scope").unwrap();
         assert_eq!(answer.selected_values.len(), 2);
     }
 
@@ -1143,17 +1136,17 @@ mod tests {
         // Navigate to dotfiles (index 2, currently unselected)
         handle_ask_user_next_option(&mut state);
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 2);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 2);
 
         // Toggle it on
         handle_ask_user_select_option(&mut state, &output_tx);
 
-        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
         assert_eq!(selections.len(), 3);
         assert!(selections.contains(&"repo:dotfiles".to_string()));
 
         // Should NOT auto-advance (still on same tab)
-        assert_eq!(state.ask_user_current_tab, 0);
+        assert_eq!(state.ask_user_state.ask_user_current_tab, 0);
     }
 
     #[tokio::test]
@@ -1166,12 +1159,12 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // api is at index 0, currently selected by default
-        assert_eq!(state.ask_user_selected_option, 0);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 0);
 
         // Toggle it off
         handle_ask_user_select_option(&mut state, &output_tx);
 
-        let selections = state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
         assert_eq!(selections.len(), 1);
         assert!(!selections.contains(&"repo:api".to_string()));
         assert!(selections.contains(&"repo:web".to_string()));
@@ -1199,13 +1192,13 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Initially "a" is selected
-        assert!(state.ask_user_answers.contains_key("Pick"));
+        assert!(state.ask_user_state.ask_user_answers.contains_key("Pick"));
 
         // Toggle off the only selection
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Answer should be removed
-        assert!(!state.ask_user_answers.contains_key("Pick"));
+        assert!(!state.ask_user_state.ask_user_answers.contains_key("Pick"));
     }
 
     #[tokio::test]
@@ -1219,11 +1212,11 @@ mod tests {
 
         // Defaults are already set (api + web selected)
         // Navigate to Submit tab
-        state.ask_user_current_tab = 1; // 1 question + submit tab
+        state.ask_user_state.ask_user_current_tab = 1; // 1 question + submit tab
 
         handle_ask_user_submit(&mut state, &output_tx);
 
-        assert!(!state.show_ask_user_popup);
+        assert!(!state.ask_user_state.show_ask_user_popup);
 
         let event = output_rx.try_recv().unwrap();
         match event {
@@ -1277,13 +1270,13 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Total options should be 2 (no custom slot)
-        let q = &state.ask_user_questions[0];
+        let q = &state.ask_user_state.ask_user_questions[0];
         assert_eq!(get_total_options(q), 2);
 
         // Can't navigate beyond last option
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1);
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1);
         handle_ask_user_next_option(&mut state);
-        assert_eq!(state.ask_user_selected_option, 1); // stuck at 1, no custom slot
+        assert_eq!(state.ask_user_state.ask_user_selected_option, 1); // stuck at 1, no custom slot
     }
 }

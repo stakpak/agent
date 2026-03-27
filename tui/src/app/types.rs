@@ -421,6 +421,77 @@ pub struct UsageTrackingState {
     pub context_usage_percent: u64,
 }
 
+#[derive(Default)]
+pub struct PlanModeState {
+    /// Whether plan mode is active (set by /plan command, cleared by /new session)
+    pub plan_mode_active: bool,
+    /// Cached plan metadata from `.stakpak/session/plan.md` front matter
+    pub plan_metadata: Option<crate::services::plan::PlanMetadata>,
+    /// SHA-256 hash of the last-read plan content (for change detection)
+    pub plan_content_hash: Option<String>,
+    /// Previous plan status (for detecting transitions)
+    pub plan_previous_status: Option<crate::services::plan::PlanStatus>,
+    /// Whether plan review was auto-opened for current reviewing transition
+    pub plan_review_auto_opened: bool,
+    /// When set, the "existing plan found" modal is visible.
+    /// Contains the stashed prompt and plan metadata for the modal to display.
+    pub existing_plan_prompt: Option<ExistingPlanPrompt>,
+}
+
+#[derive(Default)]
+pub struct PlanReviewState {
+    /// Whether the plan review overlay is visible
+    pub show_plan_review: bool,
+    /// Scroll offset (line index of the top visible line)
+    pub plan_review_scroll: usize,
+    /// Currently selected line (0-indexed)
+    pub plan_review_cursor_line: usize,
+    /// Cached plan content (loaded when review opens)
+    pub plan_review_content: String,
+    /// Cached split lines of plan content
+    pub plan_review_lines: Vec<String>,
+    /// Cached plan comments (loaded when review opens)
+    pub plan_review_comments: Option<crate::services::plan_comments::PlanComments>,
+    /// Resolved anchors mapping comment IDs to line numbers
+    pub plan_review_resolved_anchors:
+        Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
+    /// Whether the comment input modal is open
+    pub plan_review_show_comment_modal: bool,
+    /// Text buffer for composing a new comment
+    pub plan_review_comment_input: String,
+    /// Selected comment ID (for reply targeting)
+    pub plan_review_selected_comment: Option<String>,
+    /// Kind of comment modal currently open
+    pub plan_review_modal_kind: Option<crate::services::plan_review::CommentModalKind>,
+    /// Confirmation dialog currently shown (approve, feedback, delete)
+    pub plan_review_confirm: Option<crate::services::plan_review::ConfirmAction>,
+}
+
+#[derive(Default)]
+pub struct AskUserState {
+    /// Whether the ask user interaction is active
+    pub show_ask_user_popup: bool,
+    /// Questions to display in the inline block
+    pub ask_user_questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+    /// User's answers (question label -> answer)
+    pub ask_user_answers:
+        HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
+    /// Currently selected tab index (question index, or questions.len() for Submit)
+    pub ask_user_current_tab: usize,
+    /// Currently selected option index within the current question
+    pub ask_user_selected_option: usize,
+    /// Custom input text when "Type something..." is selected
+    pub ask_user_custom_input: String,
+    /// The tool call that triggered this (for sending result back)
+    pub ask_user_tool_call: Option<ToolCall>,
+    /// Message ID for the inline ask_user block in the messages list
+    pub ask_user_message_id: Option<Uuid>,
+    /// Whether the ask_user block has keyboard focus (Tab toggles)
+    pub ask_user_focused: bool,
+    /// Multi-select toggle state: question label -> list of currently selected option values
+    pub ask_user_multi_selections: HashMap<String, Vec<String>>,
+}
+
 impl Default for UsageTrackingState {
     fn default() -> Self {
         Self {

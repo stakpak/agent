@@ -25,7 +25,6 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use ratatui::layout::{Rect, Size};
 use ratatui::text::Line;
-use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
@@ -212,68 +211,13 @@ pub struct AppState {
     pub pending_revert_index: Option<usize>,
 
     // ========== Plan Mode State ==========
-    /// Whether plan mode is active (set by /plan command, cleared by /new session)
-    pub plan_mode_active: bool,
-    /// Cached plan metadata from `.stakpak/session/plan.md` front matter
-    pub plan_metadata: Option<crate::services::plan::PlanMetadata>,
-    /// SHA-256 hash of the last-read plan content (for change detection)
-    pub plan_content_hash: Option<String>,
-    /// Previous plan status (for detecting transitions)
-    pub plan_previous_status: Option<crate::services::plan::PlanStatus>,
-    /// Whether plan review was auto-opened for current reviewing transition
-    pub plan_review_auto_opened: bool,
-    /// When set, the "existing plan found" modal is visible.
-    /// Contains the stashed prompt and plan metadata for the modal to display.
-    pub existing_plan_prompt: Option<ExistingPlanPrompt>,
+    pub plan_mode_state: PlanModeState,
 
     // ========== Plan Review State ==========
-    /// Whether the plan review overlay is visible
-    pub show_plan_review: bool,
-    /// Scroll offset (line index of the top visible line)
-    pub plan_review_scroll: usize,
-    /// Currently selected line (0-indexed)
-    pub plan_review_cursor_line: usize,
-    /// Cached plan content (loaded when review opens)
-    pub plan_review_content: String,
-    /// Cached split lines of plan content
-    pub plan_review_lines: Vec<String>,
-    /// Cached plan comments (loaded when review opens)
-    pub plan_review_comments: Option<crate::services::plan_comments::PlanComments>,
-    /// Resolved anchors mapping comment IDs to line numbers
-    pub plan_review_resolved_anchors: Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
-    /// Whether the comment input modal is open
-    pub plan_review_show_comment_modal: bool,
-    /// Text buffer for composing a new comment
-    pub plan_review_comment_input: String,
-    /// Selected comment ID (for reply targeting)
-    pub plan_review_selected_comment: Option<String>,
-    /// Kind of comment modal currently open
-    pub plan_review_modal_kind: Option<crate::services::plan_review::CommentModalKind>,
-    /// Confirmation dialog currently shown (approve, feedback, delete)
-    pub plan_review_confirm: Option<crate::services::plan_review::ConfirmAction>,
+    pub plan_review_state: PlanReviewState,
 
     // ========== Ask User Inline Block State ==========
-    /// Whether the ask user interaction is active
-    pub show_ask_user_popup: bool,
-    /// Questions to display in the inline block
-    pub ask_user_questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
-    /// User's answers (question label -> answer)
-    pub ask_user_answers:
-        HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
-    /// Currently selected tab index (question index, or questions.len() for Submit)
-    pub ask_user_current_tab: usize,
-    /// Currently selected option index within the current question
-    pub ask_user_selected_option: usize,
-    /// Custom input text when "Type something..." is selected
-    pub ask_user_custom_input: String,
-    /// The tool call that triggered this (for sending result back)
-    pub ask_user_tool_call: Option<ToolCall>,
-    /// Message ID for the inline ask_user block in the messages list
-    pub ask_user_message_id: Option<Uuid>,
-    /// Whether the ask_user block has keyboard focus (Tab toggles)
-    pub ask_user_focused: bool,
-    /// Multi-select toggle state: question label -> list of currently selected option values
-    pub ask_user_multi_selections: HashMap<String, Vec<String>>,
+    pub ask_user_state: AskUserState,
 }
 
 pub struct AppStateOptions<'a> {
@@ -530,27 +474,9 @@ impl AppState {
             billing_info: None,
             auth_display_info,
 
-            // Plan mode initialization
-            plan_mode_active: false,
-            plan_metadata: None,
-            plan_content_hash: None,
-            plan_previous_status: None,
-            plan_review_auto_opened: false,
-            existing_plan_prompt: None,
-
-            // Plan review initialization
-            show_plan_review: false,
-            plan_review_scroll: 0,
-            plan_review_cursor_line: 0,
-            plan_review_content: String::new(),
-            plan_review_lines: Vec::new(),
-            plan_review_comments: None,
-            plan_review_resolved_anchors: Vec::new(),
-            plan_review_show_comment_modal: false,
-            plan_review_comment_input: String::new(),
-            plan_review_selected_comment: None,
-            plan_review_modal_kind: None,
-            plan_review_confirm: None,
+            // Plan mode/review initialization
+            plan_mode_state: PlanModeState::default(),
+            plan_review_state: PlanReviewState::default(),
             subagent_pause_info: HashMap::new(),
             init_prompt_content,
 
@@ -559,16 +485,10 @@ impl AppState {
             pending_revert_index: None,
 
             // Ask User inline block initialization
-            show_ask_user_popup: false,
-            ask_user_questions: Vec::new(),
-            ask_user_answers: HashMap::new(),
-            ask_user_current_tab: 0,
-            ask_user_selected_option: 0,
-            ask_user_custom_input: String::new(),
-            ask_user_tool_call: None,
-            ask_user_message_id: None,
-            ask_user_focused: true,
-            ask_user_multi_selections: HashMap::new(),
+            ask_user_state: AskUserState {
+                ask_user_focused: true,
+                ..Default::default()
+            },
         }
     }
 
@@ -591,7 +511,7 @@ impl AppState {
         use crate::services::plan;
 
         // Only poll when plan mode is active
-        if !self.plan_mode_active {
+        if !self.plan_mode_state.plan_mode_active {
             return None;
         }
 
@@ -600,9 +520,9 @@ impl AppState {
 
         let Ok(content) = std::fs::read_to_string(&path) else {
             // File doesn't exist (yet) — clear stale cache
-            if self.plan_metadata.is_some() {
-                self.plan_metadata = None;
-                self.plan_content_hash = None;
+            if self.plan_mode_state.plan_metadata.is_some() {
+                self.plan_mode_state.plan_metadata = None;
+                self.plan_mode_state.plan_content_hash = None;
             }
             return None;
         };
@@ -610,21 +530,21 @@ impl AppState {
         let new_hash = plan::compute_plan_hash(&content);
 
         // Skip re-parse if content unchanged
-        if self.plan_content_hash.as_deref() == Some(&new_hash) {
+        if self.plan_mode_state.plan_content_hash.as_deref() == Some(&new_hash) {
             return None;
         }
 
-        self.plan_content_hash = Some(new_hash);
+        self.plan_mode_state.plan_content_hash = Some(new_hash);
         let new_meta = plan::parse_plan_front_matter(&content);
-        self.plan_metadata = new_meta.clone();
+        self.plan_mode_state.plan_metadata = new_meta.clone();
 
         // Detect status transitions
         if let Some(ref meta) = new_meta {
             let new_status = meta.status;
-            let old_status = self.plan_previous_status;
+            let old_status = self.plan_mode_state.plan_previous_status;
 
             if old_status != Some(new_status) {
-                self.plan_previous_status = Some(new_status);
+                self.plan_mode_state.plan_previous_status = Some(new_status);
                 return Some((old_status, new_status));
             }
         }

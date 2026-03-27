@@ -509,7 +509,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/plan" => {
             // Already in plan mode? Show a message instead
-            if ctx.state.plan_mode_active {
+            if ctx.state.plan_mode_state.plan_mode_active {
                 crate::services::helper_block::push_styled_message(
                     ctx.state,
                     " Already in plan mode. Use ctrl+p to review the plan.",
@@ -537,7 +537,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             let session_dir = std::path::Path::new(".stakpak/session");
             if crate::services::plan::plan_file_exists(session_dir) {
                 let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
-                ctx.state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
+                ctx.state.plan_mode_state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
                     inline_prompt,
                     metadata: meta,
                 });
@@ -742,20 +742,20 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.input_state.show_helper_dropdown = false;
 
     // Clear plan mode state
-    state.plan_mode_active = false;
-    state.plan_metadata = None;
-    state.plan_content_hash = None;
-    state.plan_previous_status = None;
-    state.plan_review_auto_opened = false;
-    state.show_plan_review = false;
-    state.plan_review_content.clear();
-    state.plan_review_lines.clear();
-    state.plan_review_comments = None;
-    state.plan_review_resolved_anchors.clear();
-    state.plan_review_show_comment_modal = false;
-    state.plan_review_comment_input.clear();
-    state.plan_review_selected_comment = None;
-    state.plan_review_modal_kind = None;
+    state.plan_mode_state.plan_mode_active = false;
+    state.plan_mode_state.plan_metadata = None;
+    state.plan_mode_state.plan_content_hash = None;
+    state.plan_mode_state.plan_previous_status = None;
+    state.plan_mode_state.plan_review_auto_opened = false;
+    state.plan_review_state.show_plan_review = false;
+    state.plan_review_state.plan_review_content.clear();
+    state.plan_review_state.plan_review_lines.clear();
+    state.plan_review_state.plan_review_comments = None;
+    state.plan_review_state.plan_review_resolved_anchors.clear();
+    state.plan_review_state.plan_review_show_comment_modal = false;
+    state.plan_review_state.plan_review_comment_input.clear();
+    state.plan_review_state.plan_review_selected_comment = None;
+    state.plan_review_state.plan_review_modal_kind = None;
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
