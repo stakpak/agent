@@ -792,11 +792,12 @@ fn handle_input_submitted(
             }
 
             let should_buffer_message =
-                state.loading_state.loading_manager.is_loading() || !state.pending_user_messages.is_empty();
+                state.loading_state.loading_manager.is_loading() || !state.user_message_queue_state.pending_user_messages.is_empty();
 
             if should_buffer_message {
                 // Buffer while operations are active (or if previous buffered messages are pending)
                 state
+                    .user_message_queue_state
                     .pending_user_messages
                     .push_back(PendingUserMessage::new(
                         final_input.clone(),
@@ -806,7 +807,7 @@ fn handle_input_submitted(
                     ));
             } else {
                 // Take pending revert index if set (will be None on normal messages)
-                let revert_index = state.pending_revert_index.take();
+                let revert_index = state.message_revert_state.pending_revert_index.take();
 
                 if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
                     final_input.clone(),

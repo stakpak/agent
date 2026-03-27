@@ -32,8 +32,8 @@ pub struct EventChannels<'a> {
 }
 
 fn take_merged_pending_user_message(state: &mut AppState) -> Option<PendingUserMessage> {
-    let mut merged = state.pending_user_messages.pop_front()?;
-    while let Some(next) = state.pending_user_messages.pop_front() {
+    let mut merged = state.user_message_queue_state.pending_user_messages.pop_front()?;
+    while let Some(next) = state.user_message_queue_state.pending_user_messages.pop_front() {
         merged.merge_from(next);
     }
     Some(merged)
@@ -60,7 +60,7 @@ fn flush_pending_user_messages_if_idle(
     } = pending_message;
 
     // Take pending revert index if set (will be None on normal messages)
-    let revert_index = state.pending_revert_index.take();
+    let revert_index = state.message_revert_state.pending_revert_index.take();
 
     match output_tx.try_send(OutputEvent::UserMessage(
         final_input,
@@ -91,6 +91,7 @@ fn flush_pending_user_messages_if_idle(
         ) => {
             log::warn!("Failed to flush buffered UserMessage event: output channel unavailable");
             state
+                .user_message_queue_state
                 .pending_user_messages
                 .push_front(PendingUserMessage::new(
                     final_input,
@@ -962,14 +963,14 @@ pub fn update(
         InputEvent::ScrollUp => {
             navigation::handle_up_navigation(state);
             // Extend selection when scrolling during active selection
-            if state.selection.active {
+            if state.message_interaction_state.selection.active {
                 text_selection::handle_scroll_during_selection(state, -1, message_area_height);
             }
         }
         InputEvent::ScrollDown => {
             navigation::handle_down_navigation(state, message_area_height, message_area_width);
             // Extend selection when scrolling during active selection
-            if state.selection.active {
+            if state.message_interaction_state.selection.active {
                 text_selection::handle_scroll_during_selection(state, 1, message_area_height);
             }
         }
@@ -1558,7 +1559,7 @@ mod tests {
             other => panic!("unexpected input event: {:?}", other),
         }
 
-        assert!(state.pending_user_messages.is_empty());
+        assert!(state.user_message_queue_state.pending_user_messages.is_empty());
     }
 
     #[tokio::test]
@@ -1585,7 +1586,7 @@ mod tests {
 
         assert!(output_rx.try_recv().is_err());
         assert!(input_rx.try_recv().is_err());
-        assert_eq!(state.pending_user_messages.len(), 1);
+        assert_eq!(state.user_message_queue_state.pending_user_messages.len(), 1);
     }
 
     #[tokio::test]
@@ -1608,8 +1609,8 @@ mod tests {
 
         flush_pending_user_messages_if_idle(&mut state, &input_tx, &output_tx);
 
-        assert_eq!(state.pending_user_messages.len(), 1);
-        match state.pending_user_messages.front() {
+        assert_eq!(state.user_message_queue_state.pending_user_messages.len(), 1);
+        match state.user_message_queue_state.pending_user_messages.front() {
             Some(message) => {
                 assert_eq!(message.final_input, "queued");
                 assert_eq!(message.user_message_text, "queued");
@@ -1701,7 +1702,7 @@ mod tests {
             Some(InputEvent::AddUserMessage(text)) => assert_eq!(text, "from-update"),
             other => panic!("unexpected input event: {:?}", other),
         }
-        assert!(state.pending_user_messages.is_empty());
+        assert!(state.user_message_queue_state.pending_user_messages.is_empty());
     }
 
     #[tokio::test]

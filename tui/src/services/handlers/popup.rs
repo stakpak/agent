@@ -447,7 +447,7 @@ pub fn handle_toggle_collapsed_messages(
 ) {
     // Clear any active text selection when toggling the popup
     // (prevents stale selection from one context bleeding into the other)
-    state.selection = crate::services::text_selection::SelectionState::default();
+    state.message_interaction_state.selection = crate::services::text_selection::SelectionState::default();
 
     // Handle collapsed messages popup
     state.messages_scrolling_state.show_collapsed_messages = !state.messages_scrolling_state.show_collapsed_messages;
@@ -1067,7 +1067,7 @@ pub fn handle_message_action_popup_close(state: &mut AppState) {
     state.message_interaction_state.message_action_target_message_id = None;
     state.message_interaction_state.message_action_target_text = None;
     // Clear any stuck text selection (popup may have intercepted drag end)
-    state.selection = SelectionState::default();
+    state.message_interaction_state.selection = SelectionState::default();
     state.input_state.text_area.clear_selection();
 }
 
@@ -1140,12 +1140,12 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
                     }
 
                     // Store pending revert for backend sync
-                    state.pending_revert_index = Some(target_idx);
+                    state.message_revert_state.pending_revert_index = Some(target_idx);
 
                     // Update user_message_count to match the new state
                     // We removed the clicked message (target_idx) and everything after,
                     // so we now have (target_idx - 1) user messages remaining
-                    state.user_message_count = target_idx.saturating_sub(1);
+                    state.message_revert_state.user_message_count = target_idx.saturating_sub(1);
 
                     // Clear todos
                     state.side_panel_state.todos.clear();

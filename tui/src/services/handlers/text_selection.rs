@@ -42,7 +42,7 @@ fn popup_content_col(state: &AppState, terminal_col: u16) -> u16 {
 /// Handle mouse drag start - begins text selection in message area, input area, or collapsed popup
 pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     // Reset auto-scroll state when starting a new selection
-    state.selection_auto_scroll = 0;
+    state.message_interaction_state.selection_auto_scroll = 0;
 
     // When collapsed messages popup is open, use popup geometry for selection
     if state.messages_scrolling_state.show_collapsed_messages {
@@ -63,7 +63,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
                 .start_selection(col, row, input_area, &state.input_state.text_area_state);
         }
         // Clear message area selection
-        state.selection = SelectionState::default();
+        state.message_interaction_state.selection = SelectionState::default();
         return;
     }
 
@@ -75,7 +75,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
     if row < state.message_interaction_state.message_area_y || row_in_message_area >= message_area_height {
         // Click is outside message area, don't start selection
-        state.selection = SelectionState::default();
+        state.message_interaction_state.selection = SelectionState::default();
         return;
     }
 
@@ -90,7 +90,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
             .saturating_sub(side_panel_width + 1);
         if col >= main_area_width {
             // Click is in side panel, don't start selection
-            state.selection = SelectionState::default();
+            state.message_interaction_state.selection = SelectionState::default();
             return;
         }
     }
@@ -100,7 +100,7 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     // Convert terminal column to content-relative column
     let rel_col = content_col(state, col);
 
-    state.selection = SelectionState {
+    state.message_interaction_state.selection = SelectionState {
         active: true,
         start_line: Some(absolute_line),
         start_col: Some(rel_col),
@@ -116,7 +116,7 @@ fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
     // Check if click is within the popup content area
     let row_in_popup = (row as usize).saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
     if row < state.message_interaction_state.collapsed_popup_area_y || row_in_popup >= popup_height {
-        state.selection = SelectionState::default();
+        state.message_interaction_state.selection = SelectionState::default();
         return;
     }
 
@@ -124,7 +124,7 @@ fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
     let absolute_line = state.messages_scrolling_state.collapsed_messages_scroll + row_in_popup;
     let rel_col = popup_content_col(state, col);
 
-    state.selection = SelectionState {
+    state.message_interaction_state.selection = SelectionState {
         active: true,
         start_line: Some(absolute_line),
         start_col: Some(rel_col),
@@ -156,7 +156,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Handle message area selection
-    if !state.selection.active {
+    if !state.message_interaction_state.selection.active {
         return;
     }
 
@@ -170,12 +170,12 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     if (row as usize) <= msg_top && state.messages_scrolling_state.scroll > 0 {
         // Mouse is at or above the top edge — trigger auto-scroll up
         // (only if there's content above to scroll to)
-        state.selection_auto_scroll = -1;
+        state.message_interaction_state.selection_auto_scroll = -1;
         // Update selection to the topmost visible line
         let absolute_line = state.messages_scrolling_state.scroll;
         let rel_col = content_col(state, col);
-        state.selection.end_line = Some(absolute_line);
-        state.selection.end_col = Some(rel_col);
+        state.message_interaction_state.selection.end_line = Some(absolute_line);
+        state.message_interaction_state.selection.end_col = Some(rel_col);
         return;
     } else if message_area_height > 0 && (row as usize) >= msg_bottom.saturating_sub(1) {
         // Mouse is at or below the bottom edge — check if there's content below to scroll to
@@ -187,18 +187,18 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
 
         if state.messages_scrolling_state.scroll < max_scroll {
             // There's content below — trigger auto-scroll down
-            state.selection_auto_scroll = 1;
+            state.message_interaction_state.selection_auto_scroll = 1;
             // Update selection to the bottommost visible line
             let absolute_line = state.messages_scrolling_state.scroll + message_area_height.saturating_sub(1);
             let rel_col = content_col(state, col);
-            state.selection.end_line = Some(absolute_line);
-            state.selection.end_col = Some(rel_col);
+            state.message_interaction_state.selection.end_line = Some(absolute_line);
+            state.message_interaction_state.selection.end_col = Some(rel_col);
             return;
         }
     }
 
     // Mouse is inside the message area — stop auto-scroll
-    state.selection_auto_scroll = 0;
+    state.message_interaction_state.selection_auto_scroll = 0;
 
     // Clamp row to message area
     // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
@@ -222,13 +222,13 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     };
     let rel_col = content_col(state, clamped_col);
 
-    state.selection.end_line = Some(absolute_line);
-    state.selection.end_col = Some(rel_col);
+    state.message_interaction_state.selection.end_line = Some(absolute_line);
+    state.message_interaction_state.selection.end_col = Some(rel_col);
 }
 
 /// Handle drag within the collapsed messages fullscreen popup
 fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
-    if !state.selection.active {
+    if !state.message_interaction_state.selection.active {
         return;
     }
 
@@ -242,15 +242,15 @@ fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
     let absolute_line = state.messages_scrolling_state.collapsed_messages_scroll + clamped_row;
     let rel_col = popup_content_col(state, col);
 
-    state.selection.end_line = Some(absolute_line);
-    state.selection.end_col = Some(rel_col);
+    state.message_interaction_state.selection.end_line = Some(absolute_line);
+    state.message_interaction_state.selection.end_col = Some(rel_col);
 }
 
 /// Handle mouse drag end - extracts text, copies to clipboard, shows toast
 /// Also detects clicks on user messages to show action popup
 pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     // Always reset auto-scroll when mouse is released
-    state.selection_auto_scroll = 0;
+    state.message_interaction_state.selection_auto_scroll = 0;
 
     // When collapsed messages popup is open, use popup-specific logic
     if state.messages_scrolling_state.show_collapsed_messages {
@@ -278,21 +278,21 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Handle message area selection end
-    if !state.selection.active {
+    if !state.message_interaction_state.selection.active {
         return;
     }
 
     // Update final position (may re-arm selection_auto_scroll if mouse is at edge)
     handle_drag(state, col, row);
     // Reset auto-scroll again after handle_drag to ensure it's cleared on mouse release
-    state.selection_auto_scroll = 0;
+    state.message_interaction_state.selection_auto_scroll = 0;
 
     // Check if this was just a click (no actual drag)
     let is_just_click = match (
-        &state.selection.start_line,
-        &state.selection.end_line,
-        &state.selection.start_col,
-        &state.selection.end_col,
+        &state.message_interaction_state.selection.start_line,
+        &state.message_interaction_state.selection.end_line,
+        &state.message_interaction_state.selection.start_col,
+        &state.message_interaction_state.selection.end_col,
     ) {
         (Some(sl), Some(el), Some(sc), Some(ec)) => *sl == *el && *sc == *ec,
         _ => true,
@@ -305,7 +305,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
         let absolute_line = state.messages_scrolling_state.scroll + row_in_message_area;
 
         // Clear selection first
-        state.selection = SelectionState::default();
+        state.message_interaction_state.selection = SelectionState::default();
 
         // Check if clicking on a user message
         if let Some((msg_id, msg_text)) = find_user_message_at_line(state, absolute_line) {
@@ -324,7 +324,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     let selected_text = extract_selected_text(state);
 
     // Clear selection
-    state.selection = SelectionState::default();
+    state.message_interaction_state.selection = SelectionState::default();
 
     if selected_text.is_empty() {
         return;
@@ -344,7 +344,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
 
 /// Handle drag end within the collapsed messages fullscreen popup
 fn handle_popup_drag_end(state: &mut AppState, col: u16, row: u16) {
-    if !state.selection.active {
+    if !state.message_interaction_state.selection.active {
         return;
     }
 
@@ -353,10 +353,10 @@ fn handle_popup_drag_end(state: &mut AppState, col: u16, row: u16) {
 
     // Check if this was just a click (no actual drag)
     let is_just_click = match (
-        &state.selection.start_line,
-        &state.selection.end_line,
-        &state.selection.start_col,
-        &state.selection.end_col,
+        &state.message_interaction_state.selection.start_line,
+        &state.message_interaction_state.selection.end_line,
+        &state.message_interaction_state.selection.start_col,
+        &state.message_interaction_state.selection.end_col,
     ) {
         (Some(sl), Some(el), Some(sc), Some(ec)) => *sl == *el && *sc == *ec,
         _ => true,
@@ -364,7 +364,7 @@ fn handle_popup_drag_end(state: &mut AppState, col: u16, row: u16) {
 
     if is_just_click {
         // In the popup, a click just clears selection (no message action popup)
-        state.selection = SelectionState::default();
+        state.message_interaction_state.selection = SelectionState::default();
         return;
     }
 
@@ -372,7 +372,7 @@ fn handle_popup_drag_end(state: &mut AppState, col: u16, row: u16) {
     let selected_text = extract_selected_text_from_collapsed(state);
 
     // Clear selection
-    state.selection = SelectionState::default();
+    state.message_interaction_state.selection = SelectionState::default();
 
     if selected_text.is_empty() {
         return;
@@ -396,12 +396,12 @@ pub fn handle_scroll_during_selection(
     direction: i32,
     _message_area_height: usize,
 ) {
-    if !state.selection.active {
+    if !state.message_interaction_state.selection.active {
         return;
     }
 
     // Get current end position
-    let Some(end_line) = state.selection.end_line else {
+    let Some(end_line) = state.message_interaction_state.selection.end_line else {
         return;
     };
 
@@ -430,7 +430,7 @@ pub fn handle_scroll_during_selection(
         (end_line + 1).min(max_line)
     };
 
-    state.selection.end_line = Some(new_end_line);
+    state.message_interaction_state.selection.end_line = Some(new_end_line);
 
     // Update end column to end of line when extending via scroll
     // This gives a better selection experience
@@ -446,9 +446,9 @@ pub fn handle_scroll_during_selection(
         // If scrolling down, select to end of line
         // If scrolling up, select from start of line
         if direction > 0 {
-            state.selection.end_col = Some(line_width);
+            state.message_interaction_state.selection.end_col = Some(line_width);
         } else {
-            state.selection.end_col = Some(0);
+            state.message_interaction_state.selection.end_col = Some(0);
         }
     }
 }
@@ -462,18 +462,18 @@ pub fn handle_scroll_during_selection(
 /// behavior found in text editors.
 pub fn tick_selection_auto_scroll(state: &mut AppState) {
     // Safety: only auto-scroll when there's an active message area selection
-    if !state.selection.active || state.selection_auto_scroll == 0 {
-        state.selection_auto_scroll = 0;
+    if !state.message_interaction_state.selection.active || state.message_interaction_state.selection_auto_scroll == 0 {
+        state.message_interaction_state.selection_auto_scroll = 0;
         return;
     }
 
     // Don't auto-scroll for collapsed popup (it has bounded content and its own scroll)
     if state.messages_scrolling_state.show_collapsed_messages {
-        state.selection_auto_scroll = 0;
+        state.message_interaction_state.selection_auto_scroll = 0;
         return;
     }
 
-    let direction = state.selection_auto_scroll;
+    let direction = state.message_interaction_state.selection_auto_scroll;
 
     // Get total content lines from cache for bounds checking
     let total_lines = state.messages_scrolling_state.assembled_lines_cache

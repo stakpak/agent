@@ -114,7 +114,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let input_visible =
         !(approval_bar_visible || state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded);
     let effective_input_height = if input_visible { input_height } else { 0 };
-    let queue_count = state.pending_user_messages.len();
+    let queue_count = state.user_message_queue_state.pending_user_messages.len();
     let queue_preview_height = if input_visible && queue_count > 0 {
         // Cap at 1/4 of the screen to avoid starving the message area
         (queue_count as u16).min(main_area.height / 4).max(1)
@@ -547,10 +547,10 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         };
 
     // Apply selection highlighting if active
-    let visible_lines = if state.selection.active {
+    let visible_lines = if state.message_interaction_state.selection.active {
         crate::services::text_selection::apply_selection_highlight(
             visible_lines,
-            &state.selection,
+            &state.message_interaction_state.selection,
             scroll,
         )
     } else {
@@ -666,10 +666,10 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     }
 
     // Apply selection highlighting if active (same as render_messages)
-    let visible_lines = if state.selection.active {
+    let visible_lines = if state.message_interaction_state.selection.active {
         crate::services::text_selection::apply_selection_highlight(
             visible_lines,
-            &state.selection,
+            &state.message_interaction_state.selection,
             scroll,
         )
     } else {
@@ -741,14 +741,14 @@ fn truncate_to(s: &str, max: usize) -> String {
 }
 
 fn render_queue_preview_line(f: &mut Frame, state: &AppState, area: Rect) {
-    if area.width == 0 || area.height == 0 || state.pending_user_messages.is_empty() {
+    if area.width == 0 || area.height == 0 || state.user_message_queue_state.pending_user_messages.is_empty() {
         return;
     }
 
     let max_chars = (area.width as usize).saturating_sub(4); // room for "  > "
-    let mut lines: Vec<Line> = Vec::with_capacity(state.pending_user_messages.len());
+    let mut lines: Vec<Line> = Vec::with_capacity(state.user_message_queue_state.pending_user_messages.len());
 
-    for msg in state.pending_user_messages.iter() {
+    for msg in state.user_message_queue_state.pending_user_messages.iter() {
         let text = if !msg.user_message_text.trim().is_empty() {
             &msg.user_message_text
         } else if !msg.final_input.trim().is_empty() {

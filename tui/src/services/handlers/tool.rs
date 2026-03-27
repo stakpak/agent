@@ -205,6 +205,7 @@ fn handle_task_wait_progress(
                 && let Some(pause_info) = &task.pause_info
             {
                 state
+                    .tool_call_state
                     .subagent_pause_info
                     .insert(task.task_id.clone(), pause_info.clone());
             }
@@ -532,7 +533,7 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
     let tool_name_stripped = strip_tool_name(function_name);
 
     // Get current user message index for tracking (used for selective revert)
-    let user_msg_index = state.user_message_count;
+    let user_msg_index = state.message_revert_state.user_message_count;
 
     match tool_name_stripped {
         "write_to_file" | "create" | "create_file" => {
@@ -957,7 +958,7 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
                             .and_then(|v| v.as_str())
                             .map(String::from)
                     })
-                    .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+                    .and_then(|task_id| state.tool_call_state.subagent_pause_info.get(&task_id).cloned());
 
             let msg = Message::render_subagent_resume_pending_block(
                 tool_call.clone(),

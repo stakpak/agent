@@ -242,7 +242,7 @@ pub fn extract_selected_text(state: &AppState) -> String {
         return String::new();
     };
 
-    extract_selected_text_from_lines(&state.selection, cached_lines)
+    extract_selected_text_from_lines(&state.message_interaction_state.selection, cached_lines)
 }
 
 /// Extract selected text from the collapsed message lines cache (fullscreen popup)
@@ -251,7 +251,7 @@ pub fn extract_selected_text_from_collapsed(state: &AppState) -> String {
         return String::new();
     };
 
-    extract_selected_text_from_lines(&state.selection, cached_lines)
+    extract_selected_text_from_lines(&state.message_interaction_state.selection, cached_lines)
 }
 
 /// Calculate display width of a line

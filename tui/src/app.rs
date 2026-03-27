@@ -17,11 +17,9 @@ use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
-use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use stakpak_shared::secret_manager::SecretManager;
-use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
 
 pub struct AppState {
@@ -85,11 +83,6 @@ pub struct AppState {
     // ========== Shell Session State ==========
     pub shell_session_state: ShellSessionState,
 
-    // ========== Text Selection State ==========
-    pub selection: SelectionState,
-    /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
-    pub selection_auto_scroll: i32,
-
     // ========== Banner State ==========
     pub banner_state: BannerState,
 
@@ -102,20 +95,11 @@ pub struct AppState {
     // ========== Side Panel State ==========
     pub side_panel_state: SidePanelState,
 
-    /// Cached pause info for subagent tasks (task_id -> pause_info)
-    /// Used to display what subagents want to do in the approval bar
-    pub subagent_pause_info:
-        HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
-    /// Buffered user messages waiting to be sent after streaming completes
-    pub pending_user_messages: VecDeque<PendingUserMessage>,
+    // ========== User Message Queue State ==========
+    pub user_message_queue_state: UserMessageQueueState,
 
     // ========== Message Revert State ==========
-    /// Counter for user messages (1-indexed, incremented when user sends a message)
-    /// Used to track which user message triggered file edits for selective revert
-    pub user_message_count: usize,
-    /// Pending revert: truncate backend messages to this user message index when next message is sent
-    /// Set when user selects "Revert" action, consumed when sending the next user message
-    pub pending_revert_index: Option<usize>,
+    pub message_revert_state: MessageRevertState,
 
     // ========== Plan Mode State ==========
     pub plan_mode_state: PlanModeState,
@@ -269,11 +253,8 @@ impl AppState {
             shell_runtime_state: ShellRuntimeState::default(),
             shell_session_state: ShellSessionState::default(),
 
-            // Text selection initialization
-            selection: SelectionState::default(),
             toast: None,
             banner_state: BannerState::default(),
-            selection_auto_scroll: 0,
 
             // Message interaction initialization
             message_interaction_state: MessageInteractionState::default(),
@@ -322,17 +303,12 @@ impl AppState {
                     .unwrap_or_else(|| "nano".to_string()),
                 ..Default::default()
             },
-            pending_user_messages: VecDeque::new(),
+            user_message_queue_state: UserMessageQueueState::default(),
+            message_revert_state: MessageRevertState::default(),
 
             // Plan mode/review initialization
             plan_mode_state: PlanModeState::default(),
             plan_review_state: PlanReviewState::default(),
-            subagent_pause_info: HashMap::new(),
-
-            // Message revert state initialization
-            user_message_count: 0,
-            pending_revert_index: None,
-
             // Ask User inline block initialization
             ask_user_state: AskUserState {
                 ask_user_focused: true,

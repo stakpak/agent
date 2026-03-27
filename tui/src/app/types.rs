@@ -9,14 +9,15 @@ use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::banner::BannerMessage;
 use crate::services::shell_mode::ShellCommand;
+use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
 use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::secret_manager::SecretManager;
-use stakpak_shared::models::integrations::openai::{ContentPart, ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{ContentPart, TaskPauseInfo, ToolCall, ToolCallResult};
 use stakpak_shared::models::llm::LLMTokenUsage;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -459,6 +460,24 @@ impl Default for BannerState {
     }
 }
 
+pub struct UserMessageQueueState {
+    pub pending_user_messages: VecDeque<PendingUserMessage>,
+}
+
+impl Default for UserMessageQueueState {
+    fn default() -> Self {
+        Self {
+            pending_user_messages: VecDeque::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct MessageRevertState {
+    pub user_message_count: usize,
+    pub pending_revert_index: Option<usize>,
+}
+
 pub struct MessageInteractionState {
     pub show_message_action_popup: bool,
     pub message_action_popup_selected: usize,
@@ -472,6 +491,8 @@ pub struct MessageInteractionState {
     pub collapsed_popup_area_y: u16,
     pub collapsed_popup_area_x: u16,
     pub collapsed_popup_area_height: u16,
+    pub selection: SelectionState,
+    pub selection_auto_scroll: i32,
     pub input_content_area: Option<ratatui::layout::Rect>,
 }
 
@@ -490,6 +511,8 @@ impl Default for MessageInteractionState {
             collapsed_popup_area_y: 0,
             collapsed_popup_area_x: 0,
             collapsed_popup_area_height: 0,
+            selection: SelectionState::default(),
+            selection_auto_scroll: 0,
             input_content_area: None,
         }
     }
@@ -544,6 +567,7 @@ pub struct ToolCallState {
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
+    pub subagent_pause_info: HashMap<String, TaskPauseInfo>,
 }
 
 /// Dialog visibility, approval-bar interaction, and tool-approval selection state.

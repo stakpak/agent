@@ -102,8 +102,8 @@ pub fn handle_esc_event(
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     // Always clear text selection on Escape (prevents stuck selections)
-    if state.selection.active {
-        state.selection = SelectionState::default();
+    if state.message_interaction_state.selection.active {
+        state.message_interaction_state.selection = SelectionState::default();
     }
 
     if state.rulebook_switcher_state.show_rulebook_switcher {
@@ -125,7 +125,7 @@ pub fn handle_esc_event(
     }
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
-        state.selection = crate::services::text_selection::SelectionState::default();
+        state.message_interaction_state.selection = crate::services::text_selection::SelectionState::default();
         return;
     }
 
@@ -177,7 +177,7 @@ pub fn handle_esc(
     state.tool_call_state.is_streaming = false;
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
-        state.selection = crate::services::text_selection::SelectionState::default();
+        state.message_interaction_state.selection = crate::services::text_selection::SelectionState::default();
     } else if state.input_state.show_helper_dropdown {
         state.input_state.show_helper_dropdown = false;
     } else if state.dialog_approval_state.is_dialog_open {
@@ -406,7 +406,7 @@ pub fn handle_show_confirmation_dialog(
                     .and_then(|v| v.as_str())
                     .map(String::from)
             })
-            .and_then(|task_id| state.subagent_pause_info.get(&task_id).cloned());
+            .and_then(|task_id| state.tool_call_state.subagent_pause_info.get(&task_id).cloned());
 
         state.messages_scrolling_state.messages
             .push(Message::render_subagent_resume_pending_block(
