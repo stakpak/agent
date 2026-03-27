@@ -27,7 +27,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.shell_popup_state.show_shell_mode && !state.is_dialog_open {
+    if state.shell_popup_state.show_shell_mode && !state.dialog_approval_state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
             Style::default().fg(ThemeColors::magenta()),
@@ -36,7 +36,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shortcuts && state.input().is_empty() {
+    if state.dialog_approval_state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
             Line::from("$ shell . / commands . ctrl+s shortcuts"),
             Line::from(format!(
@@ -47,7 +47,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget =
             Paragraph::new(shortcuts).style(Style::default().fg(ThemeColors::dark_gray()));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.is_dialog_open && state.input().is_empty() {
+    } else if !state.dialog_approval_state.is_dialog_open && state.input().is_empty() {
         // Use current_model if set (from streaming), otherwise use default model
         let active_model = state.current_model.as_ref().unwrap_or(&state.model);
         let max_tokens = active_model.limit.context as u32;
@@ -151,9 +151,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-    } else if state.approval_bar.is_visible() {
+    } else if state.dialog_approval_state.approval_bar.is_visible() {
         // Show approval bar hints
-        let spans_vec = if state.approval_bar.is_esc_pending() {
+        let spans_vec = if state.dialog_approval_state.approval_bar.is_esc_pending() {
             // After first ESC: show confirmation hint
             vec![
                 Span::styled("Enter", Style::default().fg(ThemeColors::green())),
@@ -186,7 +186,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let hint =
             Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
         f.render_widget(hint, area);
-    } else if !state.is_dialog_open {
+    } else if !state.dialog_approval_state.is_dialog_open {
         let status_color = ThemeColors::dark_gray();
 
         // detect if terminal is vscode
@@ -199,9 +199,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);
-    } else if state.is_dialog_open {
+    } else if state.dialog_approval_state.is_dialog_open {
         let mut spans_vec = vec![];
-        if !state.approval_bar.is_visible() && state.message_tool_calls.is_some() {
+        if !state.dialog_approval_state.approval_bar.is_visible() && state.dialog_approval_state.message_tool_calls.is_some() {
             spans_vec.push(Span::styled(
                 "Enter",
                 Style::default().fg(ThemeColors::cyan()),

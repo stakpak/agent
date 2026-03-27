@@ -688,7 +688,7 @@ fn terminate_active_shell(state: &mut AppState) {
     state.shell_popup_state.shell_pending_command_value = None;
     state.shell_popup_state.shell_pending_command_output = None;
     state.shell_popup_state.shell_pending_command_output_count = 0;
-    state.dialog_command = None;
+    state.dialog_approval_state.dialog_command = None;
     state.input_state.text_area.set_shell_mode(false);
 }
 
@@ -696,13 +696,13 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Terminate any active shell before switching sessions
     terminate_active_shell(state);
 
-    state.message_tool_calls = None;
-    state.message_approved_tools.clear();
-    state.message_rejected_tools.clear();
+    state.dialog_approval_state.message_tool_calls = None;
+    state.dialog_approval_state.message_approved_tools.clear();
+    state.dialog_approval_state.message_rejected_tools.clear();
     state.tool_call_execution_order.clear();
     state.session_tool_calls_queue.clear();
-    state.approval_bar.clear();
-    state.toggle_approved_message = true;
+    state.dialog_approval_state.approval_bar.clear();
+    state.dialog_approval_state.toggle_approved_message = true;
 
     state.messages.clear();
     state

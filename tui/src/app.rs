@@ -6,7 +6,6 @@ use stakai::Model;
 use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
-use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::banner::BannerMessage;
 use crate::services::board_tasks::TaskProgress;
@@ -84,17 +83,7 @@ pub struct AppState {
     pub tool_call_state: ToolCallState,
 
     // ========== Dialog & Approval State ==========
-    pub is_dialog_open: bool,
-    pub dialog_command: Option<ToolCall>,
-    pub dialog_selected: usize,
-    pub dialog_message_id: Option<Uuid>,
-    pub dialog_focused: bool,
-    pub approval_bar: ApprovalBar,
-    pub message_tool_calls: Option<Vec<ToolCall>>,
-    pub message_approved_tools: Vec<ToolCall>,
-    pub message_rejected_tools: Vec<ToolCall>,
-    pub toggle_approved_message: bool,
-    pub show_shortcuts: bool,
+    pub dialog_approval_state: DialogApprovalState,
 
     // ========== Sessions State ==========
     pub sessions: Vec<SessionInfo>,
@@ -453,10 +442,7 @@ impl AppState {
             block_stay_at_bottom_frames: 0,
             scroll_lines_from_end: None,
             content_changed_while_scrolled_up: false,
-            show_shortcuts: false,
-            is_dialog_open: false,
-            dialog_command: None,
-            dialog_selected: 0,
+            dialog_approval_state: DialogApprovalState::default(),
             sessions: Vec::new(),
             session_selected: 0,
             account_info: String::new(),
@@ -469,14 +455,13 @@ impl AppState {
                 shell_mode_input: String::new(),
                 ..Default::default()
             },
-            dialog_message_id: None,
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
-            dialog_focused: false, // Default to messages view focused
+            // Default to messages view focused
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
@@ -493,11 +478,6 @@ impl AppState {
             line_to_message_map: Vec::new(),
             mouse_capture_enabled: false,
             has_user_messages: false,
-            message_tool_calls: None,
-            approval_bar: ApprovalBar::new(),
-            message_approved_tools: Vec::new(),
-            message_rejected_tools: Vec::new(),
-            toggle_approved_message: true,
             terminal_size: Size {
                 width: 0,
                 height: 0,

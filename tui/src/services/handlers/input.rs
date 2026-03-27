@@ -22,9 +22,9 @@ use uuid::Uuid;
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
-    if state.approval_bar.is_visible() {
+    if state.dialog_approval_state.approval_bar.is_visible() {
         if c == ' ' {
-            state.approval_bar.toggle_selected();
+            state.dialog_approval_state.approval_bar.toggle_selected();
             return;
         }
         // Block all typing when approval bar is visible
@@ -49,7 +49,7 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
 
 /// Handle InputBackspace event - routes to appropriate handler based on popup state
 pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<InputEvent>) {
-    if state.approval_bar.is_visible() {
+    if state.dialog_approval_state.approval_bar.is_visible() {
         // Block backspace when approval bar is visible
         return;
     }
@@ -94,13 +94,13 @@ pub fn handle_input_submitted_event(
                     let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
 
                     // Reset state for new session
-                    state.message_tool_calls = None;
-                    state.message_approved_tools.clear();
-                    state.message_rejected_tools.clear();
+                    state.dialog_approval_state.message_tool_calls = None;
+                    state.dialog_approval_state.message_approved_tools.clear();
+                    state.dialog_approval_state.message_rejected_tools.clear();
                     state.tool_call_execution_order.clear();
                     state.session_tool_calls_queue.clear();
-                    state.approval_bar.clear();
-                    state.toggle_approved_message = true;
+                    state.dialog_approval_state.approval_bar.clear();
+                    state.dialog_approval_state.toggle_approved_message = true;
                     state.messages.clear();
                     state.scroll = 0;
                     state.scroll_to_bottom = true;
@@ -145,17 +145,19 @@ pub fn handle_input_submitted_event(
     }
     // Handle approval bar submission (inline approval)
     // Enter key: approve all pending tools and execute
-    if state.approval_bar.is_visible() {
+    if state.dialog_approval_state.approval_bar.is_visible() {
         use crate::app::ToolCallStatus;
 
         // Update approved and rejected tool calls from bar
-        state.message_approved_tools = state
+        state.dialog_approval_state.message_approved_tools = state
+            .dialog_approval_state
             .approval_bar
             .get_approved_tool_calls()
             .into_iter()
             .cloned()
             .collect();
-        state.message_rejected_tools = state
+        state.dialog_approval_state.message_rejected_tools = state
+            .dialog_approval_state
             .approval_bar
             .get_rejected_tool_calls()
             .into_iter()
@@ -163,9 +165,9 @@ pub fn handle_input_submitted_event(
             .collect();
 
         // Process tools in order using message_tool_calls
-        if let Some(tool_calls) = &state.message_tool_calls.clone() {
+        if let Some(tool_calls) = &state.dialog_approval_state.message_tool_calls.clone() {
             for tool_call in tool_calls {
-                let is_approved = state.message_approved_tools.contains(tool_call);
+                let is_approved = state.dialog_approval_state.message_approved_tools.contains(tool_call);
                 let status = if is_approved {
                     ToolCallStatus::Approved
                 } else {
@@ -181,12 +183,12 @@ pub fn handle_input_submitted_event(
             // User pressing Enter means "I'm done reviewing, start execution from the beginning"
             if let Some(first_tool) = tool_calls.first() {
                 // Set dialog_command to the first tool for proper processing
-                state.dialog_command = Some(first_tool.clone());
+                state.dialog_approval_state.dialog_command = Some(first_tool.clone());
                 state
                     .session_tool_calls_queue
                     .insert(first_tool.id.clone(), ToolCallStatus::Executed);
 
-                let is_approved = state.message_approved_tools.contains(first_tool);
+                let is_approved = state.dialog_approval_state.message_approved_tools.contains(first_tool);
 
                 // Update the pending display to show the first tool (which is being executed)
                 // This ensures the UI shows the correct tool as "running", not the selected one
@@ -198,7 +200,7 @@ pub fn handle_input_submitted_event(
                     let _ = output_tx.try_send(OutputEvent::AcceptTool(first_tool.clone()));
                 } else {
                     // Fire handle reject - set is_dialog_open for handle_esc to work
-                    state.is_dialog_open = true;
+                    state.dialog_approval_state.is_dialog_open = true;
                     let _ = input_tx.try_send(InputEvent::HandleReject(
                         Some("Tool call rejected".to_string()),
                         true,
@@ -209,17 +211,17 @@ pub fn handle_input_submitted_event(
         }
 
         // Clear state
-        state.message_tool_calls = None;
-        state.is_dialog_open = false;
+        state.dialog_approval_state.message_tool_calls = None;
+        state.dialog_approval_state.is_dialog_open = false;
 
         // Clear the approval bar
-        state.approval_bar.clear();
+        state.dialog_approval_state.approval_bar.clear();
         return;
     }
 
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    if state.show_side_panel && !state.is_dialog_open && state.input_state.text_area.text().is_empty() {
+    if state.show_side_panel && !state.dialog_approval_state.is_dialog_open && state.input_state.text_area.text().is_empty() {
         let current = state
             .side_panel_section_collapsed
             .get(&state.side_panel_focus)
@@ -245,7 +247,7 @@ pub fn handle_input_submitted_event(
 
 /// Handle character input change
 pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
-    state.show_shortcuts = false;
+    state.dialog_approval_state.show_shortcuts = false;
 
     if c == '$' && state.input().is_empty() {
         state.input_state.text_area.set_text("");
@@ -443,11 +445,11 @@ fn handle_input_submitted(
         return;
     }
 
-    if state.is_dialog_open {
-        state.toggle_approved_message = true;
-        state.is_dialog_open = true;
-        state.dialog_selected = 0;
-        state.dialog_focused = false;
+    if state.dialog_approval_state.is_dialog_open {
+        state.dialog_approval_state.toggle_approved_message = true;
+        state.dialog_approval_state.is_dialog_open = true;
+        state.dialog_approval_state.dialog_selected = 0;
+        state.dialog_approval_state.dialog_focused = false;
         state.input_state.text_area.set_text("");
     // Reset focus when dialog closes
     } else if state.input_state.show_helper_dropdown {
@@ -1158,8 +1160,8 @@ pub fn handle_input_cursor_next_word(state: &mut AppState) {
 
 /// Handle cursor left movement (with approval bar check)
 pub fn handle_cursor_left(state: &mut AppState) {
-    if state.approval_bar.is_visible() {
-        state.approval_bar.select_prev();
+    if state.dialog_approval_state.approval_bar.is_visible() {
+        state.dialog_approval_state.approval_bar.select_prev();
         return; // Event was consumed by approval bar
     }
     state.input_state.text_area.move_cursor_left();
@@ -1167,8 +1169,8 @@ pub fn handle_cursor_left(state: &mut AppState) {
 
 /// Handle cursor right movement (with approval bar check)
 pub fn handle_cursor_right(state: &mut AppState) {
-    if state.approval_bar.is_visible() {
-        state.approval_bar.select_next();
+    if state.dialog_approval_state.approval_bar.is_visible() {
+        state.dialog_approval_state.approval_bar.select_next();
         return; // Event was consumed by approval bar
     }
     state.input_state.text_area.move_cursor_right();

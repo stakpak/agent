@@ -57,8 +57,8 @@ fn filter_rulebooks(state: &mut AppState) {
 pub fn handle_show_profile_switcher(state: &mut AppState) {
     // Don't show profile switcher if input is blocked or dialog is open
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }
@@ -144,9 +144,9 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.tool_call_state.streaming_tool_results.clear();
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.shell_tool_calls = None;
-    state.message_tool_calls = None;
-    state.message_approved_tools.clear();
-    state.message_rejected_tools.clear();
+    state.dialog_approval_state.message_tool_calls = None;
+    state.dialog_approval_state.message_approved_tools.clear();
+    state.dialog_approval_state.message_rejected_tools.clear();
     state.has_user_messages = false;
     state.scroll = 0;
     state.scroll_to_bottom = true;
@@ -168,11 +168,11 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.input_state.filtered_files.clear();
 
     // Clear dialog state
-    state.is_dialog_open = false;
-    state.dialog_command = None;
-    state.show_shortcuts = false;
+    state.dialog_approval_state.is_dialog_open = false;
+    state.dialog_approval_state.dialog_command = None;
+    state.dialog_approval_state.show_shortcuts = false;
     state.show_collapsed_messages = false;
-    state.approval_bar.clear();
+    state.dialog_approval_state.approval_bar.clear();
 
     // Clear retry state
     state.tool_call_state.retry_attempts = 0;
@@ -227,8 +227,8 @@ pub fn handle_profile_switch_failed(state: &mut AppState, error: String) {
 pub fn handle_show_rulebook_switcher(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Don't show rulebook switcher if input is blocked or dialog is open
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }
@@ -357,8 +357,8 @@ pub fn handle_current_rulebooks_loaded(state: &mut AppState, current_uris: Vec<S
 pub fn handle_show_command_palette(state: &mut AppState) {
     // Don't show if input is blocked or dialog is open
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }
@@ -421,8 +421,8 @@ pub fn handle_command_palette_search_backspace(state: &mut AppState) {
 pub fn handle_show_shortcuts(state: &mut AppState) {
     // Don't show shortcuts popup if input is blocked or dialog is open
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
         || state.show_profile_switcher
     {
         return;
@@ -440,7 +440,7 @@ pub fn handle_shortcuts_cancel(state: &mut AppState) {
 
 /// Handle toggle more shortcuts event
 pub fn handle_toggle_more_shortcuts(state: &mut AppState) {
-    state.show_shortcuts = !state.show_shortcuts;
+    state.dialog_approval_state.show_shortcuts = !state.dialog_approval_state.show_shortcuts;
 }
 
 // ========== Collapsed Messages Handlers ==========
@@ -591,8 +591,8 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
 
 pub fn handle_show_file_changes_popup(state: &mut AppState) {
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }
@@ -876,8 +876,8 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
 pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Don't show model switcher if input is blocked or dialog is open
     if state.profile_switching_in_progress
-        || state.is_dialog_open
-        || state.approval_bar.is_visible()
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
     {
         return;
     }

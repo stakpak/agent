@@ -174,13 +174,13 @@ pub fn handle_up_navigation(state: &mut AppState) {
     // Handle different UI states
     if state.input_state.show_helper_dropdown {
         handle_dropdown_up(state);
-    } else if state.is_dialog_open && state.dialog_focused {
+    } else if state.dialog_approval_state.is_dialog_open && state.dialog_approval_state.dialog_focused {
         // Handle dialog navigation only when dialog is focused
-        if state.dialog_selected > 0 {
-            state.dialog_selected -= 1;
+        if state.dialog_approval_state.dialog_selected > 0 {
+            state.dialog_approval_state.dialog_selected -= 1;
         } else {
             // Wrap to the last option
-            state.dialog_selected = 2;
+            state.dialog_approval_state.dialog_selected = 2;
         }
     } else {
         handle_scroll_up(state);
@@ -262,13 +262,13 @@ pub fn handle_down_navigation(
     // Handle different UI states
     if state.input_state.show_helper_dropdown {
         handle_dropdown_down(state);
-    } else if state.is_dialog_open && state.dialog_focused {
+    } else if state.dialog_approval_state.is_dialog_open && state.dialog_approval_state.dialog_focused {
         // Handle dialog navigation only when dialog is focused
-        if state.dialog_selected < 2 {
-            state.dialog_selected += 1;
+        if state.dialog_approval_state.dialog_selected < 2 {
+            state.dialog_approval_state.dialog_selected += 1;
         } else {
             // Wrap to the first option
-            state.dialog_selected = 0;
+            state.dialog_approval_state.dialog_selected = 0;
         }
     } else {
         handle_scroll_down(state, message_area_height, message_area_width);

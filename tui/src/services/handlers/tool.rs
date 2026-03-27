@@ -104,6 +104,7 @@ pub fn handle_stream_tool_result(
 
     // 2. Check if this is a run_command - get command from the pending message or dialog_command
     let is_run_command = state
+        .dialog_approval_state
         .dialog_command
         .as_ref()
         .map(|tc| {
@@ -116,6 +117,7 @@ pub fn handle_stream_tool_result(
 
     let command_str = if is_run_command {
         state
+            .dialog_approval_state
             .dialog_command
             .as_ref()
             .and_then(|tc| extract_command_from_tool_call(tc).ok())
@@ -270,11 +272,11 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
         .auto_approve_manager
         .get_prompt_tool_calls(&rest_tool_calls);
 
-    state.message_tool_calls = Some(prompt_tool_calls.clone());
+    state.dialog_approval_state.message_tool_calls = Some(prompt_tool_calls.clone());
 
     // Only update last_message_tool_calls if we're not in a retry scenario
     // During retry, we want to preserve the original sequence for ShellCompleted
-    if !state.shell_popup_state.show_shell_mode || state.dialog_command.is_none() {
+    if !state.shell_popup_state.show_shell_mode || state.dialog_approval_state.dialog_command.is_none() {
         state.last_message_tool_calls = prompt_tool_calls.clone();
     }
 }
@@ -336,9 +338,9 @@ pub fn handle_retry_tool_call(
         state.shell_popup_state.show_shell_mode = true;
         state.shell_popup_state.shell_popup_visible = true;
         state.shell_popup_state.shell_popup_expanded = true;
-        state.is_dialog_open = false;
+        state.dialog_approval_state.is_dialog_open = false;
         state.shell_popup_state.ondemand_shell_mode = false;
-        state.dialog_command = Some(tool_call.clone());
+        state.dialog_approval_state.dialog_command = Some(tool_call.clone());
         if state.shell_popup_state.shell_tool_calls.is_none() {
             state.shell_popup_state.shell_tool_calls = Some(Vec::new());
         }
@@ -375,11 +377,11 @@ pub fn handle_interactive_stall_detected(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
     // Close any confirmation dialog
-    state.is_dialog_open = false;
+    state.dialog_approval_state.is_dialog_open = false;
 
     // Set up shell mode state
     if let Some(tool_call) = &state.tool_call_state.latest_tool_call {
-        state.dialog_command = Some(tool_call.clone());
+        state.dialog_approval_state.dialog_command = Some(tool_call.clone());
     }
     state.shell_popup_state.ondemand_shell_mode = false;
 
@@ -393,12 +395,12 @@ pub fn handle_interactive_stall_detected(
 
 /// Handle toggle approval status event
 pub fn handle_toggle_approval_status(state: &mut AppState) {
-    state.approval_bar.toggle_selected();
+    state.dialog_approval_state.approval_bar.toggle_selected();
 }
 
 /// Handle approval bar next tab event
 pub fn handle_approval_popup_next_tab(state: &mut AppState) {
-    state.approval_bar.select_next();
+    state.dialog_approval_state.approval_bar.select_next();
     // Scroll to show the beginning of the tool call block
     state.scroll_to_last_message_start = true;
     state.stay_at_bottom = false;
@@ -406,7 +408,7 @@ pub fn handle_approval_popup_next_tab(state: &mut AppState) {
 
 /// Handle approval bar prev tab event
 pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
-    state.approval_bar.select_prev();
+    state.dialog_approval_state.approval_bar.select_prev();
     // Scroll to show the beginning of the tool call block
     state.scroll_to_last_message_start = true;
     state.stay_at_bottom = false;
@@ -414,13 +416,13 @@ pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
 
 /// Handle approval bar toggle approval event
 pub fn handle_approval_popup_toggle_approval(state: &mut AppState) {
-    state.approval_bar.toggle_selected();
+    state.dialog_approval_state.approval_bar.toggle_selected();
 }
 
 /// Handle approval bar escape event (reject all)
 pub fn handle_approval_popup_escape(state: &mut AppState) {
-    state.approval_bar.reject_all();
-    state.approval_bar.clear();
+    state.dialog_approval_state.approval_bar.reject_all();
+    state.dialog_approval_state.approval_bar.clear();
 }
 
 /// Clear streaming tool results
@@ -844,57 +846,57 @@ pub fn extract_view_params_from_tool_call(
 
 /// Handle approve all in approval bar
 pub fn handle_approval_bar_approve_all(state: &mut AppState) {
-    state.approval_bar.approve_all();
+    state.dialog_approval_state.approval_bar.approve_all();
 }
 
 /// Handle reject all in approval bar
 pub fn handle_approval_bar_reject_all(state: &mut AppState) {
-    state.approval_bar.reject_all();
+    state.dialog_approval_state.approval_bar.reject_all();
 }
 
 /// Handle select action by index (1-based)
 pub fn handle_approval_bar_select_action(state: &mut AppState, index: usize) {
-    let old_index = state.approval_bar.selected_index();
-    state.approval_bar.select_action(index);
-    if old_index != state.approval_bar.selected_index() {
+    let old_index = state.dialog_approval_state.approval_bar.selected_index();
+    state.dialog_approval_state.approval_bar.select_action(index);
+    if old_index != state.dialog_approval_state.approval_bar.selected_index() {
         update_pending_tool_display(state);
     }
 }
 
 /// Handle approve selected action
 pub fn handle_approval_bar_approve_selected(state: &mut AppState) {
-    state.approval_bar.approve_selected();
+    state.dialog_approval_state.approval_bar.approve_selected();
 }
 
 /// Handle reject selected action
 pub fn handle_approval_bar_reject_selected(state: &mut AppState) {
-    state.approval_bar.reject_selected();
+    state.dialog_approval_state.approval_bar.reject_selected();
 }
 
 /// Handle toggle selected action (space key)
 pub fn handle_approval_bar_toggle_selected(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
-    state.approval_bar.toggle_selected();
+    state.dialog_approval_state.approval_bar.toggle_selected();
     // Update the display to reflect the new status
     update_pending_tool_display(state);
 }
 
 /// Handle next action navigation (right arrow)
 pub fn handle_approval_bar_next_action(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
-    state.approval_bar.select_next();
+    state.dialog_approval_state.approval_bar.select_next();
     update_pending_tool_display(state);
 }
 
 /// Handle prev action navigation (left arrow)
 pub fn handle_approval_bar_prev_action(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
-    state.approval_bar.select_prev();
+    state.dialog_approval_state.approval_bar.select_prev();
     update_pending_tool_display(state);
 }
 
 /// Handle collapse/escape
 pub fn handle_approval_bar_collapse(state: &mut AppState) {
     // Reject all pending tools and clear
-    state.approval_bar.reject_all();
-    state.approval_bar.clear();
+    state.dialog_approval_state.approval_bar.reject_all();
+    state.dialog_approval_state.approval_bar.clear();
 }
 
 /// Update the pending tool display in messages area based on selected tab
@@ -924,7 +926,7 @@ fn update_pending_tool_display(state: &mut AppState) {
 /// Does NOT remove any existing pending block — caller is responsible for cleanup.
 pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
     // Get the currently selected tool call
-    if let Some(action) = state.approval_bar.selected_action() {
+    if let Some(action) = state.dialog_approval_state.approval_bar.selected_action() {
         let tool_call = &action.tool_call;
         let tool_name = strip_tool_name(&tool_call.function.name);
 
@@ -976,6 +978,6 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
         }
 
         // Update dialog_command to the selected tool
-        state.dialog_command = Some(tool_call.clone());
+        state.dialog_approval_state.dialog_command = Some(tool_call.clone());
     }
 }

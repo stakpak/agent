@@ -130,10 +130,10 @@ pub fn handle_esc_event(
     }
 
     // Common handling for rejection
-    state.message_tool_calls = None;
+    state.dialog_approval_state.message_tool_calls = None;
     state.tool_call_execution_order.clear();
     // Store the latest tool call for potential retry (only for command tools)
-    if let Some(tool_call) = &state.dialog_command
+    if let Some(tool_call) = &state.dialog_approval_state.dialog_command
         && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
     {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
@@ -172,7 +172,7 @@ pub fn handle_esc(
     }
 
     let was_streaming = state.tool_call_state.is_streaming;
-    let was_dialog_open = state.is_dialog_open;
+    let was_dialog_open = state.dialog_approval_state.is_dialog_open;
     let was_shell_mode = state.shell_popup_state.show_shell_mode;
     state.tool_call_state.is_streaming = false;
     if state.show_collapsed_messages {
@@ -180,8 +180,8 @@ pub fn handle_esc(
         state.selection = crate::services::text_selection::SelectionState::default();
     } else if state.input_state.show_helper_dropdown {
         state.input_state.show_helper_dropdown = false;
-    } else if state.is_dialog_open {
-        let tool_call_opt = state.dialog_command.clone();
+    } else if state.dialog_approval_state.is_dialog_open {
+        let tool_call_opt = state.dialog_approval_state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = channels
                 .output_tx
@@ -237,15 +237,15 @@ pub fn handle_esc(
                 });
             }
         }
-        state.is_dialog_open = false;
-        state.dialog_command = None;
-        state.dialog_focused = false; // Reset focus when dialog closes
+        state.dialog_approval_state.is_dialog_open = false;
+        state.dialog_approval_state.dialog_command = None;
+        state.dialog_approval_state.dialog_focused = false; // Reset focus when dialog closes
         state.input_state.text_area.set_text("");
     } else if state.shell_popup_state.show_shell_mode {
-        if state.dialog_command.is_some() {
+        if state.dialog_approval_state.dialog_command.is_some() {
             // Interactive stall shell: resolve it correctly with captured history
             // instead of just rejecting it.
-            if let Some(_tool_call) = &state.dialog_command {
+            if let Some(_tool_call) = &state.dialog_approval_state.dialog_command {
                 // Capture history for context
                 let history_lines =
                     super::shell::trim_shell_lines(state.shell_history_lines.clone());
@@ -279,7 +279,7 @@ pub fn handle_esc(
             state.shell_popup_state.shell_popup_expanded = false;
             state.input_state.text_area.set_shell_mode(false);
             state.input_state.text_area.set_text("");
-            state.dialog_command = None;
+            state.dialog_approval_state.dialog_command = None;
 
             // Reset interactive stall tracking state
             state.shell_popup_state.shell_pending_command_executed = false;
@@ -361,12 +361,12 @@ pub fn handle_show_confirmation_dialog(
                 is_collapsed: None,
             });
         }
-        state.is_dialog_open = false;
-        state.dialog_command = None;
+        state.dialog_approval_state.is_dialog_open = false;
+        state.dialog_approval_state.dialog_command = None;
         return;
     }
 
-    state.dialog_command = Some(tool_call.clone());
+    state.dialog_approval_state.dialog_command = Some(tool_call.clone());
     let tool_name = strip_tool_name(&tool_call.function.name);
     if is_foreground_command_tool(tool_name) {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
@@ -429,15 +429,15 @@ pub fn handle_show_confirmation_dialog(
     // Invalidate cache so the new message gets rendered
     invalidate_message_lines_cache(state);
 
-    state.dialog_command = Some(tool_call.clone());
+    state.dialog_approval_state.dialog_command = Some(tool_call.clone());
     // Only set is_dialog_open if NOT using the new approval bar flow
     // When toggle_approved_message is true, we use the approval bar instead
-    if !state.toggle_approved_message {
-        state.is_dialog_open = true;
+    if !state.dialog_approval_state.toggle_approved_message {
+        state.dialog_approval_state.is_dialog_open = true;
     }
     state.loading_state.is_loading = false;
     state.tool_call_state.is_streaming = false;
-    state.dialog_focused = false;
+    state.dialog_approval_state.dialog_focused = false;
 
     // check if its skipped
     let is_skipped =
@@ -445,6 +445,7 @@ pub fn handle_show_confirmation_dialog(
 
     // Check if this tool call is already rejected (after popup interaction) or skipped
     if state
+        .dialog_approval_state
         .message_rejected_tools
         .iter()
         .any(|tool| tool.id == tool_call.id)
@@ -453,6 +454,7 @@ pub fn handle_show_confirmation_dialog(
         if !is_skipped {
             // Remove from rejected list to avoid processing it again
             state
+                .dialog_approval_state
                 .message_rejected_tools
                 .retain(|tool| tool.id != tool_call.id);
         }
@@ -471,7 +473,7 @@ pub fn handle_show_confirmation_dialog(
         };
 
         // Set is_dialog_open so handle_esc can process the rejection
-        state.is_dialog_open = true;
+        state.dialog_approval_state.is_dialog_open = true;
 
         let _ = input_tx_clone.try_send(InputEvent::HandleReject(
             Some(message.to_string()),
@@ -488,12 +490,14 @@ pub fn handle_show_confirmation_dialog(
     // Check if this tool call is already approved (after popup interaction or auto-approved)
     if is_auto_approved
         || state
+            .dialog_approval_state
             .message_approved_tools
             .iter()
             .any(|tool| tool.id == tool_call.id)
     {
         // Remove from approved list to avoid processing it again
         state
+            .dialog_approval_state
             .message_approved_tools
             .retain(|tool| tool.id != tool_call.id);
 
@@ -508,30 +512,30 @@ pub fn handle_show_confirmation_dialog(
         state
             .session_tool_calls_queue
             .insert(tool_call.id.clone(), ToolCallStatus::Executed);
-        state.is_dialog_open = false;
-        state.dialog_selected = 0;
-        state.dialog_command = None;
-        state.dialog_focused = false;
+        state.dialog_approval_state.is_dialog_open = false;
+        state.dialog_approval_state.dialog_selected = 0;
+        state.dialog_approval_state.dialog_command = None;
+        state.dialog_approval_state.dialog_focused = false;
         return;
     }
 
-    let tool_calls = if let Some(tool_calls) = state.message_tool_calls.clone() {
+    let tool_calls = if let Some(tool_calls) = state.dialog_approval_state.message_tool_calls.clone() {
         tool_calls.clone()
     } else {
         vec![tool_call.clone()]
     };
 
     // Tool call is pending - add to approval bar (inline approval)
-    if !tool_calls.is_empty() && state.toggle_approved_message {
-        let was_empty = state.approval_bar.actions().is_empty();
+    if !tool_calls.is_empty() && state.dialog_approval_state.toggle_approved_message {
+        let was_empty = state.dialog_approval_state.approval_bar.actions().is_empty();
 
         // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
-            state.approval_bar.add_action(tc);
+            state.dialog_approval_state.approval_bar.add_action(tc);
         }
 
         // If this is the first time showing the approval bar, scroll to show the tool call
-        if was_empty && !state.approval_bar.actions().is_empty() {
+        if was_empty && !state.dialog_approval_state.approval_bar.actions().is_empty() {
             state.scroll_to_last_message_start = true;
             state.stay_at_bottom = false;
         }
@@ -569,9 +573,9 @@ pub fn handle_show_confirmation_dialog(
 
 /// Handle toggle dialog focus event
 pub fn handle_toggle_dialog_focus(state: &mut AppState) {
-    if state.is_dialog_open {
-        state.dialog_focused = !state.dialog_focused;
-        let focus_message = if state.dialog_focused {
+    if state.dialog_approval_state.is_dialog_open {
+        state.dialog_approval_state.dialog_focused = !state.dialog_approval_state.dialog_focused;
+        let focus_message = if state.dialog_approval_state.dialog_focused {
             "Dialog focused"
         } else {
             "Chat view focused"

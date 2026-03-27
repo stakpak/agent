@@ -226,7 +226,7 @@ pub async fn run_tui(
 
                        // Account for approval bar height (will be shown after this tool call)
                        // The approval bar will be visible, so input and dropdown are hidden
-                       let approval_bar_height = state.approval_bar.calculate_height(term_rect.width).max(7); // Use expected height
+                       let approval_bar_height = state.dialog_approval_state.approval_bar.calculate_height(term_rect.width).max(7); // Use expected height
 
                        let banner_h = crate::services::banner::banner_height(&state);
                         let outer_chunks = ratatui::layout::Layout::default()

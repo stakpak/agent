@@ -106,8 +106,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
     // Calculate approval bar height (needs terminal width for wrapping calculation)
-    let approval_bar_height = state.approval_bar.calculate_height(main_area.width);
-    let approval_bar_visible = state.approval_bar.is_visible();
+    let approval_bar_height = state.dialog_approval_state.approval_bar.calculate_height(main_area.width);
+    let approval_bar_visible = state.dialog_approval_state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
     let ask_user_visible = state.show_ask_user_popup && !state.ask_user_questions.is_empty();
@@ -193,7 +193,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
             width: approval_bar_area.width.saturating_sub(2),
             height: approval_bar_area.height,
         };
-        state.approval_bar.render(f, padded_approval_bar_area);
+        state.dialog_approval_state.approval_bar.render(f, padded_approval_bar_area);
     }
 
     // Render shell popup above input area (if visible)
@@ -227,7 +227,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
-    } else if state.is_dialog_open {
+    } else if state.dialog_approval_state.is_dialog_open {
     } else if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
     } else if !approval_bar_visible {

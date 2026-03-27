@@ -477,7 +477,7 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
             // Reset the tracking state
             state.shell_popup_state.shell_pending_command_executed = false;
             state.shell_popup_state.shell_pending_command_output_count = 0;
-            state.dialog_command = None;
+            state.dialog_approval_state.dialog_command = None;
         }
 
         // Update the message in chat to reflect termination
@@ -816,7 +816,7 @@ pub fn handle_shell_completed(
             output.replace("\r\n", "\n").replace('\r', "\n")
         });
 
-        let saved_dialog_command = state.dialog_command.clone();
+        let saved_dialog_command = state.dialog_approval_state.dialog_command.clone();
 
         let processed_terminal_command = cmd_value.map(|s| preprocess_terminal_output(&s));
 
@@ -884,8 +884,8 @@ pub fn handle_shell_completed(
             {
                 state.tool_call_state.latest_tool_call = None;
             }
-            state.dialog_command = None;
-            state.toggle_approved_message = true;
+            state.dialog_approval_state.dialog_command = None;
+            state.dialog_approval_state.toggle_approved_message = true;
         }
 
         // Invalidate cache to show the updated message
@@ -980,7 +980,7 @@ pub fn shell_command_to_tool_call_result(
     command_value: Option<String>,
     shell_output: Option<String>,
 ) -> ToolCallResult {
-    let (id, name) = if let Some(cmd) = &state.dialog_command {
+    let (id, name) = if let Some(cmd) = &state.dialog_approval_state.dialog_command {
         (cmd.id.clone(), cmd.function.name.clone())
     } else {
         (

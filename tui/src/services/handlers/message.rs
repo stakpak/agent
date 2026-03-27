@@ -120,12 +120,12 @@ pub fn handle_add_user_message(state: &mut AppState, s: String) {
 /// Handle has user message event
 pub fn handle_has_user_message(state: &mut AppState) {
     state.has_user_messages = true;
-    state.toggle_approved_message = true;
-    state.message_approved_tools.clear();
-    state.message_rejected_tools.clear();
-    state.message_tool_calls = None;
+    state.dialog_approval_state.toggle_approved_message = true;
+    state.dialog_approval_state.message_approved_tools.clear();
+    state.dialog_approval_state.message_rejected_tools.clear();
+    state.dialog_approval_state.message_tool_calls = None;
     state.tool_call_execution_order.clear();
-    state.is_dialog_open = false;
+    state.dialog_approval_state.is_dialog_open = false;
     // Clear any pending cancellation from a previous interaction
     state.tool_call_state.cancel_requested = false;
 }

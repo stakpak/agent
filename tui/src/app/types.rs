@@ -5,6 +5,7 @@
 
 use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
+use crate::services::approval_bar::ApprovalBar;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
@@ -307,6 +308,39 @@ pub struct ToolCallState {
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
+}
+
+/// Dialog visibility, approval-bar interaction, and tool-approval selection state.
+pub struct DialogApprovalState {
+    pub is_dialog_open: bool,
+    pub dialog_command: Option<ToolCall>,
+    pub dialog_selected: usize,
+    pub dialog_message_id: Option<Uuid>,
+    pub dialog_focused: bool,
+    pub approval_bar: ApprovalBar,
+    pub message_tool_calls: Option<Vec<ToolCall>>,
+    pub message_approved_tools: Vec<ToolCall>,
+    pub message_rejected_tools: Vec<ToolCall>,
+    pub toggle_approved_message: bool,
+    pub show_shortcuts: bool,
+}
+
+impl Default for DialogApprovalState {
+    fn default() -> Self {
+        Self {
+            is_dialog_open: false,
+            dialog_command: None,
+            dialog_selected: 0,
+            dialog_message_id: None,
+            dialog_focused: false,
+            approval_bar: ApprovalBar::new(),
+            message_tool_calls: None,
+            message_approved_tools: Vec::new(),
+            message_rejected_tools: Vec::new(),
+            toggle_approved_message: true,
+            show_shortcuts: false,
+        }
+    }
 }
 
 impl Default for LoadingState {

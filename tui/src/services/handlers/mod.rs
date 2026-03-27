@@ -660,27 +660,29 @@ pub fn update(
     // Intercept keys for Approval Bar (inline approval)
     // Controls: ←→ navigate, Space toggle, Enter confirm all, Esc reject all
     // Don't intercept if collapsed messages popup is showing
-    if state.approval_bar.is_visible() && !state.show_collapsed_messages {
+    if state.dialog_approval_state.approval_bar.is_visible() && !state.show_collapsed_messages {
         match event {
             InputEvent::HandleEsc => {
-                if !state.approval_bar.is_esc_pending() {
+                if !state.dialog_approval_state.approval_bar.is_esc_pending() {
                     // First ESC: show hint and set is_dialog_open
-                    state.approval_bar.set_esc_pending(true);
-                    state.is_dialog_open = true;
+                    state.dialog_approval_state.approval_bar.set_esc_pending(true);
+                    state.dialog_approval_state.is_dialog_open = true;
                     return;
                 }
 
                 // Second ESC: reject all tools
-                state.approval_bar.reject_all();
+                state.dialog_approval_state.approval_bar.reject_all();
 
                 // Update approved and rejected tool calls from bar
-                state.message_approved_tools = state
+                state.dialog_approval_state.message_approved_tools = state
+                    .dialog_approval_state
                     .approval_bar
                     .get_approved_tool_calls()
                     .into_iter()
                     .cloned()
                     .collect();
-                state.message_rejected_tools = state
+                state.dialog_approval_state.message_rejected_tools = state
+                    .dialog_approval_state
                     .approval_bar
                     .get_rejected_tool_calls()
                     .into_iter()
@@ -688,9 +690,9 @@ pub fn update(
                     .collect();
 
                 // Process tools in order
-                if let Some(tool_calls) = &state.message_tool_calls.clone() {
+                if let Some(tool_calls) = &state.dialog_approval_state.message_tool_calls.clone() {
                     for tool_call in tool_calls {
-                        let is_approved = state.message_approved_tools.contains(tool_call);
+                        let is_approved = state.dialog_approval_state.message_approved_tools.contains(tool_call);
                         let status = if is_approved {
                             crate::app::ToolCallStatus::Approved
                         } else {
@@ -705,12 +707,12 @@ pub fn update(
                     // Always execute the FIRST tool, regardless of which tab is selected
                     if let Some(first_tool) = tool_calls.first() {
                         // Set dialog_command to the first tool for proper processing
-                        state.dialog_command = Some(first_tool.clone());
+                        state.dialog_approval_state.dialog_command = Some(first_tool.clone());
                         state
                             .session_tool_calls_queue
                             .insert(first_tool.id.clone(), crate::app::ToolCallStatus::Executed);
 
-                        let is_approved = state.message_approved_tools.contains(first_tool);
+                        let is_approved = state.dialog_approval_state.message_approved_tools.contains(first_tool);
 
                         // Update the pending display to show the first tool (which is being executed)
                         dialog::update_pending_tool_to_first(state, first_tool, is_approved);
@@ -721,7 +723,7 @@ pub fn update(
                             let _ = output_tx.try_send(OutputEvent::AcceptTool(first_tool.clone()));
                         } else {
                             // Fire handle reject - keep is_dialog_open true so it renders properly
-                            state.is_dialog_open = true;
+                            state.dialog_approval_state.is_dialog_open = true;
                             let _ = input_tx.try_send(InputEvent::HandleReject(
                                 Some("Tool call rejected".to_string()),
                                 true,
@@ -733,10 +735,10 @@ pub fn update(
 
                 // Clear message_tool_calls but DON'T clear is_dialog_open yet
                 // HandleReject will clear it after rendering
-                state.message_tool_calls = None;
+                state.dialog_approval_state.message_tool_calls = None;
 
                 // Clear the approval bar
-                state.approval_bar.clear();
+                state.dialog_approval_state.approval_bar.clear();
 
                 return;
             }
@@ -757,9 +759,9 @@ pub fn update(
             }
             InputEvent::InputSubmitted => {
                 // If ESC was pending, Enter cancels it and goes back to showing the bar
-                if state.approval_bar.is_esc_pending() {
-                    state.approval_bar.set_esc_pending(false);
-                    state.is_dialog_open = false;
+                if state.dialog_approval_state.approval_bar.is_esc_pending() {
+                    state.dialog_approval_state.approval_bar.set_esc_pending(false);
+                    state.dialog_approval_state.is_dialog_open = false;
                     return;
                 }
                 // Otherwise, confirm all and execute (handled in input.rs)
@@ -774,8 +776,8 @@ pub fn update(
     // Intercept keys for Shell Mode (only when not loading)
     if state.shell_popup_state.show_shell_mode
         && state.shell_popup_state.active_shell_command.is_some()
-        && !state.is_dialog_open
-        && !state.approval_bar.is_visible()
+        && !state.dialog_approval_state.is_dialog_open
+        && !state.dialog_approval_state.approval_bar.is_visible()
         && !state.shell_popup_state.shell_loading
     {
         match event {
