@@ -801,7 +801,7 @@ pub fn update(
     }
 
     // Intercept keys for Shell Mode (only when not loading)
-    if state.shell_popup_state.show_shell_mode
+    if state.shell_popup_state.is_expanded
         && state.shell_popup_state.active_shell_command.is_some()
         && !state.dialog_approval_state.is_dialog_open
         && !state.dialog_approval_state.approval_bar.is_visible()

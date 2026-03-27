@@ -301,7 +301,6 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
     state.shell_session_state.interactive_shell_message_id = None;
-    state.shell_popup_state.show_shell_mode = false;
     state.shell_popup_state.is_visible = false;
     state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.waiting_for_shell_input = false;

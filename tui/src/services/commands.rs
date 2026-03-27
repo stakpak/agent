@@ -693,14 +693,13 @@ fn terminate_active_shell(state: &mut AppState) {
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
     state.shell_session_state.interactive_shell_message_id = None;
-    state.shell_popup_state.show_shell_mode = false;
     state.shell_popup_state.is_visible = false;
     state.shell_popup_state.is_expanded = false;
     state.shell_popup_state.waiting_for_shell_input = false;
     state.shell_popup_state.pending_command_executed = false;
     state.shell_popup_state.pending_command_value = None;
     state.shell_popup_state.pending_command_output = None;
-    state.shell_popup_state.shell_pending_command_output_count = 0;
+    state.shell_popup_state.pending_command_output_count = 0;
     state.dialog_approval_state.dialog_command = None;
     state.input_state.text_area.set_shell_mode(false);
 }

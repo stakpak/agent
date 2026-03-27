@@ -494,13 +494,9 @@ pub struct ShellPopupState {
     pub pending_command_value: Option<String>,
     pub pending_command_executed: bool,
     pub pending_command_output: Option<String>,
-    // Backward compatibility aliases (to be removed after full migration)
-    pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
-    pub shell_mode_input: String, // unused, kept for compatibility
+    pub pending_command_output_count: usize,
     pub is_tool_call_shell_command: bool,
     pub ondemand_shell_mode: bool,
-    pub shell_pending_command: Option<String>,
-    pub shell_pending_command_output_count: usize,
     /// Tracks if the initial shell prompt has been shown (before command is typed)
     pub shell_initial_prompt_shown: bool,
     /// Tracks if the command has been typed into the shell (after initial prompt)

@@ -188,7 +188,6 @@ impl AppState {
             session_tool_calls_state: SessionToolCallsState::default(),
             shell_popup_state: ShellPopupState {
                 cursor_visible: true,
-                shell_mode_input: String::new(),
                 ..Default::default()
             },
             quit_intent_state: QuitIntentState::default(),

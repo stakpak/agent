@@ -390,7 +390,7 @@ fn handle_input_submitted(
     shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    if state.shell_popup_state.show_shell_mode {
+    if state.shell_popup_state.is_expanded {
         if state.shell_popup_state.active_shell_command.is_some() {
             let input = state.input().to_string();
             state.input_state.text_area.set_text("");
@@ -630,7 +630,7 @@ fn handle_input_submitted(
         // Check for tool-initiated shell resolution
         if state.shell_popup_state.is_tool_call_shell_command
             && state.shell_popup_state.active_shell_command.is_some()
-            && !state.shell_popup_state.show_shell_mode
+            && !state.shell_popup_state.is_expanded
         {
             // 1. Signal cancellation to unblock the MCP task
             if let Some(cancel_tx) = &cancel_tx {
@@ -667,7 +667,7 @@ fn handle_input_submitted(
         // Check for on-demand shell termination and history attachment
         if state.shell_popup_state.ondemand_shell_mode
             && state.shell_popup_state.active_shell_command.is_some()
-            && !state.shell_popup_state.show_shell_mode
+            && !state.shell_popup_state.is_expanded
         {
             let mut history_lines = crate::services::handlers::shell::trim_shell_lines(
                 state.shell_runtime_state.history_lines.clone(),
@@ -730,7 +730,6 @@ fn handle_input_submitted(
             state.shell_popup_state.active_shell_command = None;
             state.shell_popup_state.active_shell_command_output = None;
             state.shell_runtime_state.history_lines.clear();
-            state.shell_popup_state.show_shell_mode = false;
             state.shell_popup_state.is_visible = false;
             state.shell_popup_state.is_expanded = false;
             state.shell_popup_state.ondemand_shell_mode = false; // Reset on-demand mode

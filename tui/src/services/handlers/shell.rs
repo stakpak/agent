@@ -275,8 +275,6 @@ pub fn handle_run_shell_command(
     state.shell_popup_state.scroll = 0; // Reset scroll to show bottom
     // Invalidate cache so old bordered message is hidden
     invalidate_message_lines_cache(state);
-    // Also set legacy alias for backward compatibility
-    state.shell_popup_state.show_shell_mode = true;
     state.input_state.text_area.set_shell_mode(true);
 }
 
@@ -294,7 +292,7 @@ pub fn handle_run_shell_with_command(
     // Initially false - will become true when command starts executing
     state.shell_popup_state.pending_command_executed = false;
     state.shell_popup_state.pending_command_output = Some(String::new());
-    state.shell_popup_state.shell_pending_command_output_count = 0;
+    state.shell_popup_state.pending_command_output_count = 0;
     // Reset prompt detection state for auto-completion
     state.shell_popup_state.shell_initial_prompt_shown = false;
     state.shell_popup_state.shell_command_typed = false;
@@ -305,13 +303,12 @@ pub fn handle_run_shell_with_command(
 
 /// Helper to background the active shell session (minimize popup)
 pub fn background_shell_session(state: &mut AppState) {
-    if !state.shell_popup_state.show_shell_mode {
+    if !state.shell_popup_state.is_expanded {
         return;
     }
 
     // Collapse popup (shrink, not hide)
     state.shell_popup_state.is_expanded = false;
-    state.shell_popup_state.show_shell_mode = false;
     // Update textarea shell mode
     state.input_state.text_area.set_shell_mode(false);
 
@@ -372,7 +369,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     // Only Esc can exit shell mode (handled elsewhere)
 
     // If already expanded, '$' IS TYPED INTO SHELL
-    if state.shell_popup_state.show_shell_mode && state.shell_popup_state.is_expanded {
+    if state.shell_popup_state.is_expanded {
         if let Some(shell_cmd) = &state.shell_popup_state.active_shell_command {
             let stdin_tx = shell_cmd.stdin_tx.clone();
             tokio::spawn(async move {
@@ -385,7 +382,6 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     // If popup is visible but shrunk (backgrounded), expand it back
     if state.shell_popup_state.is_visible && !state.shell_popup_state.is_expanded {
         state.shell_popup_state.is_expanded = true;
-        state.shell_popup_state.show_shell_mode = true;
         state.input_state.text_area.set_shell_mode(true);
 
         // Update message to show focused state
@@ -427,7 +423,6 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     if state.shell_popup_state.active_shell_command.is_some() {
         state.shell_popup_state.is_visible = true;
         state.shell_popup_state.is_expanded = true;
-        state.shell_popup_state.show_shell_mode = true;
         state.input_state.text_area.set_shell_mode(true);
         invalidate_message_lines_cache(state);
         return;
@@ -476,7 +471,7 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
 
             // Reset the tracking state
             state.shell_popup_state.pending_command_executed = false;
-            state.shell_popup_state.shell_pending_command_output_count = 0;
+            state.shell_popup_state.pending_command_output_count = 0;
             state.dialog_approval_state.dialog_command = None;
         }
 
@@ -538,7 +533,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
 
     // If we're tracking a pending command (from interactive stall), capture all output
     if state.shell_popup_state.pending_command_executed {
-        state.shell_popup_state.shell_pending_command_output_count += 1;
+        state.shell_popup_state.pending_command_output_count += 1;
         if let Some(output) = state.shell_popup_state.pending_command_output.as_mut() {
             output.push_str(&raw_data);
         }
@@ -575,7 +570,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
         .unwrap_or("shell")
         .to_string();
 
-    let (colors, title) = if state.shell_popup_state.show_shell_mode {
+    let (colors, title) = if state.shell_popup_state.is_expanded {
         (
             BubbleColors {
                 border_color: ThemeColors::cyan(),
@@ -765,7 +760,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     if !state.shell_popup_state.shell_command_typed {
         // We saw the initial prompt, now we're waiting for the command to be typed
         // Once output count increases (command starts producing output), command was typed
-        if state.shell_popup_state.shell_pending_command_output_count > 2 {
+        if state.shell_popup_state.pending_command_output_count > 2 {
             state.shell_popup_state.shell_command_typed = true;
         }
         return false;
@@ -775,7 +770,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     // shell_interaction_occurred is set when user types something (like password)
     if current_is_prompt
         && state.shell_session_state.shell_interaction_occurred
-        && state.shell_popup_state.shell_pending_command_output_count > 3
+        && state.shell_popup_state.pending_command_output_count > 3
     {
         // We're back at a prompt after the command ran and user interacted
         // This means the command is complete - trigger auto-completion!
@@ -857,7 +852,6 @@ pub fn handle_shell_completed(
         state.shell_popup_state.needs_terminal_clear = true;
         // Invalidate cache to restore normal message display
         invalidate_message_lines_cache(state);
-        state.shell_popup_state.show_shell_mode = false;
         state.input_state.text_area.set_shell_mode(false);
 
         if let Some(dialog_command) = saved_dialog_command {

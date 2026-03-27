@@ -317,8 +317,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
 
     // Only update last_message_tool_calls if we're not in a retry scenario
     // During retry, we want to preserve the original sequence for ShellCompleted
-    if !state.shell_popup_state.show_shell_mode
-        || state.dialog_approval_state.dialog_command.is_none()
+    if !state.shell_popup_state.is_expanded || state.dialog_approval_state.dialog_command.is_none()
     {
         state.session_tool_calls_state.last_message_tool_calls = prompt_tool_calls.clone();
     }
@@ -386,7 +385,6 @@ pub fn handle_retry_tool_call(
             }
         };
         // Enable shell mode and popup
-        state.shell_popup_state.show_shell_mode = true;
         state.shell_popup_state.is_visible = true;
         state.shell_popup_state.is_expanded = true;
         state.dialog_approval_state.is_dialog_open = false;

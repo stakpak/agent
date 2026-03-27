@@ -700,7 +700,7 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
 fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
     let block = Block::default().borders(Borders::ALL).border_style(
-        if state.shell_popup_state.show_shell_mode {
+        if state.shell_popup_state.is_expanded {
             Style::default().fg(ThemeColors::magenta())
         } else {
             Style::default().fg(ThemeColors::dark_gray())
@@ -724,7 +724,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(block, area);
 
     // Render the TextArea with state, handling password masking if needed
-    if state.shell_popup_state.show_shell_mode && state.shell_popup_state.waiting_for_shell_input {
+    if state.shell_popup_state.is_expanded && state.shell_popup_state.waiting_for_shell_input {
         state.input_state.text_area.render_with_state(
             content_area,
             f.buffer_mut(),

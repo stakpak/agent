@@ -180,7 +180,7 @@ pub fn handle_esc(
 
     let was_streaming = state.tool_call_state.is_streaming;
     let was_dialog_open = state.dialog_approval_state.is_dialog_open;
-    let was_shell_mode = state.shell_popup_state.show_shell_mode;
+    let was_shell_mode = state.shell_popup_state.is_expanded;
     state.tool_call_state.is_streaming = false;
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
@@ -264,7 +264,7 @@ pub fn handle_esc(
         state.dialog_approval_state.dialog_command = None;
         state.dialog_approval_state.dialog_focused = false; // Reset focus when dialog closes
         state.input_state.text_area.set_text("");
-    } else if state.shell_popup_state.show_shell_mode {
+    } else if state.shell_popup_state.is_expanded {
         if state.dialog_approval_state.dialog_command.is_some() {
             // Interactive stall shell: resolve it correctly with captured history
             // instead of just rejecting it.
@@ -297,7 +297,6 @@ pub fn handle_esc(
             }
             state.shell_popup_state.is_tool_call_shell_command = false;
 
-            state.shell_popup_state.show_shell_mode = false;
             state.shell_popup_state.is_visible = false;
             state.shell_popup_state.is_expanded = false;
             state.input_state.text_area.set_shell_mode(false);
@@ -308,7 +307,7 @@ pub fn handle_esc(
             state.shell_popup_state.pending_command_executed = false;
             state.shell_popup_state.pending_command_value = None;
             state.shell_popup_state.pending_command_output = None;
-            state.shell_popup_state.shell_pending_command_output_count = 0;
+            state.shell_popup_state.pending_command_output_count = 0;
 
             // Invalidate cache to update the display
             crate::services::message::invalidate_message_lines_cache(state);
@@ -355,7 +354,7 @@ pub fn handle_show_confirmation_dialog(
     output_tx: &Sender<OutputEvent>,
     _terminal_size: Size,
 ) {
-    if state.tool_call_state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
+    if state.tool_call_state.latest_tool_call.is_some() && state.shell_popup_state.is_expanded {
         return;
     }
     if state
