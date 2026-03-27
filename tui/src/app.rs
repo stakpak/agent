@@ -3,7 +3,6 @@ mod types;
 
 pub use events::{InputEvent, OutputEvent};
 use stakai::Model;
-use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::auto_approve::AutoApproveManager;
@@ -26,7 +25,6 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use ratatui::layout::{Rect, Size};
 use ratatui::text::Line;
-use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
@@ -86,63 +84,31 @@ pub struct AppState {
     pub dialog_approval_state: DialogApprovalState,
 
     // ========== Sessions State ==========
-    pub sessions: Vec<SessionInfo>,
-    pub session_selected: usize,
-    pub account_info: String,
+    pub sessions_state: SessionsState,
 
     // ========== Session Tool Calls Queue ==========
-    pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
-    pub tool_call_execution_order: Vec<String>,
-    pub last_message_tool_calls: Vec<ToolCall>,
+    pub session_tool_calls_state: SessionToolCallsState,
 
     // ========== Profile Switcher State ==========
-    pub show_profile_switcher: bool,
-    pub available_profiles: Vec<String>,
-    pub profile_switcher_selected: usize,
-    pub current_profile_name: String,
-    pub profile_switching_in_progress: bool,
-    pub profile_switch_status_message: Option<String>,
+    pub profile_switcher_state: ProfileSwitcherState,
 
     // ========== Rulebook Switcher State ==========
-    pub show_rulebook_switcher: bool,
-    pub available_rulebooks: Vec<ListRuleBook>,
-    pub selected_rulebooks: std::collections::HashSet<String>,
-    pub rulebook_switcher_selected: usize,
-    pub rulebook_search_input: String,
-    pub filtered_rulebooks: Vec<ListRuleBook>,
-    pub rulebook_config: Option<crate::RulebookConfig>,
+    pub rulebook_switcher_state: RulebookSwitcherState,
 
     // ========== Model Switcher State ==========
-    pub show_model_switcher: bool,
-    pub available_models: Vec<Model>,
-    pub model_switcher_selected: usize,
-    pub current_model: Option<Model>,
-    pub model_switcher_mode: ModelSwitcherMode,
-    pub model_switcher_search: String,
-    /// Recently used model IDs (most recent first, for display in model switcher)
-    pub recent_models: Vec<String>,
+    pub model_switcher_state: ModelSwitcherState,
 
     // ========== Command Palette State ==========
-    pub show_command_palette: bool,
-    pub command_palette_selected: usize,
-    pub command_palette_scroll: usize,
-    pub command_palette_search: String,
+    pub command_palette_state: CommandPaletteState,
 
     // ========== Shortcuts Popup State ==========
-    pub show_shortcuts_popup: bool,
-    pub shortcuts_scroll: usize,
-    pub shortcuts_popup_mode: ShortcutsPopupMode,
+    pub shortcuts_panel_state: ShortcutsPanelState,
 
     // ========== File Changes Popup State ==========
-    pub show_file_changes_popup: bool,
-    pub file_changes_selected: usize,
-    pub file_changes_scroll: usize,
-    pub file_changes_search: String,
+    pub file_changes_popup_state: FileChangesPopupState,
 
     // ========== Usage Tracking State ==========
-    pub current_message_usage: LLMTokenUsage,
-    pub total_session_usage: LLMTokenUsage,
-    pub context_usage_percent: u64,
+    pub usage_tracking_state: UsageTrackingState,
 
     // ========== Configuration State ==========
     pub secret_manager: SecretManager,
@@ -443,13 +409,12 @@ impl AppState {
             scroll_lines_from_end: None,
             content_changed_while_scrolled_up: false,
             dialog_approval_state: DialogApprovalState::default(),
-            sessions: Vec::new(),
-            session_selected: 0,
-            account_info: String::new(),
+            sessions_state: SessionsState::default(),
             tool_call_state: ToolCallState {
                 max_retry_attempts: 3,
                 ..Default::default()
             },
+            session_tool_calls_state: SessionToolCallsState::default(),
             shell_popup_state: ShellPopupState {
                 shell_cursor_visible: true,
                 shell_mode_input: String::new(),
@@ -482,9 +447,6 @@ impl AppState {
                 width: 0,
                 height: 0,
             },
-            session_tool_calls_queue: std::collections::HashMap::new(),
-            tool_call_execution_order: Vec::new(),
-            last_message_tool_calls: Vec::new(),
             shell_screen: vt100::Parser::new(24, 80, 1000),
             shell_scroll: 0,
             shell_history_lines: Vec::new(),
@@ -516,60 +478,29 @@ impl AppState {
             collapsed_popup_area_height: 0,
 
             // Profile switcher initialization
-            show_profile_switcher: false,
-            available_profiles: Vec::new(),
-            profile_switcher_selected: 0,
-            current_profile_name: "default".to_string(),
-            profile_switching_in_progress: false,
-            profile_switch_status_message: None,
-            rulebook_config: None,
+            profile_switcher_state: ProfileSwitcherState {
+                current_profile_name: "default".to_string(),
+                ..Default::default()
+            },
 
             // Shortcuts popup initialization
-            show_shortcuts_popup: false,
-            shortcuts_scroll: 0,
-            shortcuts_popup_mode: ShortcutsPopupMode::default(),
+            shortcuts_panel_state: ShortcutsPanelState::default(),
             // Rulebook switcher initialization
-            show_rulebook_switcher: false,
-            available_rulebooks: Vec::new(),
-            selected_rulebooks: std::collections::HashSet::new(),
-            rulebook_switcher_selected: 0,
-            rulebook_search_input: String::new(),
-            filtered_rulebooks: Vec::new(),
+            rulebook_switcher_state: RulebookSwitcherState::default(),
 
             // Model switcher initialization
-            show_model_switcher: false,
-            available_models: Vec::new(),
-            model_switcher_selected: 0,
-            current_model: None,
-            model_switcher_mode: ModelSwitcherMode::default(),
-            model_switcher_search: String::new(),
-            recent_models,
+            model_switcher_state: ModelSwitcherState {
+                recent_models,
+                ..Default::default()
+            },
             // Command palette initialization
-            show_command_palette: false,
-            command_palette_selected: 0,
-            command_palette_scroll: 0,
-            command_palette_search: String::new(),
+            command_palette_state: CommandPaletteState::default(),
 
             // File changes popup initialization
-            show_file_changes_popup: false,
-            file_changes_selected: 0,
-            file_changes_scroll: 0,
-            file_changes_search: String::new(),
+            file_changes_popup_state: FileChangesPopupState::default(),
 
             // Usage tracking
-            current_message_usage: LLMTokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
-            },
-            total_session_usage: LLMTokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
-            },
-            context_usage_percent: 0,
+            usage_tracking_state: UsageTrackingState::default(),
             model,
 
             // Side panel initialization
@@ -732,7 +663,7 @@ impl AppState {
 
     /// Check if user input should be blocked (during profile switch)
     pub fn is_input_blocked(&self) -> bool {
-        self.profile_switching_in_progress
+        self.profile_switcher_state.profile_switching_in_progress
     }
 
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {

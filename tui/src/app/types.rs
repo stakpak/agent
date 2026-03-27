@@ -9,7 +9,10 @@ use crate::services::approval_bar::ApprovalBar;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
+use stakai::Model;
+use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{ContentPart, ToolCall, ToolCallResult};
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -339,6 +342,101 @@ impl Default for DialogApprovalState {
             message_rejected_tools: Vec::new(),
             toggle_approved_message: true,
             show_shortcuts: false,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct SessionsState {
+    pub sessions: Vec<SessionInfo>,
+    pub session_selected: usize,
+    pub account_info: String,
+}
+
+#[derive(Default)]
+pub struct SessionToolCallsState {
+    pub session_tool_calls_queue: HashMap<String, ToolCallStatus>,
+    pub tool_call_execution_order: Vec<String>,
+    pub last_message_tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Default)]
+pub struct ProfileSwitcherState {
+    pub show_profile_switcher: bool,
+    pub available_profiles: Vec<String>,
+    pub profile_switcher_selected: usize,
+    pub current_profile_name: String,
+    pub profile_switching_in_progress: bool,
+    pub profile_switch_status_message: Option<String>,
+}
+
+#[derive(Default)]
+pub struct RulebookSwitcherState {
+    pub show_rulebook_switcher: bool,
+    pub available_rulebooks: Vec<ListRuleBook>,
+    pub selected_rulebooks: HashSet<String>,
+    pub rulebook_switcher_selected: usize,
+    pub rulebook_search_input: String,
+    pub filtered_rulebooks: Vec<ListRuleBook>,
+    pub rulebook_config: Option<crate::RulebookConfig>,
+}
+
+#[derive(Default)]
+pub struct ModelSwitcherState {
+    pub show_model_switcher: bool,
+    pub available_models: Vec<Model>,
+    pub model_switcher_selected: usize,
+    pub current_model: Option<Model>,
+    pub model_switcher_mode: ModelSwitcherMode,
+    pub model_switcher_search: String,
+    pub recent_models: Vec<String>,
+}
+
+#[derive(Default)]
+pub struct CommandPaletteState {
+    pub show_command_palette: bool,
+    pub command_palette_selected: usize,
+    pub command_palette_scroll: usize,
+    pub command_palette_search: String,
+}
+
+#[derive(Default)]
+pub struct ShortcutsPanelState {
+    pub show_shortcuts_popup: bool,
+    pub shortcuts_scroll: usize,
+    pub shortcuts_popup_mode: ShortcutsPopupMode,
+}
+
+#[derive(Default)]
+pub struct FileChangesPopupState {
+    pub show_file_changes_popup: bool,
+    pub file_changes_selected: usize,
+    pub file_changes_scroll: usize,
+    pub file_changes_search: String,
+}
+
+pub struct UsageTrackingState {
+    pub current_message_usage: LLMTokenUsage,
+    pub total_session_usage: LLMTokenUsage,
+    pub context_usage_percent: u64,
+}
+
+impl Default for UsageTrackingState {
+    fn default() -> Self {
+        Self {
+            current_message_usage: LLMTokenUsage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
+            total_session_usage: LLMTokenUsage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
+            context_usage_percent: 0,
         }
     }
 }

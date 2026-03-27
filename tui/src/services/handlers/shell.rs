@@ -842,21 +842,19 @@ pub fn handle_shell_completed(
         if let Some(dialog_command) = saved_dialog_command {
             let dialog_command_id = dialog_command.id.clone();
             // Check the index of dialog_command in tool_calls_execution_order
-            let index = state
-                .last_message_tool_calls
+            let index = state.session_tool_calls_state.last_message_tool_calls
                 .iter()
                 .position(|tool_call| tool_call.id == dialog_command_id);
 
             let should_stop = if let Some(index) = index {
-                index != state.last_message_tool_calls.len() - 1
+                index != state.session_tool_calls_state.last_message_tool_calls.len() - 1
             } else {
                 false
             };
 
             // Get the ids of the tool calls after that id
             let tool_calls_after_index = if let Some(index) = index {
-                state
-                    .last_message_tool_calls
+                state.session_tool_calls_state.last_message_tool_calls
                     .iter()
                     .skip(index + 1)
                     .cloned()
@@ -868,8 +866,7 @@ pub fn handle_shell_completed(
             // Move those rejected tool calls to message_tool_calls
             if !tool_calls_after_index.is_empty() {
                 for tool_call in tool_calls_after_index.iter() {
-                    state
-                        .session_tool_calls_queue
+                    state.session_tool_calls_state.session_tool_calls_queue
                         .insert(tool_call.id.clone(), ToolCallStatus::Pending);
                 }
             }

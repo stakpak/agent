@@ -299,11 +299,11 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     };
 
     // Get the active model (current_model if set, otherwise default model)
-    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
 
     // Token usage - use current message's prompt_tokens for context window utilization
     // (prompt_tokens represents the actual context size, not accumulated across messages)
-    let tokens = state.current_message_usage.prompt_tokens;
+    let tokens = state.usage_tracking_state.current_message_usage.prompt_tokens;
     let max_tokens = active_model.limit.context as u32;
 
     // Show tokens info
@@ -348,7 +348,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     // Profile
     lines.push(make_row(
         "Profile",
-        state.current_profile_name.clone(),
+        state.profile_switcher_state.current_profile_name.clone(),
         ThemeColors::dark_gray(),
     ));
 

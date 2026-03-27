@@ -259,9 +259,8 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
     let rest_tool_calls = tool_calls
         .into_iter()
         .filter(|tool_call| {
-            !state.session_tool_calls_queue.contains_key(&tool_call.id)
-                || state
-                    .session_tool_calls_queue
+            !state.session_tool_calls_state.session_tool_calls_queue.contains_key(&tool_call.id)
+                || state.session_tool_calls_state.session_tool_calls_queue
                     .get(&tool_call.id)
                     .map(|status| status != &ToolCallStatus::Executed)
                     .unwrap_or(false)
@@ -277,7 +276,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
     // Only update last_message_tool_calls if we're not in a retry scenario
     // During retry, we want to preserve the original sequence for ShellCompleted
     if !state.shell_popup_state.show_shell_mode || state.dialog_approval_state.dialog_command.is_none() {
-        state.last_message_tool_calls = prompt_tool_calls.clone();
+        state.session_tool_calls_state.last_message_tool_calls = prompt_tool_calls.clone();
     }
 }
 
@@ -447,14 +446,12 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 /// Update session tool calls queue
 pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
     if tool_call_result.status == ToolCallResultStatus::Error
-        && let Some(failed_idx) = state
-            .tool_call_execution_order
+        && let Some(failed_idx) = state.session_tool_calls_state.tool_call_execution_order
             .iter()
             .position(|id| id == &tool_call_result.call.id)
     {
-        for id in state.tool_call_execution_order.iter().skip(failed_idx + 1) {
-            state
-                .session_tool_calls_queue
+        for id in state.session_tool_calls_state.tool_call_execution_order.iter().skip(failed_idx + 1) {
+            state.session_tool_calls_state.session_tool_calls_queue
                 .insert(id.clone(), ToolCallStatus::Skipped);
         }
     }
@@ -466,16 +463,16 @@ pub fn execute_command_palette_selection(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    let filtered_commands = filter_commands(&state.command_palette_search);
-    if filtered_commands.is_empty() || state.command_palette_selected >= filtered_commands.len() {
+    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+    if filtered_commands.is_empty() || state.command_palette_state.command_palette_selected >= filtered_commands.len() {
         return;
     }
 
-    let selected_command = &filtered_commands[state.command_palette_selected];
+    let selected_command = &filtered_commands[state.command_palette_state.command_palette_selected];
 
     // Close command palette
-    state.show_command_palette = false;
-    state.command_palette_search.clear();
+    state.command_palette_state.show_command_palette = false;
+    state.command_palette_state.command_palette_search.clear();
 
     // Execute the command - use unified executor for slash commands
     if let Some(command_id) = selected_command.action.to_command_id() {

@@ -342,8 +342,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/model" => {
             // Show model switcher popup
-            ctx.state.show_model_switcher = true;
-            ctx.state.model_switcher_selected = 0;
+            ctx.state.model_switcher_state.show_model_switcher = true;
+            ctx.state.model_switcher_state.model_switcher_selected = 0;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             // Request available models from the output handler
@@ -435,7 +435,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             Ok(())
         }
         "/profiles" => {
-            ctx.state.show_profile_switcher = true;
+            ctx.state.profile_switcher_state.show_profile_switcher = true;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowProfileSwitcher);
@@ -699,8 +699,8 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.dialog_approval_state.message_tool_calls = None;
     state.dialog_approval_state.message_approved_tools.clear();
     state.dialog_approval_state.message_rejected_tools.clear();
-    state.tool_call_execution_order.clear();
-    state.session_tool_calls_queue.clear();
+    state.session_tool_calls_state.tool_call_execution_order.clear();
+    state.session_tool_calls_state.session_tool_calls_queue.clear();
     state.dialog_approval_state.approval_bar.clear();
     state.dialog_approval_state.toggle_approved_message = true;
 
@@ -723,13 +723,13 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the resumed session
-    state.total_session_usage = LLMTokenUsage {
+    state.usage_tracking_state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
         prompt_tokens_details: None,
     };
-    state.current_message_usage = LLMTokenUsage {
+    state.usage_tracking_state.current_message_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
@@ -783,13 +783,13 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the new session
-    state.total_session_usage = LLMTokenUsage {
+    state.usage_tracking_state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
         prompt_tokens_details: None,
     };
-    state.current_message_usage = LLMTokenUsage {
+    state.usage_tracking_state.current_message_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
@@ -800,13 +800,13 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn build_summarize_prompt(state: &AppState) -> String {
-    let usage = &state.total_session_usage;
+    let usage = &state.usage_tracking_state.total_session_usage;
     let total_tokens = usage.total_tokens;
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
 
     // Use current_model if set (from streaming), otherwise use default model
-    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
     let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
@@ -822,7 +822,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     prompt.push_str("Session snapshot:\n");
     prompt.push_str(&format!(
         "- Active profile: {}\n",
-        state.current_profile_name
+        state.profile_switcher_state.current_profile_name
     ));
     prompt.push_str(&format!(
         "- Total tokens used: {} (prompt: {}, completion: {})\n",
@@ -969,7 +969,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.command_palette_search.is_empty() {
+    let search_spans = if state.command_palette_state.command_palette_search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -984,7 +984,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.command_palette_search,
+                &state.command_palette_state.command_palette_search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -1003,17 +1003,17 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     f.render_widget(search_paragraph, chunks[1]);
 
     // Get filtered commands
-    let filtered_commands = filter_commands(&state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
     let total_commands = filtered_commands.len();
     let height = chunks[2].height as usize;
 
     // Calculate scroll position
     use crate::constants::SCROLL_BUFFER_LINES;
     let max_scroll = total_commands.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
-    let scroll = if state.command_palette_scroll > max_scroll {
+    let scroll = if state.command_palette_state.command_palette_scroll > max_scroll {
         max_scroll
     } else {
-        state.command_palette_scroll
+        state.command_palette_state.command_palette_scroll
     };
 
     // Add top arrow indicator if there are hidden items above
@@ -1032,7 +1032,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
         if line_index < total_commands {
             let command = &filtered_commands[line_index];
             let available_width = area.width as usize - 2; // Account for borders
-            let is_selected = line_index == state.command_palette_selected;
+            let is_selected = line_index == state.command_palette_state.command_palette_selected;
             let bg_color = if is_selected {
                 ThemeColors::highlight_bg()
             } else {

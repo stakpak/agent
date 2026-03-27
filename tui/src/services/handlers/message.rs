@@ -124,7 +124,7 @@ pub fn handle_has_user_message(state: &mut AppState) {
     state.dialog_approval_state.message_approved_tools.clear();
     state.dialog_approval_state.message_rejected_tools.clear();
     state.dialog_approval_state.message_tool_calls = None;
-    state.tool_call_execution_order.clear();
+    state.session_tool_calls_state.tool_call_execution_order.clear();
     state.dialog_approval_state.is_dialog_open = false;
     // Clear any pending cancellation from a previous interaction
     state.tool_call_state.cancel_requested = false;
@@ -132,7 +132,7 @@ pub fn handle_has_user_message(state: &mut AppState) {
 
 /// Handle stream usage event
 pub fn handle_stream_usage(state: &mut AppState, usage: LLMTokenUsage) {
-    state.current_message_usage = usage;
+    state.usage_tracking_state.current_message_usage = usage;
 }
 
 /// Handle request total usage event
@@ -144,7 +144,7 @@ pub fn handle_request_total_usage(output_tx: &Sender<OutputEvent>) {
 /// Handle total usage event
 pub fn handle_total_usage(state: &mut AppState, usage: LLMTokenUsage) {
     // Update total session usage from CLI
-    state.total_session_usage = usage;
+    state.usage_tracking_state.total_session_usage = usage;
     // If cost message was just displayed, update it
     let should_update = state
         .messages

@@ -254,21 +254,21 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // === POPUPS - rendered last to appear on top of side panel ===
 
     // Render profile switcher
-    if state.show_profile_switcher {
+    if state.profile_switcher_state.show_profile_switcher {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
     }
 
     // Render file changes popup
-    if state.show_file_changes_popup {
+    if state.file_changes_popup_state.show_file_changes_popup {
         crate::services::file_changes_popup::render_file_changes_popup(f, state);
     }
 
     // Render shortcuts popup (now includes commands)
-    if state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
         crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
     }
     // Render rulebook switcher
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
@@ -278,12 +278,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render model switcher
-    if state.show_model_switcher {
+    if state.model_switcher_state.show_model_switcher {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
     }
 
     // Render profile switch overlay
-    if state.profile_switching_in_progress {
+    if state.profile_switcher_state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
 

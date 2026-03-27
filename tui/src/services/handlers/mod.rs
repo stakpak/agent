@@ -361,7 +361,7 @@ pub fn update(
     }
 
     // Intercept keys for File Changes Popup
-    if state.show_file_changes_popup && !skip_popup_interception {
+    if state.file_changes_popup_state.show_file_changes_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_file_changes_popup_cancel(state);
@@ -555,7 +555,7 @@ pub fn update(
     }
 
     // Intercept keys for Model Switcher Popup
-    if state.show_model_switcher && !skip_popup_interception {
+    if state.model_switcher_state.show_model_switcher && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_model_switcher_cancel(state);
@@ -568,9 +568,9 @@ pub fn update(
             InputEvent::Up | InputEvent::ScrollUp => {
                 // Navigate up in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
-                    &state.available_models,
-                    state.model_switcher_mode,
-                    &state.model_switcher_search,
+                    &state.model_switcher_state.available_models,
+                    state.model_switcher_state.model_switcher_mode,
+                    &state.model_switcher_state.model_switcher_search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
@@ -578,7 +578,7 @@ pub fn update(
                     // Find current position in navigation order
                     let current_pos = nav_order
                         .iter()
-                        .position(|&idx| idx == state.model_switcher_selected)
+                        .position(|&idx| idx == state.model_switcher_state.model_switcher_selected)
                         .unwrap_or(0);
                     // Move up (with wrap)
                     let new_pos = if current_pos > 0 {
@@ -586,16 +586,16 @@ pub fn update(
                     } else {
                         nav_order.len() - 1
                     };
-                    state.model_switcher_selected = nav_order[new_pos];
+                    state.model_switcher_state.model_switcher_selected = nav_order[new_pos];
                 }
                 return;
             }
             InputEvent::Down | InputEvent::ScrollDown => {
                 // Navigate down in display order (Recent first, then providers)
                 let filtered = crate::services::model_switcher::filter_models(
-                    &state.available_models,
-                    state.model_switcher_mode,
-                    &state.model_switcher_search,
+                    &state.model_switcher_state.available_models,
+                    state.model_switcher_state.model_switcher_mode,
+                    &state.model_switcher_state.model_switcher_search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
@@ -603,7 +603,7 @@ pub fn update(
                     // Find current position in navigation order
                     let current_pos = nav_order
                         .iter()
-                        .position(|&idx| idx == state.model_switcher_selected)
+                        .position(|&idx| idx == state.model_switcher_state.model_switcher_selected)
                         .unwrap_or(0);
                     // Move down (with wrap)
                     let new_pos = if current_pos < nav_order.len() - 1 {
@@ -611,7 +611,7 @@ pub fn update(
                     } else {
                         0
                     };
-                    state.model_switcher_selected = nav_order[new_pos];
+                    state.model_switcher_state.model_switcher_selected = nav_order[new_pos];
                 }
                 return;
             }
@@ -621,30 +621,30 @@ pub fn update(
             }
             InputEvent::InputChanged(c) | InputEvent::ModelSwitcherSearchInputChanged(c) => {
                 // Add character to search
-                state.model_switcher_search.push(c);
+                state.model_switcher_state.model_switcher_search.push(c);
                 // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
-                    &state.available_models,
-                    state.model_switcher_mode,
-                    &state.model_switcher_search,
+                    &state.model_switcher_state.available_models,
+                    state.model_switcher_state.model_switcher_mode,
+                    &state.model_switcher_state.model_switcher_search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
-                state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
+                state.model_switcher_state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::InputBackspace | InputEvent::ModelSwitcherSearchBackspace => {
                 // Remove character from search
-                state.model_switcher_search.pop();
+                state.model_switcher_state.model_switcher_search.pop();
                 // Reset selection to first in navigation order
                 let filtered = crate::services::model_switcher::filter_models(
-                    &state.available_models,
-                    state.model_switcher_mode,
-                    &state.model_switcher_search,
+                    &state.model_switcher_state.available_models,
+                    state.model_switcher_state.model_switcher_mode,
+                    &state.model_switcher_state.model_switcher_search,
                 );
                 let nav_order =
                     crate::services::model_switcher::get_navigation_order(state, &filtered);
-                state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
+                state.model_switcher_state.model_switcher_selected = nav_order.first().copied().unwrap_or(0);
                 return;
             }
             InputEvent::AvailableModelsLoaded(_) | InputEvent::RecentModelsUpdated(_) => {
@@ -698,9 +698,8 @@ pub fn update(
                         } else {
                             crate::app::ToolCallStatus::Rejected
                         };
-                        state.tool_call_execution_order.push(tool_call.id.clone());
-                        state
-                            .session_tool_calls_queue
+                        state.session_tool_calls_state.tool_call_execution_order.push(tool_call.id.clone());
+                        state.session_tool_calls_state.session_tool_calls_queue
                             .insert(tool_call.id.clone(), status);
                     }
 
@@ -708,8 +707,7 @@ pub fn update(
                     if let Some(first_tool) = tool_calls.first() {
                         // Set dialog_command to the first tool for proper processing
                         state.dialog_approval_state.dialog_command = Some(first_tool.clone());
-                        state
-                            .session_tool_calls_queue
+                        state.session_tool_calls_state.session_tool_calls_queue
                             .insert(first_tool.id.clone(), crate::app::ToolCallStatus::Executed);
 
                         let is_approved = state.dialog_approval_state.message_approved_tools.contains(first_tool);
@@ -1208,7 +1206,7 @@ pub fn update(
             // If we reach here, the model switcher is not visible, so ignore
         }
         InputEvent::RecentModelsUpdated(recent_models) => {
-            state.recent_models = recent_models;
+            state.model_switcher_state.recent_models = recent_models;
             // Ensure any custom models in recent_models are added to available_models
             popup::ensure_custom_models_in_available(state);
         }
@@ -1344,7 +1342,7 @@ pub fn update(
                 // When collapsed popup is open, route directly to text selection
                 // (which handles popup geometry internally)
                 text_selection::handle_drag_start(state, col, row);
-            } else if state.show_file_changes_popup {
+            } else if state.file_changes_popup_state.show_file_changes_popup {
                 // Check if click is on file changes popup first
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
             } else {

@@ -120,8 +120,8 @@ pub async fn run_tui(
     });
 
     // Set the current profile name and rulebook config
-    state.current_profile_name = current_profile_name;
-    state.rulebook_config = rulebook_config;
+    state.profile_switcher_state.current_profile_name = current_profile_name;
+    state.rulebook_switcher_state.rulebook_config = rulebook_config;
 
     // Add welcome messages after state is created
     let welcome_msg =
@@ -263,7 +263,7 @@ pub async fn run_tui(
                            state.messages.retain(|m| m.id != tool_call_uuid);
                        }
 
-                       state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+                       state.session_tool_calls_state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
                        let tool_name = strip_tool_name(&tool_call_result.call.function.name);
 

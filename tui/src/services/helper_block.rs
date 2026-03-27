@@ -42,7 +42,7 @@ pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
 }
 
 pub fn push_status_message(state: &mut AppState) {
-    let status_text = state.account_info.clone();
+    let status_text = state.sessions_state.account_info.clone();
     let version = get_stakpak_version();
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
@@ -102,7 +102,7 @@ pub fn push_usage_message(state: &mut AppState) {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
 
-    let usage = &state.total_session_usage;
+    let usage = &state.usage_tracking_state.total_session_usage;
     let mut lines = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
@@ -510,7 +510,7 @@ pub fn welcome_messages(
     // }
 
     // // Show rulebook configuration
-    // if let Some(rb_config) = &state.rulebook_config {
+    // if let Some(rb_config) = &state.rulebook_switcher_state.rulebook_config {
     //     if let Some(include) = &rb_config.include
     //         && !include.is_empty()
     //     {

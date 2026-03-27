@@ -30,12 +30,12 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         // Block all typing when approval bar is visible
         return;
     }
-    if state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
         // Handle search input for command palette / shortcuts
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
         return;
     }
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         if c == ' ' {
             let _ = input_tx.try_send(InputEvent::RulebookSwitcherToggle);
             return;
@@ -53,11 +53,11 @@ pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<Inpu
         // Block backspace when approval bar is visible
         return;
     }
-    if state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
         return;
     }
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSearchBackspace);
         return;
     }
@@ -73,12 +73,12 @@ pub fn handle_input_submitted_event(
     shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    if state.show_profile_switcher {
+    if state.profile_switcher_state.show_profile_switcher {
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
         return;
     }
-    if state.show_shortcuts_popup {
-        match state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Execute the selected command
                 use super::tool::execute_command_palette_selection;
@@ -87,8 +87,8 @@ pub fn handle_input_submitted_event(
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Select the session and resume it
-                if !state.sessions.is_empty() && state.session_selected < state.sessions.len() {
-                    let selected = &state.sessions[state.session_selected];
+                if !state.sessions_state.sessions.is_empty() && state.sessions_state.session_selected < state.sessions_state.sessions.len() {
+                    let selected = &state.sessions_state.sessions[state.sessions_state.session_selected];
                     let selected_id = selected.id.to_string();
                     let selected_title = selected.title.clone();
                     let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
@@ -97,8 +97,8 @@ pub fn handle_input_submitted_event(
                     state.dialog_approval_state.message_tool_calls = None;
                     state.dialog_approval_state.message_approved_tools.clear();
                     state.dialog_approval_state.message_rejected_tools.clear();
-                    state.tool_call_execution_order.clear();
-                    state.session_tool_calls_queue.clear();
+                    state.session_tool_calls_state.tool_call_execution_order.clear();
+                    state.session_tool_calls_state.session_tool_calls_queue.clear();
                     state.dialog_approval_state.approval_bar.clear();
                     state.dialog_approval_state.toggle_approved_message = true;
                     state.messages.clear();
@@ -113,13 +113,13 @@ pub fn handle_input_submitted_event(
                     crate::services::message::invalidate_message_lines_cache(state);
 
                     // Reset usage
-                    state.total_session_usage = LLMTokenUsage {
+                    state.usage_tracking_state.total_session_usage = LLMTokenUsage {
                         prompt_tokens: 0,
                         completion_tokens: 0,
                         total_tokens: 0,
                         prompt_tokens_details: None,
                     };
-                    state.current_message_usage = LLMTokenUsage {
+                    state.usage_tracking_state.current_message_usage = LLMTokenUsage {
                         prompt_tokens: 0,
                         completion_tokens: 0,
                         total_tokens: 0,
@@ -130,7 +130,7 @@ pub fn handle_input_submitted_event(
                         state,
                         &format!("Switching to session . {}", selected_title),
                     );
-                    state.show_shortcuts_popup = false;
+                    state.shortcuts_panel_state.show_shortcuts_popup = false;
                 }
                 return;
             }
@@ -139,7 +139,7 @@ pub fn handle_input_submitted_event(
             }
         }
     }
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
         return;
     }
@@ -173,9 +173,8 @@ pub fn handle_input_submitted_event(
                 } else {
                     ToolCallStatus::Rejected
                 };
-                state.tool_call_execution_order.push(tool_call.id.clone());
-                state
-                    .session_tool_calls_queue
+                state.session_tool_calls_state.tool_call_execution_order.push(tool_call.id.clone());
+                state.session_tool_calls_state.session_tool_calls_queue
                     .insert(tool_call.id.clone(), status);
             }
 
@@ -184,8 +183,7 @@ pub fn handle_input_submitted_event(
             if let Some(first_tool) = tool_calls.first() {
                 // Set dialog_command to the first tool for proper processing
                 state.dialog_approval_state.dialog_command = Some(first_tool.clone());
-                state
-                    .session_tool_calls_queue
+                state.session_tool_calls_state.session_tool_calls_queue
                     .insert(first_tool.id.clone(), ToolCallStatus::Executed);
 
                 let is_approved = state.dialog_approval_state.message_approved_tools.contains(first_tool);
@@ -742,11 +740,11 @@ fn handle_input_submitted(
         let user_message_text = final_input.clone();
 
         // Use current_model if set (from streaming), otherwise use default model
-        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
         let max_tokens = active_model.limit.context as u32;
 
         // Use prompt_tokens for context window utilization (actual input context size)
-        let capped_tokens = state.current_message_usage.prompt_tokens.min(max_tokens);
+        let capped_tokens = state.usage_tracking_state.current_message_usage.prompt_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 

@@ -106,21 +106,21 @@ pub fn handle_esc_event(
         state.selection = SelectionState::default();
     }
 
-    if state.show_rulebook_switcher {
-        state.show_rulebook_switcher = false;
+    if state.rulebook_switcher_state.show_rulebook_switcher {
+        state.rulebook_switcher_state.show_rulebook_switcher = false;
         return;
     }
-    if state.show_shortcuts_popup {
-        state.show_shortcuts_popup = false;
-        state.command_palette_search.clear();
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        state.shortcuts_panel_state.show_shortcuts_popup = false;
+        state.command_palette_state.command_palette_search.clear();
         return;
     }
-    if state.show_profile_switcher {
-        state.show_profile_switcher = false;
+    if state.profile_switcher_state.show_profile_switcher {
+        state.profile_switcher_state.show_profile_switcher = false;
         return;
     }
-    if state.show_shortcuts_popup {
-        state.show_shortcuts_popup = false;
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        state.shortcuts_panel_state.show_shortcuts_popup = false;
         return;
     }
     if state.show_collapsed_messages {
@@ -131,7 +131,7 @@ pub fn handle_esc_event(
 
     // Common handling for rejection
     state.dialog_approval_state.message_tool_calls = None;
-    state.tool_call_execution_order.clear();
+    state.session_tool_calls_state.tool_call_execution_order.clear();
     // Store the latest tool call for potential retry (only for command tools)
     if let Some(tool_call) = &state.dialog_approval_state.dialog_command
         && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
@@ -328,8 +328,7 @@ pub fn handle_show_confirmation_dialog(
     if state.tool_call_state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
         return;
     }
-    if state
-        .session_tool_calls_queue
+    if state.session_tool_calls_state.session_tool_calls_queue
         .get(&tool_call.id)
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
@@ -441,7 +440,7 @@ pub fn handle_show_confirmation_dialog(
 
     // check if its skipped
     let is_skipped =
-        state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
+        state.session_tool_calls_state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
 
     // Check if this tool call is already rejected (after popup interaction) or skipped
     if state
@@ -481,8 +480,7 @@ pub fn handle_show_confirmation_dialog(
             color,
         ));
 
-        state
-            .session_tool_calls_queue
+        state.session_tool_calls_state.session_tool_calls_queue
             .insert(tool_call.id.clone(), ToolCallStatus::Executed);
         return;
     }
@@ -509,8 +507,7 @@ pub fn handle_show_confirmation_dialog(
         let output_tx_clone = output_tx.clone();
 
         let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
-        state
-            .session_tool_calls_queue
+        state.session_tool_calls_state.session_tool_calls_queue
             .insert(tool_call.id.clone(), ToolCallStatus::Executed);
         state.dialog_approval_state.is_dialog_open = false;
         state.dialog_approval_state.dialog_selected = 0;

@@ -39,7 +39,7 @@ fn update_helper_dropdown_scroll(state: &mut AppState) {
 
 /// Updates command palette scroll position to keep selected item visible
 fn update_command_palette_scroll(state: &mut AppState) {
-    let filtered_commands = filter_commands(&state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
     let total_commands = filtered_commands.len();
 
     if total_commands == 0 {
@@ -50,18 +50,18 @@ fn update_command_palette_scroll(state: &mut AppState) {
     let visible_height = 6; // Adjust this based on your actual popup height
 
     // Calculate the scroll position to keep the selected item visible
-    if state.command_palette_selected < state.command_palette_scroll {
+    if state.command_palette_state.command_palette_selected < state.command_palette_state.command_palette_scroll {
         // Selected item is above visible area, scroll up
-        state.command_palette_scroll = state.command_palette_selected;
-    } else if state.command_palette_selected >= state.command_palette_scroll + visible_height {
+        state.command_palette_state.command_palette_scroll = state.command_palette_state.command_palette_selected;
+    } else if state.command_palette_state.command_palette_selected >= state.command_palette_state.command_palette_scroll + visible_height {
         // Selected item is below visible area, scroll down
-        state.command_palette_scroll = state.command_palette_selected - visible_height + 1;
+        state.command_palette_state.command_palette_scroll = state.command_palette_state.command_palette_selected - visible_height + 1;
     }
 
     // Ensure scroll doesn't go beyond bounds
     let max_scroll = total_commands.saturating_sub(visible_height);
-    if state.command_palette_scroll > max_scroll {
-        state.command_palette_scroll = max_scroll;
+    if state.command_palette_state.command_palette_scroll > max_scroll {
+        state.command_palette_state.command_palette_scroll = max_scroll;
     }
 }
 
@@ -105,39 +105,38 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
-    if state.show_profile_switcher {
-        if state.profile_switcher_selected > 0 {
-            state.profile_switcher_selected -= 1;
+    if state.profile_switcher_state.show_profile_switcher {
+        if state.profile_switcher_state.profile_switcher_selected > 0 {
+            state.profile_switcher_state.profile_switcher_selected -= 1;
         } else {
-            state.profile_switcher_selected = state.available_profiles.len().saturating_sub(1);
+            state.profile_switcher_state.profile_switcher_selected = state.profile_switcher_state.available_profiles.len().saturating_sub(1);
         }
         return;
     }
-    if state.show_shortcuts_popup {
-        match state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands = filter_commands(&state.command_palette_search);
-                if state.command_palette_selected > 0 {
-                    state.command_palette_selected -= 1;
+                let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+                if state.command_palette_state.command_palette_selected > 0 {
+                    state.command_palette_state.command_palette_selected -= 1;
                 } else {
-                    state.command_palette_selected = filtered_commands.len().saturating_sub(1);
+                    state.command_palette_state.command_palette_selected = filtered_commands.len().saturating_sub(1);
                 }
                 update_command_palette_scroll(state);
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_scroll = state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
+                state.shortcuts_panel_state.shortcuts_scroll = state.shortcuts_panel_state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state.command_palette_search.to_lowercase();
-                let filtered_indices: Vec<usize> = state
-                    .sessions
+                let search_lower = state.command_palette_state.command_palette_search.to_lowercase();
+                let filtered_indices: Vec<usize> = state.sessions_state.sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state.command_palette_search.is_empty()
+                        state.command_palette_state.command_palette_search.is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -147,7 +146,7 @@ pub fn handle_up_navigation(state: &mut AppState) {
                     // Find current position in filtered list
                     let current_pos = filtered_indices
                         .iter()
-                        .position(|&i| i == state.session_selected)
+                        .position(|&i| i == state.sessions_state.session_selected)
                         .unwrap_or(0);
 
                     // Move up in filtered list
@@ -156,17 +155,17 @@ pub fn handle_up_navigation(state: &mut AppState) {
                     } else {
                         filtered_indices.len() - 1
                     };
-                    state.session_selected = filtered_indices[new_pos];
+                    state.sessions_state.session_selected = filtered_indices[new_pos];
                 }
             }
         }
         return;
     }
-    if state.show_rulebook_switcher {
-        if state.rulebook_switcher_selected > 0 {
-            state.rulebook_switcher_selected -= 1;
+    if state.rulebook_switcher_state.show_rulebook_switcher {
+        if state.rulebook_switcher_state.rulebook_switcher_selected > 0 {
+            state.rulebook_switcher_state.rulebook_switcher_selected -= 1;
         } else {
-            state.rulebook_switcher_selected = state.filtered_rulebooks.len().saturating_sub(1);
+            state.rulebook_switcher_state.rulebook_switcher_selected = state.rulebook_switcher_state.filtered_rulebooks.len().saturating_sub(1);
         }
         return;
     }
@@ -193,39 +192,38 @@ pub fn handle_down_navigation(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    if state.show_profile_switcher {
-        if state.profile_switcher_selected < state.available_profiles.len().saturating_sub(1) {
-            state.profile_switcher_selected += 1;
+    if state.profile_switcher_state.show_profile_switcher {
+        if state.profile_switcher_state.profile_switcher_selected < state.profile_switcher_state.available_profiles.len().saturating_sub(1) {
+            state.profile_switcher_state.profile_switcher_selected += 1;
         } else {
-            state.profile_switcher_selected = 0;
+            state.profile_switcher_state.profile_switcher_selected = 0;
         }
         return;
     }
-    if state.show_shortcuts_popup {
-        match state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands = filter_commands(&state.command_palette_search);
-                if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
-                    state.command_palette_selected += 1;
+                let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+                if state.command_palette_state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
+                    state.command_palette_state.command_palette_selected += 1;
                 } else {
-                    state.command_palette_selected = 0;
+                    state.command_palette_state.command_palette_selected = 0;
                 }
                 update_command_palette_scroll(state);
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_scroll = state.shortcuts_scroll.saturating_add(SCROLL_LINES);
+                state.shortcuts_panel_state.shortcuts_scroll = state.shortcuts_panel_state.shortcuts_scroll.saturating_add(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state.command_palette_search.to_lowercase();
-                let filtered_indices: Vec<usize> = state
-                    .sessions
+                let search_lower = state.command_palette_state.command_palette_search.to_lowercase();
+                let filtered_indices: Vec<usize> = state.sessions_state.sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state.command_palette_search.is_empty()
+                        state.command_palette_state.command_palette_search.is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -235,7 +233,7 @@ pub fn handle_down_navigation(
                     // Find current position in filtered list
                     let current_pos = filtered_indices
                         .iter()
-                        .position(|&i| i == state.session_selected)
+                        .position(|&i| i == state.sessions_state.session_selected)
                         .unwrap_or(0);
 
                     // Move down in filtered list
@@ -244,17 +242,17 @@ pub fn handle_down_navigation(
                     } else {
                         0
                     };
-                    state.session_selected = filtered_indices[new_pos];
+                    state.sessions_state.session_selected = filtered_indices[new_pos];
                 }
             }
         }
         return;
     }
-    if state.show_rulebook_switcher {
-        if state.rulebook_switcher_selected < state.filtered_rulebooks.len().saturating_sub(1) {
-            state.rulebook_switcher_selected += 1;
+    if state.rulebook_switcher_state.show_rulebook_switcher {
+        if state.rulebook_switcher_state.rulebook_switcher_selected < state.rulebook_switcher_state.filtered_rulebooks.len().saturating_sub(1) {
+            state.rulebook_switcher_state.rulebook_switcher_selected += 1;
         } else {
-            state.rulebook_switcher_selected = 0;
+            state.rulebook_switcher_state.rulebook_switcher_selected = 0;
         }
         return;
     }

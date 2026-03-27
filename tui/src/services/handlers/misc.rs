@@ -119,8 +119,8 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
-    if state.show_shortcuts_popup {
-        state.shortcuts_popup_mode = match state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.show_shortcuts_popup {
+        state.shortcuts_panel_state.shortcuts_popup_mode = match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
             crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
             crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
@@ -237,7 +237,7 @@ fn handle_collapsed_messages_tab(
 
 /// Handle Ctrl+S event
 pub fn handle_ctrl_s(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<InputEvent>) {
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherSelectAll);
         return;
     }
@@ -288,11 +288,11 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.shell_popup_state.waiting_for_shell_input = false;
     state.input_state.text_area.set_shell_mode(false);
 
-    state.sessions = sessions;
-    state.session_selected = 0; // Reset selection to first item
+    state.sessions_state.sessions = sessions;
+    state.sessions_state.session_selected = 0; // Reset selection to first item
     // Open unified popup at Sessions tab instead of separate sessions dialog
-    state.show_shortcuts_popup = true;
-    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
+    state.shortcuts_panel_state.show_shortcuts_popup = true;
+    state.shortcuts_panel_state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
 /// Handle set banner message event
@@ -351,12 +351,12 @@ pub fn handle_assistant_message(state: &mut AppState, msg: String) {
 
 /// Handle get status event
 pub fn handle_get_status(state: &mut AppState, account_info: String) {
-    state.account_info = account_info;
+    state.sessions_state.account_info = account_info;
 }
 
 /// Handle stream model event - updates current_model for side panel display
 pub fn handle_stream_model(state: &mut AppState, model: Model) {
-    state.current_model = Some(model);
+    state.model_switcher_state.current_model = Some(model);
 }
 
 /// Handle billing info loaded event

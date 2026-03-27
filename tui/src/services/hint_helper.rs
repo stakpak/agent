@@ -49,11 +49,11 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(shortcuts_widget, area);
     } else if !state.dialog_approval_state.is_dialog_open && state.input().is_empty() {
         // Use current_model if set (from streaming), otherwise use default model
-        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
         let max_tokens = active_model.limit.context as u32;
         // Use current message's prompt_tokens for context window warnings
         // (prompt_tokens represents the actual context size, not accumulated across messages)
-        let current_context = state.current_message_usage.prompt_tokens;
+        let current_context = state.usage_tracking_state.current_message_usage.prompt_tokens;
         let high_cost_warning = current_context >= (max_tokens as f64 * 0.9) as u32;
         let approaching_max = (current_context as f64 / max_tokens as f64) >= 0.8; // Default threshold
 
@@ -107,7 +107,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                     Style::default().fg(ThemeColors::dark_gray()),
                 ));
                 right_spans.push(Span::styled(
-                    state.current_profile_name.clone(),
+                    state.profile_switcher_state.current_profile_name.clone(),
                     Style::default().fg(Color::Reset),
                 ));
                 right_spans.push(Span::styled(
