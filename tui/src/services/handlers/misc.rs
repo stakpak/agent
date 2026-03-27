@@ -309,9 +309,9 @@ pub fn handle_start_loading_operation(
     state: &mut AppState,
     operation: crate::app::LoadingOperation,
 ) {
-    state.loading_manager.start_operation(operation.clone());
-    state.loading = state.loading_manager.is_loading();
-    state.loading_type = state.loading_manager.get_loading_type();
+    state.loading_state.loading_manager.start_operation(operation.clone());
+    state.loading_state.is_loading = state.loading_state.loading_manager.is_loading();
+    state.loading_state.loading_type = state.loading_state.loading_manager.get_loading_type();
 }
 
 /// Handle end loading operation event
@@ -319,9 +319,9 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
     // Check if this is a checkpoint resume before consuming operation
     let is_checkpoint_resume = matches!(operation, crate::app::LoadingOperation::CheckpointResume);
 
-    state.loading_manager.end_operation(operation);
-    state.loading = state.loading_manager.is_loading();
-    state.loading_type = state.loading_manager.get_loading_type();
+    state.loading_state.loading_manager.end_operation(operation);
+    state.loading_state.is_loading = state.loading_state.loading_manager.is_loading();
+    state.loading_state.loading_type = state.loading_state.loading_manager.get_loading_type();
 
     // After checkpoint resume completes, ensure we scroll to show the latest messages
     if is_checkpoint_resume {

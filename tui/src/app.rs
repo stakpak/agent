@@ -75,10 +75,7 @@ pub struct AppState {
     pub line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)>,
 
     // ========== Loading State ==========
-    pub loading: bool,
-    pub loading_type: LoadingType,
-    pub spinner_frame: usize,
-    pub loading_manager: LoadingStateManager,
+    pub loading_state: LoadingState,
 
     // ========== Shell Popup State ==========
     pub shell_popup_visible: bool,
@@ -486,6 +483,7 @@ impl AppState {
                     .map(|s| s.to_string())
                     .collect(),
             },
+            loading_state: LoadingState::default(),
             messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
@@ -498,9 +496,6 @@ impl AppState {
             is_dialog_open: false,
             dialog_command: None,
             dialog_selected: 0,
-            loading: false,
-            loading_type: LoadingType::Llm,
-            spinner_frame: 0,
             sessions: Vec::new(),
             session_selected: 0,
             account_info: String::new(),
@@ -561,7 +556,6 @@ impl AppState {
             last_render_width: 0,
             line_to_message_map: Vec::new(),
             mouse_capture_enabled: false,
-            loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
             approval_bar: ApprovalBar::new(),

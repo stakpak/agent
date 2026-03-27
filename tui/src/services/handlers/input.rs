@@ -792,7 +792,7 @@ fn handle_input_submitted(
             }
 
             let should_buffer_message =
-                state.loading_manager.is_loading() || !state.pending_user_messages.is_empty();
+                state.loading_state.loading_manager.is_loading() || !state.pending_user_messages.is_empty();
 
             if should_buffer_message {
                 // Buffer while operations are active (or if previous buffered messages are pending)
@@ -853,7 +853,7 @@ fn handle_input_submitted(
             state.stay_at_bottom = true;
         }
         // Loading will be managed by stream processing
-        state.spinner_frame = 0;
+        state.loading_state.spinner_frame = 0;
     }
 }
 

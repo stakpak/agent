@@ -250,6 +250,24 @@ impl Default for InputState {
     }
 }
 
+pub struct LoadingState {
+    pub is_loading: bool,
+    pub loading_type: LoadingType,
+    pub spinner_frame: usize,
+    pub loading_manager: LoadingStateManager
+}
+
+impl Default for LoadingState {
+    fn default() -> Self {
+        Self {
+            is_loading: false,
+            loading_type: LoadingType::Llm,
+            spinner_frame: 0,
+            loading_manager: LoadingStateManager::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SessionInfo {
     pub title: String,

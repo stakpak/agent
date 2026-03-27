@@ -435,7 +435,7 @@ pub fn handle_show_confirmation_dialog(
     if !state.toggle_approved_message {
         state.is_dialog_open = true;
     }
-    state.loading = false;
+    state.loading_state.is_loading = false;
     state.is_streaming = false;
     state.dialog_focused = false;
 

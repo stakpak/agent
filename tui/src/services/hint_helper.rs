@@ -70,10 +70,10 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
             // Left side: loader if loading, otherwise empty
             let mut left_spans = Vec::new();
-            if state.loading {
+            if state.loading_state.is_loading {
                 let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-                let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-                let spinner_text = if state.loading_type == crate::app::LoadingType::Sessions {
+                let spinner = spinner_chars[state.loading_state.spinner_frame % spinner_chars.len()];
+                let spinner_text = if state.loading_state.loading_type == crate::app::LoadingType::Sessions {
                     "Loading sessions..."
                 } else {
                     "Stakpaking..."
@@ -86,7 +86,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 ));
 
-                if state.loading_type == crate::app::LoadingType::Llm {
+                if state.loading_state.loading_type == crate::app::LoadingType::Llm {
                     left_spans.push(Span::styled(
                         " - esc cancel",
                         Style::default().fg(ThemeColors::dark_gray()),

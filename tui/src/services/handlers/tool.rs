@@ -89,8 +89,8 @@ pub fn handle_stream_tool_result(
 
     // Ensure loading state is true during streaming tool results
     // Only set it if it's not already true to avoid unnecessary state changes
-    if !state.loading {
-        state.loading = true;
+    if !state.loading_state.is_loading {
+        state.loading_state.is_loading = true;
     }
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
@@ -173,8 +173,8 @@ fn handle_task_wait_progress(
     let tool_call_id = progress.id;
 
     // Ensure loading state is true
-    if !state.loading {
-        state.loading = true;
+    if !state.loading_state.is_loading {
+        state.loading_state.is_loading = true;
     }
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
@@ -284,8 +284,8 @@ pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCal
         .get_or_insert_with(uuid::Uuid::new_v4);
 
     // Ensure loading state
-    if !state.loading {
-        state.loading = true;
+    if !state.loading_state.is_loading {
+        state.loading_state.is_loading = true;
     }
     state.is_streaming = true;
 

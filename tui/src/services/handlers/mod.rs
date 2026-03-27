@@ -44,7 +44,7 @@ fn flush_pending_user_messages_if_idle(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    if state.loading_manager.is_loading() {
+    if state.loading_state.loading_manager.is_loading() {
         return;
     }
 
@@ -1565,9 +1565,9 @@ mod tests {
     async fn flush_pending_messages_does_not_run_when_busy() {
         let mut state = build_state();
         state
-            .loading_manager
+            .loading_state.loading_manager
             .start_operation(LoadingOperation::StreamProcessing);
-        state.loading = true;
+        state.loading_state.is_loading = true;
 
         state
             .pending_user_messages

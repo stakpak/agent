@@ -27,8 +27,8 @@ pub fn handle_stream_message(
 
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
         state.is_streaming = true;
-        if !state.loading {
-            state.loading = true;
+        if !state.loading_state.is_loading {
+            state.loading_state.is_loading = true;
         }
         if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
