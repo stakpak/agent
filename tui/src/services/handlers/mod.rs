@@ -151,7 +151,7 @@ pub fn update(
     let skip_popup_interception = event.is_backend_event();
 
     // Intercept keys for Message Action Popup
-    if state.show_message_action_popup && !skip_popup_interception {
+    if state.message_interaction_state.show_message_action_popup && !skip_popup_interception {
         match event {
             InputEvent::HandleEsc => {
                 popup::handle_message_action_popup_close(state);
@@ -1359,7 +1359,7 @@ pub fn update(
         }
         InputEvent::MouseMove(_col, row) => {
             // Track hover row for visual debugging
-            state.hover_row = Some(row);
+            state.message_interaction_state.hover_row = Some(row);
         }
         // Board tasks events
         InputEvent::RefreshBoardTasks => {

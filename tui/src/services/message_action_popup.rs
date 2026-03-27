@@ -30,7 +30,7 @@ impl MessageAction {
 
 /// Render the message action popup - centered on screen like file_changes_popup
 pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
-    if !state.show_message_action_popup {
+    if !state.message_interaction_state.show_message_action_popup {
         return;
     }
 
@@ -85,7 +85,7 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
     let mut item_lines: Vec<Line> = Vec::new();
 
     for (idx, action) in actions.iter().enumerate() {
-        let is_selected = idx == state.message_action_popup_selected;
+        let is_selected = idx == state.message_interaction_state.message_action_popup_selected;
 
         let (highlight_word, rest_text) = match action {
             MessageAction::CopyMessage => ("Copy", " message text to clipboard"),
@@ -146,7 +146,7 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
 /// Get the currently selected action
 pub fn get_selected_action(state: &AppState) -> Option<MessageAction> {
     let actions = MessageAction::all();
-    actions.get(state.message_action_popup_selected).copied()
+    actions.get(state.message_interaction_state.message_action_popup_selected).copied()
 }
 
 /// Find the user message at a given absolute line index

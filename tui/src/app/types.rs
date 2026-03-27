@@ -376,6 +376,42 @@ impl Default for SidePanelState {
     }
 }
 
+pub struct MessageInteractionState {
+    pub show_message_action_popup: bool,
+    pub message_action_popup_selected: usize,
+    pub message_action_popup_position: Option<(u16, u16)>,
+    pub message_action_target_message_id: Option<Uuid>,
+    pub message_action_target_text: Option<String>,
+    pub message_area_y: u16,
+    pub message_area_x: u16,
+    pub message_area_height: u16,
+    pub hover_row: Option<u16>,
+    pub collapsed_popup_area_y: u16,
+    pub collapsed_popup_area_x: u16,
+    pub collapsed_popup_area_height: u16,
+    pub input_content_area: Option<ratatui::layout::Rect>,
+}
+
+impl Default for MessageInteractionState {
+    fn default() -> Self {
+        Self {
+            show_message_action_popup: false,
+            message_action_popup_selected: 0,
+            message_action_popup_position: None,
+            message_action_target_message_id: None,
+            message_action_target_text: None,
+            message_area_y: 0,
+            message_area_x: 0,
+            message_area_height: 0,
+            hover_row: None,
+            collapsed_popup_area_y: 0,
+            collapsed_popup_area_x: 0,
+            collapsed_popup_area_height: 0,
+            input_content_area: None,
+        }
+    }
+}
+
 /// Shell popup and shell-command execution UI state.
 #[derive(Default)]
 pub struct ShellPopupState {

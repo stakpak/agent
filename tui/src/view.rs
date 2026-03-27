@@ -173,9 +173,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     // Store message area geometry for click/selection coordinate mapping
     // These values are used by event handlers to convert mouse coordinates to line indices
-    state.message_area_y = message_area.y;
-    state.message_area_x = padded_message_area.x;
-    state.message_area_height = message_area.height;
+    state.message_interaction_state.message_area_y = message_area.y;
+    state.message_interaction_state.message_area_x = padded_message_area.x;
+    state.message_interaction_state.message_area_height = message_area.height;
 
     render_messages(
         f,
@@ -273,7 +273,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render message action popup
-    if state.show_message_action_popup {
+    if state.message_interaction_state.show_message_action_popup {
         crate::services::message_action_popup::render_message_action_popup(f, state);
     }
 
@@ -492,9 +492,9 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
 
     // Apply hover highlighting for user messages
     let visible_lines =
-        if let Some(hover_row) = state.hover_row {
+        if let Some(hover_row) = state.message_interaction_state.hover_row {
             let row_in_message_area =
-                (hover_row as usize).saturating_sub(state.message_area_y as usize);
+                (hover_row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
 
             // Check if hover is within message area
             if row_in_message_area < height {
@@ -610,9 +610,9 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let height = area.height as usize;
 
     // Store popup content area geometry for text selection coordinate mapping
-    state.collapsed_popup_area_y = area.y;
-    state.collapsed_popup_area_x = area.x;
-    state.collapsed_popup_area_height = area.height;
+    state.message_interaction_state.collapsed_popup_area_y = area.y;
+    state.message_interaction_state.collapsed_popup_area_x = area.x;
+    state.message_interaction_state.collapsed_popup_area_height = area.height;
 
     // Messages are already owned, no need to clone
     let all_lines: Vec<Line> = get_wrapped_collapsed_message_lines_cached(state, width);
@@ -702,7 +702,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Store the content area for mouse click handling
-    state.input_content_area = Some(content_area);
+    state.message_interaction_state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);

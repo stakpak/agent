@@ -17,7 +17,7 @@ use crate::services::toast::Toast;
 
 /// Check if coordinates are within the input area
 fn is_in_input_area(state: &AppState, col: u16, row: u16) -> bool {
-    let Some(input_area) = state.input_content_area else {
+    let Some(input_area) = state.message_interaction_state.input_content_area else {
         return false;
     };
 
@@ -31,12 +31,12 @@ fn is_in_input_area(state: &AppState, col: u16, row: u16) -> bool {
 /// The message content is rendered at `message_area_x`, so we subtract that offset
 /// to get a 0-based column within the rendered line content.
 fn content_col(state: &AppState, terminal_col: u16) -> u16 {
-    terminal_col.saturating_sub(state.message_area_x)
+    terminal_col.saturating_sub(state.message_interaction_state.message_area_x)
 }
 
 /// Convert terminal column to content-relative column within the collapsed popup area.
 fn popup_content_col(state: &AppState, terminal_col: u16) -> u16 {
-    terminal_col.saturating_sub(state.collapsed_popup_area_x)
+    terminal_col.saturating_sub(state.message_interaction_state.collapsed_popup_area_x)
 }
 
 /// Handle mouse drag start - begins text selection in message area, input area, or collapsed popup
@@ -51,12 +51,12 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Use the accurate message_area_height from the last render
-    let message_area_height = state.message_area_height as usize;
+    let message_area_height = state.message_interaction_state.message_area_height as usize;
 
     // First check if click is in input area
     if is_in_input_area(state, col, row) {
         // Click was in input area - start input selection
-        if let Some(input_area) = state.input_content_area {
+        if let Some(input_area) = state.message_interaction_state.input_content_area {
             state
                 .input_state
                 .text_area
@@ -72,8 +72,8 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
 
     // Check if click is within message area
     // Message area starts at message_area_y and extends for message_area_height rows
-    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
-    if row < state.message_area_y || row_in_message_area >= message_area_height {
+    let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
+    if row < state.message_interaction_state.message_area_y || row_in_message_area >= message_area_height {
         // Click is outside message area, don't start selection
         state.selection = SelectionState::default();
         return;
@@ -110,11 +110,11 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
 
 /// Handle drag start within the collapsed messages fullscreen popup
 fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
-    let popup_height = state.collapsed_popup_area_height as usize;
+    let popup_height = state.message_interaction_state.collapsed_popup_area_height as usize;
 
     // Check if click is within the popup content area
-    let row_in_popup = (row as usize).saturating_sub(state.collapsed_popup_area_y as usize);
-    if row < state.collapsed_popup_area_y || row_in_popup >= popup_height {
+    let row_in_popup = (row as usize).saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
+    if row < state.message_interaction_state.collapsed_popup_area_y || row_in_popup >= popup_height {
         state.selection = SelectionState::default();
         return;
     }
@@ -141,11 +141,11 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     }
 
     // Use the accurate message_area_height from the last render
-    let message_area_height = state.message_area_height as usize;
+    let message_area_height = state.message_interaction_state.message_area_height as usize;
 
     // Check if we're dragging in input area selection mode
     if state.input_state.text_area.selection.is_active() {
-        if let Some(input_area) = state.input_content_area {
+        if let Some(input_area) = state.message_interaction_state.input_content_area {
             state
                 .input_state
                 .text_area
@@ -163,7 +163,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     // We check for "at the edge" (<=, >=) rather than strictly beyond, because
     // the message area may start at y=0 where the mouse can never go above it,
     // and similarly the bottom edge may be at the last terminal row.
-    let msg_top = state.message_area_y as usize;
+    let msg_top = state.message_interaction_state.message_area_y as usize;
     let msg_bottom = msg_top + message_area_height;
 
     if (row as usize) <= msg_top && state.messages_scrolling_state.scroll > 0 {
@@ -201,7 +201,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
 
     // Clamp row to message area
     // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+    let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
     let clamped_row = row_in_message_area.min(message_area_height.saturating_sub(1));
 
     // Convert screen row to absolute line index
@@ -230,10 +230,10 @@ fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
         return;
     }
 
-    let popup_height = state.collapsed_popup_area_height as usize;
+    let popup_height = state.message_interaction_state.collapsed_popup_area_height as usize;
 
     // Clamp row to popup content area
-    let row_in_popup = (row as usize).saturating_sub(state.collapsed_popup_area_y as usize);
+    let row_in_popup = (row as usize).saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
     let clamped_row = row_in_popup.min(popup_height.saturating_sub(1));
 
     // Convert screen row to absolute line index using popup's own scroll
@@ -299,7 +299,7 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     if is_just_click {
         // Just a click, not a selection - check if it's on a user message
         // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-        let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+        let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
         let absolute_line = state.messages_scrolling_state.scroll + row_in_message_area;
 
         // Clear selection first
@@ -308,11 +308,11 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
         // Check if clicking on a user message
         if let Some((msg_id, msg_text)) = find_user_message_at_line(state, absolute_line) {
             // Show message action popup
-            state.show_message_action_popup = true;
-            state.message_action_popup_selected = 0;
-            state.message_action_popup_position = Some((col, row));
-            state.message_action_target_message_id = Some(msg_id);
-            state.message_action_target_text = Some(msg_text);
+            state.message_interaction_state.show_message_action_popup = true;
+            state.message_interaction_state.message_action_popup_selected = 0;
+            state.message_interaction_state.message_action_popup_position = Some((col, row));
+            state.message_interaction_state.message_action_target_message_id = Some(msg_id);
+            state.message_interaction_state.message_action_target_text = Some(msg_text);
         }
 
         return;
@@ -483,7 +483,7 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
         return;
     }
 
-    let message_area_height = state.message_area_height as usize;
+    let message_area_height = state.message_interaction_state.message_area_height as usize;
     let max_scroll = total_lines.saturating_sub(message_area_height);
 
     // Perform the scroll

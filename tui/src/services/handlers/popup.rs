@@ -1061,11 +1061,11 @@ pub fn handle_model_switcher_cancel(state: &mut AppState) {
 
 /// Close the message action popup
 pub fn handle_message_action_popup_close(state: &mut AppState) {
-    state.show_message_action_popup = false;
-    state.message_action_popup_selected = 0;
-    state.message_action_popup_position = None;
-    state.message_action_target_message_id = None;
-    state.message_action_target_text = None;
+    state.message_interaction_state.show_message_action_popup = false;
+    state.message_interaction_state.message_action_popup_selected = 0;
+    state.message_interaction_state.message_action_popup_position = None;
+    state.message_interaction_state.message_action_target_message_id = None;
+    state.message_interaction_state.message_action_target_text = None;
     // Clear any stuck text selection (popup may have intercepted drag end)
     state.selection = SelectionState::default();
     state.input_state.text_area.clear_selection();
@@ -1079,14 +1079,14 @@ pub fn handle_message_action_popup_navigate(state: &mut AppState, direction: i32
     }
 
     if direction < 0 {
-        if state.message_action_popup_selected > 0 {
-            state.message_action_popup_selected -= 1;
+        if state.message_interaction_state.message_action_popup_selected > 0 {
+            state.message_interaction_state.message_action_popup_selected -= 1;
         } else {
-            state.message_action_popup_selected = num_actions - 1;
+            state.message_interaction_state.message_action_popup_selected = num_actions - 1;
         }
     } else {
-        state.message_action_popup_selected =
-            (state.message_action_popup_selected + 1) % num_actions;
+        state.message_interaction_state.message_action_popup_selected =
+            (state.message_interaction_state.message_action_popup_selected + 1) % num_actions;
     }
 }
 
@@ -1104,7 +1104,7 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
     match action {
         MessageAction::CopyMessage => {
             // Copy the message text to clipboard
-            if let Some(text) = &state.message_action_target_text {
+            if let Some(text) = &state.message_interaction_state.message_action_target_text {
                 match copy_to_clipboard(text) {
                     Ok(()) => {
                         state.toast = Some(Toast::success("Copied!"));
@@ -1117,7 +1117,7 @@ pub fn handle_message_action_popup_execute(state: &mut AppState) {
             }
         }
         MessageAction::RevertToMessage => {
-            if let Some(target_id) = state.message_action_target_message_id {
+            if let Some(target_id) = state.message_interaction_state.message_action_target_message_id {
                 // Find the user message index from the line_to_message_map
                 let target_user_idx = state.messages_scrolling_state.line_to_message_map
                     .iter()

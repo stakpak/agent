@@ -107,25 +107,8 @@ pub struct AppState {
     /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
     pub selection_auto_scroll: i32,
 
-    // ========== Message Action Popup State ==========
-    pub show_message_action_popup: bool,
-    pub message_action_popup_selected: usize,
-    pub message_action_popup_position: Option<(u16, u16)>, // (x, y) position for popup
-    pub message_action_target_message_id: Option<Uuid>,    // The user message being acted on
-    pub message_action_target_text: Option<String>,        // The text of the target message
-    pub message_area_y: u16, // Y offset of message area for click detection
-    pub message_area_x: u16, // X offset of padded message area for column mapping
-    pub message_area_height: u16, // Height of message area (set during render for accurate event handling)
-    pub hover_row: Option<u16>,   // Current mouse hover row for debugging
-
-    // ========== Collapsed Popup Geometry (for text selection in fullscreen popup) ==========
-    pub collapsed_popup_area_y: u16, // Y offset of popup content area
-    pub collapsed_popup_area_x: u16, // X offset of popup content area
-    pub collapsed_popup_area_height: u16, // Height of popup content area
-
-    // ========== Input Area State ==========
-    /// Stores the input area content rect for mouse click positioning
-    pub input_content_area: Option<ratatui::layout::Rect>,
+    // ========== Message Interaction State ==========
+    pub message_interaction_state: MessageInteractionState,
 
     // ========== Side Panel State ==========
     pub side_panel_state: SidePanelState,
@@ -318,22 +301,9 @@ impl AppState {
             banner_area: None,
             banner_click_regions: Vec::new(),
             selection_auto_scroll: 0,
-            input_content_area: None,
 
-            // Message action popup initialization
-            show_message_action_popup: false,
-            message_action_popup_selected: 0,
-            message_action_popup_position: None,
-            message_action_target_message_id: None,
-            message_action_target_text: None,
-            message_area_y: 0,
-            message_area_x: 0,
-            message_area_height: 0,
-            hover_row: None,
-
-            collapsed_popup_area_y: 0,
-            collapsed_popup_area_x: 0,
-            collapsed_popup_area_height: 0,
+            // Message interaction initialization
+            message_interaction_state: MessageInteractionState::default(),
 
             // Profile switcher initialization
             profile_switcher_state: ProfileSwitcherState {
