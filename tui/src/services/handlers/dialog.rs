@@ -370,7 +370,7 @@ pub fn handle_show_confirmation_dialog(
     if is_foreground_command_tool(tool_name) {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
-    let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
+    let is_auto_approved = state.configuration_state.auto_approve_manager.should_auto_approve(&tool_call);
 
     // Tool call is pending - create pending border block and check if we should show popup
     // For command tools, try to use tool_call.id as UUID so removal logic in event_loop works

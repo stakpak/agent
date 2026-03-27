@@ -125,7 +125,7 @@ pub async fn run_tui(
 
     // Add welcome messages after state is created
     let welcome_msg =
-        crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
+        crate::services::helper_block::welcome_messages(state.configuration_state.latest_version.clone(), &state);
     state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Trigger initial board tasks refresh if agent ID is configured
@@ -135,7 +135,7 @@ pub async fn run_tui(
 
     // When started via `stakpak init`, add init prompt as user message and send to backend
     if send_init_prompt_on_start
-        && let Some(prompt) = state.init_prompt_content.clone()
+        && let Some(prompt) = state.configuration_state.init_prompt_content.clone()
         && !prompt.trim().is_empty()
     {
         state.messages_scrolling_state.messages.push(Message::user(prompt.clone(), None));

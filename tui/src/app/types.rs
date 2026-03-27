@@ -6,11 +6,13 @@
 use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
 use crate::services::approval_bar::ApprovalBar;
+use crate::services::auto_approve::AutoApproveManager;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
 use stakai::Model;
 use stakpak_api::models::ListRuleBook;
+use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::models::integrations::openai::{ContentPart, ToolCall, ToolCallResult};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::{HashMap, HashSet};
@@ -374,6 +376,17 @@ impl Default for SidePanelState {
             billing_info: None,
         }
     }
+}
+
+pub struct ConfigurationState {
+    pub secret_manager: SecretManager,
+    pub latest_version: Option<String>,
+    pub is_git_repo: bool,
+    pub auto_approve_manager: AutoApproveManager,
+    pub allowed_tools: Option<Vec<String>>,
+    pub model: Model,
+    pub auth_display_info: (Option<String>, Option<String>, Option<String>),
+    pub init_prompt_content: Option<String>,
 }
 
 pub struct MessageInteractionState {

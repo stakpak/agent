@@ -268,7 +268,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
         .collect::<Vec<ToolCall>>();
 
     let prompt_tool_calls = state
-        .auto_approve_manager
+        .configuration_state.auto_approve_manager
         .get_prompt_tool_calls(&rest_tool_calls);
 
     state.dialog_approval_state.message_tool_calls = Some(prompt_tool_calls.clone());

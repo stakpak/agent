@@ -404,7 +404,7 @@ fn handle_input_submitted(
 
             // Get current policy for the tool
             let current_policy = state
-                .auto_approve_manager
+                .configuration_state.auto_approve_manager
                 .get_policy_for_tool_name(tool_name);
             let new_policy = if current_policy == AutoApprovePolicy::Auto {
                 AutoApprovePolicy::Prompt
@@ -413,7 +413,7 @@ fn handle_input_submitted(
             };
 
             if let Err(e) = state
-                .auto_approve_manager
+                .configuration_state.auto_approve_manager
                 .update_tool_policy(tool_name, new_policy.clone())
             {
                 push_error_message(
@@ -733,14 +733,14 @@ fn handle_input_submitted(
 
         // Scan for secrets typed character-by-character
         let final_input = state
-            .secret_manager
+            .configuration_state.secret_manager
             .redact_and_store_secrets(&final_input, None);
 
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
         // Use current_model if set (from streaming), otherwise use default model
-        let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
+        let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.configuration_state.model);
         let max_tokens = active_model.limit.context as u32;
 
         // Use prompt_tokens for context window utilization (actual input context size)
@@ -920,7 +920,7 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // This allows users to paste API keys, passwords, etc. and have them automatically
     // redacted with placeholders that the agent can use
     let redacted_pasted = state
-        .secret_manager
+        .configuration_state.secret_manager
         .redact_and_store_secrets(&normalized_pasted, None);
 
     // Also check if the pasted text itself contains file paths

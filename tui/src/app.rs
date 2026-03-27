@@ -74,16 +74,7 @@ pub struct AppState {
     pub usage_tracking_state: UsageTrackingState,
 
     // ========== Configuration State ==========
-    pub secret_manager: SecretManager,
-    pub latest_version: Option<String>,
-    pub is_git_repo: bool,
-    pub auto_approve_manager: AutoApproveManager,
-    pub allowed_tools: Option<Vec<String>>,
-    pub model: Model,
-    /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
-    pub auth_display_info: (Option<String>, Option<String>, Option<String>),
-    /// Content of init prompt for /init
-    pub init_prompt_content: Option<String>,
+    pub configuration_state: ConfigurationState,
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
@@ -275,14 +266,8 @@ impl AppState {
                 shell_mode_input: String::new(),
                 ..Default::default()
             },
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
-            latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
-            auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
-            allowed_tools: allowed_tools.cloned(),
-            // Default to messages view focused
-            is_git_repo,
             mouse_capture_enabled: false,
             terminal_size: Size {
                 width: 0,
@@ -329,7 +314,18 @@ impl AppState {
 
             // Usage tracking
             usage_tracking_state: UsageTrackingState::default(),
-            model,
+
+            // Configuration state
+            configuration_state: ConfigurationState {
+                secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+                latest_version: latest_version.clone(),
+                is_git_repo,
+                auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
+                allowed_tools: allowed_tools.cloned(),
+                model,
+                auth_display_info,
+                init_prompt_content,
+            },
 
             // Side panel initialization
             side_panel_state: SidePanelState {
@@ -339,13 +335,11 @@ impl AppState {
                 ..Default::default()
             },
             pending_user_messages: VecDeque::new(),
-            auth_display_info,
 
             // Plan mode/review initialization
             plan_mode_state: PlanModeState::default(),
             plan_review_state: PlanReviewState::default(),
             subagent_pause_info: HashMap::new(),
-            init_prompt_content,
 
             // Message revert state initialization
             user_message_count: 0,

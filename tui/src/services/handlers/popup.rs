@@ -196,7 +196,7 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
         Some(Style::default().fg(ThemeColors::success())),
     ));
 
-    let welcome_msg = welcome_messages(state.latest_version.clone(), state);
+    let welcome_msg = welcome_messages(state.configuration_state.latest_version.clone(), state);
     state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Invalidate all caches
@@ -897,7 +897,7 @@ pub fn handle_show_model_switcher(state: &mut AppState, output_tx: &Sender<Outpu
 /// `id: "fireworks-ai/accounts/fireworks/models/glm-5", provider: "stakpak"`.
 pub fn ensure_custom_models_in_available(state: &mut AppState) {
     // Get the default provider from the configured model
-    let default_provider = state.model.provider.clone();
+    let default_provider = state.configuration_state.model.provider.clone();
 
     // Collect models to add first, then extend (avoids cloning recent_models)
     let to_add: Vec<Model> = state.model_switcher_state.recent_models
@@ -950,9 +950,9 @@ pub fn handle_available_models_loaded(
     let recent_id_to_add = if let Some(current) = &state.model_switcher_state.current_model {
         Some(format_recent_model_id(&current.provider, &current.id))
     } else {
-        // Use the configured default model (state.model)
+        // Use the configured default model (state.configuration_state.model)
         // Try to find matching model in available_models first (for correct provider)
-        let default_model_id = &state.model.id;
+        let default_model_id = &state.configuration_state.model.id;
         if let Some(matched) = state.model_switcher_state.available_models.iter().find(|m| {
             m.id == *default_model_id
                 || m.id
@@ -963,7 +963,7 @@ pub fn handle_available_models_loaded(
             Some(format_recent_model_id(&matched.provider, &matched.id))
         } else if !default_model_id.is_empty() {
             Some(format_recent_model_id(
-                &state.model.provider,
+                &state.configuration_state.model.provider,
                 default_model_id,
             ))
         } else {

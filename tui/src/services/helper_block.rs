@@ -490,7 +490,7 @@ pub fn welcome_messages(
     ];
 
     // Show allowed tools for debugging
-    // if let Some(tools) = &state.allowed_tools {
+    // if let Some(tools) = &state.configuration_state.allowed_tools {
     //     if tools.is_empty() {
     //         messages.push(Message::info(
     //             "allowed_tools: [] (empty - all tools allowed)",
@@ -558,7 +558,7 @@ pub fn push_clear_message(state: &mut AppState) {
     state.messages_scrolling_state.messages.clear();
     state.input_state.text_area.set_text("");
     state.input_state.show_helper_dropdown = false;
-    let welcome_msg = welcome_messages(state.latest_version.clone(), state);
+    let welcome_msg = welcome_messages(state.configuration_state.latest_version.clone(), state);
     state.messages_scrolling_state.messages.extend(welcome_msg);
     invalidate_message_lines_cache(state);
 }

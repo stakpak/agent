@@ -551,7 +551,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
 
         "/init" => {
             //  init prompt is always available (embedded at compile time)
-            let prompt = match ctx.state.init_prompt_content.as_deref() {
+            let prompt = match ctx.state.configuration_state.init_prompt_content.as_deref() {
                 Some(p) if !p.trim().is_empty() => p.to_string(),
                 _ => {
                     push_error_message(
@@ -705,7 +705,7 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     state.messages_scrolling_state.messages.clear();
     state.messages_scrolling_state.messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
+        .extend(welcome_messages(state.configuration_state.latest_version.clone(), state));
     render_system_message(state, "Resuming last session.");
 
     // Reset scroll state to show bottom when messages are loaded
@@ -764,7 +764,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.input_state.text_area.set_text("");
     state.messages_scrolling_state.messages.clear();
     state.messages_scrolling_state.messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
+        .extend(welcome_messages(state.configuration_state.latest_version.clone(), state));
     render_system_message(state, "New session started.");
 
     // Reset scroll state
@@ -803,7 +803,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let completion_tokens = usage.completion_tokens;
 
     // Use current_model if set (from streaming), otherwise use default model
-    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.model);
+    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.configuration_state.model);
     let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
@@ -873,7 +873,7 @@ fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
 }
 
 pub fn list_auto_approved_tools(state: &mut AppState) {
-    let config = state.auto_approve_manager.get_config();
+    let config = state.configuration_state.auto_approve_manager.get_config();
     let mut auto_approved_tools: Vec<_> = config
         .tools
         .iter()
@@ -881,7 +881,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         .collect();
 
     // Filter by allowed_tools if configured
-    if let Some(allowed_tools) = &state.allowed_tools
+    if let Some(allowed_tools) = &state.configuration_state.allowed_tools
         && !allowed_tools.is_empty()
     {
         auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
@@ -889,7 +889,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
 
     if auto_approved_tools.is_empty() {
         let message = if state
-            .allowed_tools
+            .configuration_state.allowed_tools
             .as_ref()
             .is_some_and(|tools| !tools.is_empty())
         {

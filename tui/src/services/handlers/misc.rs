@@ -82,20 +82,20 @@ pub fn handle_toggle_cursor_visible(state: &mut AppState) {
 
 /// Handle toggle auto approve event
 pub fn handle_toggle_auto_approve(state: &mut AppState) {
-    if let Err(e) = state.auto_approve_manager.toggle_enabled() {
+    if let Err(e) = state.configuration_state.auto_approve_manager.toggle_enabled() {
         push_error_message(
             state,
             &format!("Failed to toggle auto-approve: {}", e),
             None,
         );
     } else {
-        let status = if state.auto_approve_manager.is_enabled() {
+        let status = if state.configuration_state.auto_approve_manager.is_enabled() {
             "enabled"
         } else {
             "disabled"
         };
 
-        let status_color = if state.auto_approve_manager.is_enabled() {
+        let status_color = if state.configuration_state.auto_approve_manager.is_enabled() {
             ThemeColors::green()
         } else {
             ThemeColors::red()
