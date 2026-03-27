@@ -296,7 +296,7 @@ pub async fn run_interactive(
             .unwrap_or(true)
         {
             Some(stakpak_tui::BannerMessage::new(
-                "❕ System not scanned - context limited. Run /init to unlock full capabilities ",
+                "❕ System not scanned - /init to generate an APPS.md file with your context",
                 stakpak_tui::BannerStyle::Info,
             ))
         } else {
