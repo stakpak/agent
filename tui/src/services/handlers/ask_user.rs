@@ -55,7 +55,10 @@ pub fn handle_show_ask_user_popup(
     // showing the interactive ask_user UI. Without this, both blocks coexist and
     // the user sees a confusing duplicate "Ask User" placeholder.
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id.take() {
-        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != pending_id);
     }
 
     state.ask_user_state.show_ask_user_popup = true;
@@ -78,7 +81,9 @@ pub fn handle_show_ask_user_popup(
                 .map(|o| o.value.clone())
                 .collect();
             if !defaults.is_empty() {
-                state.ask_user_state.ask_user_multi_selections
+                state
+                    .ask_user_state
+                    .ask_user_multi_selections
                     .insert(q.label.clone(), defaults.clone());
 
                 // Also pre-populate the answer so the tab shows as answered
@@ -196,7 +201,10 @@ fn restore_selection_for_current_tab(state: &mut AppState) {
         if answer.is_custom {
             // Custom answer — point to the custom input slot
             state.ask_user_state.ask_user_selected_option = q.options.len();
-            state.ask_user_state.ask_user_custom_input.clone_from(&answer.answer);
+            state
+                .ask_user_state
+                .ask_user_custom_input
+                .clone_from(&answer.answer);
         } else if let Some(idx) = q.options.iter().position(|o| o.value == answer.answer) {
             state.ask_user_state.ask_user_selected_option = idx;
         } else {
@@ -219,7 +227,8 @@ pub fn handle_ask_user_next_option(state: &mut AppState) -> bool {
         return false;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
     let total_options = get_total_options(current_q);
 
     if state.ask_user_state.ask_user_selected_option < total_options.saturating_sub(1) {
@@ -265,7 +274,8 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
     let question_label = current_q.label.clone();
 
     // --- Multi-select mode: toggle the option ---
@@ -275,7 +285,9 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
             let opt_value = current_q.options[state.ask_user_state.ask_user_selected_option]
                 .value
                 .clone();
-            let selections = state.ask_user_state.ask_user_multi_selections
+            let selections = state
+                .ask_user_state
+                .ask_user_multi_selections
                 .entry(question_label.clone())
                 .or_default();
 
@@ -287,7 +299,9 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
             }
 
             // Build the answer from current selections
-            let selected = state.ask_user_state.ask_user_multi_selections
+            let selected = state
+                .ask_user_state
+                .ask_user_multi_selections
                 .get(&question_label)
                 .cloned()
                 .unwrap_or_default();
@@ -303,9 +317,15 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
 
             if answer.selected_values.is_empty() {
                 // No selections — remove the answer so "required" validation works
-                state.ask_user_state.ask_user_answers.remove(&question_label);
+                state
+                    .ask_user_state
+                    .ask_user_answers
+                    .remove(&question_label);
             } else {
-                state.ask_user_state.ask_user_answers.insert(question_label, answer);
+                state
+                    .ask_user_state
+                    .ask_user_answers
+                    .insert(question_label, answer);
             }
         }
         refresh_ask_user_block(state);
@@ -315,7 +335,9 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     // --- Single-select mode: select without advancing ---
 
     // Check if custom input is selected
-    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+    if current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    {
         // Custom input selected - save the custom answer if not empty (no advance)
         if !state.ask_user_state.ask_user_custom_input.is_empty() {
             let answer = AskUserAnswer {
@@ -324,7 +346,9 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
                 is_custom: true,
                 selected_values: vec![],
             };
-            state.ask_user_state.ask_user_answers
+            state
+                .ask_user_state
+                .ask_user_answers
                 .insert(current_q.label.clone(), answer);
         }
         refresh_ask_user_block(state);
@@ -332,14 +356,19 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     }
 
     // Regular option selected (no advance)
-    if let Some(opt) = current_q.options.get(state.ask_user_state.ask_user_selected_option) {
+    if let Some(opt) = current_q
+        .options
+        .get(state.ask_user_state.ask_user_selected_option)
+    {
         let answer = AskUserAnswer {
             question_label,
             answer: opt.value.clone(),
             is_custom: false,
             selected_values: vec![],
         };
-        state.ask_user_state.ask_user_answers
+        state
+            .ask_user_state
+            .ask_user_answers
             .insert(current_q.label.clone(), answer);
     }
     refresh_ask_user_block(state);
@@ -359,7 +388,8 @@ pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
 
     // If custom input is selected and has text, save it before advancing
     if !current_q.multi_select
@@ -373,7 +403,9 @@ pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender
             is_custom: true,
             selected_values: vec![],
         };
-        state.ask_user_state.ask_user_answers
+        state
+            .ask_user_state
+            .ask_user_answers
             .insert(current_q.label.clone(), answer);
     }
 
@@ -391,10 +423,19 @@ pub fn handle_ask_user_custom_input_paste(state: &mut AppState, text: &str) {
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
-        let redacted = state.configuration_state.secret_manager.redact_and_store_secrets(text, None);
-        state.ask_user_state.ask_user_custom_input.push_str(&redacted);
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    {
+        let redacted = state
+            .configuration_state
+            .secret_manager
+            .redact_and_store_secrets(text, None);
+        state
+            .ask_user_state
+            .ask_user_custom_input
+            .push_str(&redacted);
         refresh_ask_user_block(state);
     }
 }
@@ -410,8 +451,11 @@ pub fn handle_ask_user_custom_input_changed(state: &mut AppState, c: char) {
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    {
         state.ask_user_state.ask_user_custom_input.push(c);
         refresh_ask_user_block(state);
     }
@@ -428,8 +472,11 @@ pub fn handle_ask_user_custom_input_backspace(state: &mut AppState) {
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    {
         state.ask_user_state.ask_user_custom_input.pop();
         refresh_ask_user_block(state);
     }
@@ -446,8 +493,11 @@ pub fn handle_ask_user_custom_input_delete(state: &mut AppState) {
         return;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
-    if current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len() {
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    if current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    {
         state.ask_user_state.ask_user_custom_input.clear();
         refresh_ask_user_block(state);
     }
@@ -460,12 +510,15 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
     }
 
     // Build the structured result as documented in the tool description
-    let answers: Vec<AskUserAnswer> = state.ask_user_state.ask_user_questions
+    let answers: Vec<AskUserAnswer> = state
+        .ask_user_state
+        .ask_user_questions
         .iter()
         .filter_map(|q| state.ask_user_state.ask_user_answers.get(&q.label).cloned())
         .map(|mut answer| {
             answer.answer = state
-                .configuration_state.secret_manager
+                .configuration_state
+                .secret_manager
                 .redact_and_store_secrets(&answer.answer, None);
             answer
         })
@@ -530,7 +583,10 @@ pub fn handle_ask_user_cancel(state: &mut AppState, output_tx: &Sender<OutputEve
 fn close_ask_user_popup(state: &mut AppState) {
     // Remove the inline message block
     if let Some(msg_id) = state.ask_user_state.ask_user_message_id.take() {
-        state.messages_scrolling_state.messages.retain(|m| m.id != msg_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != msg_id);
     }
 
     state.ask_user_state.show_ask_user_popup = false;
@@ -557,8 +613,10 @@ pub fn is_custom_input_selected(state: &AppState) -> bool {
         return false;
     }
 
-    let current_q = &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
-    current_q.allow_custom && state.ask_user_state.ask_user_selected_option == current_q.options.len()
+    let current_q =
+        &state.ask_user_state.ask_user_questions[state.ask_user_state.ask_user_current_tab];
+    current_q.allow_custom
+        && state.ask_user_state.ask_user_selected_option == current_q.options.len()
 }
 
 #[cfg(test)]
@@ -779,7 +837,12 @@ mod tests {
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Should have recorded the answer
-        assert!(state.ask_user_state.ask_user_answers.contains_key("Environment"));
+        assert!(
+            state
+                .ask_user_state
+                .ask_user_answers
+                .contains_key("Environment")
+        );
         let answer = &state.ask_user_state.ask_user_answers["Environment"];
         assert_eq!(answer.answer, "dev");
         assert!(!answer.is_custom);
@@ -821,7 +884,12 @@ mod tests {
         handle_ask_user_select_option(&mut state, &output_tx);
 
         // Should have recorded custom answer
-        assert!(state.ask_user_state.ask_user_answers.contains_key("Environment"));
+        assert!(
+            state
+                .ask_user_state
+                .ask_user_answers
+                .contains_key("Environment")
+        );
         let answer = &state.ask_user_state.ask_user_answers["Environment"];
         assert_eq!(answer.answer, "staging");
         assert!(answer.is_custom);
@@ -1114,7 +1182,11 @@ mod tests {
         handle_show_ask_user_popup(&mut state, tool_call, questions);
 
         // Should have pre-populated multi-select state from option.selected
-        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state
+            .ask_user_state
+            .ask_user_multi_selections
+            .get("Scope")
+            .unwrap();
         assert_eq!(selections.len(), 2);
         assert!(selections.contains(&"repo:api".to_string()));
         assert!(selections.contains(&"repo:web".to_string()));
@@ -1141,7 +1213,11 @@ mod tests {
         // Toggle it on
         handle_ask_user_select_option(&mut state, &output_tx);
 
-        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state
+            .ask_user_state
+            .ask_user_multi_selections
+            .get("Scope")
+            .unwrap();
         assert_eq!(selections.len(), 3);
         assert!(selections.contains(&"repo:dotfiles".to_string()));
 
@@ -1164,7 +1240,11 @@ mod tests {
         // Toggle it off
         handle_ask_user_select_option(&mut state, &output_tx);
 
-        let selections = state.ask_user_state.ask_user_multi_selections.get("Scope").unwrap();
+        let selections = state
+            .ask_user_state
+            .ask_user_multi_selections
+            .get("Scope")
+            .unwrap();
         assert_eq!(selections.len(), 1);
         assert!(!selections.contains(&"repo:api".to_string()));
         assert!(selections.contains(&"repo:web".to_string()));

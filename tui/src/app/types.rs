@@ -3,20 +3,22 @@
 //! This module contains all type definitions used throughout the TUI application.
 //! Types are organized here for better maintainability and code organization.
 
-use crate::services::file_search::FileSearch;
-use crate::services::message::Message;
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::banner::BannerMessage;
+use crate::services::file_search::FileSearch;
+use crate::services::message::Message;
 use crate::services::shell_mode::ShellCommand;
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
 use stakai::Model;
 use stakpak_api::models::ListRuleBook;
-use stakpak_shared::secret_manager::SecretManager;
-use stakpak_shared::models::integrations::openai::{ContentPart, TaskPauseInfo, ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{
+    ContentPart, TaskPauseInfo, ToolCall, ToolCallResult,
+};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -263,7 +265,7 @@ pub struct LoadingState {
     pub is_loading: bool,
     pub loading_type: LoadingType,
     pub spinner_frame: usize,
-    pub loading_manager: LoadingStateManager
+    pub loading_manager: LoadingStateManager,
 }
 
 pub struct MessagesScrollingState {
@@ -335,8 +337,7 @@ impl Default for MessagesScrollingState {
 pub struct SidePanelState {
     pub show_side_panel: bool,
     pub side_panel_focus: crate::services::changeset::SidePanelSection,
-    pub side_panel_section_collapsed:
-        HashMap<crate::services::changeset::SidePanelSection, bool>,
+    pub side_panel_section_collapsed: HashMap<crate::services::changeset::SidePanelSection, bool>,
     pub side_panel_areas:
         HashMap<crate::services::changeset::SidePanelSection, ratatui::layout::Rect>,
     pub session_id: String,
@@ -358,7 +359,10 @@ impl Default for SidePanelState {
         collapsed.insert(crate::services::changeset::SidePanelSection::Context, false);
         collapsed.insert(crate::services::changeset::SidePanelSection::Billing, false);
         collapsed.insert(crate::services::changeset::SidePanelSection::Tasks, false);
-        collapsed.insert(crate::services::changeset::SidePanelSection::Changeset, false);
+        collapsed.insert(
+            crate::services::changeset::SidePanelSection::Changeset,
+            false,
+        );
 
         Self {
             show_side_panel: false,
@@ -391,18 +395,10 @@ pub struct ConfigurationState {
     pub init_prompt_content: Option<String>,
 }
 
+#[derive(Default)]
 pub struct QuitIntentState {
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
-}
-
-impl Default for QuitIntentState {
-    fn default() -> Self {
-        Self {
-            ctrl_c_pressed_once: false,
-            ctrl_c_timer: None,
-        }
-    }
 }
 
 pub struct TerminalUiState {
@@ -444,32 +440,16 @@ pub struct ShellSessionState {
     pub shell_interaction_occurred: bool,
 }
 
+#[derive(Default)]
 pub struct BannerState {
     pub banner_message: Option<BannerMessage>,
     pub banner_area: Option<ratatui::layout::Rect>,
     pub banner_click_regions: Vec<(String, ratatui::layout::Rect)>,
 }
 
-impl Default for BannerState {
-    fn default() -> Self {
-        Self {
-            banner_message: None,
-            banner_area: None,
-            banner_click_regions: Vec::new(),
-        }
-    }
-}
-
+#[derive(Default)]
 pub struct UserMessageQueueState {
     pub pending_user_messages: VecDeque<PendingUserMessage>,
-}
-
-impl Default for UserMessageQueueState {
-    fn default() -> Self {
-        Self {
-            pending_user_messages: VecDeque::new(),
-        }
-    }
 }
 
 #[derive(Default)]
@@ -478,6 +458,7 @@ pub struct MessageRevertState {
     pub pending_revert_index: Option<usize>,
 }
 
+#[derive(Default)]
 pub struct MessageInteractionState {
     pub show_message_action_popup: bool,
     pub message_action_popup_selected: usize,
@@ -494,28 +475,6 @@ pub struct MessageInteractionState {
     pub selection: SelectionState,
     pub selection_auto_scroll: i32,
     pub input_content_area: Option<ratatui::layout::Rect>,
-}
-
-impl Default for MessageInteractionState {
-    fn default() -> Self {
-        Self {
-            show_message_action_popup: false,
-            message_action_popup_selected: 0,
-            message_action_popup_position: None,
-            message_action_target_message_id: None,
-            message_action_target_text: None,
-            message_area_y: 0,
-            message_area_x: 0,
-            message_area_height: 0,
-            hover_row: None,
-            collapsed_popup_area_y: 0,
-            collapsed_popup_area_x: 0,
-            collapsed_popup_area_height: 0,
-            selection: SelectionState::default(),
-            selection_auto_scroll: 0,
-            input_content_area: None,
-        }
-    }
 }
 
 /// Shell popup and shell-command execution UI state.
@@ -710,8 +669,7 @@ pub struct PlanReviewState {
     /// Cached plan comments (loaded when review opens)
     pub plan_review_comments: Option<crate::services::plan_comments::PlanComments>,
     /// Resolved anchors mapping comment IDs to line numbers
-    pub plan_review_resolved_anchors:
-        Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
+    pub plan_review_resolved_anchors: Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
     /// Whether the comment input modal is open
     pub plan_review_show_comment_modal: bool,
     /// Text buffer for composing a new comment

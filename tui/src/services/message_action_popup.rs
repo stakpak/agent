@@ -85,7 +85,10 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
     let mut item_lines: Vec<Line> = Vec::new();
 
     for (idx, action) in actions.iter().enumerate() {
-        let is_selected = idx == state.message_interaction_state.message_action_popup_selected;
+        let is_selected = idx
+            == state
+                .message_interaction_state
+                .message_action_popup_selected;
 
         let (highlight_word, rest_text) = match action {
             MessageAction::CopyMessage => ("Copy", " message text to clipboard"),
@@ -146,7 +149,13 @@ pub fn render_message_action_popup(f: &mut Frame, state: &AppState) {
 /// Get the currently selected action
 pub fn get_selected_action(state: &AppState) -> Option<MessageAction> {
     let actions = MessageAction::all();
-    actions.get(state.message_interaction_state.message_action_popup_selected).copied()
+    actions
+        .get(
+            state
+                .message_interaction_state
+                .message_action_popup_selected,
+        )
+        .copied()
 }
 
 /// Find the user message at a given absolute line index
@@ -154,7 +163,9 @@ pub fn get_selected_action(state: &AppState) -> Option<MessageAction> {
 /// Uses the line_to_message_map that was built during rendering
 pub fn find_user_message_at_line(state: &AppState, absolute_line: usize) -> Option<(Uuid, String)> {
     // Search through the line-to-message map to find which user message contains this line
-    for (start_line, end_line, msg_id, is_user, text, _user_idx) in &state.messages_scrolling_state.line_to_message_map {
+    for (start_line, end_line, msg_id, is_user, text, _user_idx) in
+        &state.messages_scrolling_state.line_to_message_map
+    {
         if *is_user && absolute_line >= *start_line && absolute_line < *end_line {
             return Some((*msg_id, text.clone()));
         }

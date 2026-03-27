@@ -64,7 +64,10 @@ pub fn update_pending_tool_to_first(
 ) {
     // Remove any existing pending tool block
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != pending_id);
     }
 
     let tool_name = strip_tool_name(&first_tool.function.name);
@@ -125,13 +128,17 @@ pub fn handle_esc_event(
     }
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
-        state.message_interaction_state.selection = crate::services::text_selection::SelectionState::default();
+        state.message_interaction_state.selection =
+            crate::services::text_selection::SelectionState::default();
         return;
     }
 
     // Common handling for rejection
     state.dialog_approval_state.message_tool_calls = None;
-    state.session_tool_calls_state.tool_call_execution_order.clear();
+    state
+        .session_tool_calls_state
+        .tool_call_execution_order
+        .clear();
     // Store the latest tool call for potential retry (only for command tools)
     if let Some(tool_call) = &state.dialog_approval_state.dialog_command
         && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
@@ -177,7 +184,8 @@ pub fn handle_esc(
     state.tool_call_state.is_streaming = false;
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
-        state.message_interaction_state.selection = crate::services::text_selection::SelectionState::default();
+        state.message_interaction_state.selection =
+            crate::services::text_selection::SelectionState::default();
     } else if state.input_state.show_helper_dropdown {
         state.input_state.show_helper_dropdown = false;
     } else if state.dialog_approval_state.is_dialog_open {
@@ -192,11 +200,17 @@ pub fn handle_esc(
                 // For command tools, remove the pending unified block and add rejected unified block
                 // Remove pending message by tool_call_id
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
-                    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_uuid);
+                    state
+                        .messages_scrolling_state
+                        .messages
+                        .retain(|m| m.id != tool_call_uuid);
                 }
                 // Also remove by pending_bash_message_id
                 if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-                    state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+                    state
+                        .messages_scrolling_state
+                        .messages
+                        .retain(|m| m.id != pending_id);
                 }
 
                 let command =
@@ -210,19 +224,28 @@ pub fn handle_esc(
                     crate::services::bash_block::RunCommandState::Rejected
                 };
 
-                state.messages_scrolling_state.messages.push(Message::render_run_command_block(
-                    command,
-                    message.clone(), // Use rejection message as result
-                    run_state,
-                    None,
-                ));
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_run_command_block(
+                        command,
+                        message.clone(), // Use rejection message as result
+                        run_state,
+                        None,
+                    ));
             } else {
                 // For other tools, remove the pending block first
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
-                    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_uuid);
+                    state
+                        .messages_scrolling_state
+                        .messages
+                        .retain(|m| m.id != tool_call_uuid);
                 }
                 if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-                    state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+                    state
+                        .messages_scrolling_state
+                        .messages
+                        .retain(|m| m.id != pending_id);
                 }
 
                 // Then add the rejected block
@@ -247,8 +270,9 @@ pub fn handle_esc(
             // instead of just rejecting it.
             if let Some(_tool_call) = &state.dialog_approval_state.dialog_command {
                 // Capture history for context
-                let history_lines =
-                    super::shell::trim_shell_lines(state.shell_runtime_state.shell_history_lines.clone());
+                let history_lines = super::shell::trim_shell_lines(
+                    state.shell_runtime_state.shell_history_lines.clone(),
+                );
                 let history_text = history_lines
                     .iter()
                     .map(|l| l.to_string())
@@ -304,8 +328,15 @@ pub fn handle_esc(
     }
 
     state.messages_scrolling_state.messages.retain(|m| {
-        m.id != state.tool_call_state.streaming_tool_result_id.unwrap_or_default()
-            && m.id != state.tool_call_state.pending_bash_message_id.unwrap_or_default()
+        m.id != state
+            .tool_call_state
+            .streaming_tool_result_id
+            .unwrap_or_default()
+            && m.id
+                != state
+                    .tool_call_state
+                    .pending_bash_message_id
+                    .unwrap_or_default()
     });
 
     // Invalidate cache and scroll to bottom when something was actually
@@ -328,7 +359,9 @@ pub fn handle_show_confirmation_dialog(
     if state.tool_call_state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
         return;
     }
-    if state.session_tool_calls_state.session_tool_calls_queue
+    if state
+        .session_tool_calls_state
+        .session_tool_calls_queue
         .get(&tool_call.id)
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
@@ -339,12 +372,15 @@ pub fn handle_show_confirmation_dialog(
             let command =
                 crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
                     .unwrap_or_else(|_| "unknown command".to_string());
-            state.messages_scrolling_state.messages.push(Message::render_run_command_block(
-                command,
-                Some("Tool call already executed".to_string()),
-                crate::services::bash_block::RunCommandState::Error,
-                None,
-            ));
+            state
+                .messages_scrolling_state
+                .messages
+                .push(Message::render_run_command_block(
+                    command,
+                    Some("Tool call already executed".to_string()),
+                    crate::services::bash_block::RunCommandState::Error,
+                    None,
+                ));
         } else {
             let truncated_command = extract_truncated_command_arguments(&tool_call, None);
             let title = get_command_type_name(&tool_call);
@@ -370,7 +406,10 @@ pub fn handle_show_confirmation_dialog(
     if is_foreground_command_tool(tool_name) {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
-    let is_auto_approved = state.configuration_state.auto_approve_manager.should_auto_approve(&tool_call);
+    let is_auto_approved = state
+        .configuration_state
+        .auto_approve_manager
+        .should_auto_approve(&tool_call);
 
     // Tool call is pending - create pending border block and check if we should show popup
     // For command tools, try to use tool_call.id as UUID so removal logic in event_loop works
@@ -390,12 +429,15 @@ pub fn handle_show_confirmation_dialog(
         // Extract command from tool call arguments
         let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
             .unwrap_or_else(|_| "unknown command".to_string());
-        state.messages_scrolling_state.messages.push(Message::render_run_command_block(
-            command,
-            None, // No result yet
-            crate::services::bash_block::RunCommandState::Pending,
-            Some(message_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_run_command_block(
+                command,
+                None, // No result yet
+                crate::services::bash_block::RunCommandState::Pending,
+                Some(message_id),
+            ));
     } else if tool_name == "resume_subagent_task" {
         // For resume_subagent_task, use the special subagent pending block
         // Try to get pause info from cached subagent state
@@ -406,21 +448,31 @@ pub fn handle_show_confirmation_dialog(
                     .and_then(|v| v.as_str())
                     .map(String::from)
             })
-            .and_then(|task_id| state.tool_call_state.subagent_pause_info.get(&task_id).cloned());
+            .and_then(|task_id| {
+                state
+                    .tool_call_state
+                    .subagent_pause_info
+                    .get(&task_id)
+                    .cloned()
+            });
 
-        state.messages_scrolling_state.messages
-            .push(Message::render_subagent_resume_pending_block(
+        state.messages_scrolling_state.messages.push(
+            Message::render_subagent_resume_pending_block(
                 tool_call.clone(),
                 is_auto_approved,
                 pause_info,
                 Some(message_id),
-            ));
+            ),
+        );
     } else {
-        state.messages_scrolling_state.messages.push(Message::render_pending_border_block(
-            tool_call.clone(),
-            is_auto_approved,
-            Some(message_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_pending_border_block(
+                tool_call.clone(),
+                is_auto_approved,
+                Some(message_id),
+            ));
     }
     state.tool_call_state.pending_bash_message_id = Some(message_id);
 
@@ -438,8 +490,11 @@ pub fn handle_show_confirmation_dialog(
     state.dialog_approval_state.dialog_focused = false;
 
     // check if its skipped
-    let is_skipped =
-        state.session_tool_calls_state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
+    let is_skipped = state
+        .session_tool_calls_state
+        .session_tool_calls_queue
+        .get(&tool_call.id)
+        == Some(&ToolCallStatus::Skipped);
 
     // Check if this tool call is already rejected (after popup interaction) or skipped
     if state
@@ -479,7 +534,9 @@ pub fn handle_show_confirmation_dialog(
             color,
         ));
 
-        state.session_tool_calls_state.session_tool_calls_queue
+        state
+            .session_tool_calls_state
+            .session_tool_calls_queue
             .insert(tool_call.id.clone(), ToolCallStatus::Executed);
         return;
     }
@@ -506,7 +563,9 @@ pub fn handle_show_confirmation_dialog(
         let output_tx_clone = output_tx.clone();
 
         let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
-        state.session_tool_calls_state.session_tool_calls_queue
+        state
+            .session_tool_calls_state
+            .session_tool_calls_queue
             .insert(tool_call.id.clone(), ToolCallStatus::Executed);
         state.dialog_approval_state.is_dialog_open = false;
         state.dialog_approval_state.dialog_selected = 0;
@@ -515,15 +574,20 @@ pub fn handle_show_confirmation_dialog(
         return;
     }
 
-    let tool_calls = if let Some(tool_calls) = state.dialog_approval_state.message_tool_calls.clone() {
-        tool_calls.clone()
-    } else {
-        vec![tool_call.clone()]
-    };
+    let tool_calls =
+        if let Some(tool_calls) = state.dialog_approval_state.message_tool_calls.clone() {
+            tool_calls.clone()
+        } else {
+            vec![tool_call.clone()]
+        };
 
     // Tool call is pending - add to approval bar (inline approval)
     if !tool_calls.is_empty() && state.dialog_approval_state.toggle_approved_message {
-        let was_empty = state.dialog_approval_state.approval_bar.actions().is_empty();
+        let was_empty = state
+            .dialog_approval_state
+            .approval_bar
+            .actions()
+            .is_empty();
 
         // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
@@ -531,7 +595,13 @@ pub fn handle_show_confirmation_dialog(
         }
 
         // If this is the first time showing the approval bar, scroll to show the tool call
-        if was_empty && !state.dialog_approval_state.approval_bar.actions().is_empty() {
+        if was_empty
+            && !state
+                .dialog_approval_state
+                .approval_bar
+                .actions()
+                .is_empty()
+        {
             state.messages_scrolling_state.scroll_to_last_message_start = true;
             state.messages_scrolling_state.stay_at_bottom = false;
         }
@@ -542,14 +612,20 @@ pub fn handle_show_confirmation_dialog(
         if !was_empty {
             // Remove the pending block we just created since it's not the selected one
             if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-                state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .retain(|m| m.id != pending_id);
             }
             // Also remove the previous pending block (from the first tool call that
             // was kept when the bar was initially empty). Without this, the first
             // tool's preview block becomes orphaned and stays stuck in the messages
             // area while the user cycles through tool calls with arrow keys.
             if let Some(prev_id) = previous_pending_bash_message_id {
-                state.messages_scrolling_state.messages.retain(|m| m.id != prev_id);
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .retain(|m| m.id != prev_id);
             }
             state.tool_call_state.pending_bash_message_id = None;
 

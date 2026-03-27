@@ -49,12 +49,18 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     } else {
         ThemeColors::red()
     };
-    state.messages_scrolling_state.messages.push(Message::info("SPACING_MARKER", None));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::info("SPACING_MARKER", None));
     state.messages_scrolling_state.messages.push(Message::info(
         format!("Mouse capture {}", status),
         Some(Style::default().fg(color)),
     ));
-    state.messages_scrolling_state.messages.push(Message::info("SPACING_MARKER", None));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::info("SPACING_MARKER", None));
 
     // Invalidate cache so the new messages are rendered
     invalidate_message_lines_cache(state);

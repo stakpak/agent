@@ -437,7 +437,10 @@ pub fn push_styled_message(
         Span::styled(icon.to_string(), Style::default().fg(icon_color)),
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
-    state.messages_scrolling_state.messages.push(Message::styled(line));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::styled(line));
     invalidate_message_lines_cache(state);
 }
 

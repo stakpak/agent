@@ -124,8 +124,10 @@ pub async fn run_tui(
     state.rulebook_switcher_state.rulebook_config = rulebook_config;
 
     // Add welcome messages after state is created
-    let welcome_msg =
-        crate::services::helper_block::welcome_messages(state.configuration_state.latest_version.clone(), &state);
+    let welcome_msg = crate::services::helper_block::welcome_messages(
+        state.configuration_state.latest_version.clone(),
+        &state,
+    );
     state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Trigger initial board tasks refresh if agent ID is configured
@@ -138,7 +140,10 @@ pub async fn run_tui(
         && let Some(prompt) = state.configuration_state.init_prompt_content.clone()
         && !prompt.trim().is_empty()
     {
-        state.messages_scrolling_state.messages.push(Message::user(prompt.clone(), None));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::user(prompt.clone(), None));
         crate::services::message::invalidate_message_lines_cache(&mut state);
         let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new(), None));
     }

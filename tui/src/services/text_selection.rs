@@ -247,7 +247,8 @@ pub fn extract_selected_text(state: &AppState) -> String {
 
 /// Extract selected text from the collapsed message lines cache (fullscreen popup)
 pub fn extract_selected_text_from_collapsed(state: &AppState) -> String {
-    let Some((_, _, cached_lines)) = &state.messages_scrolling_state.collapsed_message_lines_cache else {
+    let Some((_, _, cached_lines)) = &state.messages_scrolling_state.collapsed_message_lines_cache
+    else {
         return String::new();
     };
 

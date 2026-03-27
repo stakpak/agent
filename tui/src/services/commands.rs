@@ -385,11 +385,17 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/summarize" => {
             let prompt = build_summarize_prompt(ctx.state);
-            ctx.state.messages_scrolling_state.messages.push(Message::info("".to_string(), None));
-            ctx.state.messages_scrolling_state.messages.push(Message::info(
-                "Requesting session summary (summary.md)...",
-                Some(Style::default().fg(ThemeColors::cyan())),
-            ));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::info("".to_string(), None));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::info(
+                    "Requesting session summary (summary.md)...",
+                    Some(Style::default().fg(ThemeColors::cyan())),
+                ));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
                 ctx.state.shell_popup_state.shell_tool_calls.clone(),
@@ -537,10 +543,11 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             let session_dir = std::path::Path::new(".stakpak/session");
             if crate::services::plan::plan_file_exists(session_dir) {
                 let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
-                ctx.state.plan_mode_state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
-                    inline_prompt,
-                    metadata: meta,
-                });
+                ctx.state.plan_mode_state.existing_plan_prompt =
+                    Some(crate::app::ExistingPlanPrompt {
+                        inline_prompt,
+                        metadata: meta,
+                    });
             } else {
                 let _ = ctx
                     .output_tx
@@ -565,7 +572,10 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
-            ctx.state.messages_scrolling_state.messages.push(Message::user(prompt.clone(), None));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
                 ctx.state.shell_popup_state.shell_tool_calls.clone(),
@@ -644,7 +654,9 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
-            ctx.state.messages_scrolling_state.messages
+            ctx.state
+                .messages_scrolling_state
+                .messages
                 .push(Message::user(full_prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 full_prompt,
@@ -672,7 +684,10 @@ fn terminate_active_shell(state: &mut AppState) {
 
     // Remove the shell message box if it exists
     if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != shell_msg_id);
     }
 
     // Reset all shell-related state
@@ -698,14 +713,25 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.dialog_approval_state.message_tool_calls = None;
     state.dialog_approval_state.message_approved_tools.clear();
     state.dialog_approval_state.message_rejected_tools.clear();
-    state.session_tool_calls_state.tool_call_execution_order.clear();
-    state.session_tool_calls_state.session_tool_calls_queue.clear();
+    state
+        .session_tool_calls_state
+        .tool_call_execution_order
+        .clear();
+    state
+        .session_tool_calls_state
+        .session_tool_calls_queue
+        .clear();
     state.dialog_approval_state.approval_bar.clear();
     state.dialog_approval_state.toggle_approved_message = true;
 
     state.messages_scrolling_state.messages.clear();
-    state.messages_scrolling_state.messages
-        .extend(welcome_messages(state.configuration_state.latest_version.clone(), state));
+    state
+        .messages_scrolling_state
+        .messages
+        .extend(welcome_messages(
+            state.configuration_state.latest_version.clone(),
+            state,
+        ));
     render_system_message(state, "Resuming last session.");
 
     // Reset scroll state to show bottom when messages are loaded
@@ -763,8 +789,13 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     let _ = output_tx.try_send(OutputEvent::NewSession);
     state.input_state.text_area.set_text("");
     state.messages_scrolling_state.messages.clear();
-    state.messages_scrolling_state.messages
-        .extend(welcome_messages(state.configuration_state.latest_version.clone(), state));
+    state
+        .messages_scrolling_state
+        .messages
+        .extend(welcome_messages(
+            state.configuration_state.latest_version.clone(),
+            state,
+        ));
     render_system_message(state, "New session started.");
 
     // Reset scroll state
@@ -803,7 +834,11 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let completion_tokens = usage.completion_tokens;
 
     // Use current_model if set (from streaming), otherwise use default model
-    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.configuration_state.model);
+    let active_model = state
+        .model_switcher_state
+        .current_model
+        .as_ref()
+        .unwrap_or(&state.configuration_state.model);
     let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
@@ -889,7 +924,8 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
 
     if auto_approved_tools.is_empty() {
         let message = if state
-            .configuration_state.allowed_tools
+            .configuration_state
+            .allowed_tools
             .as_ref()
             .is_some_and(|tools| !tools.is_empty())
         {
@@ -905,7 +941,10 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
             .collect::<Vec<_>>()
             .join(", ");
         // add a spacing marker
-        state.messages_scrolling_state.messages.push(Message::plain_text(""));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::plain_text(""));
         push_styled_message(
             state,
             &format!("Tools currently set to auto-approve: {}", tool_list),
@@ -966,7 +1005,11 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.command_palette_state.command_palette_search.is_empty() {
+    let search_spans = if state
+        .command_palette_state
+        .command_palette_search
+        .is_empty()
+    {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),

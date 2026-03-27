@@ -318,7 +318,11 @@ fn render_commands_section(
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.command_palette_state.command_palette_search.is_empty() {
+    let search_spans = if state
+        .command_palette_state
+        .command_palette_search
+        .is_empty()
+    {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -608,7 +612,8 @@ fn render_shortcuts_section(
     // Calculate scroll position (similar to collapsed messages)
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
-    state.shortcuts_panel_state.shortcuts_scroll = state.shortcuts_panel_state.shortcuts_scroll.min(max_scroll);
+    state.shortcuts_panel_state.shortcuts_scroll =
+        state.shortcuts_panel_state.shortcuts_scroll.min(max_scroll);
     let scroll = state.shortcuts_panel_state.shortcuts_scroll;
 
     // Add top arrow indicator if there are hidden items above
@@ -740,7 +745,9 @@ fn render_sessions_section(
 
     // Filter sessions by search term
     let search_lower = search_term.to_lowercase();
-    let filtered_sessions: Vec<(usize, &crate::app::SessionInfo)> = state.sessions_state.sessions
+    let filtered_sessions: Vec<(usize, &crate::app::SessionInfo)> = state
+        .sessions_state
+        .sessions
         .iter()
         .enumerate()
         .filter(|(_, s)| search_term.is_empty() || s.title.to_lowercase().contains(&search_lower))
@@ -764,7 +771,10 @@ fn render_sessions_section(
         f.render_widget(Paragraph::new(""), scroll_area);
     } else {
         // Ensure session_selected is within bounds of filtered list
-        let selected_in_filtered = state.sessions_state.session_selected.min(total_filtered.saturating_sub(1));
+        let selected_in_filtered = state
+            .sessions_state
+            .session_selected
+            .min(total_filtered.saturating_sub(1));
 
         // Calculate scroll position based on selected item
         let max_scroll = total_filtered.saturating_sub(height);

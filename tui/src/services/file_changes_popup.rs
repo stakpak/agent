@@ -54,7 +54,10 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         .split(inner_area);
 
     // Filter files
-    let query = state.file_changes_popup_state.file_changes_search.to_lowercase();
+    let query = state
+        .file_changes_popup_state
+        .file_changes_search
+        .to_lowercase();
     let binding = state.side_panel_state.changeset.files_in_order();
     let filtered_files: Vec<_> = binding
         .iter()
@@ -97,7 +100,11 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.file_changes_popup_state.file_changes_search.is_empty() {
+    let search_spans = if state
+        .file_changes_popup_state
+        .file_changes_search
+        .is_empty()
+    {
         vec![
             Span::raw(" "),
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),

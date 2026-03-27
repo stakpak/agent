@@ -87,8 +87,11 @@ pub fn handle_input_submitted_event(
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Select the session and resume it
-                if !state.sessions_state.sessions.is_empty() && state.sessions_state.session_selected < state.sessions_state.sessions.len() {
-                    let selected = &state.sessions_state.sessions[state.sessions_state.session_selected];
+                if !state.sessions_state.sessions.is_empty()
+                    && state.sessions_state.session_selected < state.sessions_state.sessions.len()
+                {
+                    let selected =
+                        &state.sessions_state.sessions[state.sessions_state.session_selected];
                     let selected_id = selected.id.to_string();
                     let selected_title = selected.title.clone();
                     let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
@@ -97,8 +100,14 @@ pub fn handle_input_submitted_event(
                     state.dialog_approval_state.message_tool_calls = None;
                     state.dialog_approval_state.message_approved_tools.clear();
                     state.dialog_approval_state.message_rejected_tools.clear();
-                    state.session_tool_calls_state.tool_call_execution_order.clear();
-                    state.session_tool_calls_state.session_tool_calls_queue.clear();
+                    state
+                        .session_tool_calls_state
+                        .tool_call_execution_order
+                        .clear();
+                    state
+                        .session_tool_calls_state
+                        .session_tool_calls_queue
+                        .clear();
                     state.dialog_approval_state.approval_bar.clear();
                     state.dialog_approval_state.toggle_approved_message = true;
                     state.messages_scrolling_state.messages.clear();
@@ -107,7 +116,8 @@ pub fn handle_input_submitted_event(
                     state.messages_scrolling_state.stay_at_bottom = true;
 
                     // Clear changeset and todos from previous session
-                    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+                    state.side_panel_state.changeset =
+                        crate::services::changeset::Changeset::default();
                     state.side_panel_state.todos.clear();
 
                     crate::services::message::invalidate_message_lines_cache(state);
@@ -167,14 +177,22 @@ pub fn handle_input_submitted_event(
         // Process tools in order using message_tool_calls
         if let Some(tool_calls) = &state.dialog_approval_state.message_tool_calls.clone() {
             for tool_call in tool_calls {
-                let is_approved = state.dialog_approval_state.message_approved_tools.contains(tool_call);
+                let is_approved = state
+                    .dialog_approval_state
+                    .message_approved_tools
+                    .contains(tool_call);
                 let status = if is_approved {
                     ToolCallStatus::Approved
                 } else {
                     ToolCallStatus::Rejected
                 };
-                state.session_tool_calls_state.tool_call_execution_order.push(tool_call.id.clone());
-                state.session_tool_calls_state.session_tool_calls_queue
+                state
+                    .session_tool_calls_state
+                    .tool_call_execution_order
+                    .push(tool_call.id.clone());
+                state
+                    .session_tool_calls_state
+                    .session_tool_calls_queue
                     .insert(tool_call.id.clone(), status);
             }
 
@@ -183,10 +201,15 @@ pub fn handle_input_submitted_event(
             if let Some(first_tool) = tool_calls.first() {
                 // Set dialog_command to the first tool for proper processing
                 state.dialog_approval_state.dialog_command = Some(first_tool.clone());
-                state.session_tool_calls_state.session_tool_calls_queue
+                state
+                    .session_tool_calls_state
+                    .session_tool_calls_queue
                     .insert(first_tool.id.clone(), ToolCallStatus::Executed);
 
-                let is_approved = state.dialog_approval_state.message_approved_tools.contains(first_tool);
+                let is_approved = state
+                    .dialog_approval_state
+                    .message_approved_tools
+                    .contains(first_tool);
 
                 // Update the pending display to show the first tool (which is being executed)
                 // This ensures the UI shows the correct tool as "running", not the selected one
@@ -219,14 +242,19 @@ pub fn handle_input_submitted_event(
 
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    if state.side_panel_state.show_side_panel && !state.dialog_approval_state.is_dialog_open && state.input_state.text_area.text().is_empty() {
+    if state.side_panel_state.show_side_panel
+        && !state.dialog_approval_state.is_dialog_open
+        && state.input_state.text_area.text().is_empty()
+    {
         let current = state
-            .side_panel_state.side_panel_section_collapsed
+            .side_panel_state
+            .side_panel_section_collapsed
             .get(&state.side_panel_state.side_panel_focus)
             .copied()
             .unwrap_or(false);
         state
-            .side_panel_state.side_panel_section_collapsed
+            .side_panel_state
+            .side_panel_section_collapsed
             .insert(state.side_panel_state.side_panel_focus, !current);
         return;
     }
@@ -404,7 +432,8 @@ fn handle_input_submitted(
 
             // Get current policy for the tool
             let current_policy = state
-                .configuration_state.auto_approve_manager
+                .configuration_state
+                .auto_approve_manager
                 .get_policy_for_tool_name(tool_name);
             let new_policy = if current_policy == AutoApprovePolicy::Auto {
                 AutoApprovePolicy::Prompt
@@ -413,7 +442,8 @@ fn handle_input_submitted(
             };
 
             if let Err(e) = state
-                .configuration_state.auto_approve_manager
+                .configuration_state
+                .auto_approve_manager
                 .update_tool_policy(tool_name, new_policy.clone())
             {
                 push_error_message(
@@ -576,7 +606,9 @@ fn handle_input_submitted(
         }
     }
 
-    if !state.input_state.text_area.text().trim().is_empty() || !state.input_state.attached_images.is_empty() {
+    if !state.input_state.text_area.text().trim().is_empty()
+        || !state.input_state.attached_images.is_empty()
+    {
         // Allow submission if there's text input OR attached images
 
         log::debug!(
@@ -687,7 +719,10 @@ fn handle_input_submitted(
 
             // Remove the active shell message bubble
             if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
-                state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .retain(|m| m.id != shell_msg_id);
             }
             state.shell_session_state.interactive_shell_message_id = None;
 
@@ -721,9 +756,10 @@ fn handle_input_submitted(
         }
 
         // Also handle the existing pasted_placeholder system
-        if let (Some(placeholder), Some(long_text)) =
-            (&state.input_state.pasted_placeholder, &state.input_state.pasted_long_text)
-            && final_input.contains(placeholder)
+        if let (Some(placeholder), Some(long_text)) = (
+            &state.input_state.pasted_placeholder,
+            &state.input_state.pasted_long_text,
+        ) && final_input.contains(placeholder)
         {
             final_input = final_input.replace(placeholder, long_text);
             state.input_state.text_area.set_text(&final_input);
@@ -733,24 +769,34 @@ fn handle_input_submitted(
 
         // Scan for secrets typed character-by-character
         let final_input = state
-            .configuration_state.secret_manager
+            .configuration_state
+            .secret_manager
             .redact_and_store_secrets(&final_input, None);
 
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
         // Use current_model if set (from streaming), otherwise use default model
-        let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.configuration_state.model);
+        let active_model = state
+            .model_switcher_state
+            .current_model
+            .as_ref()
+            .unwrap_or(&state.configuration_state.model);
         let max_tokens = active_model.limit.context as u32;
 
         // Use prompt_tokens for context window utilization (actual input context size)
-        let capped_tokens = state.usage_tracking_state.current_message_usage.prompt_tokens.min(max_tokens);
+        let capped_tokens = state
+            .usage_tracking_state
+            .current_message_usage
+            .prompt_tokens
+            .min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
         if utilization_pct < 92 {
             // Process all images and create ContentParts
-            let attached_paths: Vec<_> = state.input_state
+            let attached_paths: Vec<_> = state
+                .input_state
                 .attached_images
                 .iter()
                 .map(|img| img.path.clone())
@@ -791,8 +837,11 @@ fn handle_input_submitted(
                 }
             }
 
-            let should_buffer_message =
-                state.loading_state.loading_manager.is_loading() || !state.user_message_queue_state.pending_user_messages.is_empty();
+            let should_buffer_message = state.loading_state.loading_manager.is_loading()
+                || !state
+                    .user_message_queue_state
+                    .pending_user_messages
+                    .is_empty();
 
             if should_buffer_message {
                 // Buffer while operations are active (or if previous buffered messages are pending)
@@ -824,21 +873,36 @@ fn handle_input_submitted(
             }
         } else {
             if !state.messages_scrolling_state.messages.is_empty() {
-                state.messages_scrolling_state.messages.push(Message::plain_text(""));
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::plain_text(""));
             }
 
-            state.messages_scrolling_state.messages.push(Message::user(final_input, None));
+            state
+                .messages_scrolling_state
+                .messages
+                .push(Message::user(final_input, None));
 
             // Add spacing after user message
-            state.messages_scrolling_state.messages.push(Message::plain_text(""));
+            state
+                .messages_scrolling_state
+                .messages
+                .push(Message::plain_text(""));
             state.messages_scrolling_state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(ThemeColors::yellow()))));
-            state.messages_scrolling_state.messages.push(Message::plain_text(""));
+            state
+                .messages_scrolling_state
+                .messages
+                .push(Message::plain_text(""));
             state.messages_scrolling_state.messages.push(Message::info(
                 "Start a new session or /summarize to export compressed summary to be resued"
                     .to_string(),
                 Some(Style::default().fg(ThemeColors::green())),
             ));
-            state.messages_scrolling_state.messages.push(Message::plain_text(""));
+            state
+                .messages_scrolling_state
+                .messages
+                .push(Message::plain_text(""));
         }
 
         // Always clear attached images and reset state after submission
@@ -871,17 +935,22 @@ pub fn handle_input_submitted_with(
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.messages_scrolling_state.scroll == max_scroll;
-    state.messages_scrolling_state.messages.push(Message::submitted_with(
-        None,
-        s.clone(),
-        color.map(|c| Style::default().fg(c)),
-    ));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::submitted_with(
+            None,
+            s.clone(),
+            color.map(|c| Style::default().fg(c)),
+        ));
     // Loading will be managed by stream processing
     state.input_state.text_area.set_text("");
 
     // If content changed while user is scrolled up, mark it
     if !was_at_bottom {
-        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+        state
+            .messages_scrolling_state
+            .content_changed_while_scrolled_up = true;
     }
 
     let total_lines = state.messages_scrolling_state.messages.len() * 2;
@@ -921,7 +990,8 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // This allows users to paste API keys, passwords, etc. and have them automatically
     // redacted with placeholders that the agent can use
     let redacted_pasted = state
-        .configuration_state.secret_manager
+        .configuration_state
+        .secret_manager
         .redact_and_store_secrets(&normalized_pasted, None);
 
     // Also check if the pasted text itself contains file paths
@@ -931,7 +1001,10 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
         let placeholder = format!("[Pasted Content {char_count} chars]");
         state.input_state.text_area.insert_element(&placeholder);
         // Store the redacted version (with placeholders) for later expansion
-        state.input_state.pending_pastes.push((placeholder, redacted_pasted));
+        state
+            .input_state
+            .pending_pastes
+            .push((placeholder, redacted_pasted));
     } else if char_count > 1 && handle_paste_image_path(state, redacted_pasted.clone()) {
         // Path inserted - conversion will happen when user types or hits Enter
     } else {
@@ -1133,12 +1206,18 @@ pub fn handle_input_delete_word(state: &mut AppState) {
 
 /// Handle cursor move to start of line
 pub fn handle_input_cursor_start(state: &mut AppState) {
-    state.input_state.text_area.move_cursor_to_beginning_of_line(false);
+    state
+        .input_state
+        .text_area
+        .move_cursor_to_beginning_of_line(false);
 }
 
 /// Handle cursor move to end of line
 pub fn handle_input_cursor_end(state: &mut AppState) {
-    state.input_state.text_area.move_cursor_to_end_of_line(false);
+    state
+        .input_state
+        .text_area
+        .move_cursor_to_end_of_line(false);
 }
 
 /// Handle cursor move to previous word
@@ -1193,7 +1272,10 @@ fn check_placeholder_edit(state: &mut AppState) {
                         .input_state
                         .text_area
                         .replace_range(img.start_pos..img.end_pos, &path_str);
-                    state.input_state.text_area.set_cursor(img.start_pos + path_str.len());
+                    state
+                        .input_state
+                        .text_area
+                        .set_cursor(img.start_pos + path_str.len());
                     state
                         .input_state
                         .attached_images
@@ -1506,7 +1588,10 @@ fn convert_path_to_placeholder(
     let placeholder = format!("[Image {} {}x{} JPEG]", filename, width, height);
 
     // Replace path with placeholder
-    state.input_state.text_area.replace_range(start..end, &placeholder);
+    state
+        .input_state
+        .text_area
+        .replace_range(start..end, &placeholder);
     state
         .input_state
         .text_area

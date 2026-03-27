@@ -72,7 +72,10 @@ pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
     // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
     let shell_rows = height.saturating_sub(2).max(1);
     let shell_cols = width.saturating_sub(4).max(1);
-    state.shell_runtime_state.shell_screen.set_size(shell_rows, shell_cols);
+    state
+        .shell_runtime_state
+        .shell_screen
+        .set_size(shell_rows, shell_cols);
 }
 
 /// Handle toggle cursor visible event
@@ -82,7 +85,11 @@ pub fn handle_toggle_cursor_visible(state: &mut AppState) {
 
 /// Handle toggle auto approve event
 pub fn handle_toggle_auto_approve(state: &mut AppState) {
-    if let Err(e) = state.configuration_state.auto_approve_manager.toggle_enabled() {
+    if let Err(e) = state
+        .configuration_state
+        .auto_approve_manager
+        .toggle_enabled()
+    {
         push_error_message(
             state,
             &format!("Failed to toggle auto-approve: {}", e),
@@ -120,7 +127,10 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
     if state.shortcuts_panel_state.show_shortcuts_popup {
-        state.shortcuts_panel_state.shortcuts_popup_mode = match state.shortcuts_panel_state.shortcuts_popup_mode {
+        state.shortcuts_panel_state.shortcuts_popup_mode = match state
+            .shortcuts_panel_state
+            .shortcuts_popup_mode
+        {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
             crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
             crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
@@ -159,7 +169,8 @@ fn handle_tab_normal(state: &mut AppState) {
         }
         // Handle helper selection - auto-complete the selected helper
         if !state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/') {
-            let selected_helper = &state.input_state.filtered_helpers[state.input_state.helper_selected];
+            let selected_helper =
+                &state.input_state.filtered_helpers[state.input_state.helper_selected];
             // Commands that take arguments should have a trailing space
             let needs_space = matches!(
                 selected_helper.command.as_str(),
@@ -198,7 +209,9 @@ fn handle_collapsed_messages_tab(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    let collapsed_messages: Vec<Message> = state.messages_scrolling_state.messages
+    let collapsed_messages: Vec<Message> = state
+        .messages_scrolling_state
+        .messages
         .iter()
         .filter(|m| m.is_collapsed == Some(true))
         .cloned()
@@ -231,7 +244,10 @@ fn handle_collapsed_messages_tab(
     let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    state.messages_scrolling_state.collapsed_messages_scroll = state.messages_scrolling_state.collapsed_messages_scroll.min(max_scroll);
+    state.messages_scrolling_state.collapsed_messages_scroll = state
+        .messages_scrolling_state
+        .collapsed_messages_scroll
+        .min(max_scroll);
 }
 
 /// Handle Ctrl+S event
@@ -249,7 +265,11 @@ pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::S
     let now = Instant::now();
     if !state.quit_intent_state.ctrl_c_pressed_once
         || state.quit_intent_state.ctrl_c_timer.is_none()
-        || state.quit_intent_state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
+        || state
+            .quit_intent_state
+            .ctrl_c_timer
+            .map(|t| now > t)
+            .unwrap_or(true)
     {
         // First press or timer expired: clear input, move cursor, set timer
         state.input_state.text_area.set_text("");
@@ -276,7 +296,10 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
         let _ = cmd.kill();
     }
     if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != shell_msg_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != shell_msg_id);
     }
     state.shell_popup_state.active_shell_command = None;
     state.shell_popup_state.active_shell_command_output = None;
@@ -300,7 +323,8 @@ pub fn handle_set_banner_message(
     text: String,
     style: crate::services::banner::BannerStyle,
 ) {
-    state.banner_state.banner_message = Some(crate::services::banner::BannerMessage::new(text, style));
+    state.banner_state.banner_message =
+        Some(crate::services::banner::BannerMessage::new(text, style));
 }
 
 /// Handle start loading operation event
@@ -308,7 +332,10 @@ pub fn handle_start_loading_operation(
     state: &mut AppState,
     operation: crate::app::LoadingOperation,
 ) {
-    state.loading_state.loading_manager.start_operation(operation.clone());
+    state
+        .loading_state
+        .loading_manager
+        .start_operation(operation.clone());
     state.loading_state.is_loading = state.loading_state.loading_manager.is_loading();
     state.loading_state.loading_type = state.loading_state.loading_manager.get_loading_type();
 }
@@ -335,7 +362,10 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     // Clear any pending cancellation since a new assistant message arrived
     state.tool_call_state.cancel_requested = false;
-    state.messages_scrolling_state.messages.push(Message::assistant(None, msg, None));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::assistant(None, msg, None));
 
     // Invalidate cache since messages changed
     crate::services::message::invalidate_message_lines_cache(state);
@@ -372,10 +402,10 @@ pub fn handle_refresh_board_tasks(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
     // Try to get agent_id from state, or extract from message history
-    let agent_id = state
-        .side_panel_state.board_agent_id
-        .clone()
-        .or_else(|| extract_board_agent_id_from_messages(&state.messages_scrolling_state.messages));
+    let agent_id =
+        state.side_panel_state.board_agent_id.clone().or_else(|| {
+            extract_board_agent_id_from_messages(&state.messages_scrolling_state.messages)
+        });
 
     let Some(agent_id) = agent_id else {
         return;

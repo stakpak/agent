@@ -24,7 +24,11 @@ pub fn handle_stream_tool_result(
 ) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
-    if state.tool_call_state.completed_tool_calls.contains(&tool_call_id) {
+    if state
+        .tool_call_state
+        .completed_tool_calls
+        .contains(&tool_call_id)
+    {
         return None;
     }
 
@@ -127,10 +131,16 @@ pub fn handle_stream_tool_result(
 
     // 3. Remove the pending message with pending_bash_message_id (not the streaming message id)
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != pending_id);
     }
     // Also remove any old streaming message with this id
-    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_id);
+    state
+        .messages_scrolling_state
+        .messages
+        .retain(|m| m.id != tool_call_id);
 
     // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
@@ -143,27 +153,35 @@ pub fn handle_stream_tool_result(
     // 5. Use unified run command block for run_command, otherwise use the default streaming block
     if is_run_command {
         let cmd = command_str.unwrap_or_else(|| "command".to_string());
-        state.messages_scrolling_state.messages.push(Message::render_run_command_block(
-            cmd,
-            Some(buffer_content),
-            crate::services::bash_block::RunCommandState::Running,
-            Some(tool_call_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_run_command_block(
+                cmd,
+                Some(buffer_content),
+                crate::services::bash_block::RunCommandState::Running,
+                Some(tool_call_id),
+            ));
     } else {
-        state.messages_scrolling_state.messages.push(Message::render_streaming_border_block(
-            &buffer_content,
-            "Tool Streaming",
-            "Result",
-            None,
-            "Streaming",
-            Some(tool_call_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_streaming_border_block(
+                &buffer_content,
+                "Tool Streaming",
+                "Result",
+                None,
+                "Streaming",
+                Some(tool_call_id),
+            ));
     }
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
     if !state.messages_scrolling_state.stay_at_bottom {
-        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+        state
+            .messages_scrolling_state
+            .content_changed_while_scrolled_up = true;
     }
 
     None
@@ -185,10 +203,16 @@ fn handle_task_wait_progress(
 
     // Remove the pending message if exists
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != pending_id);
     }
     // Remove any old message with this id (replace mode)
-    state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_id);
+    state
+        .messages_scrolling_state
+        .messages
+        .retain(|m| m.id != tool_call_id);
 
     // Use structured task updates if available, otherwise fall back to message
     if let Some(task_updates) = progress.task_updates {
@@ -214,12 +238,15 @@ fn handle_task_wait_progress(
         let overall_progress = progress.progress.unwrap_or(0.0);
 
         // Use dedicated task wait block
-        state.messages_scrolling_state.messages.push(Message::render_task_wait_block(
-            task_updates,
-            overall_progress,
-            target_task_ids,
-            Some(tool_call_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_task_wait_block(
+                task_updates,
+                overall_progress,
+                target_task_ids,
+                Some(tool_call_id),
+            ));
     } else {
         // Fallback: use generic streaming block with replace mode
         // Store message directly (not appending)
@@ -228,21 +255,26 @@ fn handle_task_wait_progress(
             .streaming_tool_results
             .insert(tool_call_id, progress.message.clone());
 
-        state.messages_scrolling_state.messages.push(Message::render_streaming_border_block(
-            &progress.message,
-            "Wait for Tasks",
-            "Progress",
-            None,
-            "TaskWait",
-            Some(tool_call_id),
-        ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_streaming_border_block(
+                &progress.message,
+                "Wait for Tasks",
+                "Progress",
+                None,
+                "TaskWait",
+                Some(tool_call_id),
+            ));
     }
 
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
     if !state.messages_scrolling_state.stay_at_bottom {
-        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+        state
+            .messages_scrolling_state
+            .content_changed_while_scrolled_up = true;
     }
 
     None
@@ -252,7 +284,10 @@ fn handle_task_wait_progress(
 pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>) {
     // Clear the streaming preview block now that tool calls are finalized
     if let Some(preview_id) = state.tool_call_state.tool_call_stream_preview_id.take() {
-        state.messages_scrolling_state.messages.retain(|m| m.id != preview_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != preview_id);
         invalidate_message_lines_cache(state);
     }
 
@@ -260,8 +295,13 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
     let rest_tool_calls = tool_calls
         .into_iter()
         .filter(|tool_call| {
-            !state.session_tool_calls_state.session_tool_calls_queue.contains_key(&tool_call.id)
-                || state.session_tool_calls_state.session_tool_calls_queue
+            !state
+                .session_tool_calls_state
+                .session_tool_calls_queue
+                .contains_key(&tool_call.id)
+                || state
+                    .session_tool_calls_state
+                    .session_tool_calls_queue
                     .get(&tool_call.id)
                     .map(|status| status != &ToolCallStatus::Executed)
                     .unwrap_or(false)
@@ -269,14 +309,17 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
         .collect::<Vec<ToolCall>>();
 
     let prompt_tool_calls = state
-        .configuration_state.auto_approve_manager
+        .configuration_state
+        .auto_approve_manager
         .get_prompt_tool_calls(&rest_tool_calls);
 
     state.dialog_approval_state.message_tool_calls = Some(prompt_tool_calls.clone());
 
     // Only update last_message_tool_calls if we're not in a retry scenario
     // During retry, we want to preserve the original sequence for ShellCompleted
-    if !state.shell_popup_state.show_shell_mode || state.dialog_approval_state.dialog_command.is_none() {
+    if !state.shell_popup_state.show_shell_mode
+        || state.dialog_approval_state.dialog_command.is_none()
+    {
         state.session_tool_calls_state.last_message_tool_calls = prompt_tool_calls.clone();
     }
 }
@@ -296,18 +339,26 @@ pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCal
     state.tool_call_state.is_streaming = true;
 
     // Remove old preview message (replace mode)
-    state.messages_scrolling_state.messages.retain(|m| m.id != preview_id);
+    state
+        .messages_scrolling_state
+        .messages
+        .retain(|m| m.id != preview_id);
 
     // Add updated preview
-    state.messages_scrolling_state.messages.push(Message::render_tool_call_stream_block(
-        infos,
-        Some(preview_id),
-    ));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::render_tool_call_stream_block(
+            infos,
+            Some(preview_id),
+        ));
 
     invalidate_message_lines_cache(state);
 
     if !state.messages_scrolling_state.stay_at_bottom {
-        state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+        state
+            .messages_scrolling_state
+            .content_changed_while_scrolled_up = true;
     }
 }
 
@@ -351,8 +402,18 @@ pub fn handle_retry_tool_call(
         state.shell_runtime_state.shell_history_lines.clear(); // Clear history for fresh retry
 
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
-        let rows = state.terminal_ui_state.terminal_size.height.saturating_sub(2).max(1);
-        let cols = state.terminal_ui_state.terminal_size.width.saturating_sub(4).max(1);
+        let rows = state
+            .terminal_ui_state
+            .terminal_size
+            .height
+            .saturating_sub(2)
+            .max(1);
+        let cols = state
+            .terminal_ui_state
+            .terminal_size
+            .width
+            .saturating_sub(4)
+            .max(1);
         state.shell_runtime_state.shell_screen = vt100::Parser::new(rows, cols, 0);
 
         // Set textarea shell mode to match app state
@@ -431,14 +492,24 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 
     // Mark the current streaming tool call as completed
     if let Some(tool_call_id) = state.tool_call_state.streaming_tool_result_id {
-        state.tool_call_state.completed_tool_calls.insert(tool_call_id);
+        state
+            .tool_call_state
+            .completed_tool_calls
+            .insert(tool_call_id);
     }
 
     // Clear the streaming data and remove the streaming message and pending bash message id
     state.tool_call_state.streaming_tool_results.clear();
     state.messages_scrolling_state.messages.retain(|m| {
-        m.id != state.tool_call_state.streaming_tool_result_id.unwrap_or_default()
-            && m.id != state.tool_call_state.pending_bash_message_id.unwrap_or_default()
+        m.id != state
+            .tool_call_state
+            .streaming_tool_result_id
+            .unwrap_or_default()
+            && m.id
+                != state
+                    .tool_call_state
+                    .pending_bash_message_id
+                    .unwrap_or_default()
     });
     state.tool_call_state.latest_tool_call = None;
     state.tool_call_state.pending_bash_message_id = None;
@@ -447,12 +518,21 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 /// Update session tool calls queue
 pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
     if tool_call_result.status == ToolCallResultStatus::Error
-        && let Some(failed_idx) = state.session_tool_calls_state.tool_call_execution_order
+        && let Some(failed_idx) = state
+            .session_tool_calls_state
+            .tool_call_execution_order
             .iter()
             .position(|id| id == &tool_call_result.call.id)
     {
-        for id in state.session_tool_calls_state.tool_call_execution_order.iter().skip(failed_idx + 1) {
-            state.session_tool_calls_state.session_tool_calls_queue
+        for id in state
+            .session_tool_calls_state
+            .tool_call_execution_order
+            .iter()
+            .skip(failed_idx + 1)
+        {
+            state
+                .session_tool_calls_state
+                .session_tool_calls_queue
                 .insert(id.clone(), ToolCallStatus::Skipped);
         }
     }
@@ -465,7 +545,9 @@ pub fn execute_command_palette_selection(
     output_tx: &Sender<OutputEvent>,
 ) {
     let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
-    if filtered_commands.is_empty() || state.command_palette_state.command_palette_selected >= filtered_commands.len() {
+    if filtered_commands.is_empty()
+        || state.command_palette_state.command_palette_selected >= filtered_commands.len()
+    {
         return;
     }
 
@@ -604,7 +686,8 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 let is_first_edit = !state.side_panel_state.changeset.files.contains_key(path);
                 if is_first_edit
                     && std::path::Path::new(path).exists()
-                    && let Some(backup_path) = backup_original_file(path, &state.side_panel_state.session_id)
+                    && let Some(backup_path) =
+                        backup_original_file(path, &state.side_panel_state.session_id)
                 {
                     // Store backup path on the tracked file (will be created by track_file)
                     // We need to track first, then set the backup path
@@ -628,7 +711,10 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     }
 
                     state.side_panel_state.changeset.track_file(path, edit);
-                    state.side_panel_state.changeset.set_original_backup(path, backup_path);
+                    state
+                        .side_panel_state
+                        .changeset
+                        .set_original_backup(path, backup_path);
 
                     // If file does not exist, mark it as Deleted immediately
                     if !std::path::Path::new(path).exists() {
@@ -678,7 +764,10 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 // Extract backup path from result.result if available
                 let backup_path = extract_backup_path(&result.result);
 
-                state.side_panel_state.changeset.mark_removed(path, backup_path);
+                state
+                    .side_panel_state
+                    .changeset
+                    .mark_removed(path, backup_path);
             }
         }
         _ => {}
@@ -855,7 +944,10 @@ pub fn handle_approval_bar_reject_all(state: &mut AppState) {
 /// Handle select action by index (1-based)
 pub fn handle_approval_bar_select_action(state: &mut AppState, index: usize) {
     let old_index = state.dialog_approval_state.approval_bar.selected_index();
-    state.dialog_approval_state.approval_bar.select_action(index);
+    state
+        .dialog_approval_state
+        .approval_bar
+        .select_action(index);
     if old_index != state.dialog_approval_state.approval_bar.selected_index() {
         update_pending_tool_display(state);
     }
@@ -901,7 +993,10 @@ pub fn handle_approval_bar_collapse(state: &mut AppState) {
 fn update_pending_tool_display(state: &mut AppState) {
     // Remove any existing pending tool block
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
-        state.messages_scrolling_state.messages.retain(|m| m.id != pending_id);
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != pending_id);
     }
 
     // Create a new pending block for the currently selected tool
@@ -958,7 +1053,13 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
                             .and_then(|v| v.as_str())
                             .map(String::from)
                     })
-                    .and_then(|task_id| state.tool_call_state.subagent_pause_info.get(&task_id).cloned());
+                    .and_then(|task_id| {
+                        state
+                            .tool_call_state
+                            .subagent_pause_info
+                            .get(&task_id)
+                            .cloned()
+                    });
 
             let msg = Message::render_subagent_resume_pending_block(
                 tool_call.clone(),

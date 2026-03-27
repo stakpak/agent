@@ -16,7 +16,9 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
     f.render_widget(ratatui::widgets::Clear, area);
 
     // Create list items
-    let items: Vec<ListItem> = state.profile_switcher_state.available_profiles
+    let items: Vec<ListItem> = state
+        .profile_switcher_state
+        .available_profiles
         .iter()
         .enumerate()
         .map(|(idx, profile_name)| {
@@ -140,7 +142,9 @@ pub fn render_profile_switch_overlay(f: &mut Frame, state: &AppState) {
 
     f.render_widget(ratatui::widgets::Clear, area);
 
-    let status_text = state.profile_switcher_state.profile_switch_status_message
+    let status_text = state
+        .profile_switcher_state
+        .profile_switch_status_message
         .as_deref()
         .unwrap_or("Switching profile...");
 

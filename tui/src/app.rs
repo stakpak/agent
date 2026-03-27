@@ -23,91 +23,34 @@ use stakpak_shared::secret_manager::SecretManager;
 use tokio::sync::mpsc;
 
 pub struct AppState {
-    // ========== Input State (TextArea + helpers + file search) ==========
     pub input_state: InputState,
-
-    // ========== Messages & Scrolling State ==========
     pub messages_scrolling_state: MessagesScrollingState,
-
-    // ========== Loading State ==========
     pub loading_state: LoadingState,
-
-    // ========== Shell Popup State ==========
     pub shell_popup_state: ShellPopupState,
-
-    // ========== Tool Call State ==========
     pub tool_call_state: ToolCallState,
-
-    // ========== Dialog & Approval State ==========
     pub dialog_approval_state: DialogApprovalState,
-
-    // ========== Sessions State ==========
     pub sessions_state: SessionsState,
-
-    // ========== Session Tool Calls Queue ==========
     pub session_tool_calls_state: SessionToolCallsState,
-
-    // ========== Profile Switcher State ==========
     pub profile_switcher_state: ProfileSwitcherState,
-
-    // ========== Rulebook Switcher State ==========
     pub rulebook_switcher_state: RulebookSwitcherState,
-
-    // ========== Model Switcher State ==========
     pub model_switcher_state: ModelSwitcherState,
-
-    // ========== Command Palette State ==========
     pub command_palette_state: CommandPaletteState,
-
-    // ========== Shortcuts Popup State ==========
     pub shortcuts_panel_state: ShortcutsPanelState,
-
-    // ========== File Changes Popup State ==========
     pub file_changes_popup_state: FileChangesPopupState,
-
-    // ========== Usage Tracking State ==========
     pub usage_tracking_state: UsageTrackingState,
-
-    // ========== Configuration State ==========
     pub configuration_state: ConfigurationState,
-
-    // ========== Quit Intent State ==========
     pub quit_intent_state: QuitIntentState,
-
-    // ========== Terminal UI State ==========
     pub terminal_ui_state: TerminalUiState,
-
-    // ========== Shell Runtime State ==========
     pub shell_runtime_state: ShellRuntimeState,
-
-    // ========== Shell Session State ==========
     pub shell_session_state: ShellSessionState,
-
-    // ========== Banner State ==========
     pub banner_state: BannerState,
-
-    // ========== Toast State ==========
     pub toast: Option<Toast>,
-
-    // ========== Message Interaction State ==========
     pub message_interaction_state: MessageInteractionState,
-
-    // ========== Side Panel State ==========
     pub side_panel_state: SidePanelState,
-
-    // ========== User Message Queue State ==========
     pub user_message_queue_state: UserMessageQueueState,
-
-    // ========== Message Revert State ==========
     pub message_revert_state: MessageRevertState,
-
-    // ========== Plan Mode State ==========
     pub plan_mode_state: PlanModeState,
-
-    // ========== Plan Review State ==========
     pub plan_review_state: PlanReviewState,
-
-    // ========== Ask User Inline Block State ==========
     pub ask_user_state: AskUserState,
 }
 
@@ -378,7 +321,7 @@ impl AppState {
         None
     }
 
-// Convenience methods for accessing input and cursor (using input_state)
+    // Convenience methods for accessing input and cursor (using input_state)
     pub fn input(&self) -> &str {
         self.input_state.text_area.text()
     }
@@ -485,13 +428,16 @@ impl AppState {
 
                 let filtered_files = result.filtered_files.clone();
                 self.input_state.filtered_files = filtered_files;
-                self.input_state.file_search.filtered_files = self.input_state.filtered_files.clone();
-                self.input_state.file_search.is_file_mode = !self.input_state.filtered_files.is_empty();
-                self.input_state.file_search.trigger_char = if !self.input_state.filtered_files.is_empty() {
-                    Some('@')
-                } else {
-                    None
-                };
+                self.input_state.file_search.filtered_files =
+                    self.input_state.filtered_files.clone();
+                self.input_state.file_search.is_file_mode =
+                    !self.input_state.filtered_files.is_empty();
+                self.input_state.file_search.trigger_char =
+                    if !self.input_state.filtered_files.is_empty() {
+                        Some('@')
+                    } else {
+                        None
+                    };
 
                 // NOTE: Slash command filtering (filtered_helpers) is now done synchronously
                 // in handle_input_changed / handle_input_backspace to avoid race conditions

@@ -25,7 +25,12 @@ pub fn handle_stream_message(
         return;
     }
 
-    if let Some(message) = state.messages_scrolling_state.messages.iter_mut().find(|m| m.id == id) {
+    if let Some(message) = state
+        .messages_scrolling_state
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id)
+    {
         state.tool_call_state.is_streaming = true;
         if !state.loading_state.is_loading {
             state.loading_state.is_loading = true;
@@ -56,7 +61,9 @@ pub fn handle_stream_message(
             state.messages_scrolling_state.scroll = max_scroll;
         } else {
             // Mark that content changed while scrolled up - cache will be rebuilt when user scrolls back
-            state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+            state
+                .messages_scrolling_state
+                .content_changed_while_scrolled_up = true;
         }
         state.tool_call_state.is_streaming = false;
     } else {
@@ -65,7 +72,9 @@ pub fn handle_stream_message(
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         let was_at_bottom = state.messages_scrolling_state.scroll == max_scroll;
-        state.messages_scrolling_state.messages
+        state
+            .messages_scrolling_state
+            .messages
             .push(Message::assistant(Some(id), s.clone(), None));
 
         // Invalidate cache since messages changed
@@ -75,7 +84,9 @@ pub fn handle_stream_message(
         // Clearing here would wipe out any new input the user started typing while waiting for the response.
 
         if !was_at_bottom {
-            state.messages_scrolling_state.content_changed_while_scrolled_up = true;
+            state
+                .messages_scrolling_state
+                .content_changed_while_scrolled_up = true;
         }
 
         // Auto-show side panel
@@ -100,13 +111,28 @@ pub fn handle_add_user_message(state: &mut AppState, s: String) {
 
     // Add extra spacing before user message if not the first message
     if !state.messages_scrolling_state.messages.is_empty() {
-        state.messages_scrolling_state.messages.push(Message::plain_text(""));
-        state.messages_scrolling_state.messages.push(Message::plain_text(""));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::plain_text(""));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::plain_text(""));
     }
-    state.messages_scrolling_state.messages.push(Message::user(s, None));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::user(s, None));
     // Add extra spacing after user message
-    state.messages_scrolling_state.messages.push(Message::plain_text(""));
-    state.messages_scrolling_state.messages.push(Message::plain_text(""));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::plain_text(""));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::plain_text(""));
 
     // Invalidate cache since messages changed
     invalidate_message_lines_cache(state);
@@ -123,7 +149,10 @@ pub fn handle_has_user_message(state: &mut AppState) {
     state.dialog_approval_state.message_approved_tools.clear();
     state.dialog_approval_state.message_rejected_tools.clear();
     state.dialog_approval_state.message_tool_calls = None;
-    state.session_tool_calls_state.tool_call_execution_order.clear();
+    state
+        .session_tool_calls_state
+        .tool_call_execution_order
+        .clear();
     state.dialog_approval_state.is_dialog_open = false;
     // Clear any pending cancellation from a previous interaction
     state.tool_call_state.cancel_requested = false;
@@ -145,7 +174,9 @@ pub fn handle_total_usage(state: &mut AppState, usage: LLMTokenUsage) {
     // Update total session usage from CLI
     state.usage_tracking_state.total_session_usage = usage;
     // If cost message was just displayed, update it
-    let should_update = state.messages_scrolling_state.messages
+    let should_update = state
+        .messages_scrolling_state
+        .messages
         .last()
         .and_then(|msg| {
             if let MessageContent::StyledBlock(lines) = &msg.content {

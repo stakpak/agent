@@ -65,7 +65,9 @@ pub fn get_navigation_order(state: &AppState, filtered_indices: &[usize]) -> Vec
 
     // First: Recent models that exist in available_models and match filter
     for recent_id in &state.model_switcher_state.recent_models {
-        if let Some(idx) = state.model_switcher_state.available_models
+        if let Some(idx) = state
+            .model_switcher_state
+            .available_models
             .iter()
             .position(|m| matches_recent_id(m, recent_id))
             && filtered_indices.contains(&idx)
@@ -362,10 +364,14 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
     // === Recent Models Section ===
     // Recent models are now always in available_models (custom models are synthesized
     // with provider inferred from model ID prefix or the user's default provider)
-    let recent_model_indices: Vec<usize> = state.model_switcher_state.recent_models
+    let recent_model_indices: Vec<usize> = state
+        .model_switcher_state
+        .recent_models
         .iter()
         .filter_map(|recent_id| {
-            state.model_switcher_state.available_models
+            state
+                .model_switcher_state
+                .available_models
                 .iter()
                 .position(|m| matches_recent_id(m, recent_id))
         })
@@ -386,7 +392,9 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         for &model_idx in &recent_model_indices {
             let model = &state.model_switcher_state.available_models[model_idx];
             let is_selected = model_idx == state.model_switcher_state.model_switcher_selected;
-            let is_current = state.model_switcher_state.current_model
+            let is_current = state
+                .model_switcher_state
+                .current_model
                 .as_ref()
                 .is_some_and(|m| m.id == model.id);
 
@@ -442,7 +450,9 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         for &model_idx in model_indices {
             let model = &state.model_switcher_state.available_models[model_idx];
             let is_selected = model_idx == state.model_switcher_state.model_switcher_selected;
-            let is_current = state.model_switcher_state.current_model
+            let is_current = state
+                .model_switcher_state
+                .current_model
                 .as_ref()
                 .is_some_and(|m| m.id == model.id);
 

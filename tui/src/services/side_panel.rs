@@ -49,7 +49,8 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Plan section is only visible when plan mode is active
     let plan_active = state.plan_mode_state.plan_mode_active;
     let plan_collapsed = state
-        .side_panel_state.side_panel_section_collapsed
+        .side_panel_state
+        .side_panel_section_collapsed
         .get(&SidePanelSection::Plan)
         .copied()
         .unwrap_or(false);
@@ -64,22 +65,26 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
-        .side_panel_state.side_panel_section_collapsed
+        .side_panel_state
+        .side_panel_section_collapsed
         .get(&SidePanelSection::Context)
         .copied()
         .unwrap_or(false);
     let billing_collapsed = state
-        .side_panel_state.side_panel_section_collapsed
+        .side_panel_state
+        .side_panel_section_collapsed
         .get(&SidePanelSection::Billing)
         .copied()
         .unwrap_or(false);
     let tasks_collapsed = state
-        .side_panel_state.side_panel_section_collapsed
+        .side_panel_state
+        .side_panel_section_collapsed
         .get(&SidePanelSection::Tasks)
         .copied()
         .unwrap_or(false);
     let changeset_collapsed = state
-        .side_panel_state.side_panel_section_collapsed
+        .side_panel_state
+        .side_panel_section_collapsed
         .get(&SidePanelSection::Changeset)
         .copied()
         .unwrap_or(false);
@@ -141,20 +146,25 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     state.side_panel_state.side_panel_areas.clear();
     if plan_active {
         state
-            .side_panel_state.side_panel_areas
+            .side_panel_state
+            .side_panel_areas
             .insert(SidePanelSection::Plan, chunks[0]);
     }
     state
-        .side_panel_state.side_panel_areas
+        .side_panel_state
+        .side_panel_areas
         .insert(SidePanelSection::Context, chunks[1]);
     state
-        .side_panel_state.side_panel_areas
+        .side_panel_state
+        .side_panel_areas
         .insert(SidePanelSection::Billing, chunks[2]);
     state
-        .side_panel_state.side_panel_areas
+        .side_panel_state
+        .side_panel_areas
         .insert(SidePanelSection::Tasks, chunks[3]);
     state
-        .side_panel_state.side_panel_areas
+        .side_panel_state
+        .side_panel_areas
         .insert(SidePanelSection::Changeset, chunks[4]);
 
     if plan_active {
@@ -177,7 +187,12 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
 
     // Derive phase badge from plan_metadata status
-    let phase_badge = match state.plan_mode_state.plan_metadata.as_ref().map(|m| m.status) {
+    let phase_badge = match state
+        .plan_mode_state
+        .plan_metadata
+        .as_ref()
+        .map(|m| m.status)
+    {
         Some(PlanStatus::Drafting) => "",
         Some(PlanStatus::PendingReview) => "",
         Some(PlanStatus::Approved) => "",
@@ -217,7 +232,12 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     };
 
     // Phase row — derived from plan_metadata status
-    let (phase_label, phase_color) = match state.plan_mode_state.plan_metadata.as_ref().map(|m| m.status) {
+    let (phase_label, phase_color) = match state
+        .plan_mode_state
+        .plan_metadata
+        .as_ref()
+        .map(|m| m.status)
+    {
         Some(PlanStatus::Drafting) => ("Drafting", ThemeColors::yellow()),
         Some(PlanStatus::PendingReview) => ("Pending Review", ThemeColors::cyan()),
         Some(PlanStatus::Approved) => ("Approved", ThemeColors::green()),
@@ -299,11 +319,18 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     };
 
     // Get the active model (current_model if set, otherwise default model)
-    let active_model = state.model_switcher_state.current_model.as_ref().unwrap_or(&state.configuration_state.model);
+    let active_model = state
+        .model_switcher_state
+        .current_model
+        .as_ref()
+        .unwrap_or(&state.configuration_state.model);
 
     // Token usage - use current message's prompt_tokens for context window utilization
     // (prompt_tokens represents the actual context size, not accumulated across messages)
-    let tokens = state.usage_tracking_state.current_message_usage.prompt_tokens;
+    let tokens = state
+        .usage_tracking_state
+        .current_message_usage
+        .prompt_tokens;
     let max_tokens = active_model.limit.context as u32;
 
     // Show tokens info
@@ -782,7 +809,8 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     // Session ID line with copy shortcut
     // Check if we recently copied (within 2 seconds)
     let recently_copied = state
-        .side_panel_state.session_id_copied_at
+        .side_panel_state
+        .session_id_copied_at
         .map(|t| t.elapsed().as_secs() < 2)
         .unwrap_or(false);
 

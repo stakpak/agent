@@ -57,10 +57,12 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
     if is_in_input_area(state, col, row) {
         // Click was in input area - start input selection
         if let Some(input_area) = state.message_interaction_state.input_content_area {
-            state
-                .input_state
-                .text_area
-                .start_selection(col, row, input_area, &state.input_state.text_area_state);
+            state.input_state.text_area.start_selection(
+                col,
+                row,
+                input_area,
+                &state.input_state.text_area_state,
+            );
         }
         // Clear message area selection
         state.message_interaction_state.selection = SelectionState::default();
@@ -72,8 +74,11 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16) {
 
     // Check if click is within message area
     // Message area starts at message_area_y and extends for message_area_height rows
-    let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
-    if row < state.message_interaction_state.message_area_y || row_in_message_area >= message_area_height {
+    let row_in_message_area =
+        (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
+    if row < state.message_interaction_state.message_area_y
+        || row_in_message_area >= message_area_height
+    {
         // Click is outside message area, don't start selection
         state.message_interaction_state.selection = SelectionState::default();
         return;
@@ -114,8 +119,10 @@ fn handle_popup_drag_start(state: &mut AppState, col: u16, row: u16) {
     let popup_height = state.message_interaction_state.collapsed_popup_area_height as usize;
 
     // Check if click is within the popup content area
-    let row_in_popup = (row as usize).saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
-    if row < state.message_interaction_state.collapsed_popup_area_y || row_in_popup >= popup_height {
+    let row_in_popup = (row as usize)
+        .saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
+    if row < state.message_interaction_state.collapsed_popup_area_y || row_in_popup >= popup_height
+    {
         state.message_interaction_state.selection = SelectionState::default();
         return;
     }
@@ -147,10 +154,12 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
     // Check if we're dragging in input area selection mode
     if state.input_state.text_area.selection.is_active() {
         if let Some(input_area) = state.message_interaction_state.input_content_area {
-            state
-                .input_state
-                .text_area
-                .update_selection(col, row, input_area, &state.input_state.text_area_state);
+            state.input_state.text_area.update_selection(
+                col,
+                row,
+                input_area,
+                &state.input_state.text_area_state,
+            );
         }
         return;
     }
@@ -179,7 +188,9 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
         return;
     } else if message_area_height > 0 && (row as usize) >= msg_bottom.saturating_sub(1) {
         // Mouse is at or below the bottom edge — check if there's content below to scroll to
-        let total_lines = state.messages_scrolling_state.assembled_lines_cache
+        let total_lines = state
+            .messages_scrolling_state
+            .assembled_lines_cache
             .as_ref()
             .map(|(_, lines, _)| lines.len())
             .unwrap_or(0);
@@ -189,7 +200,8 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
             // There's content below — trigger auto-scroll down
             state.message_interaction_state.selection_auto_scroll = 1;
             // Update selection to the bottommost visible line
-            let absolute_line = state.messages_scrolling_state.scroll + message_area_height.saturating_sub(1);
+            let absolute_line =
+                state.messages_scrolling_state.scroll + message_area_height.saturating_sub(1);
             let rel_col = content_col(state, col);
             state.message_interaction_state.selection.end_line = Some(absolute_line);
             state.message_interaction_state.selection.end_col = Some(rel_col);
@@ -202,7 +214,8 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16) {
 
     // Clamp row to message area
     // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-    let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
+    let row_in_message_area =
+        (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
     let clamped_row = row_in_message_area.min(message_area_height.saturating_sub(1));
 
     // Convert screen row to absolute line index
@@ -235,7 +248,8 @@ fn handle_popup_drag(state: &mut AppState, col: u16, row: u16) {
     let popup_height = state.message_interaction_state.collapsed_popup_area_height as usize;
 
     // Clamp row to popup content area
-    let row_in_popup = (row as usize).saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
+    let row_in_popup = (row as usize)
+        .saturating_sub(state.message_interaction_state.collapsed_popup_area_y as usize);
     let clamped_row = row_in_popup.min(popup_height.saturating_sub(1));
 
     // Convert screen row to absolute line index using popup's own scroll
@@ -301,7 +315,8 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
     if is_just_click {
         // Just a click, not a selection - check if it's on a user message
         // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-        let row_in_message_area = (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
+        let row_in_message_area =
+            (row as usize).saturating_sub(state.message_interaction_state.message_area_y as usize);
         let absolute_line = state.messages_scrolling_state.scroll + row_in_message_area;
 
         // Clear selection first
@@ -311,9 +326,15 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16) {
         if let Some((msg_id, msg_text)) = find_user_message_at_line(state, absolute_line) {
             // Show message action popup
             state.message_interaction_state.show_message_action_popup = true;
-            state.message_interaction_state.message_action_popup_selected = 0;
-            state.message_interaction_state.message_action_popup_position = Some((col, row));
-            state.message_interaction_state.message_action_target_message_id = Some(msg_id);
+            state
+                .message_interaction_state
+                .message_action_popup_selected = 0;
+            state
+                .message_interaction_state
+                .message_action_popup_position = Some((col, row));
+            state
+                .message_interaction_state
+                .message_action_target_message_id = Some(msg_id);
             state.message_interaction_state.message_action_target_text = Some(msg_text);
         }
 
@@ -406,16 +427,20 @@ pub fn handle_scroll_during_selection(
     };
 
     // Choose the correct cache depending on whether the collapsed popup is open
-    let cached_lines: Option<&Vec<ratatui::text::Line<'static>>> = if state.messages_scrolling_state.show_collapsed_messages
-    {
-        state.messages_scrolling_state.collapsed_message_lines_cache
-            .as_ref()
-            .map(|(_, _, lines)| lines)
-    } else {
-        state.messages_scrolling_state.assembled_lines_cache
-            .as_ref()
-            .map(|(_, lines, _)| lines)
-    };
+    let cached_lines: Option<&Vec<ratatui::text::Line<'static>>> =
+        if state.messages_scrolling_state.show_collapsed_messages {
+            state
+                .messages_scrolling_state
+                .collapsed_message_lines_cache
+                .as_ref()
+                .map(|(_, _, lines)| lines)
+        } else {
+            state
+                .messages_scrolling_state
+                .assembled_lines_cache
+                .as_ref()
+                .map(|(_, lines, _)| lines)
+        };
 
     // Calculate new end line based on scroll direction
     let new_end_line = if direction < 0 {
@@ -462,7 +487,9 @@ pub fn handle_scroll_during_selection(
 /// behavior found in text editors.
 pub fn tick_selection_auto_scroll(state: &mut AppState) {
     // Safety: only auto-scroll when there's an active message area selection
-    if !state.message_interaction_state.selection.active || state.message_interaction_state.selection_auto_scroll == 0 {
+    if !state.message_interaction_state.selection.active
+        || state.message_interaction_state.selection_auto_scroll == 0
+    {
         state.message_interaction_state.selection_auto_scroll = 0;
         return;
     }
@@ -476,7 +503,9 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
     let direction = state.message_interaction_state.selection_auto_scroll;
 
     // Get total content lines from cache for bounds checking
-    let total_lines = state.messages_scrolling_state.assembled_lines_cache
+    let total_lines = state
+        .messages_scrolling_state
+        .assembled_lines_cache
         .as_ref()
         .map(|(_, lines, _)| lines.len())
         .unwrap_or(0);
@@ -494,14 +523,16 @@ pub fn tick_selection_auto_scroll(state: &mut AppState) {
         if state.messages_scrolling_state.scroll == 0 {
             return; // Already at top, nothing to do
         }
-        state.messages_scrolling_state.scroll = state.messages_scrolling_state.scroll.saturating_sub(1);
+        state.messages_scrolling_state.scroll =
+            state.messages_scrolling_state.scroll.saturating_sub(1);
         state.messages_scrolling_state.stay_at_bottom = false;
     } else {
         // Scroll down
         if state.messages_scrolling_state.scroll >= max_scroll {
             return; // Already at bottom, nothing to do
         }
-        state.messages_scrolling_state.scroll = (state.messages_scrolling_state.scroll + 1).min(max_scroll);
+        state.messages_scrolling_state.scroll =
+            (state.messages_scrolling_state.scroll + 1).min(max_scroll);
         if state.messages_scrolling_state.scroll >= max_scroll {
             state.messages_scrolling_state.stay_at_bottom = true;
         }

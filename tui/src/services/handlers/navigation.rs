@@ -25,7 +25,8 @@ fn update_helper_dropdown_scroll(state: &mut AppState) {
     if state.input_state.helper_selected < state.input_state.helper_scroll {
         // Selected item is above visible area, scroll up
         state.input_state.helper_scroll = state.input_state.helper_selected;
-    } else if state.input_state.helper_selected >= state.input_state.helper_scroll + visible_height {
+    } else if state.input_state.helper_selected >= state.input_state.helper_scroll + visible_height
+    {
         // Selected item is below visible area, scroll down
         state.input_state.helper_scroll = state.input_state.helper_selected - visible_height + 1;
     }
@@ -50,12 +51,18 @@ fn update_command_palette_scroll(state: &mut AppState) {
     let visible_height = 6; // Adjust this based on your actual popup height
 
     // Calculate the scroll position to keep the selected item visible
-    if state.command_palette_state.command_palette_selected < state.command_palette_state.command_palette_scroll {
+    if state.command_palette_state.command_palette_selected
+        < state.command_palette_state.command_palette_scroll
+    {
         // Selected item is above visible area, scroll up
-        state.command_palette_state.command_palette_scroll = state.command_palette_state.command_palette_selected;
-    } else if state.command_palette_state.command_palette_selected >= state.command_palette_state.command_palette_scroll + visible_height {
+        state.command_palette_state.command_palette_scroll =
+            state.command_palette_state.command_palette_selected;
+    } else if state.command_palette_state.command_palette_selected
+        >= state.command_palette_state.command_palette_scroll + visible_height
+    {
         // Selected item is below visible area, scroll down
-        state.command_palette_state.command_palette_scroll = state.command_palette_state.command_palette_selected - visible_height + 1;
+        state.command_palette_state.command_palette_scroll =
+            state.command_palette_state.command_palette_selected - visible_height + 1;
     }
 
     // Ensure scroll doesn't go beyond bounds
@@ -86,7 +93,9 @@ pub fn handle_dropdown_down(state: &mut AppState) {
     if state.input_state.show_helper_dropdown {
         if state.input_state.file_search.is_active() {
             // File file_search mode
-            if state.input_state.helper_selected + 1 < state.input_state.file_search.filtered_count() {
+            if state.input_state.helper_selected + 1
+                < state.input_state.file_search.filtered_count()
+            {
                 state.input_state.helper_selected += 1;
             }
         } else {
@@ -109,7 +118,11 @@ pub fn handle_up_navigation(state: &mut AppState) {
         if state.profile_switcher_state.profile_switcher_selected > 0 {
             state.profile_switcher_state.profile_switcher_selected -= 1;
         } else {
-            state.profile_switcher_state.profile_switcher_selected = state.profile_switcher_state.available_profiles.len().saturating_sub(1);
+            state.profile_switcher_state.profile_switcher_selected = state
+                .profile_switcher_state
+                .available_profiles
+                .len()
+                .saturating_sub(1);
         }
         return;
     }
@@ -117,26 +130,39 @@ pub fn handle_up_navigation(state: &mut AppState) {
         match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
+                let filtered_commands =
+                    filter_commands(&state.command_palette_state.command_palette_search);
                 if state.command_palette_state.command_palette_selected > 0 {
                     state.command_palette_state.command_palette_selected -= 1;
                 } else {
-                    state.command_palette_state.command_palette_selected = filtered_commands.len().saturating_sub(1);
+                    state.command_palette_state.command_palette_selected =
+                        filtered_commands.len().saturating_sub(1);
                 }
                 update_command_palette_scroll(state);
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_panel_state.shortcuts_scroll = state.shortcuts_panel_state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
+                state.shortcuts_panel_state.shortcuts_scroll = state
+                    .shortcuts_panel_state
+                    .shortcuts_scroll
+                    .saturating_sub(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state.command_palette_state.command_palette_search.to_lowercase();
-                let filtered_indices: Vec<usize> = state.sessions_state.sessions
+                let search_lower = state
+                    .command_palette_state
+                    .command_palette_search
+                    .to_lowercase();
+                let filtered_indices: Vec<usize> = state
+                    .sessions_state
+                    .sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state.command_palette_state.command_palette_search.is_empty()
+                        state
+                            .command_palette_state
+                            .command_palette_search
+                            .is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -165,7 +191,11 @@ pub fn handle_up_navigation(state: &mut AppState) {
         if state.rulebook_switcher_state.rulebook_switcher_selected > 0 {
             state.rulebook_switcher_state.rulebook_switcher_selected -= 1;
         } else {
-            state.rulebook_switcher_state.rulebook_switcher_selected = state.rulebook_switcher_state.filtered_rulebooks.len().saturating_sub(1);
+            state.rulebook_switcher_state.rulebook_switcher_selected = state
+                .rulebook_switcher_state
+                .filtered_rulebooks
+                .len()
+                .saturating_sub(1);
         }
         return;
     }
@@ -173,7 +203,9 @@ pub fn handle_up_navigation(state: &mut AppState) {
     // Handle different UI states
     if state.input_state.show_helper_dropdown {
         handle_dropdown_up(state);
-    } else if state.dialog_approval_state.is_dialog_open && state.dialog_approval_state.dialog_focused {
+    } else if state.dialog_approval_state.is_dialog_open
+        && state.dialog_approval_state.dialog_focused
+    {
         // Handle dialog navigation only when dialog is focused
         if state.dialog_approval_state.dialog_selected > 0 {
             state.dialog_approval_state.dialog_selected -= 1;
@@ -193,7 +225,13 @@ pub fn handle_down_navigation(
     message_area_width: usize,
 ) {
     if state.profile_switcher_state.show_profile_switcher {
-        if state.profile_switcher_state.profile_switcher_selected < state.profile_switcher_state.available_profiles.len().saturating_sub(1) {
+        if state.profile_switcher_state.profile_switcher_selected
+            < state
+                .profile_switcher_state
+                .available_profiles
+                .len()
+                .saturating_sub(1)
+        {
             state.profile_switcher_state.profile_switcher_selected += 1;
         } else {
             state.profile_switcher_state.profile_switcher_selected = 0;
@@ -204,8 +242,11 @@ pub fn handle_down_navigation(
         match state.shortcuts_panel_state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
                 // Navigate commands list
-                let filtered_commands = filter_commands(&state.command_palette_state.command_palette_search);
-                if state.command_palette_state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
+                let filtered_commands =
+                    filter_commands(&state.command_palette_state.command_palette_search);
+                if state.command_palette_state.command_palette_selected
+                    < filtered_commands.len().saturating_sub(1)
+                {
                     state.command_palette_state.command_palette_selected += 1;
                 } else {
                     state.command_palette_state.command_palette_selected = 0;
@@ -214,16 +255,27 @@ pub fn handle_down_navigation(
             }
             crate::app::ShortcutsPopupMode::Shortcuts => {
                 // Scroll shortcuts content
-                state.shortcuts_panel_state.shortcuts_scroll = state.shortcuts_panel_state.shortcuts_scroll.saturating_add(SCROLL_LINES);
+                state.shortcuts_panel_state.shortcuts_scroll = state
+                    .shortcuts_panel_state
+                    .shortcuts_scroll
+                    .saturating_add(SCROLL_LINES);
             }
             crate::app::ShortcutsPopupMode::Sessions => {
                 // Navigate filtered sessions list
-                let search_lower = state.command_palette_state.command_palette_search.to_lowercase();
-                let filtered_indices: Vec<usize> = state.sessions_state.sessions
+                let search_lower = state
+                    .command_palette_state
+                    .command_palette_search
+                    .to_lowercase();
+                let filtered_indices: Vec<usize> = state
+                    .sessions_state
+                    .sessions
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| {
-                        state.command_palette_state.command_palette_search.is_empty()
+                        state
+                            .command_palette_state
+                            .command_palette_search
+                            .is_empty()
                             || s.title.to_lowercase().contains(&search_lower)
                     })
                     .map(|(i, _)| i)
@@ -249,7 +301,13 @@ pub fn handle_down_navigation(
         return;
     }
     if state.rulebook_switcher_state.show_rulebook_switcher {
-        if state.rulebook_switcher_state.rulebook_switcher_selected < state.rulebook_switcher_state.filtered_rulebooks.len().saturating_sub(1) {
+        if state.rulebook_switcher_state.rulebook_switcher_selected
+            < state
+                .rulebook_switcher_state
+                .filtered_rulebooks
+                .len()
+                .saturating_sub(1)
+        {
             state.rulebook_switcher_state.rulebook_switcher_selected += 1;
         } else {
             state.rulebook_switcher_state.rulebook_switcher_selected = 0;
@@ -260,7 +318,9 @@ pub fn handle_down_navigation(
     // Handle different UI states
     if state.input_state.show_helper_dropdown {
         handle_dropdown_down(state);
-    } else if state.dialog_approval_state.is_dialog_open && state.dialog_approval_state.dialog_focused {
+    } else if state.dialog_approval_state.is_dialog_open
+        && state.dialog_approval_state.dialog_focused
+    {
         // Handle dialog navigation only when dialog is focused
         if state.dialog_approval_state.dialog_selected < 2 {
             state.dialog_approval_state.dialog_selected += 1;
@@ -294,7 +354,9 @@ fn handle_scroll_up(state: &mut AppState) {
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     if state.messages_scrolling_state.show_collapsed_messages {
         // For collapsed messages popup, we need to calculate scroll based on collapsed messages only
-        let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.collapsed_message_lines_cache {
+        let total_lines = if let Some((_, _, cached_lines)) =
+            &state.messages_scrolling_state.collapsed_message_lines_cache
+        {
             cached_lines.len()
         } else {
             // Fallback: calculate once and cache
@@ -310,7 +372,9 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
         }
     } else {
         // Use cached line count instead of recalculating every scroll
-        let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.message_lines_cache {
+        let total_lines = if let Some((_, _, cached_lines)) =
+            &state.messages_scrolling_state.message_lines_cache
+        {
             cached_lines.len()
         } else {
             // Fallback: calculate once and cache
@@ -328,9 +392,14 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
 
             // If content changed while we were scrolled up, invalidate cache once
             // to catch up with new content that arrived while scrolled up
-            if state.messages_scrolling_state.content_changed_while_scrolled_up {
+            if state
+                .messages_scrolling_state
+                .content_changed_while_scrolled_up
+            {
                 crate::services::message::invalidate_message_lines_cache(state);
-                state.messages_scrolling_state.content_changed_while_scrolled_up = false;
+                state
+                    .messages_scrolling_state
+                    .content_changed_while_scrolled_up = false;
             }
         }
     }
@@ -357,25 +426,32 @@ pub fn handle_page_down(
 ) {
     state.messages_scrolling_state.stay_at_bottom = false; // unlock from bottom
     // Use cached line count instead of recalculating every page operation
-    let total_lines = if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.message_lines_cache {
-        cached_lines.len()
-    } else {
-        // Fallback: calculate once and cache
-        let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
-        all_lines.len()
-    };
+    let total_lines =
+        if let Some((_, _, cached_lines)) = &state.messages_scrolling_state.message_lines_cache {
+            cached_lines.len()
+        } else {
+            // Fallback: calculate once and cache
+            let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
+            all_lines.len()
+        };
 
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
     if state.messages_scrolling_state.scroll < max_scroll {
-        state.messages_scrolling_state.scroll = (state.messages_scrolling_state.scroll + page).min(max_scroll);
+        state.messages_scrolling_state.scroll =
+            (state.messages_scrolling_state.scroll + page).min(max_scroll);
         if state.messages_scrolling_state.scroll == max_scroll {
             state.messages_scrolling_state.stay_at_bottom = true;
 
             // If content changed while we were scrolled up, invalidate cache once
-            if state.messages_scrolling_state.content_changed_while_scrolled_up {
+            if state
+                .messages_scrolling_state
+                .content_changed_while_scrolled_up
+            {
                 crate::services::message::invalidate_message_lines_cache(state);
-                state.messages_scrolling_state.content_changed_while_scrolled_up = false;
+                state
+                    .messages_scrolling_state
+                    .content_changed_while_scrolled_up = false;
             }
         }
     } else {
@@ -405,9 +481,16 @@ pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_a
     // scroll_to_last_message_start takes priority - user explicitly navigating tool calls
     if state.messages_scrolling_state.scroll_to_last_message_start {
         // Get the last message's rendered line count from cache
-        let last_message_lines = state.messages_scrolling_state.messages
+        let last_message_lines = state
+            .messages_scrolling_state
+            .messages
             .last()
-            .and_then(|msg| state.messages_scrolling_state.per_message_cache.get(&msg.id))
+            .and_then(|msg| {
+                state
+                    .messages_scrolling_state
+                    .per_message_cache
+                    .get(&msg.id)
+            })
             .map(|cache| cache.rendered_lines.len())
             .unwrap_or(0);
 

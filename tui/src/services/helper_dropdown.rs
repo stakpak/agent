@@ -26,7 +26,8 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
 
         // Create a compact area for the dropdown (matching view.rs calculation)
         let has_content_above = state.input_state.helper_scroll > 0;
-        let has_content_below = state.input_state.helper_scroll < total_commands.saturating_sub(visible_height);
+        let has_content_below =
+            state.input_state.helper_scroll < total_commands.saturating_sub(visible_height);
         let arrow_lines =
             if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
         let counter_line = if has_content_above || has_content_below {
