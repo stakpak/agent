@@ -271,7 +271,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
 
     // Only update last_message_tool_calls if we're not in a retry scenario
     // During retry, we want to preserve the original sequence for ShellCompleted
-    if !state.show_shell_mode || state.dialog_command.is_none() {
+    if !state.shell_popup_state.show_shell_mode || state.dialog_command.is_none() {
         state.last_message_tool_calls = prompt_tool_calls.clone();
     }
 }
@@ -329,19 +329,19 @@ pub fn handle_retry_tool_call(
             }
         };
         // Enable shell mode and popup
-        state.show_shell_mode = true;
-        state.shell_popup_visible = true;
-        state.shell_popup_expanded = true;
+        state.shell_popup_state.show_shell_mode = true;
+        state.shell_popup_state.shell_popup_visible = true;
+        state.shell_popup_state.shell_popup_expanded = true;
         state.is_dialog_open = false;
-        state.ondemand_shell_mode = false;
+        state.shell_popup_state.ondemand_shell_mode = false;
         state.dialog_command = Some(tool_call.clone());
-        if state.shell_tool_calls.is_none() {
-            state.shell_tool_calls = Some(Vec::new());
+        if state.shell_popup_state.shell_tool_calls.is_none() {
+            state.shell_popup_state.shell_tool_calls = Some(Vec::new());
         }
 
         // Clear any existing shell state
-        state.active_shell_command = None;
-        state.active_shell_command_output = None;
+        state.shell_popup_state.active_shell_command = None;
+        state.shell_popup_state.active_shell_command_output = None;
         state.shell_history_lines.clear(); // Clear history for fresh retry
 
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
@@ -377,10 +377,10 @@ pub fn handle_interactive_stall_detected(
     if let Some(tool_call) = &state.latest_tool_call {
         state.dialog_command = Some(tool_call.clone());
     }
-    state.ondemand_shell_mode = false;
+    state.shell_popup_state.ondemand_shell_mode = false;
 
-    if state.shell_tool_calls.is_none() {
-        state.shell_tool_calls = Some(Vec::new());
+    if state.shell_popup_state.shell_tool_calls.is_none() {
+        state.shell_popup_state.shell_tool_calls = Some(Vec::new());
     }
 
     // Trigger running the shell with the command - this spawns the user's shell and then executes the command

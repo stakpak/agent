@@ -392,11 +392,11 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             ));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
                 None,       // No revert index
             ));
-            ctx.state.shell_tool_calls = None;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
@@ -568,11 +568,11 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             ctx.state.messages.push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
                 None,       // No revert index
             ));
-            ctx.state.shell_tool_calls = None;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
@@ -649,11 +649,11 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 .push(Message::user(full_prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 full_prompt,
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(),
                 None,
             ));
-            ctx.state.shell_tool_calls = None;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
             ctx.state.input_state.text_area.set_text("");
             ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
@@ -666,7 +666,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
 
 /// Terminate any active shell command before switching sessions
 fn terminate_active_shell(state: &mut AppState) {
-    if let Some(cmd) = &state.active_shell_command {
+    if let Some(cmd) = &state.shell_popup_state.active_shell_command {
         // Kill the running command
         let _ = cmd.kill();
     }
@@ -677,17 +677,17 @@ fn terminate_active_shell(state: &mut AppState) {
     }
 
     // Reset all shell-related state
-    state.active_shell_command = None;
-    state.active_shell_command_output = None;
+    state.shell_popup_state.active_shell_command = None;
+    state.shell_popup_state.active_shell_command_output = None;
     state.interactive_shell_message_id = None;
-    state.show_shell_mode = false;
-    state.shell_popup_visible = false;
-    state.shell_popup_expanded = false;
-    state.waiting_for_shell_input = false;
-    state.shell_pending_command_executed = false;
-    state.shell_pending_command_value = None;
-    state.shell_pending_command_output = None;
-    state.shell_pending_command_output_count = 0;
+    state.shell_popup_state.show_shell_mode = false;
+    state.shell_popup_state.shell_popup_visible = false;
+    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.waiting_for_shell_input = false;
+    state.shell_popup_state.shell_pending_command_executed = false;
+    state.shell_popup_state.shell_pending_command_value = None;
+    state.shell_popup_state.shell_pending_command_output = None;
+    state.shell_popup_state.shell_pending_command_output_count = 0;
     state.dialog_command = None;
     state.input_state.text_area.set_shell_mode(false);
 }

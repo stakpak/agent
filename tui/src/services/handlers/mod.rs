@@ -772,11 +772,11 @@ pub fn update(
     }
 
     // Intercept keys for Shell Mode (only when not loading)
-    if state.show_shell_mode
-        && state.active_shell_command.is_some()
+    if state.shell_popup_state.show_shell_mode
+        && state.shell_popup_state.active_shell_command.is_some()
         && !state.is_dialog_open
         && !state.approval_bar.is_visible()
-        && !state.shell_loading
+        && !state.shell_popup_state.shell_loading
     {
         match event {
             InputEvent::InputChanged(c) => {
@@ -821,8 +821,8 @@ pub fn update(
 
             InputEvent::ScrollUp => {
                 // Scroll popup up (show older content)
-                if state.shell_popup_visible && state.shell_popup_expanded {
-                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_add(1);
+                if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
+                    state.shell_popup_state.shell_popup_scroll = state.shell_popup_state.shell_popup_scroll.saturating_add(1);
                 } else {
                     let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
                     let total_lines = state.shell_history_lines.len();
@@ -833,18 +833,18 @@ pub fn update(
             }
             InputEvent::ScrollDown => {
                 // Scroll popup down (show newer content)
-                if state.shell_popup_visible && state.shell_popup_expanded {
-                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_sub(1);
+                if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
+                    state.shell_popup_state.shell_popup_scroll = state.shell_popup_state.shell_popup_scroll.saturating_sub(1);
                 } else {
                     state.shell_scroll = state.shell_scroll.saturating_sub(1);
                 }
                 return;
             }
             InputEvent::PageUp => {
-                if state.shell_popup_visible && state.shell_popup_expanded {
+                if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
                     let page_size = state.terminal_size.height / 4;
-                    state.shell_popup_scroll =
-                        state.shell_popup_scroll.saturating_add(page_size as usize);
+                    state.shell_popup_state.shell_popup_scroll =
+                        state.shell_popup_state.shell_popup_scroll.saturating_add(page_size as usize);
                 } else {
                     let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
                     let total_lines = state.shell_history_lines.len();
@@ -856,10 +856,10 @@ pub fn update(
                 return;
             }
             InputEvent::PageDown => {
-                if state.shell_popup_visible && state.shell_popup_expanded {
+                if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
                     let page_size = state.terminal_size.height / 4;
-                    state.shell_popup_scroll =
-                        state.shell_popup_scroll.saturating_sub(page_size as usize);
+                    state.shell_popup_state.shell_popup_scroll =
+                        state.shell_popup_state.shell_popup_scroll.saturating_sub(page_size as usize);
                 } else {
                     let page_size = state.terminal_size.height / 2;
                     state.shell_scroll = state.shell_scroll.saturating_sub(page_size);

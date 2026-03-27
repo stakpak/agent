@@ -5,6 +5,7 @@
 
 use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
+use crate::services::shell_mode::ShellCommand;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{ContentPart, ToolCallResult};
@@ -255,6 +256,37 @@ pub struct LoadingState {
     pub loading_type: LoadingType,
     pub spinner_frame: usize,
     pub loading_manager: LoadingStateManager
+}
+
+/// Shell popup and shell-command execution UI state.
+#[derive(Default)]
+pub struct ShellPopupState {
+    pub shell_popup_visible: bool,
+    pub shell_popup_expanded: bool,
+    pub shell_popup_scroll: usize,
+    /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
+    pub needs_terminal_clear: bool,
+    pub shell_cursor_visible: bool,
+    pub shell_cursor_blink_timer: u8,
+    pub active_shell_command: Option<ShellCommand>,
+    pub active_shell_command_output: Option<String>,
+    pub waiting_for_shell_input: bool,
+    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub shell_loading: bool,
+    pub shell_pending_command_value: Option<String>,
+    pub shell_pending_command_executed: bool,
+    pub shell_pending_command_output: Option<String>,
+    // Backward compatibility aliases (to be removed after full migration)
+    pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
+    pub shell_mode_input: String, // unused, kept for compatibility
+    pub is_tool_call_shell_command: bool,
+    pub ondemand_shell_mode: bool,
+    pub shell_pending_command: Option<String>,
+    pub shell_pending_command_output_count: usize,
+    /// Tracks if the initial shell prompt has been shown (before command is typed)
+    pub shell_initial_prompt_shown: bool,
+    /// Tracks if the command has been typed into the shell (after initial prompt)
+    pub shell_command_typed: bool,
 }
 
 impl Default for LoadingState {

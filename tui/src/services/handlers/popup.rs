@@ -142,8 +142,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.session_tool_calls_queue.clear();
     state.completed_tool_calls.clear();
     state.streaming_tool_results.clear();
-    state.active_shell_command = None;
-    state.shell_tool_calls = None;
+    state.shell_popup_state.active_shell_command = None;
+    state.shell_popup_state.shell_tool_calls = None;
     state.message_tool_calls = None;
     state.message_approved_tools.clear();
     state.message_rejected_tools.clear();
@@ -155,14 +155,14 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.last_message_tool_calls.clear();
 
     // Clear shell mode state
-    state.show_shell_mode = false;
-    state.shell_popup_visible = false;
-    state.shell_popup_expanded = false;
-    state.shell_mode_input.clear();
-    state.waiting_for_shell_input = false;
-    state.active_shell_command_output = None;
-    state.is_tool_call_shell_command = false;
-    state.ondemand_shell_mode = false;
+    state.shell_popup_state.show_shell_mode = false;
+    state.shell_popup_state.shell_popup_visible = false;
+    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.shell_mode_input.clear();
+    state.shell_popup_state.waiting_for_shell_input = false;
+    state.shell_popup_state.active_shell_command_output = None;
+    state.shell_popup_state.is_tool_call_shell_command = false;
+    state.shell_popup_state.ondemand_shell_mode = false;
 
     // Clear file search
     state.input_state.filtered_files.clear();

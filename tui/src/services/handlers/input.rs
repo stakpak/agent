@@ -362,19 +362,19 @@ fn handle_input_submitted(
     shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    if state.show_shell_mode {
-        if state.active_shell_command.is_some() {
+    if state.shell_popup_state.show_shell_mode {
+        if state.shell_popup_state.active_shell_command.is_some() {
             let input = state.input().to_string();
             state.input_state.text_area.set_text("");
 
             // Send the input to the shell command
-            if let Some(cmd) = &state.active_shell_command {
+            if let Some(cmd) = &state.shell_popup_state.active_shell_command {
                 let stdin_tx = cmd.stdin_tx.clone();
                 tokio::spawn(async move {
                     let _ = stdin_tx.send(input).await;
                 });
             }
-            state.waiting_for_shell_input = false;
+            state.shell_popup_state.waiting_for_shell_input = false;
             return;
         }
 
@@ -596,9 +596,9 @@ fn handle_input_submitted(
         let mut final_input = state.input().to_string();
 
         // Check for tool-initiated shell resolution
-        if state.is_tool_call_shell_command
-            && state.active_shell_command.is_some()
-            && !state.show_shell_mode
+        if state.shell_popup_state.is_tool_call_shell_command
+            && state.shell_popup_state.active_shell_command.is_some()
+            && !state.shell_popup_state.show_shell_mode
         {
             // 1. Signal cancellation to unblock the MCP task
             if let Some(cancel_tx) = &cancel_tx {
@@ -619,7 +619,7 @@ fn handle_input_submitted(
                 // Form a successful tool call result with history
                 let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
                     state,
-                    state.shell_pending_command_value.clone(),
+                    state.shell_popup_state.shell_pending_command_value.clone(),
                     Some(history_text),
                 );
 
@@ -629,13 +629,13 @@ fn handle_input_submitted(
 
             // 3. Clean up the shell
             crate::services::handlers::shell::terminate_active_shell_session(state);
-            state.is_tool_call_shell_command = false;
+            state.shell_popup_state.is_tool_call_shell_command = false;
         }
 
         // Check for on-demand shell termination and history attachment
-        if state.ondemand_shell_mode
-            && state.active_shell_command.is_some()
-            && !state.show_shell_mode
+        if state.shell_popup_state.ondemand_shell_mode
+            && state.shell_popup_state.active_shell_command.is_some()
+            && !state.shell_popup_state.show_shell_mode
         {
             let mut history_lines = crate::services::handlers::shell::trim_shell_lines(
                 state.shell_history_lines.clone(),
@@ -670,8 +670,8 @@ fn handle_input_submitted(
                     .collect::<Vec<_>>()
                     .join("\n");
 
-                if state.shell_tool_calls.is_none() {
-                    state.shell_tool_calls = Some(Vec::new());
+                if state.shell_popup_state.shell_tool_calls.is_none() {
+                    state.shell_popup_state.shell_tool_calls = Some(Vec::new());
                 }
 
                 let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
@@ -680,7 +680,7 @@ fn handle_input_submitted(
                     Some(history_text),
                 );
 
-                if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                if let Some(ref mut tool_calls) = state.shell_popup_state.shell_tool_calls {
                     tool_calls.push(result);
                 }
             }
@@ -692,13 +692,13 @@ fn handle_input_submitted(
             state.interactive_shell_message_id = None;
 
             // Full clear of shell variables
-            state.active_shell_command = None;
-            state.active_shell_command_output = None;
+            state.shell_popup_state.active_shell_command = None;
+            state.shell_popup_state.active_shell_command_output = None;
             state.shell_history_lines.clear();
-            state.show_shell_mode = false;
-            state.shell_popup_visible = false;
-            state.shell_popup_expanded = false;
-            state.ondemand_shell_mode = false; // Reset on-demand mode
+            state.shell_popup_state.show_shell_mode = false;
+            state.shell_popup_state.shell_popup_visible = false;
+            state.shell_popup_state.shell_popup_expanded = false;
+            state.shell_popup_state.ondemand_shell_mode = false; // Reset on-demand mode
 
             // Note: We don't call terminate_active_shell_session here because we manually cleaned up
             // and we don't want the "Terminated" message update logic from that function.
@@ -800,7 +800,7 @@ fn handle_input_submitted(
                     .pending_user_messages
                     .push_back(PendingUserMessage::new(
                         final_input.clone(),
-                        state.shell_tool_calls.clone(),
+                        state.shell_popup_state.shell_tool_calls.clone(),
                         image_parts,
                         user_message_text,
                     ));
@@ -810,7 +810,7 @@ fn handle_input_submitted(
 
                 if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
                     final_input.clone(),
-                    state.shell_tool_calls.clone(),
+                    state.shell_popup_state.shell_tool_calls.clone(),
                     image_parts,
                     revert_index,
                 )) {
@@ -841,7 +841,7 @@ fn handle_input_submitted(
         }
 
         // Always clear attached images and reset state after submission
-        state.shell_tool_calls = None;
+        state.shell_popup_state.shell_tool_calls = None;
         state.input_state.text_area.set_text("");
         state.input_state.attached_images.clear();
         state.input_state.pending_path_start = None;
@@ -864,7 +864,7 @@ pub fn handle_input_submitted_with(
     color: Option<Color>,
     message_area_height: usize,
 ) {
-    state.shell_tool_calls = None;
+    state.shell_popup_state.shell_tool_calls = None;
     let input_height = 3;
     let total_lines = state.messages.len() * 2;
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));

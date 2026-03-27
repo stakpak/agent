@@ -173,7 +173,7 @@ pub fn handle_esc(
 
     let was_streaming = state.is_streaming;
     let was_dialog_open = state.is_dialog_open;
-    let was_shell_mode = state.show_shell_mode;
+    let was_shell_mode = state.shell_popup_state.show_shell_mode;
     state.is_streaming = false;
     if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
@@ -241,7 +241,7 @@ pub fn handle_esc(
         state.dialog_command = None;
         state.dialog_focused = false; // Reset focus when dialog closes
         state.input_state.text_area.set_text("");
-    } else if state.show_shell_mode {
+    } else if state.shell_popup_state.show_shell_mode {
         if state.dialog_command.is_some() {
             // Interactive stall shell: resolve it correctly with captured history
             // instead of just rejecting it.
@@ -257,7 +257,7 @@ pub fn handle_esc(
 
                 let result = super::shell::shell_command_to_tool_call_result(
                     state,
-                    state.shell_pending_command_value.clone(),
+                    state.shell_popup_state.shell_pending_command_value.clone(),
                     Some(history_text),
                 );
 
@@ -269,23 +269,23 @@ pub fn handle_esc(
                 ));
             }
 
-            if state.active_shell_command.is_some() {
+            if state.shell_popup_state.active_shell_command.is_some() {
                 super::shell::terminate_active_shell_session(state);
             }
-            state.is_tool_call_shell_command = false;
+            state.shell_popup_state.is_tool_call_shell_command = false;
 
-            state.show_shell_mode = false;
-            state.shell_popup_visible = false;
-            state.shell_popup_expanded = false;
+            state.shell_popup_state.show_shell_mode = false;
+            state.shell_popup_state.shell_popup_visible = false;
+            state.shell_popup_state.shell_popup_expanded = false;
             state.input_state.text_area.set_shell_mode(false);
             state.input_state.text_area.set_text("");
             state.dialog_command = None;
 
             // Reset interactive stall tracking state
-            state.shell_pending_command_executed = false;
-            state.shell_pending_command_value = None;
-            state.shell_pending_command_output = None;
-            state.shell_pending_command_output_count = 0;
+            state.shell_popup_state.shell_pending_command_executed = false;
+            state.shell_popup_state.shell_pending_command_value = None;
+            state.shell_popup_state.shell_pending_command_output = None;
+            state.shell_popup_state.shell_pending_command_output_count = 0;
 
             // Invalidate cache to update the display
             crate::services::message::invalidate_message_lines_cache(state);
@@ -325,7 +325,7 @@ pub fn handle_show_confirmation_dialog(
     output_tx: &Sender<OutputEvent>,
     _terminal_size: Size,
 ) {
-    if state.latest_tool_call.is_some() && state.show_shell_mode {
+    if state.latest_tool_call.is_some() && state.shell_popup_state.show_shell_mode {
         return;
     }
     if state

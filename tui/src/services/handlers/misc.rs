@@ -273,19 +273,19 @@ pub fn handle_toggle_mouse_capture(_state: &mut AppState) {
 /// Handle set sessions event
 pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::SessionInfo>) {
     // Terminate any active shell before showing sessions popup
-    if let Some(cmd) = &state.active_shell_command {
+    if let Some(cmd) = &state.shell_popup_state.active_shell_command {
         let _ = cmd.kill();
     }
     if let Some(shell_msg_id) = state.interactive_shell_message_id {
         state.messages.retain(|m| m.id != shell_msg_id);
     }
-    state.active_shell_command = None;
-    state.active_shell_command_output = None;
+    state.shell_popup_state.active_shell_command = None;
+    state.shell_popup_state.active_shell_command_output = None;
     state.interactive_shell_message_id = None;
-    state.show_shell_mode = false;
-    state.shell_popup_visible = false;
-    state.shell_popup_expanded = false;
-    state.waiting_for_shell_input = false;
+    state.shell_popup_state.show_shell_mode = false;
+    state.shell_popup_state.shell_popup_visible = false;
+    state.shell_popup_state.shell_popup_expanded = false;
+    state.shell_popup_state.waiting_for_shell_input = false;
     state.input_state.text_area.set_shell_mode(false);
 
     state.sessions = sessions;

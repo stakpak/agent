@@ -27,7 +27,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode && !state.is_dialog_open {
+    if state.shell_popup_state.show_shell_mode && !state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
             Style::default().fg(ThemeColors::magenta()),

@@ -112,7 +112,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
     let ask_user_visible = state.show_ask_user_popup && !state.ask_user_questions.is_empty();
     let input_visible =
-        !(approval_bar_visible || state.shell_popup_visible && state.shell_popup_expanded);
+        !(approval_bar_visible || state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded);
     let effective_input_height = if input_visible { input_height } else { 0 };
     let queue_count = state.pending_user_messages.len();
     let queue_preview_height = if input_visible && queue_count > 0 {
@@ -197,7 +197,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // Render shell popup above input area (if visible)
-    if state.shell_popup_visible {
+    if state.shell_popup_state.shell_popup_visible {
         let padded_shell_popup_area = Rect {
             x: shell_popup_area.x + 1,
             y: shell_popup_area.y,
@@ -228,7 +228,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.is_dialog_open {
-    } else if state.shell_popup_visible && state.shell_popup_expanded {
+    } else if state.shell_popup_state.shell_popup_visible && state.shell_popup_state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
     } else if !approval_bar_visible {
         // Only render input/dropdown when approval bar is NOT visible
@@ -685,7 +685,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(if state.show_shell_mode {
+        .border_style(if state.shell_popup_state.show_shell_mode {
             Style::default().fg(ThemeColors::magenta())
         } else {
             Style::default().fg(ThemeColors::dark_gray())
@@ -708,12 +708,12 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(block, area);
 
     // Render the TextArea with state, handling password masking if needed
-    if state.show_shell_mode && state.waiting_for_shell_input {
+    if state.shell_popup_state.show_shell_mode && state.shell_popup_state.waiting_for_shell_input {
         state.input_state.text_area.render_with_state(
             content_area,
             f.buffer_mut(),
             &mut state.input_state.text_area_state,
-            state.waiting_for_shell_input,
+            state.shell_popup_state.waiting_for_shell_input,
         );
     } else {
         f.render_stateful_widget_ref(&state.input_state.text_area, content_area, &mut state.input_state.text_area_state);

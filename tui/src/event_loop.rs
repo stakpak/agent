@@ -319,7 +319,7 @@ pub async fn run_tui(
 
                                     // If shell is visible/running, insert cancelled block BEFORE the shell message
                                     // so the order is: cancelled command -> shell box
-                                    if is_cancelled && state.shell_popup_visible {
+                                    if is_cancelled && state.shell_popup_state.shell_popup_visible {
                                         if let Some(shell_msg_id) = state.interactive_shell_message_id {
                                             // Find the position of the shell message
                                             if let Some(pos) = state.messages.iter().position(|m| m.id == shell_msg_id) {
@@ -656,8 +656,8 @@ pub async fn run_tui(
             break;
         }
         // Check if terminal clear was requested (e.g., after shell popup closes)
-        if state.needs_terminal_clear {
-            state.needs_terminal_clear = false;
+        if state.shell_popup_state.needs_terminal_clear {
+            state.shell_popup_state.needs_terminal_clear = false;
             emergency_clear_and_redraw(&mut terminal, &mut state)?;
         }
         state.poll_file_search_results();

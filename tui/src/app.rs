@@ -21,14 +21,14 @@ use crate::services::message::Message;
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
-use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
+use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use ratatui::layout::{Rect, Size};
 use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
@@ -78,32 +78,7 @@ pub struct AppState {
     pub loading_state: LoadingState,
 
     // ========== Shell Popup State ==========
-    pub shell_popup_visible: bool,
-    pub shell_popup_expanded: bool,
-    pub shell_popup_scroll: usize,
-    /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
-    pub needs_terminal_clear: bool,
-    pub shell_cursor_visible: bool,
-    pub shell_cursor_blink_timer: u8,
-    pub active_shell_command: Option<ShellCommand>,
-    pub active_shell_command_output: Option<String>,
-    pub waiting_for_shell_input: bool,
-    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
-    pub shell_loading: bool,
-    pub shell_pending_command_value: Option<String>,
-    pub shell_pending_command_executed: bool,
-    pub shell_pending_command_output: Option<String>,
-    // Backward compatibility aliases (to be removed after full migration)
-    pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
-    pub shell_mode_input: String, // unused, kept for compatibility
-    pub is_tool_call_shell_command: bool,
-    pub ondemand_shell_mode: bool,
-    pub shell_pending_command: Option<String>,
-    pub shell_pending_command_output_count: usize,
-    /// Tracks if the initial shell prompt has been shown (before command is typed)
-    pub shell_initial_prompt_shown: bool,
-    /// Tracks if the command has been typed into the shell (after initial prompt)
-    pub shell_command_typed: bool,
+    pub shell_popup_state: ShellPopupState,
 
     // ========== Tool Call State ==========
     pub pending_bash_message_id: Option<Uuid>,
@@ -503,28 +478,11 @@ impl AppState {
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
             completed_tool_calls: std::collections::HashSet::new(),
-            shell_popup_visible: false,
-            shell_popup_expanded: false,
-            shell_popup_scroll: 0,
-            needs_terminal_clear: false,
-            shell_cursor_visible: true,
-            shell_cursor_blink_timer: 0,
-            active_shell_command: None,
-            active_shell_command_output: None,
-            waiting_for_shell_input: false,
-            shell_tool_calls: None,
-            shell_loading: false,
-            shell_pending_command_value: None,
-            shell_pending_command_executed: false,
-            shell_pending_command_output: None,
-            show_shell_mode: false,
-            shell_mode_input: String::new(),
-            is_tool_call_shell_command: false,
-            ondemand_shell_mode: false,
-            shell_pending_command: None,
-            shell_pending_command_output_count: 0,
-            shell_initial_prompt_shown: false,
-            shell_command_typed: false,
+            shell_popup_state: ShellPopupState {
+                shell_cursor_visible: true,
+                shell_mode_input: String::new(),
+                ..Default::default()
+            },
             dialog_message_id: None,
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
@@ -853,8 +811,8 @@ impl AppState {
         #[cfg(not(unix))]
         let shell_cmd = run_background_shell_command(command.clone(), shell_tx);
 
-        self.active_shell_command = Some(shell_cmd.clone());
-        self.active_shell_command_output = Some(String::new());
+        self.shell_popup_state.active_shell_command = Some(shell_cmd.clone());
+        self.shell_popup_state.active_shell_command_output = Some(String::new());
         self.shell_screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
@@ -904,7 +862,7 @@ impl AppState {
                 // Show dropdown for @ file triggers (slash command dropdown is managed synchronously)
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                if has_at_trigger && !self.waiting_for_shell_input {
+                if has_at_trigger && !self.shell_popup_state.waiting_for_shell_input {
                     self.input_state.show_helper_dropdown = true;
                 }
                 // If we have file results, reset selection if out of bounds
