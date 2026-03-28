@@ -31,6 +31,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 clap = { version = "4.5.23", features = ["derive", "env"] }
+clap_complete = "4.6.0"
 config = "0.14.1"
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -484,6 +484,23 @@ tags:
 Your deployment procedures and guidelines here...
 ```
 
+### Shell Completion
+
+Enable tab-completion for every `stakpak` subcommand, flag, and argument.
+
+```bash
+# Bash – add to ~/.bashrc
+source <(stakpak completion bash)
+
+# Zsh – add to ~/.zshrc
+source <(stakpak completion zsh)
+
+# Fish
+stakpak completion fish > ~/.config/fish/completions/stakpak.fish
+```
+
+Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
+
 ### Shell Mode
 
 Execute system commands explicitly from the input bar.

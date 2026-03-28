@@ -19,7 +19,7 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::local::skills::{default_skill_directories, discover_skills};
@@ -236,6 +236,12 @@ async fn main() {
     } else {
         Cli::parse()
     };
+
+    // Handle `stakpak completion <shell>` before loading config — no auth required.
+    if let Some(Commands::Completion { shell }) = cli.command {
+        commands::completion::print_completions(shell, &mut Cli::command());
+        return;
+    }
 
     // Only run auto-update in interactive mode (when no command is specified)
     if cli.command.is_none()

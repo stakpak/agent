@@ -15,6 +15,7 @@ pub mod auto_update;
 pub mod autopilot;
 pub mod board;
 pub mod browser;
+pub mod completion;
 pub mod mcp;
 pub mod warden;
 pub mod watch;
@@ -209,6 +210,16 @@ pub enum Commands {
         #[command(flatten)]
         args: StopArgs,
     },
+
+    /// Generate shell completion scripts
+    ///
+    /// Prints a completion script for the given shell to stdout. Source or
+    /// install it according to your shell's documentation.
+    Completion {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
@@ -253,6 +264,7 @@ impl Commands {
                 | Commands::Set { .. }
                 | Commands::Config(_)
                 | Commands::Version
+                | Commands::Completion { .. }
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
@@ -570,6 +582,10 @@ impl Commands {
                     eprintln!("ACP agent failed: {}", e);
                     std::process::exit(1);
                 }
+            }
+            Commands::Completion { .. } => {
+                // Handled in main before AppConfig::load() so Cli::command() is in scope.
+                unreachable!("stakpak completion is handled before Commands::run()")
             }
         }
         Ok(())
