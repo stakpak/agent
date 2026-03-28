@@ -4,6 +4,7 @@ use serde::Deserialize;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
 
+#[cfg(feature = "auto-update")]
 use crate::commands::auto_update::run_auto_update;
 use crate::utils::cli_colors::CliColors;
 
@@ -196,6 +197,7 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
     Ok(release.tag_name)
 }
 
+#[cfg(feature = "auto-update")]
 pub async fn auto_update() -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
@@ -245,6 +247,7 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
 
 /// Force auto-update without prompting (for ACP mode).
 /// Returns true if an update was performed and the process should restart.
+#[cfg(feature = "auto-update")]
 pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));

@@ -9,7 +9,8 @@ homepage = { workspace = true }
 readme = "../README.md"
 
 [features]
-default = ["bedrock"]
+default = ["auto-update", "bedrock"]
+auto-update = []
 bedrock = ["stakpak-shared/bedrock", "stakai/bedrock"]
 jemalloc = ["dep:tikv-jemallocator"]
 libsql-test = []
