@@ -246,6 +246,34 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<ProviderAuth>,
     },
+    /// MiniMax provider configuration
+    ///
+    /// MiniMax provides OpenAI-compatible API access to MiniMax-M2.7
+    /// and MiniMax-M2.5 series models with up to 1M context window.
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.minimax]
+    /// type = "minimax"
+    ///
+    /// [profiles.myprofile.providers.minimax.auth]
+    /// type = "api"
+    /// key = "your-minimax-api-key"
+    ///
+    /// # Then use models as:
+    /// model = "minimax/MiniMax-M2.7"
+    /// ```
+    MiniMax {
+        /// Legacy API key field (prefer `auth` field)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_key: Option<String>,
+        /// API endpoint URL (default: https://api.minimax.io/v1)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
+    },
 }
 
 impl ProviderConfig {
@@ -259,6 +287,7 @@ impl ProviderConfig {
             ProviderConfig::Stakpak { .. } => "stakpak",
             ProviderConfig::Bedrock { .. } => "amazon-bedrock",
             ProviderConfig::GitHubCopilot { .. } => "github-copilot",
+            ProviderConfig::MiniMax { .. } => "minimax",
         }
     }
 
@@ -277,6 +306,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
+            ProviderConfig::MiniMax { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
             ProviderConfig::GitHubCopilot { .. } => None, // OAuth only, no API key
         }
@@ -290,6 +320,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { auth, .. } => auth.as_ref(),
             ProviderConfig::Custom { auth, .. } => auth.as_ref(),
             ProviderConfig::Stakpak { auth, .. } => auth.as_ref(),
+            ProviderConfig::MiniMax { auth, .. } => auth.as_ref(),
             ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::GitHubCopilot { auth, .. } => auth.as_ref(),
         }
@@ -312,7 +343,8 @@ impl ProviderConfig {
             ProviderConfig::OpenAI { api_key, .. }
             | ProviderConfig::Gemini { api_key, .. }
             | ProviderConfig::Custom { api_key, .. }
-            | ProviderConfig::Stakpak { api_key, .. } => {
+            | ProviderConfig::Stakpak { api_key, .. }
+            | ProviderConfig::MiniMax { api_key, .. } => {
                 api_key.as_ref().map(ProviderAuth::api_key)
             }
             ProviderConfig::Anthropic {
@@ -360,6 +392,11 @@ impl ProviderConfig {
                 ..
             }
             | ProviderConfig::Stakpak {
+                auth: auth_field,
+                api_key,
+                ..
+            }
+            | ProviderConfig::MiniMax {
                 auth: auth_field,
                 api_key,
                 ..
@@ -413,6 +450,11 @@ impl ProviderConfig {
                 auth: auth_field,
                 api_key,
                 ..
+            }
+            | ProviderConfig::MiniMax {
+                auth: auth_field,
+                api_key,
+                ..
             } => {
                 *auth_field = None;
                 *api_key = None;
@@ -446,6 +488,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
+            ProviderConfig::MiniMax { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => api_endpoint.as_deref(),
         }
@@ -461,6 +504,7 @@ impl ProviderConfig {
             | ProviderConfig::Anthropic { api_endpoint, .. }
             | ProviderConfig::Gemini { api_endpoint, .. }
             | ProviderConfig::Stakpak { api_endpoint, .. }
+            | ProviderConfig::MiniMax { api_endpoint, .. }
             | ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
                 *api_endpoint = endpoint;
             }
@@ -583,6 +627,24 @@ impl ProviderConfig {
         }
     }
 
+    /// Create a MiniMax provider config (legacy, uses api_key field)
+    pub fn minimax(api_key: String, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::MiniMax {
+            api_key: Some(api_key),
+            api_endpoint,
+            auth: None,
+        }
+    }
+
+    /// Create a MiniMax provider config with auth
+    pub fn minimax_with_auth(auth: ProviderAuth, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::MiniMax {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
+        }
+    }
+
     /// Create a GitHub Copilot provider config with auth (OAuth token from device flow)
     pub fn github_copilot_with_auth(auth: ProviderAuth) -> Self {
         ProviderConfig::GitHubCopilot {
@@ -643,6 +705,11 @@ impl ProviderConfig {
                 auth: None,
             }),
             "github-copilot" => Some(ProviderConfig::GitHubCopilot {
+                api_endpoint: None,
+                auth: None,
+            }),
+            "minimax" => Some(ProviderConfig::MiniMax {
+                api_key: None,
                 api_endpoint: None,
                 auth: None,
             }),

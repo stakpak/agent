@@ -12,6 +12,8 @@ pub enum ProviderKind {
     Anthropic,
     /// Google Gemini provider (future)
     Google,
+    /// MiniMax provider
+    MiniMax,
 }
 
 impl ProviderKind {
@@ -21,6 +23,7 @@ impl ProviderKind {
             Self::OpenAI => "openai",
             Self::Anthropic => "anthropic",
             Self::Google => "google",
+            Self::MiniMax => "minimax",
         }
     }
 }
@@ -33,6 +36,7 @@ impl std::str::FromStr for ProviderKind {
             "openai" => Ok(Self::OpenAI),
             "anthropic" => Ok(Self::Anthropic),
             "google" | "gemini" => Ok(Self::Google),
+            "minimax" => Ok(Self::MiniMax),
             _ => Err(Error::UnknownProvider(s.to_string())),
         }
     }

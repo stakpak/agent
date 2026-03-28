@@ -474,6 +474,12 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                         inference_config.stakpak(api_key.to_string(), api_endpoint.clone());
                 }
             }
+            ProviderConfig::MiniMax { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    inference_config =
+                        inference_config.minimax(api_key.to_string(), api_endpoint.clone());
+                }
+            }
             ProviderConfig::GitHubCopilot { .. } => {
                 tracing::debug!(
                     provider = %name,
@@ -581,6 +587,20 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 let provider = StakpakProvider::new(stakpak_config)
                     .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
                 registry = registry.register("stakpak", provider);
+            }
+            ProviderConfig::MiniMax { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    use stakai::providers::minimax::{
+                        MiniMaxConfig as StakaiMiniMaxConfig, MiniMaxProvider,
+                    };
+                    let mut minimax_config = StakaiMiniMaxConfig::new(api_key.to_string());
+                    if let Some(endpoint) = api_endpoint {
+                        minimax_config = minimax_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = MiniMaxProvider::new(minimax_config)
+                        .map_err(|e| format!("Failed to create MiniMax provider: {}", e))?;
+                    registry = registry.register("minimax", provider);
+                }
             }
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
                 if let Some(access_token) = provider_config.access_token() {
