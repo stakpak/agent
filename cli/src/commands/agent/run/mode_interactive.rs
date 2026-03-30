@@ -295,9 +295,10 @@ pub async fn run_interactive(
             .map(|ctx| ctx.apps_md.is_none())
             .unwrap_or(true)
         {
-            Some(stakpak_tui::BannerMessage::new(
-                "❕ System not scanned - /init to generate an APPS.md file with your context",
+            Some(stakpak_tui::BannerMessage::persistent_with_action(
+                "Run /init to auto-discover your apps, infra, and dependencies. Stakpak works better with context.",
                 stakpak_tui::BannerStyle::Info,
+                "/init",
             ))
         } else {
             None

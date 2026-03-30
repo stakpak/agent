@@ -37,6 +37,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         Some(banner_area)
     } else {
         state.banner_click_regions.clear();
+        state.banner_dismiss_region = None;
         None
     };
 
