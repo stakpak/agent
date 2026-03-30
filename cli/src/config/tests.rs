@@ -877,6 +877,241 @@ api_key = "gemini-key"
     assert_eq!(gemini.api_key(), Some("gemini-key"));
 }
 
+#[test]
+fn openai_oauth_resolves_codex_backend_profile() {
+    use crate::config::openai_resolver::{OpenAIBackendProfile, OpenAIBackendResolutionInput};
+    use base64::Engine;
+
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+
+    let payload = serde_json::json!({
+        "https://api.openai.com/auth": {
+            "chatgpt_account_id": "acct_test_789"
+        }
+    });
+    let encoded_payload =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+    let access_token = format!("header.{}.signature", encoded_payload);
+
+    let config_toml = format!(
+        r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+
+[profiles.default.providers.openai.auth]
+type = "oauth"
+access = "{access_token}"
+refresh = "refresh-token"
+expires = 1735600000000
+name = "ChatGPT Plus/Pro"
+"#
+    );
+
+    std::fs::write(&config_path, config_toml).expect("write config");
+    let app = AppConfig::load("default", Some(&config_path)).expect("load app config");
+    let input = OpenAIBackendResolutionInput::new(
+        app.providers.get("openai").cloned(),
+        app.resolve_provider_auth("openai"),
+    );
+    let openai = crate::config::openai_resolver::resolve_openai_runtime(input)
+        .expect("resolver success")
+        .expect("resolved openai config");
+
+    match openai.backend {
+        OpenAIBackendProfile::Codex(codex) => {
+            assert_eq!(
+                codex.base_url,
+                stakpak_shared::models::integrations::openai::OpenAIConfig::OPENAI_CODEX_BASE_URL
+            );
+            assert_eq!(codex.chatgpt_account_id, "acct_test_789");
+            assert_eq!(codex.originator, "stakpak");
+        }
+        _ => panic!("expected codex backend"),
+    }
+}
+
+#[test]
+fn openai_oauth_without_account_id_fails_runtime_resolution() {
+    use crate::config::openai_resolver::OpenAIBackendResolutionInput;
+    use base64::Engine;
+
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+
+    let payload = serde_json::json!({
+        "https://api.openai.com/auth": {}
+    });
+    let encoded_payload =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+    let access_token = format!("header.{}.signature", encoded_payload);
+
+    let config_toml = format!(
+        r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+
+[profiles.default.providers.openai.auth]
+type = "oauth"
+access = "{access_token}"
+refresh = "refresh-token"
+expires = 1735600000000
+name = "ChatGPT Plus/Pro"
+"#
+    );
+
+    std::fs::write(&config_path, config_toml).expect("write config");
+    let app = AppConfig::load("default", Some(&config_path)).expect("load app config");
+    let input = OpenAIBackendResolutionInput::new(
+        app.providers.get("openai").cloned(),
+        app.resolve_provider_auth("openai"),
+    );
+
+    let result = crate::config::openai_resolver::resolve_openai_runtime(input);
+    assert!(result.is_err());
+}
+
+#[test]
+fn openai_oauth_resolves_codex_endpoint_headers_and_responses_mode() {
+    use base64::Engine;
+
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+
+    let payload = serde_json::json!({
+        "https://api.openai.com/auth": {
+            "chatgpt_account_id": "acct_test_789"
+        }
+    });
+    let encoded_payload =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+    let access_token = format!("header.{}.signature", encoded_payload);
+
+    let config_toml = format!(
+        r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+
+[profiles.default.providers.openai.auth]
+type = "oauth"
+access = "{access_token}"
+refresh = "refresh-token"
+expires = 1735600000000
+name = "ChatGPT Plus/Pro"
+"#
+    );
+
+    std::fs::write(&config_path, config_toml).expect("write config");
+    let app = AppConfig::load("default", Some(&config_path)).expect("load app config");
+    let openai = crate::config::openai_resolver::resolve_openai_runtime(
+        crate::config::openai_resolver::OpenAIBackendResolutionInput::new(
+            app.providers.get("openai").cloned(),
+            app.resolve_provider_auth("openai"),
+        ),
+    )
+    .expect("resolver success")
+    .expect("resolved openai config");
+
+    match openai.backend {
+        crate::config::openai_resolver::OpenAIBackendProfile::Codex(codex) => {
+            assert_eq!(
+                codex.base_url,
+                stakpak_shared::models::integrations::openai::OpenAIConfig::OPENAI_CODEX_BASE_URL
+            );
+            assert_eq!(codex.chatgpt_account_id, "acct_test_789");
+            assert_eq!(codex.originator, "stakpak");
+        }
+        _ => panic!("expected codex backend"),
+    }
+
+    assert!(matches!(
+        openai.default_api_mode,
+        stakai::types::OpenAIApiConfig::Responses(_)
+    ));
+}
+
+#[test]
+fn openai_api_key_keeps_standard_routing() {
+    use crate::config::openai_resolver::{OpenAIBackendProfile, OpenAIResolvedAuth};
+
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+    let config_toml = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "sk-openai-test"
+"#;
+
+    std::fs::write(&config_path, config_toml).expect("write config");
+    let app = AppConfig::load("default", Some(&config_path)).expect("load app config");
+    let openai = crate::config::openai_resolver::resolve_openai_runtime(
+        crate::config::openai_resolver::OpenAIBackendResolutionInput::new(
+            app.providers.get("openai").cloned(),
+            app.resolve_provider_auth("openai"),
+        ),
+    )
+    .expect("resolver success")
+    .expect("resolved openai config");
+
+    match openai.auth {
+        OpenAIResolvedAuth::ApiKey { key } => assert_eq!(key, "sk-openai-test"),
+        _ => panic!("expected api key auth"),
+    }
+
+    match openai.backend {
+        OpenAIBackendProfile::Official(profile) => {
+            assert_eq!(profile.base_url, "https://api.openai.com/v1")
+        }
+        _ => panic!("expected official backend"),
+    }
+}
+
+#[test]
+fn openai_removed_legacy_transport_fields_fail_to_load() {
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+    let config_toml = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "sk-openai-test"
+use_responses_api = true
+
+[profiles.default.providers.openai.custom_headers]
+originator = "stakpak"
+"#;
+
+    std::fs::write(&config_path, config_toml).expect("write config");
+
+    let result = AppConfig::load("default", Some(&config_path));
+
+    assert!(result.is_err());
+}
+
 // =============================================================================
 // Legacy Provider Migration Tests
 // =============================================================================

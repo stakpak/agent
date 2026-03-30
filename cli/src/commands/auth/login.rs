@@ -244,7 +244,7 @@ async fn handle_oauth_login(
         .oauth_config(method_id)
         .ok_or("OAuth not supported for this method")?;
 
-    let mut flow = OAuthFlow::new(oauth_config);
+    let mut flow = OAuthFlow::new(oauth_config.clone());
     let auth_url = flow.generate_auth_url();
 
     println!();
@@ -255,31 +255,56 @@ async fn handle_oauth_login(
     println!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", auth_url, auth_url);
     println!();
 
-    // Try to open browser
-    let _ = open::that(&auth_url);
+    let callback = if should_wait_for_local_oauth_callback(&oauth_config.redirect_url) {
+        println!(
+            "Waiting for OAuth callback on {}...",
+            oauth_config.redirect_url
+        );
 
-    // Prompt for authorization code
-    print!("Paste the authorization code: ");
-    io::stdout().flush().map_err(|e| e.to_string())?;
+        let callback_listener =
+            bind_local_oauth_callback_listener(oauth_config.redirect_url.clone()).await?;
 
-    let mut code = String::new();
-    io::stdin()
-        .read_line(&mut code)
-        .map_err(|e| format!("Failed to read input: {}", e))?;
-    let code = code.trim();
+        // Try to open browser after the listener is ready.
+        let _ = open::that(&auth_url);
 
-    if code.is_empty() {
-        println!("Cancelled.");
-        return Ok(());
-    }
+        OAuthCallback::FromRedirect(
+            callback_listener
+                .wait(std::time::Duration::from_secs(300))
+                .await?,
+        )
+    } else {
+        // Try to open browser
+        let _ = open::that(&auth_url);
+
+        // Prompt for authorization code
+        print!("Paste the authorization code: ");
+        io::stdout().flush().map_err(|e| e.to_string())?;
+
+        let mut code = String::new();
+        io::stdin()
+            .read_line(&mut code)
+            .map_err(|e| format!("Failed to read input: {}", e))?;
+        let code = code.trim().to_string();
+
+        if code.is_empty() {
+            println!("Cancelled.");
+            return Ok(());
+        }
+
+        OAuthCallback::Manual(code)
+    };
 
     println!();
     println!("Exchanging code for tokens...");
 
-    let tokens = flow
-        .exchange_code(code)
-        .await
-        .map_err(|e| format!("Token exchange failed: {}", e))?;
+    let tokens = match callback {
+        OAuthCallback::Manual(code) => flow.exchange_code(&code).await,
+        OAuthCallback::FromRedirect(callback) => {
+            flow.exchange_code_with_state(&callback.code, &callback.state)
+                .await
+        }
+    }
+    .map_err(|e| format!("Token exchange failed: {}", e))?;
 
     let auth = provider
         .post_authorize(method_id, &tokens)
@@ -287,6 +312,172 @@ async fn handle_oauth_login(
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
     save_auth_to_config(config_dir, provider, profile, auth)
+}
+
+fn should_wait_for_local_oauth_callback(redirect_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(redirect_url) else {
+        return false;
+    };
+
+    matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
+}
+
+enum OAuthCallback {
+    Manual(String),
+    FromRedirect(LocalOAuthCallback),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalOAuthCallback {
+    code: String,
+    state: String,
+}
+
+struct LocalOAuthCallbackListener {
+    callback_rx: tokio::sync::oneshot::Receiver<Result<LocalOAuthCallback, String>>,
+    server_task: tokio::task::JoinHandle<()>,
+}
+
+impl LocalOAuthCallbackListener {
+    async fn wait(
+        self,
+        timeout_duration: std::time::Duration,
+    ) -> Result<LocalOAuthCallback, String> {
+        let code = match tokio::time::timeout(timeout_duration, self.callback_rx).await {
+            Ok(result) => result.map_err(|_| {
+                "OAuth callback listener closed before receiving a response".to_string()
+            })?,
+            Err(_) => Err(format!(
+                "OAuth callback timed out after {} seconds",
+                timeout_duration.as_secs()
+            )),
+        };
+
+        self.server_task.abort();
+        let _ = self.server_task.await;
+
+        code
+    }
+}
+
+async fn bind_local_oauth_callback_listener(
+    redirect_url: String,
+) -> Result<LocalOAuthCallbackListener, String> {
+    let parsed = reqwest::Url::parse(&redirect_url)
+        .map_err(|e| format!("Invalid OAuth redirect URL '{}': {}", redirect_url, e))?;
+    let host = parsed.host_str().unwrap_or("127.0.0.1");
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| format!("OAuth redirect URL is missing a port: {}", redirect_url))?;
+    let bind_addr = format!("{}:{}", host, port);
+
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to bind OAuth callback listener on {}: {}",
+                bind_addr, e
+            )
+        })?;
+
+    build_local_oauth_callback_listener(redirect_url, listener)
+}
+
+fn build_local_oauth_callback_listener(
+    redirect_url: String,
+    listener: tokio::net::TcpListener,
+) -> Result<LocalOAuthCallbackListener, String> {
+    let parsed = reqwest::Url::parse(&redirect_url)
+        .map_err(|e| format!("Invalid OAuth redirect URL '{}': {}", redirect_url, e))?;
+    let path = parsed.path().to_string();
+
+    let (code_tx, code_rx) = tokio::sync::oneshot::channel::<Result<LocalOAuthCallback, String>>();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
+    let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
+
+    let build_callback_route = || {
+        let code_tx = code_tx.clone();
+        let shutdown_tx = shutdown_tx.clone();
+        axum::routing::get(
+            move |axum::extract::Query(query): axum::extract::Query<
+                std::collections::HashMap<String, String>,
+            >| {
+                let code_tx = code_tx.clone();
+                let shutdown_tx = shutdown_tx.clone();
+                async move {
+                    let result = if let Some(error) = query.get("error") {
+                        Err(format!(
+                            "OAuth callback returned '{}'{}",
+                            error,
+                            query
+                                .get("error_description")
+                                .map(|description| format!(": {}", description))
+                                .unwrap_or_default()
+                        ))
+                    } else {
+                        match (query.get("code"), query.get("state")) {
+                            (Some(code), Some(state)) => Ok(LocalOAuthCallback {
+                                code: code.clone(),
+                                state: state.clone(),
+                            }),
+                            _ => Err("OAuth callback missing code or state".to_string()),
+                        }
+                    };
+
+                    if let Ok(mut sender) = code_tx.lock()
+                        && let Some(sender) = sender.take()
+                    {
+                        let _ = sender.send(result.clone());
+                    }
+
+                    if let Ok(mut sender) = shutdown_tx.lock()
+                        && let Some(sender) = sender.take()
+                    {
+                        let _ = sender.send(());
+                    }
+
+                    let (body, status) = match result {
+                        Ok(_) => (
+                            "Authentication complete. You can return to Stakpak.",
+                            axum::http::StatusCode::OK,
+                        ),
+                        Err(_) => (
+                            "Authentication failed. You can return to Stakpak for details.",
+                            axum::http::StatusCode::BAD_REQUEST,
+                        ),
+                    };
+
+                    (status, axum::response::Html(body.to_string()))
+                }
+            },
+        )
+    };
+
+    let mut app = axum::Router::new().route(&path, build_callback_route());
+    if path != "/" {
+        app = app.route("/", build_callback_route());
+    }
+    if path != "/callback" {
+        app = app.route("/callback", build_callback_route());
+    }
+
+    let server =
+        axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        });
+
+    let server_task = tokio::spawn(async move {
+        if let Err(error) = server.await {
+            tracing::debug!("OAuth callback server exited: {}", error);
+        }
+    });
+
+    Ok(LocalOAuthCallbackListener {
+        callback_rx: code_rx,
+        server_task,
+    })
 }
 
 /// Persist a `ProviderAuth` into the config file for the given profile.
@@ -833,5 +1024,111 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn should_wait_for_local_oauth_callback_detects_localhost_redirects() {
+        assert!(should_wait_for_local_oauth_callback(
+            "http://localhost:1455/callback"
+        ));
+        assert!(should_wait_for_local_oauth_callback(
+            "http://127.0.0.1:1455/callback"
+        ));
+        assert!(!should_wait_for_local_oauth_callback(
+            "https://console.anthropic.com/oauth/code/callback"
+        ));
+    }
+
+    fn reserve_local_callback_listener(
+        redirect_url: &str,
+    ) -> Result<(String, LocalOAuthCallbackListener), String> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .map_err(|error| format!("bind temp listener: {error}"))?;
+        let port = listener
+            .local_addr()
+            .map_err(|error| format!("local addr: {error}"))?
+            .port();
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| format!("set nonblocking: {error}"))?;
+        let listener = tokio::net::TcpListener::from_std(listener)
+            .map_err(|error| format!("tokio listener: {error}"))?;
+        let redirect_url = redirect_url.replace("{port}", &port.to_string());
+        let callback_listener =
+            build_local_oauth_callback_listener(redirect_url.clone(), listener)?;
+        Ok((redirect_url, callback_listener))
+    }
+
+    #[tokio::test]
+    async fn local_oauth_callback_listener_is_ready_before_request() {
+        let (redirect_url, callback_listener) =
+            reserve_local_callback_listener("http://127.0.0.1:{port}/callback")
+                .expect("reserve callback listener");
+        let callback_url = format!("{redirect_url}?code=test-code&state=test-state");
+
+        let response = reqwest::get(callback_url)
+            .await
+            .expect("send callback request");
+        assert!(response.status().is_success());
+
+        let callback = callback_listener
+            .wait(std::time::Duration::from_secs(1))
+            .await
+            .expect("oauth callback");
+        assert_eq!(callback.code, "test-code");
+        assert_eq!(callback.state, "test-state");
+    }
+
+    #[tokio::test]
+    async fn local_oauth_callback_listener_accepts_auth_callback_path() {
+        let (redirect_url, callback_listener) =
+            reserve_local_callback_listener("http://127.0.0.1:{port}/auth/callback")
+                .expect("reserve callback listener");
+        let callback_url = format!("{redirect_url}?code=test-code&state=test-state");
+
+        let response = reqwest::get(callback_url)
+            .await
+            .expect("send callback request");
+        assert!(response.status().is_success());
+
+        let callback = callback_listener
+            .wait(std::time::Duration::from_secs(1))
+            .await
+            .expect("oauth callback");
+        assert_eq!(callback.code, "test-code");
+        assert_eq!(callback.state, "test-state");
+    }
+
+    #[tokio::test]
+    async fn local_oauth_callback_listener_accepts_callback_path_when_redirect_uses_root() {
+        let (redirect_url, callback_listener) =
+            reserve_local_callback_listener("http://127.0.0.1:{port}")
+                .expect("reserve callback listener");
+        let callback_url = format!("{redirect_url}/callback?code=test-code&state=test-state");
+
+        let response = reqwest::get(callback_url)
+            .await
+            .expect("send callback request");
+        assert!(response.status().is_success());
+
+        let callback = callback_listener
+            .wait(std::time::Duration::from_secs(1))
+            .await
+            .expect("oauth callback");
+        assert_eq!(callback.code, "test-code");
+        assert_eq!(callback.state, "test-state");
+    }
+
+    #[tokio::test]
+    async fn local_oauth_callback_listener_times_out() {
+        let (_redirect_url, callback_listener) =
+            reserve_local_callback_listener("http://127.0.0.1:{port}/callback")
+                .expect("reserve callback listener");
+
+        let error = callback_listener
+            .wait(std::time::Duration::from_millis(10))
+            .await
+            .expect_err("listener should time out");
+        assert!(error.contains("timed out"));
     }
 }
