@@ -755,8 +755,16 @@ pub fn get_wrapped_styled_block_lines<'a>(
             .map(|l| (l.clone(), Style::default()))
             .collect();
     }
+
     let mut result = Vec::new();
     for line in lines {
+        let display_width: usize = line.spans.iter().map(|span| span.width()).sum();
+
+        if display_width <= width {
+            result.push((line.clone(), Style::default()));
+            continue;
+        }
+
         let wrapped = super::wrapping::word_wrap_line(line, width);
         for wrapped_line in wrapped {
             result.push((wrapped_line, Style::default()));
@@ -1332,6 +1340,9 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 cleaned = format!("{}{}", cleaned_before, after_checkpoint);
             }
 
+            // Strip any ANSI escape codes that may be present in LLM responses
+            cleaned = crate::services::bash_block::strip_all_ansi(&cleaned);
+
             let borrowed_lines =
                 render_markdown_to_lines_with_width(&cleaned, width).unwrap_or_default();
             for line in borrowed_lines {
@@ -1366,6 +1377,9 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 }
             }
 
+            // Strip any ANSI escape codes that may be present in LLM responses
+            cleaned = crate::services::bash_block::strip_all_ansi(&cleaned);
+
             // Handle shell history
             if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
                 let shell_lines = render_shell_history_lines(&cleaned, style, width);
@@ -1391,7 +1405,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                     lines.extend(convert_to_owned_lines(borrowed));
                 }
             } else {
-                let borrowed = get_wrapped_plain_lines(text, style, width);
+                let borrowed = get_wrapped_plain_lines(&cleaned, style, width);
                 lines.extend(convert_to_owned_lines(borrowed));
             }
         }
