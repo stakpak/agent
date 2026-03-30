@@ -247,6 +247,8 @@ pub struct AppState {
     pub banner_area: Option<Rect>,
     /// Clickable command regions within the banner: (command_text, bounding_rect)
     pub banner_click_regions: Vec<(String, Rect)>,
+    /// Clickable dismiss button region within the banner
+    pub banner_dismiss_region: Option<Rect>,
     /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
     pub selection_auto_scroll: i32,
 
@@ -605,6 +607,7 @@ impl AppState {
             banner_message: None,
             banner_area: None,
             banner_click_regions: Vec::new(),
+            banner_dismiss_region: None,
             selection_auto_scroll: 0,
             input_content_area: None,
 
