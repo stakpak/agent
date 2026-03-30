@@ -62,6 +62,14 @@ fn flush_pending_user_messages_if_idle(
     // Take pending revert index if set (will be None on normal messages)
     let revert_index = state.pending_revert_index.take();
 
+    // Dismiss the onboarding banner once the user sends their first message.
+    if state.banner_message.is_some() {
+        state.banner_message = None;
+        state.banner_click_regions.clear();
+        state.banner_dismiss_region = None;
+        state.banner_area = None;
+    }
+
     match output_tx.try_send(OutputEvent::UserMessage(
         final_input,
         shell_tool_calls,
