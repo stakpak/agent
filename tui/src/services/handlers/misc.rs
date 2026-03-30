@@ -294,6 +294,15 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
+/// Handle set banner message event
+pub fn handle_set_banner_message(
+    state: &mut AppState,
+    text: String,
+    style: crate::services::banner::BannerStyle,
+) {
+    state.banner_message = Some(crate::services::banner::BannerMessage::new(text, style));
+}
+
 /// Handle start loading operation event
 pub fn handle_start_loading_operation(
     state: &mut AppState,

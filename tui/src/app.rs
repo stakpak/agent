@@ -8,6 +8,7 @@ pub use types::*;
 
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::banner::BannerMessage;
 use crate::services::board_tasks::TaskProgress;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::ThemeColors;
@@ -24,7 +25,7 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent}
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
-use ratatui::layout::Size;
+use ratatui::layout::{Rect, Size};
 use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
@@ -241,6 +242,11 @@ pub struct AppState {
     // ========== Text Selection State ==========
     pub selection: SelectionState,
     pub toast: Option<Toast>,
+    pub banner_message: Option<BannerMessage>,
+    /// Stores the banner area rect for mouse click detection
+    pub banner_area: Option<Rect>,
+    /// Clickable command regions within the banner: (command_text, bounding_rect)
+    pub banner_click_regions: Vec<(String, Rect)>,
     /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
     pub selection_auto_scroll: i32,
 
@@ -596,6 +602,9 @@ impl AppState {
             // Text selection initialization
             selection: SelectionState::default(),
             toast: None,
+            banner_message: None,
+            banner_area: None,
+            banner_click_regions: Vec::new(),
             selection_auto_scroll: 0,
             input_content_area: None,
 

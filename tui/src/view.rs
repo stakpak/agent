@@ -8,6 +8,7 @@ use crate::services::message::{
 };
 use crate::services::message_pattern::spans_to_string;
 
+use crate::services::banner;
 use crate::services::shell_popup;
 use crate::services::side_panel;
 use ratatui::{
@@ -19,14 +20,34 @@ use ratatui::{
 };
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
-    // First, handle the horizontal split for the side panel
+    // Full-width banner at the top (height=0 when no active message)
+    let banner_h = banner::banner_height(state);
+    let vertical_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(banner_h), Constraint::Min(1)])
+        .split(f.area());
+
+    let banner_area = vertical_chunks[0];
+    let screen_area = vertical_chunks[1];
+
+    banner::render_banner(f, banner_area, state);
+
+    // Store banner area for click detection (None when banner is hidden)
+    state.banner_area = if banner_h > 0 {
+        Some(banner_area)
+    } else {
+        state.banner_click_regions.clear();
+        None
+    };
+
+    // Horizontal split for the side panel
     let (main_area, side_panel_area) = if state.show_side_panel {
         // Fixed width of 32 characters for side panel
         let panel_width = 32u16;
         let horizontal_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(1), Constraint::Length(panel_width)])
-            .split(f.area());
+            .split(screen_area);
         // Add 1 char right margin to main area for symmetric spacing around the side panel divider
         let main_with_margin = Rect {
             x: horizontal_chunks[0].x,
@@ -36,7 +57,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         };
         (main_with_margin, Some(horizontal_chunks[1]))
     } else {
-        (f.area(), None)
+        (screen_area, None)
     };
 
     // Render side panel if visible
