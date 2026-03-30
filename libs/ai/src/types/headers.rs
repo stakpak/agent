@@ -1,16 +1,45 @@
 //! HTTP headers support for custom provider headers
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 /// HTTP headers map (single value per header name)
 /// Headers can be layered; later values override earlier ones
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Headers {
     inner: HashMap<String, String>,
 }
 
+impl<'de> Deserialize<'de> for Headers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum HeadersRepr {
+            Transparent(HashMap<String, String>),
+            Wrapped { inner: HashMap<String, String> },
+        }
+
+        let raw = match HeadersRepr::deserialize(deserializer)? {
+            HeadersRepr::Transparent(map) => map,
+            HeadersRepr::Wrapped { inner } => inner,
+        };
+
+        let mut headers = Headers::new();
+        for (key, value) in raw {
+            headers.insert(key, value);
+        }
+        Ok(headers)
+    }
+}
+
 impl Headers {
+    fn normalize_key(key: &str) -> String {
+        key.to_ascii_lowercase()
+    }
+
     /// Create a new empty headers map
     pub fn new() -> Self {
         Self::default()
@@ -18,26 +47,32 @@ impl Headers {
 
     /// Insert a header
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.inner.insert(key.into(), value.into());
+        let key = key.into();
+        self.inner.insert(Self::normalize_key(&key), value.into());
     }
 
     /// Merge headers from overlay (consuming)
     pub fn merge(&mut self, overlay: Headers) {
         for (k, v) in overlay.inner {
-            self.inner.insert(k, v);
+            self.inner.insert(Self::normalize_key(&k), v);
         }
     }
 
     /// Merge headers from overlay (borrowing)
     pub fn merge_with(&mut self, overlay: &Headers) {
         for (k, v) in &overlay.inner {
-            self.inner.insert(k.clone(), v.clone());
+            self.inner.insert(Self::normalize_key(k), v.clone());
         }
     }
 
     /// Get a header value
     pub fn get(&self, key: &str) -> Option<&String> {
-        self.inner.get(key)
+        self.inner.get(&Self::normalize_key(key))
+    }
+
+    /// Remove a header and return the previous value, if any.
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.inner.remove(&Self::normalize_key(key))
     }
 
     /// Check if headers is empty
@@ -159,5 +194,36 @@ mod tests {
     fn test_headers_from_array() {
         let headers: Headers = [("key1", "val1"), ("key2", "val2")].into();
         assert_eq!(headers.len(), 2);
+    }
+
+    #[test]
+    fn test_headers_are_case_insensitive() {
+        let mut headers = Headers::new();
+        headers.insert("ChatGPT-Account-Id", "acct_test_123");
+
+        assert_eq!(
+            headers.get("chatgpt-account-id"),
+            Some(&"acct_test_123".to_string())
+        );
+        assert_eq!(
+            headers.get("ChatGPT-Account-Id"),
+            Some(&"acct_test_123".to_string())
+        );
+
+        let removed = headers.remove("CHATGPT-ACCOUNT-ID");
+        assert_eq!(removed.as_deref(), Some("acct_test_123"));
+        assert!(headers.get("chatgpt-account-id").is_none());
+    }
+
+    #[test]
+    fn test_headers_deserialization_remains_case_insensitive() {
+        let headers: Headers =
+            serde_json::from_str(r#"{"inner":{"ChatGPT-Account-Id":"acct_test_123"}}"#)
+                .expect("deserialize headers");
+
+        assert_eq!(
+            headers.get("chatgpt-account-id"),
+            Some(&"acct_test_123".to_string())
+        );
     }
 }

@@ -15,6 +15,7 @@ fn get_browser_config() -> PluginConfig {
         repo: Some("tab".to_string()),
         owner: Some("stakpak".to_string()),
         version_arg: Some("version".to_string()),
+        prefer_server_version: false,
     }
 }
 

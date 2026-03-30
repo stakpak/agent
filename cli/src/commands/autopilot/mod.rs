@@ -719,6 +719,9 @@ fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
     let gid = read_unix_id_value("-g");
 
     match (uid, gid) {
+        // Refuse to map root into the sandbox — it would weaken the
+        // isolation boundary.  Fall back to the image's built-in user.
+        (Some(0), _) | (_, Some(0)) => stakpak_server::SandboxUserMapping::ImageDefault,
         (Some(uid), Some(gid)) => stakpak_server::SandboxUserMapping::HostUser { uid, gid },
         _ => stakpak_server::SandboxUserMapping::ImageDefault,
     }
@@ -730,6 +733,20 @@ fn detect_host_user_mapping() -> stakpak_server::SandboxUserMapping {
     // layer, so user mapping is not needed and would cause permission errors
     // inside the container.
     stakpak_server::SandboxUserMapping::ImageDefault
+}
+
+fn sandbox_user_mapping_for_mode(
+    _sandbox_mode: &stakpak_server::SandboxMode,
+) -> stakpak_server::SandboxUserMapping {
+    // On Linux, always map to the host user so bind-mounted files (local.db,
+    // cloud CLI caches, etc.) are writable.  The container entrypoint script
+    // patches /etc/passwd when the runtime UID differs from the image UID
+    // (1000), preserving a valid user identity, home directory, and group
+    // memberships.
+    //
+    // On macOS, Docker Desktop handles file ownership transparently via its
+    // VM layer, so no mapping is needed for either sandbox mode.
+    detect_host_user_mapping()
 }
 
 #[cfg(target_os = "linux")]
@@ -1289,13 +1306,14 @@ async fn start_foreground_runtime(
     stakpak_shared::container::ensure_named_volumes_exist();
 
     let sandbox_mode = &options.sandbox_mode;
+    let sandbox_user_mapping = sandbox_user_mapping_for_mode(sandbox_mode);
 
     let sandbox_config = stakpak_server::SandboxConfig {
         warden_path,
         image: stakpak_image.clone(),
         volumes,
         mode: sandbox_mode.clone(),
-        user_mapping: detect_host_user_mapping(),
+        user_mapping: sandbox_user_mapping,
     };
     tracing::info!(image = %stakpak_image, mode = %sandbox_mode, warden = %sandbox_config.warden_path, "Sandbox config initialized");
     let app_state = app_state.with_sandbox(sandbox_config.clone());
@@ -3605,13 +3623,17 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
         "--from-service".to_string(),
     ]);
 
+    let exec_cmd = shell_join(&exec_parts);
+    let (exec_start, no_new_privileges) = build_systemd_exec_start(&exec_cmd);
+
     let unit = format!(
-        "[Unit]\nDescription=Stakpak Autopilot Runtime\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=5\nWorkingDirectory={}\nEnvironment=HOME={}\nEnvironment=PATH=/usr/local/bin:/usr/bin:/bin\nStandardOutput=append:{}/stdout.log\nStandardError=append:{}/stderr.log\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n",
-        shell_join(&exec_parts),
+        "[Unit]\nDescription=Stakpak Autopilot Runtime\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=5\nWorkingDirectory={}\nEnvironment=HOME={}\nEnvironment=PATH=/usr/local/bin:/usr/bin:/bin\nStandardOutput=append:{}/stdout.log\nStandardError=append:{}/stderr.log\nNoNewPrivileges={}\n\n[Install]\nWantedBy=default.target\n",
+        exec_start,
         home.display(),
         home.display(),
         log_dir.display(),
         log_dir.display(),
+        no_new_privileges,
     );
 
     std::fs::write(&service_path, unit)
@@ -3629,6 +3651,14 @@ fn install_systemd_service(config: &AppConfig) -> Result<(), String> {
     )?;
 
     Ok(())
+}
+
+/// Build the `ExecStart=` value for the systemd unit file.
+///
+/// Autopilot now always uses a direct exec path so the service can keep
+/// `NoNewPrivileges=true` regardless of docker-group membership.
+fn build_systemd_exec_start(exec_cmd: &str) -> (String, &'static str) {
+    (exec_cmd.to_string(), "true")
 }
 
 fn uninstall_systemd_service() -> Result<(), String> {
@@ -4800,5 +4830,267 @@ max_turns = 12
                 .unwrap_or_default();
             assert_eq!(scheduler_runs, 1);
         }
+    }
+    #[test]
+    fn sandbox_user_mapping_always_delegates_to_detect_host_user_mapping() {
+        // Both persistent and ephemeral modes must use detect_host_user_mapping()
+        // so that bind-mounted host files are writable.  The container entrypoint
+        // script handles /etc/passwd fixup when the runtime UID differs.
+        //
+        // On macOS (CI) this returns ImageDefault; on Linux it returns HostUser.
+        let expected = detect_host_user_mapping();
+        assert_eq!(
+            sandbox_user_mapping_for_mode(&stakpak_server::SandboxMode::Persistent),
+            expected,
+        );
+        assert_eq!(
+            sandbox_user_mapping_for_mode(&stakpak_server::SandboxMode::Ephemeral),
+            expected,
+        );
+    }
+
+    // The root UID guard in detect_host_user_mapping() cannot be unit-tested
+    // directly without running as root.  The logic is: uid=0 or gid=0 → fallback
+    // to ImageDefault.  This is covered by code review; an integration test would
+    // need a privileged container.
+
+    // ── shell_join tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn shell_join_simple_args() {
+        let parts = vec![
+            "/usr/local/bin/stakpak".to_string(),
+            "autopilot".to_string(),
+            "up".to_string(),
+            "--foreground".to_string(),
+        ];
+        assert_eq!(
+            shell_join(&parts),
+            "/usr/local/bin/stakpak autopilot up --foreground"
+        );
+    }
+
+    #[test]
+    fn shell_join_preserves_colons_and_dots() {
+        let parts = vec![
+            "/usr/bin/app".to_string(),
+            "--bind".to_string(),
+            "127.0.0.1:8080".to_string(),
+        ];
+        assert_eq!(shell_join(&parts), "/usr/bin/app --bind 127.0.0.1:8080");
+    }
+
+    #[test]
+    fn shell_join_quotes_spaces() {
+        let parts = vec![
+            "/usr/bin/app".to_string(),
+            "--profile".to_string(),
+            "my profile".to_string(),
+        ];
+        assert_eq!(shell_join(&parts), "/usr/bin/app --profile 'my profile'");
+    }
+
+    #[test]
+    fn shell_join_escapes_single_quotes() {
+        let parts = vec![
+            "/usr/bin/app".to_string(),
+            "--name".to_string(),
+            "it's-a-test".to_string(),
+        ];
+        // The POSIX '\'' idiom: close quote, escaped literal quote, reopen quote
+        assert_eq!(shell_join(&parts), "/usr/bin/app --name 'it'\\''s-a-test'");
+    }
+
+    #[test]
+    fn shell_join_handles_multiple_single_quotes() {
+        let parts = vec!["a'b'c".to_string()];
+        assert_eq!(shell_join(&parts), "'a'\\''b'\\''c'");
+    }
+
+    #[test]
+    fn shell_join_empty_string_arg() {
+        // Note: shell_join does NOT quote empty strings because the `all()`
+        // check is vacuously true. This is fine in practice because
+        // install_systemd_service guards against empty profile_name/config_path
+        // before building exec_parts.
+        let parts = vec!["/usr/bin/app".to_string(), "".to_string()];
+        assert_eq!(shell_join(&parts), "/usr/bin/app ");
+    }
+
+    #[test]
+    fn shell_join_arg_with_equals_and_spaces() {
+        let parts = vec!["/usr/bin/app".to_string(), "--env=FOO BAR".to_string()];
+        assert_eq!(shell_join(&parts), "/usr/bin/app '--env=FOO BAR'");
+    }
+
+    // ── systemd sg wrapper quoting tests ────────────────────────────────────
+    //
+    // These tests verify the full quoting pipeline:
+    //   shell_join() → backslash doubling → sg -c "..." wrapper
+    //
+    // The resulting string is what goes into ExecStart=. Systemd processes
+    // C-style escapes (\\ → \, \' → ') before passing argv to sg.
+    // sg then invokes /bin/sh -c <argv[3]>, so the shell must receive
+    // valid POSIX-quoted arguments.
+
+    /// Simulate what systemd does to the ExecStart value: process C-style
+    /// escape sequences inside double-quoted regions.
+    fn simulate_systemd_unescape(exec_start: &str) -> Vec<String> {
+        // Simplified systemd ExecStart parser:
+        // - Split on whitespace
+        // - "..." groups tokens (strip outer quotes, process C-escapes inside)
+        // - '...' groups tokens (strip outer quotes, literal content)
+        // - Unquoted tokens are literal
+        let mut args = Vec::new();
+        let mut chars = exec_start.chars().peekable();
+
+        while chars.peek().is_some() {
+            // Skip whitespace between tokens
+            while chars.peek() == Some(&' ') {
+                chars.next();
+            }
+            if chars.peek().is_none() {
+                break;
+            }
+
+            let mut token = String::new();
+            match chars.peek() {
+                Some('"') => {
+                    chars.next(); // consume opening "
+                    while let Some(&c) = chars.peek() {
+                        if c == '"' {
+                            chars.next(); // consume closing "
+                            break;
+                        } else if c == '\\' {
+                            chars.next(); // consume backslash
+                            if let Some(&escaped) = chars.peek() {
+                                // C-style escapes
+                                match escaped {
+                                    '\\' => {
+                                        token.push('\\');
+                                        chars.next();
+                                    }
+                                    '\'' => {
+                                        token.push('\'');
+                                        chars.next();
+                                    }
+                                    '"' => {
+                                        token.push('"');
+                                        chars.next();
+                                    }
+                                    'n' => {
+                                        token.push('\n');
+                                        chars.next();
+                                    }
+                                    't' => {
+                                        token.push('\t');
+                                        chars.next();
+                                    }
+                                    _ => {
+                                        token.push('\\');
+                                        token.push(escaped);
+                                        chars.next();
+                                    }
+                                }
+                            } else {
+                                token.push('\\');
+                            }
+                        } else {
+                            token.push(c);
+                            chars.next();
+                        }
+                    }
+                }
+                Some('\'') => {
+                    chars.next(); // consume opening '
+                    while let Some(&c) = chars.peek() {
+                        if c == '\'' {
+                            chars.next(); // consume closing '
+                            break;
+                        }
+                        token.push(c);
+                        chars.next();
+                    }
+                }
+                _ => {
+                    while let Some(&c) = chars.peek() {
+                        if c == ' ' {
+                            break;
+                        }
+                        token.push(c);
+                        chars.next();
+                    }
+                }
+            }
+            args.push(token);
+        }
+        args
+    }
+
+    #[test]
+    fn build_systemd_exec_start_ignores_docker_group_wrapper_and_keeps_hardening() {
+        let exec_cmd = "/usr/local/bin/stakpak autopilot up --foreground";
+        let (exec_start, no_new_privileges) = build_systemd_exec_start(exec_cmd);
+        assert_eq!(exec_start, exec_cmd);
+        assert_eq!(no_new_privileges, "true");
+    }
+
+    #[test]
+    fn build_systemd_exec_start_preserves_quoted_arguments_without_shell_wrapper() {
+        let exec_cmd = "/usr/local/bin/stakpak --profile 'my profile' autopilot up";
+        let (exec_start, no_new_privileges) = build_systemd_exec_start(exec_cmd);
+        assert_eq!(exec_start, exec_cmd);
+        assert_eq!(no_new_privileges, "true");
+    }
+
+    // ── direct ExecStart quoting tests ──────────────────────────────────────
+    //
+    // Autopilot now always uses the direct ExecStart path. Systemd execs the
+    // binary directly (no shell), so systemd's own parser handles quoting.
+
+    /// For the non-sg path, verify systemd correctly parses shell_join output.
+    fn assert_direct_exec_roundtrip(exec_parts: &[String], expected_argv: &[&str]) {
+        let exec_start = shell_join(exec_parts);
+        let systemd_argv = simulate_systemd_unescape(&exec_start);
+        let expected: Vec<String> = expected_argv.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            systemd_argv, expected,
+            "systemd-parsed argv for direct exec"
+        );
+    }
+
+    #[test]
+    fn direct_exec_simple_args() {
+        let parts = vec![
+            "/usr/local/bin/stakpak".to_string(),
+            "autopilot".to_string(),
+            "up".to_string(),
+            "--foreground".to_string(),
+        ];
+        assert_direct_exec_roundtrip(
+            &parts,
+            &["/usr/local/bin/stakpak", "autopilot", "up", "--foreground"],
+        );
+    }
+
+    #[test]
+    fn direct_exec_spaces_in_profile() {
+        let parts = vec![
+            "/usr/local/bin/stakpak".to_string(),
+            "--profile".to_string(),
+            "my profile".to_string(),
+            "autopilot".to_string(),
+            "up".to_string(),
+        ];
+        assert_direct_exec_roundtrip(
+            &parts,
+            &[
+                "/usr/local/bin/stakpak",
+                "--profile",
+                "my profile",
+                "autopilot",
+                "up",
+            ],
+        );
     }
 }

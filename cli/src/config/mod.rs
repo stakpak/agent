@@ -11,6 +11,7 @@
 mod app;
 mod file;
 pub mod models_cache;
+pub(crate) mod openai_resolver;
 mod profile;
 pub(crate) mod profile_resolver;
 mod rulebook;

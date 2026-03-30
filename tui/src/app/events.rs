@@ -8,6 +8,7 @@ use stakpak_shared::models::{
 use uuid::Uuid;
 
 use crate::app::{ExistingPlanPrompt, LoadingOperation, SessionInfo};
+use crate::services::banner::BannerStyle;
 use crate::services::board_tasks::FetchTasksResult;
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ pub enum InputEvent {
     BillingInfoLoaded(stakpak_shared::models::billing::BillingResponse),
     Error(String),
     SetSessions(Vec<SessionInfo>),
+    SetBannerMessage(String, BannerStyle),
     InputBackspace,
     InputChangedNewline,
     InputSubmitted,
@@ -253,6 +255,7 @@ impl InputEvent {
                 | InputEvent::ShowAskUserPopup(_, _)
                 | InputEvent::ExistingPlanFound(_)
                 | InputEvent::SetSessions(_)
+                | InputEvent::SetBannerMessage(_, _)
                 | InputEvent::GetStatus(_)
                 | InputEvent::BillingInfoLoaded(_)
                 | InputEvent::TotalUsage(_)

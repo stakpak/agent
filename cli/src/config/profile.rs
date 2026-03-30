@@ -493,6 +493,7 @@ impl ProfileConfig {
                 "google",
                 "gemini",
                 "amazon-bedrock",
+                "github-copilot",
             ];
             if !known.contains(&default_provider) {
                 known.push(default_provider);

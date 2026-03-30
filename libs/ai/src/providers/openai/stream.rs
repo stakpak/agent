@@ -14,6 +14,11 @@ use futures::StreamExt;
 use reqwest_eventsource::{self, Event, EventSource};
 use std::error::Error as StdError;
 
+struct SseDispatchResult {
+    events: Vec<StreamEvent>,
+    done: bool,
+}
+
 /// Track state for each tool call during streaming
 #[derive(Debug, Clone)]
 struct ToolCallState {
@@ -353,6 +358,174 @@ pub async fn create_responses_stream(event_source: EventSource) -> Result<Genera
 }
 
 /// Parse a streaming event from Responses API
+fn dispatch_sse_event(
+    event_type: &mut String,
+    data_lines: &mut Vec<String>,
+    state: &mut ResponsesStreamState,
+    started: &mut bool,
+) -> Result<SseDispatchResult> {
+    if event_type.is_empty() && data_lines.is_empty() {
+        return Ok(SseDispatchResult {
+            events: Vec::new(),
+            done: false,
+        });
+    }
+
+    let current_event_type = std::mem::take(event_type);
+    let data = std::mem::take(data_lines).join("\n");
+    if data == "[DONE]" {
+        return Ok(SseDispatchResult {
+            events: Vec::new(),
+            done: true,
+        });
+    }
+
+    let normalized_event_type = if current_event_type.is_empty() {
+        "message"
+    } else {
+        current_event_type.as_str()
+    };
+
+    Ok(SseDispatchResult {
+        events: parse_responses_event(normalized_event_type, &data, state, started)?,
+        done: false,
+    })
+}
+
+fn parse_sse_line(
+    line: &str,
+    event_type: &mut String,
+    data_lines: &mut Vec<String>,
+    state: &mut ResponsesStreamState,
+    started: &mut bool,
+) -> Result<SseDispatchResult> {
+    if line.is_empty() {
+        return dispatch_sse_event(event_type, data_lines, state, started);
+    }
+
+    if line.starts_with(':') {
+        return Ok(SseDispatchResult {
+            events: Vec::new(),
+            done: false,
+        });
+    }
+
+    if let Some(value) = line.strip_prefix("event:") {
+        *event_type = value.trim_start().to_string();
+    } else if let Some(value) = line.strip_prefix("data:") {
+        data_lines.push(value.trim_start().to_string());
+    }
+
+    Ok(SseDispatchResult {
+        events: Vec::new(),
+        done: false,
+    })
+}
+
+pub async fn create_responses_stream_from_response(
+    response: reqwest::Response,
+) -> Result<GenerateStream> {
+    let stream = async_stream::stream! {
+        let mut byte_stream = response.bytes_stream();
+        let mut state = ResponsesStreamState::default();
+        let mut started = false;
+        let mut buffer = Vec::<u8>::new();
+        let mut event_type = String::new();
+        let mut data_lines = Vec::<String>::new();
+
+        while let Some(chunk) = byte_stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffer.extend_from_slice(&bytes);
+
+                    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+                        let mut line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                        if matches!(line_bytes.last(), Some(b'\n')) {
+                            let _ = line_bytes.pop();
+                        }
+                        if matches!(line_bytes.last(), Some(b'\r')) {
+                            let _ = line_bytes.pop();
+                        }
+
+                        let line = match String::from_utf8(line_bytes) {
+                            Ok(line) => line,
+                            Err(error) => {
+                                yield Err(Error::stream_error(format!(
+                                    "UTF-8 decode error in stream: {}",
+                                    error
+                                )));
+                                return;
+                            }
+                        };
+
+                        match parse_sse_line(&line, &mut event_type, &mut data_lines, &mut state, &mut started) {
+                            Ok(result) => {
+                                for event in result.events {
+                                    yield Ok(event);
+                                }
+                                if result.done {
+                                    return;
+                                }
+                            }
+                            Err(error) => {
+                                yield Err(error);
+                                return;
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    yield Err(Error::stream_error(format!(
+                        "Transport error: {} | source: {:?}",
+                        error,
+                        error.source()
+                    )));
+                    return;
+                }
+            }
+        }
+
+        if !buffer.is_empty() {
+            let line = match String::from_utf8(std::mem::take(&mut buffer)) {
+                Ok(line) => line.trim_end_matches(['\r', '\n']).to_string(),
+                Err(error) => {
+                    yield Err(Error::stream_error(format!(
+                        "UTF-8 decode error in stream: {}",
+                        error
+                    )));
+                    return;
+                }
+            };
+
+            match parse_sse_line(&line, &mut event_type, &mut data_lines, &mut state, &mut started) {
+                Ok(result) => {
+                    for event in result.events {
+                        yield Ok(event);
+                    }
+                    if result.done {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    yield Err(error);
+                    return;
+                }
+            }
+        }
+
+        match dispatch_sse_event(&mut event_type, &mut data_lines, &mut state, &mut started) {
+            Ok(result) => {
+                for event in result.events {
+                    yield Ok(event);
+                }
+            }
+            Err(error) => yield Err(error),
+        }
+    };
+
+    Ok(GenerateStream::new(Box::pin(stream)))
+}
+
 fn parse_responses_event(
     event_type: &str,
     data: &str,
@@ -860,5 +1033,55 @@ mod tests {
         } else {
             panic!("Expected Finish event");
         }
+    }
+
+    #[tokio::test]
+    async fn test_create_responses_stream_from_response_without_content_type() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/responses")
+            .with_status(200)
+            .with_body(
+                concat!(
+                    "event: response.output_item.added\n",
+                    "data: {\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\n",
+                    "event: response.output_text.delta\n",
+                    "data: {\"delta\":\"Hello\"}\n\n",
+                    "event: response.completed\n",
+                    "data: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+                ),
+            )
+            .create();
+
+        let response = reqwest::get(format!("{}/responses", server.url()))
+            .await
+            .expect("response");
+        let mut stream = create_responses_stream_from_response(response)
+            .await
+            .expect("stream");
+
+        let first = stream.next().await.expect("start event").expect("ok event");
+        assert!(matches!(first, StreamEvent::Start { .. }));
+
+        let second = stream.next().await.expect("text event").expect("ok event");
+        match second {
+            StreamEvent::TextDelta { delta, .. } => assert_eq!(delta, "Hello"),
+            _ => panic!("Expected TextDelta"),
+        }
+
+        let third = stream
+            .next()
+            .await
+            .expect("finish event")
+            .expect("ok event");
+        match third {
+            StreamEvent::Finish { usage, .. } => {
+                assert_eq!(usage.prompt_tokens, 1);
+                assert_eq!(usage.completion_tokens, 1);
+            }
+            _ => panic!("Expected Finish"),
+        }
+
+        mock.assert();
     }
 }

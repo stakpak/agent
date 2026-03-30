@@ -289,6 +289,20 @@ pub async fn run_interactive(
         };
 
         let send_init_prompt_on_start = config.send_init_prompt_on_start;
+
+        let banner_message = if agent_context
+            .as_ref()
+            .map(|ctx| ctx.apps_md.is_none())
+            .unwrap_or(true)
+        {
+            Some(stakpak_tui::BannerMessage::new(
+                "❕ System not scanned - /init to generate an APPS.md file with your context",
+                stakpak_tui::BannerStyle::Info,
+            ))
+        } else {
+            None
+        };
+
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -310,6 +324,7 @@ pub async fn run_interactive(
                 init_prompt_content_for_tui,
                 send_init_prompt_on_start,
                 recent_models_for_tui,
+                banner_message,
             )
             .await
             .map_err(|e| e.to_string())

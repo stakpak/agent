@@ -1,7 +1,9 @@
 //! OAuth provider registry
 
 use super::provider::OAuthProvider;
-use super::providers::{AnthropicProvider, GitHubCopilotProvider, StakpakProvider};
+use super::providers::{
+    AnthropicProvider, GitHubCopilotProvider, OpenAICodexProvider, StakpakProvider,
+};
 use std::collections::HashMap;
 
 /// Registry of OAuth providers
@@ -19,6 +21,7 @@ impl ProviderRegistry {
         // Register built-in providers
         registry.register(Box::new(StakpakProvider::new()));
         registry.register(Box::new(AnthropicProvider::new()));
+        registry.register(Box::new(OpenAICodexProvider::new()));
         registry.register(Box::new(GitHubCopilotProvider::new()));
 
         registry
@@ -106,5 +109,15 @@ mod tests {
 
         assert!(registry.has_provider("anthropic"));
         assert!(!registry.has_provider("unknown"));
+    }
+
+    #[test]
+    fn test_registry_registers_openai_with_codex_auth_method() {
+        let registry = ProviderRegistry::new();
+        let provider = registry.get("openai").expect("openai provider");
+        let methods = provider.auth_methods();
+
+        assert!(methods.iter().any(|method| method.id == "chatgpt-plus-pro"));
+        assert!(methods.iter().any(|method| method.id == "api-key"));
     }
 }

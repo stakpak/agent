@@ -155,9 +155,10 @@ pub async fn get_warden_plugin_path() -> String {
             "windows-x86_64".to_string(),
         ],
         version: None,
-        repo: Some("warden".to_string()),
-        owner: Some("stakpak".to_string()),
+        repo: None,
+        owner: None,
         version_arg: None,
+        prefer_server_version: true,
     };
 
     get_plugin_path(warden_config).await
