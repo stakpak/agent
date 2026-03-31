@@ -218,7 +218,6 @@ impl ClientPoolConfig {
         let mut servers = HashMap::new();
 
         for (name, server_config_json) in mcp_config.mcp_servers {
-            
             if server_config_json.is_disabled() {
                 continue;
             }
