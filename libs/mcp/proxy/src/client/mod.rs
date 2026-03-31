@@ -260,18 +260,26 @@ fn substitute_env_vars(s: &str) -> String {
                 // ${VAR} form
                 chars.next(); // consume '{'
                 let mut var_name = String::new();
+                let mut closed = false;
                 for c in chars.by_ref() {
                     if c == '}' {
+                        closed = true;
                         break;
                     }
                     var_name.push(c);
                 }
-                match std::env::var(&var_name) {
-                    Ok(val) => result.push_str(&val),
-                    Err(_) => {
-                        result.push_str("${");
-                        result.push_str(&var_name);
-                        result.push('}');
+                if !closed {
+                    // Unterminated ${VAR; leave as-is without env lookup.
+                    result.push_str("${");
+                    result.push_str(&var_name);
+                } else {
+                    match std::env::var(&var_name) {
+                        Ok(val) => result.push_str(&val),
+                        Err(_) => {
+                            result.push_str("${");
+                            result.push_str(&var_name);
+                            result.push('}');
+                        }
                     }
                 }
             } else {
