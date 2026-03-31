@@ -8,7 +8,7 @@ use crate::config::AppConfig;
 pub mod proxy;
 pub mod server;
 
-fn find_mcp_proxy_config_file() -> Result<String, String> {
+pub fn find_mcp_proxy_config_file() -> Result<String, String> {
     // Priority 1: ~/.stakpak/mcp.{toml,json}
     let config_path = AppConfig::get_config_path::<&str>(None);
     if let Some(home_stakpak) = config_path.parent() {

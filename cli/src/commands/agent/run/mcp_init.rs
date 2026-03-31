@@ -9,6 +9,7 @@
 
 use crate::commands::agent::run::helpers::convert_tools_with_filter;
 use crate::commands::get_client;
+use crate::commands::mcp::find_mcp_proxy_config_file;
 use crate::config::AppConfig;
 use crate::utils::network;
 use stakpak_api::local::skills::default_skill_directories;
@@ -205,7 +206,45 @@ fn build_proxy_config(
         },
     );
 
+    // Load external servers from config file (overrides defaults on name collision)
+    if let Ok(config_path) = find_mcp_proxy_config_file() {
+        match load_external_servers(&config_path) {
+            Ok(external_servers) => {
+                tracing::info!(
+                    "Loaded {} external MCP server(s) from {}",
+                    external_servers.len(),
+                    config_path
+                );
+                for (name, config) in external_servers {
+                    if name == "stakpak" || name == "paks" {
+                        tracing::warn!(
+                            "Skipping external MCP server {} (reserved for stakpak's internal use)",
+                            name
+                        );
+                        continue;
+                    }
+                    servers.insert(name, config);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load MCP config from {}: {}", config_path, e);
+            }
+        }
+    }
+
     ClientPoolConfig::with_servers(servers)
+}
+
+/// Load external MCP servers from a config file (TOML or JSON).
+fn load_external_servers(config_path: &str) -> Result<HashMap<String, ServerConfig>, String> {
+    let config = if config_path.ends_with(".toml") {
+        ClientPoolConfig::from_toml_file(config_path)
+    } else {
+        ClientPoolConfig::from_json_file(config_path)
+    }
+    .map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
+
+    Ok(config.servers)
 }
 
 /// Start the proxy server
