@@ -206,7 +206,7 @@ fn build_proxy_config(
         },
     );
 
-    // Load external servers from config file (overrides defaults on name collision)
+    // Load external servers from config file (skip mcp_servers with reserved names)
     if let Ok(config_path) = find_mcp_proxy_config_file() {
         match load_external_servers(&config_path) {
             Ok(external_servers) => {
