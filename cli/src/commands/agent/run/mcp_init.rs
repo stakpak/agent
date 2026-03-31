@@ -210,11 +210,7 @@ fn build_proxy_config(
     if let Ok(config_path) = find_mcp_proxy_config_file() {
         match load_external_servers(&config_path) {
             Ok(external_servers) => {
-                tracing::info!(
-                    "Loaded {} external MCP server(s) from {}",
-                    external_servers.len(),
-                    config_path
-                );
+                let mut loaded_servers = 0;
                 for (name, config) in external_servers {
                     if name == "stakpak" || name == "paks" {
                         tracing::warn!(
@@ -223,8 +219,14 @@ fn build_proxy_config(
                         );
                         continue;
                     }
+                    loaded_servers += 1;
                     servers.insert(name, config);
                 }
+                tracing::info!(
+                    "Loaded {} external MCP servers from {}",
+                    loaded_servers,
+                    config_path
+                );
             }
             Err(e) => {
                 tracing::warn!("Failed to load MCP config from {}: {}", config_path, e);
