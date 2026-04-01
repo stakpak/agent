@@ -50,7 +50,16 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
 
     // Get the target version from the server or GitHub
     let target_version = match config.version.clone() {
-        Some(version) => version,
+        Some(version) => match normalize_version(&version) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "Warning: Invalid configured version for {}: {}",
+                    config.name, e
+                );
+                return get_plugin_path_without_version_check(&config).await;
+            }
+        },
         None => {
             let latest = match latest_version_source(&config) {
                 LatestVersionSource::Server => get_latest_version(&config).await,
@@ -68,7 +77,16 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
             };
 
             match latest {
-                Ok(version) => version,
+                Ok(version) => match normalize_version(&version) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Invalid version returned for {}: {}",
+                            config.name, e
+                        );
+                        return get_plugin_path_without_version_check(&config).await;
+                    }
+                },
                 Err(e) => {
                     eprintln!(
                         "Warning: Failed to check latest version for {}: {}",
@@ -110,21 +128,10 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
         }
     }
 
-    // Pin the resolved version so the download URL uses the exact version
-    // rather than falling back to "latest" (which could race with a new release).
-    let resolved_config = PluginConfig {
-        version: Some(target_version.clone()),
-        name: config.name.clone(),
-        base_url: config.base_url.clone(),
-        targets: config.targets.clone(),
-        repo: config.repo.clone(),
-        owner: config.owner.clone(),
-        version_arg: config.version_arg.clone(),
-        prefer_server_version: config.prefer_server_version,
-    };
-
-    // Try to download and install the resolved version
-    match download_and_install_plugin(&resolved_config).await {
+    // Try to download and install the resolved version.
+    // If storage/tag naming disagrees about the `v` prefix, retry once with
+    // the alternate form (e.g. `v1.2.3` <-> `1.2.3`).
+    match download_with_version_fallback(&config, &target_version).await {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Failed to download {}: {}", config.name, e);
@@ -275,10 +282,97 @@ pub async fn get_latest_github_release_version(owner: &str, repo: &str) -> Resul
         .ok_or_else(|| "No tag_name in release".to_string())
 }
 
+/// Normalize a version string to canonical `v`-prefixed format.
+///
+/// We canonicalize for comparisons and internal target selection, then retry
+/// downloads once with the alternate non-`v` form to support both storage styles.
+fn normalize_version(version: &str) -> Result<String, String> {
+    let v = version.trim();
+    if v.is_empty() {
+        return Err("Version string is empty".to_string());
+    }
+    let bare = v
+        .strip_prefix('v')
+        .or_else(|| v.strip_prefix('V'))
+        .unwrap_or(v);
+    Ok(format!("v{bare}"))
+}
+
+fn alternate_version_form(version: &str) -> Option<String> {
+    let v = version.trim();
+    if v.is_empty() {
+        return None;
+    }
+
+    if let Some(bare) = v.strip_prefix('v').or_else(|| v.strip_prefix('V')) {
+        if bare.is_empty() {
+            None
+        } else {
+            Some(bare.to_string())
+        }
+    } else {
+        Some(format!("v{v}"))
+    }
+}
+
+async fn download_with_version_fallback(
+    config: &PluginConfig,
+    target_version: &str,
+) -> Result<String, String> {
+    let primary_config = PluginConfig {
+        version: Some(target_version.to_string()),
+        name: config.name.clone(),
+        base_url: config.base_url.clone(),
+        targets: config.targets.clone(),
+        repo: config.repo.clone(),
+        owner: config.owner.clone(),
+        version_arg: config.version_arg.clone(),
+        prefer_server_version: config.prefer_server_version,
+    };
+
+    match download_and_install_plugin(&primary_config).await {
+        Ok(path) => Ok(path),
+        Err(primary_err) => {
+            let alternate = match alternate_version_form(target_version) {
+                Some(alt) if alt != target_version => alt,
+                _ => return Err(primary_err),
+            };
+
+            let alternate_config = PluginConfig {
+                version: Some(alternate.clone()),
+                name: config.name.clone(),
+                base_url: config.base_url.clone(),
+                targets: config.targets.clone(),
+                repo: config.repo.clone(),
+                owner: config.owner.clone(),
+                version_arg: config.version_arg.clone(),
+                prefer_server_version: config.prefer_server_version,
+            };
+
+            match download_and_install_plugin(&alternate_config).await {
+                Ok(path) => Ok(path),
+                Err(alternate_err) => Err(format!(
+                    "{}; retry with version '{}' failed: {}",
+                    primary_err, alternate, alternate_err
+                )),
+            }
+        }
+    }
+}
+
 /// Compare two version strings
 pub fn is_same_version(current: &str, latest: &str) -> bool {
-    let current_clean = current.strip_prefix('v').unwrap_or(current);
-    let latest_clean = latest.strip_prefix('v').unwrap_or(latest);
+    let current_trim = current.trim();
+    let latest_trim = latest.trim();
+
+    let current_clean = current_trim
+        .strip_prefix('v')
+        .or_else(|| current_trim.strip_prefix('V'))
+        .unwrap_or(current_trim);
+    let latest_clean = latest_trim
+        .strip_prefix('v')
+        .or_else(|| latest_trim.strip_prefix('V'))
+        .unwrap_or(latest_trim);
 
     current_clean == latest_clean
 }
@@ -607,5 +701,47 @@ mod tests {
         let (download_url, _, _) = get_download_info(&config).expect("download info");
         assert!(download_url.contains("/v9.9.9/"));
         assert!(!download_url.contains("/latest/"));
+    }
+
+    // ── normalize_version tests ─────────────────────────────────────────
+
+    #[test]
+    fn normalize_version_adds_v_prefix() {
+        assert_eq!(normalize_version("1.2.3").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn normalize_version_preserves_existing_lowercase_v() {
+        assert_eq!(normalize_version("v1.2.3").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn normalize_version_lowercases_uppercase_v() {
+        assert_eq!(normalize_version("V1.2.3").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn normalize_version_trims_whitespace() {
+        assert_eq!(normalize_version("  1.2.3  ").unwrap(), "v1.2.3");
+        assert_eq!(normalize_version("  v1.2.3  ").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn normalize_version_rejects_empty_string() {
+        assert!(normalize_version("").is_err());
+        assert!(normalize_version("   ").is_err());
+    }
+
+    #[test]
+    fn alternate_version_form_toggles_prefix() {
+        assert_eq!(alternate_version_form("v1.2.3"), Some("1.2.3".to_string()));
+        assert_eq!(alternate_version_form("1.2.3"), Some("v1.2.3".to_string()));
+        assert_eq!(alternate_version_form("V1.2.3"), Some("1.2.3".to_string()));
+    }
+
+    #[test]
+    fn is_same_version_ignores_prefix_case_and_whitespace() {
+        assert!(is_same_version("V1.2.3", "v1.2.3"));
+        assert!(is_same_version("  1.2.3", "v1.2.3  "));
     }
 }
