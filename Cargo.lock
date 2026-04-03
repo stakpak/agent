@@ -5889,7 +5889,7 @@ dependencies = [
 
 [[package]]
 name = "shell-tool-approvals"
-version = "0.3.68"
+version = "0.3.71"
 dependencies = [
  "globset",
  "log",
