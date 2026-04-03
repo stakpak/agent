@@ -1310,8 +1310,7 @@ pub async fn run_interactive(
                         }
                     }
                     OutputEvent::InitCommandCalled => {
-                        if !has_stakpak_key
-                            && let Some(ref anonymous_id) = ctx_clone.anonymous_id
+                        if let Some(ref anonymous_id) = ctx_clone.anonymous_id
                             && ctx_clone.collect_telemetry.unwrap_or(true)
                         {
                             capture_event(
