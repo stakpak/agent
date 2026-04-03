@@ -1309,6 +1309,20 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
+                    OutputEvent::InitCommandCalled => {
+                        if !has_stakpak_key
+                            && let Some(ref anonymous_id) = ctx_clone.anonymous_id
+                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                        {
+                            capture_event(
+                                anonymous_id,
+                                ctx_clone.machine_name.as_deref(),
+                                true,
+                                TelemetryEvent::InitCommandCalled,
+                            );
+                        }
+                        continue;
+                    }
                     OutputEvent::PlanFeedback(feedback_text) => {
                         // User submitted feedback from plan review.
                         // Inject as direct user message — the feedback already contains

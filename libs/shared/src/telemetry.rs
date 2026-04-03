@@ -12,6 +12,7 @@ const TELEMETRY_ENDPOINT: &str = "https://apiv2.stakpak.dev/v1/telemetry";
 pub enum TelemetryEvent {
     FirstOpen,
     UserPrompted,
+    InitCommandCalled,
 }
 
 impl fmt::Display for TelemetryEvent {
@@ -19,6 +20,7 @@ impl fmt::Display for TelemetryEvent {
         match self {
             TelemetryEvent::FirstOpen => write!(f, "FirstOpen"),
             TelemetryEvent::UserPrompted => write!(f, "UserPrompted"),
+            TelemetryEvent::InitCommandCalled => write!(f, "InitCommandCalled"),
         }
     }
 }

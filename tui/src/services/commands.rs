@@ -565,6 +565,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
+            let _ = ctx.output_tx.try_send(OutputEvent::InitCommandCalled);
             ctx.state.messages.push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
