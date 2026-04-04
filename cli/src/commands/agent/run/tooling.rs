@@ -40,6 +40,7 @@ pub async fn run_tool_call(
     cancel_rx: Option<tokio::sync::broadcast::Receiver<()>>,
     session_id: Option<Uuid>,
     model_id: Option<String>,
+    model_provider: Option<String>,
 ) -> Result<Option<CallToolResult>, String> {
     let tool_name = &tool_call.function.name;
     let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
@@ -69,6 +70,12 @@ pub async fn run_tool_call(
             }
             if let Some(model_id) = model_id {
                 meta.insert("model_id".to_string(), serde_json::Value::String(model_id));
+            }
+            if let Some(model_provider) = model_provider {
+                meta.insert(
+                    "model_provider".to_string(),
+                    serde_json::Value::String(model_provider),
+                );
             }
             meta
         });

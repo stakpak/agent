@@ -183,18 +183,24 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         let config_path = self.subagent_config.config_path.clone();
         let max_steps = max_steps.unwrap_or(30);
 
-        let model = if let Some(serde_json::Value::String(model_id)) = ctx.meta.get("model_id") {
-            if model_id.contains("claude-opus-4-6") {
-                model_id.replace("opus-4-6", "haiku-4-5")
-            } else if model_id.contains("claude-opus") {
-                model_id.replace("opus", "haiku")
-            } else if model_id.contains("claude-sonnet") {
-                model_id.replace("sonnet", "haiku")
-            } else {
-                model_id.clone()
+        let model_id = ctx
+            .meta
+            .get("model_id")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+
+        let model_provider = ctx
+            .meta
+            .get("model_provider")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+
+        let model = match (model_provider.clone(), model_id.clone()) {
+            (Some(provider), Some(id)) => {
+                let downgraded_id = downgrade_model_choice(&id);
+                Some(format!("{}/{}", provider, downgraded_id))
             }
-        } else {
-            "claude-haiku-4-5".to_string()
+            _ => None,
         };
 
         // Build the dynamic subagent command
@@ -202,7 +208,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             &instructions,
             context.as_deref(),
             &tools,
-            &model,
+            model.as_deref(),
             max_steps,
             enable_sandbox,
             session_id.as_deref(),
@@ -249,6 +255,9 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         } else {
             ""
         };
+        let model_display = model
+            .clone()
+            .unwrap_or_else(|| "(inherited from profile config)".to_string());
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "🤖 Dynamic Subagent Created\n\n\
@@ -262,7 +271,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             Use get_task_details to monitor progress and get results.",
             task_info.id,
             description,
-            model,
+            model_display,
             tools_display,
             max_steps,
             context_display,
@@ -416,7 +425,7 @@ NOTES:
         instructions: &str,
         context: Option<&str>,
         tools: &[String],
-        model: &str,
+        model: Option<&str>,
         max_steps: usize,
         enable_sandbox: bool,
         session_id: Option<&str>,
@@ -489,9 +498,11 @@ NOTES:
             prompt_file_path.clone(),
             "--max-steps".to_string(),
             max_steps.to_string(),
-            "--model".to_string(),
-            model.to_string(),
         ]);
+
+        if let Some(model) = model.filter(|m| !m.is_empty()) {
+            args.extend(["--model".to_string(), model.to_string()]);
+        }
 
         // Add tool flags
         for tool in tools {
@@ -554,5 +565,74 @@ NOTES:
         }
 
         Ok(command)
+    }
+}
+
+fn downgrade_model_choice(model_id: &str) -> String {
+    if !model_id.contains("claude") {
+        return model_id.to_string();
+    }
+
+    let downgraded = if model_id.contains("opus") {
+        model_id.replacen("opus", "haiku", 1)
+    } else if model_id.contains("sonnet") {
+        model_id.replacen("sonnet", "haiku", 1)
+    } else {
+        model_id.to_string()
+    };
+
+    if downgraded.contains("claude") {
+        downgraded.replace("4-6", "4-5").replace("4.6", "4.5")
+    } else {
+        downgraded
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::downgrade_model_choice;
+
+    #[test]
+    fn non_claude_model_is_unchanged() {
+        let model = "gpt-5";
+        assert_eq!(downgrade_model_choice(model), model);
+    }
+
+    #[test]
+    fn claude_opus_is_downgraded_to_haiku() {
+        assert_eq!(
+            downgrade_model_choice("claude-opus-4-6"),
+            "claude-haiku-4-5"
+        );
+    }
+
+    #[test]
+    fn claude_sonnet_is_downgraded_to_haiku() {
+        assert_eq!(
+            downgrade_model_choice("claude-sonnet-4-6"),
+            "claude-haiku-4-5"
+        );
+    }
+
+    #[test]
+    fn claude_version_with_dot_is_normalized() {
+        assert_eq!(
+            downgrade_model_choice("claude-opus-4.6"),
+            "claude-haiku-4.5"
+        );
+    }
+
+    #[test]
+    fn claude_haiku_still_gets_version_normalization() {
+        assert_eq!(
+            downgrade_model_choice("claude-haiku-4-6"),
+            "claude-haiku-4-5"
+        );
+    }
+
+    #[test]
+    fn claude_without_target_tokens_is_left_as_is() {
+        let model = "claude-custom";
+        assert_eq!(downgrade_model_choice(model), model);
     }
 }

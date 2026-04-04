@@ -972,6 +972,7 @@ impl StakpakAcpAgent {
                     tool_cancel_rx,
                     self.current_session_id.get(),
                     Some(self.model.read().await.id.clone()),
+                    Some(self.model.read().await.provider.clone()),
                 )
                 .await
                 .map_err(|e| {
