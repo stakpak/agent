@@ -179,6 +179,13 @@ pub fn load_config(path: &Path) -> Result<McpConfigFile, String> {
 
     let format = detect_format(path);
 
+    if content.trim().is_empty() {
+        return Ok(McpConfigFile {
+            servers: BTreeMap::new(),
+            format: Some(format),
+        });
+    }
+
     let mut config: McpConfigFile = match format {
         FileFormat::Toml => toml::from_str(&content)
             .map_err(|e| format!("Failed to parse {} as TOML: {}", path.display(), e))?,
@@ -430,6 +437,18 @@ disabled = true
         let config = load_config(&path).unwrap();
         assert!(config.servers.is_empty());
         assert!(config.format.is_none());
+    }
+
+    #[test]
+    fn test_load_empty_config_returns_default_servers() {
+        let path = temp_test_path("empty.toml");
+        fs::write(&path, "\n").unwrap();
+
+        let config = load_config(&path).unwrap();
+        assert!(config.servers.is_empty());
+        assert!(matches!(config.format, Some(FileFormat::Toml)));
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]
