@@ -5,10 +5,9 @@ use rmcp::model::{
 };
 use rmcp::service::{NotificationContext, Peer, RunningService};
 use rmcp::{RoleClient, RoleServer};
-use serde::Deserialize;
+use stakpak_mcp_config::{McpConfigFile, McpServerEntry, load_config, load_config_from_str};
 use stakpak_shared::cert_utils::CertificateChain;
 use std::collections::HashMap;
-use std::fs;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
@@ -145,85 +144,22 @@ pub enum ServerConfig {
     },
 }
 
-#[derive(Debug, Deserialize)]
-struct McpConfig {
-    #[serde(rename = "mcpServers")]
-    mcp_servers: HashMap<String, ServerConfigJson>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ServerConfigJson {
-    CommandBased {
-        command: String,
-        args: Vec<String>,
-        #[serde(default)]
-        env: Option<HashMap<String, String>>,
-        #[serde(default)]
-        disabled: bool,
-    },
-    UrlBased {
-        url: String,
-        #[serde(default)]
-        headers: Option<HashMap<String, String>>,
-        #[serde(default)]
-        disabled: bool,
-    },
-}
-
-impl ServerConfigJson {
-    fn is_disabled(&self) -> bool {
-        match self {
-            ServerConfigJson::CommandBased { disabled, .. } => *disabled,
-            ServerConfigJson::UrlBased { disabled, .. } => *disabled,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ClientPoolConfig {
     pub servers: HashMap<String, ServerConfig>,
 }
 
-impl ClientPoolConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_servers(servers: HashMap<String, ServerConfig>) -> Self {
-        Self { servers }
-    }
-
-    pub fn from_json_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let content = fs::read_to_string(path)?;
-        Self::from_json_str(&content)
-    }
-
-    pub fn from_json_str(json_str: &str) -> anyhow::Result<Self> {
-        let mcp_config: McpConfig = serde_json::from_str(json_str)?;
-        Ok(Self::from_mcp_config(mcp_config))
-    }
-
-    pub fn from_toml_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let content = fs::read_to_string(path)?;
-        Self::from_toml_str(&content)
-    }
-
-    pub fn from_toml_str(toml_str: &str) -> anyhow::Result<Self> {
-        let mcp_config: McpConfig = toml::from_str(toml_str)?;
-        Ok(Self::from_mcp_config(mcp_config))
-    }
-
-    fn from_mcp_config(mcp_config: McpConfig) -> Self {
+impl From<McpConfigFile> for ClientPoolConfig {
+    fn from(config: McpConfigFile) -> Self {
         let mut servers = HashMap::new();
 
-        for (name, server_config_json) in mcp_config.mcp_servers {
-            if server_config_json.is_disabled() {
+        for (name, entry) in config.servers {
+            if entry.is_disabled() {
                 continue;
             }
 
-            let server_config = match server_config_json {
-                ServerConfigJson::CommandBased {
+            let server_config = match entry {
+                McpServerEntry::CommandBased {
                     command, args, env, ..
                 } => {
                     let env = env.map(|vars| {
@@ -233,7 +169,7 @@ impl ClientPoolConfig {
                     });
                     ServerConfig::Stdio { command, args, env }
                 }
-                ServerConfigJson::UrlBased { url, headers, .. } => ServerConfig::Http {
+                McpServerEntry::UrlBased { url, headers, .. } => ServerConfig::Http {
                     url,
                     headers,
                     certificate_chain: Arc::new(None),
@@ -245,6 +181,26 @@ impl ClientPoolConfig {
         }
 
         Self { servers }
+    }
+}
+
+impl ClientPoolConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_servers(servers: HashMap<String, ServerConfig>) -> Self {
+        Self { servers }
+    }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let config = load_config(path.as_ref()).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Self::from(config))
+    }
+
+    pub fn from_text(str: &str) -> anyhow::Result<Self> {
+        let config = load_config_from_str(str).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Self::from(config))
     }
 }
 
@@ -390,7 +346,7 @@ url = "https://example.com/mcp"
 url = "https://disabled.com/mcp"
 disabled = true
 "#;
-        let config = ClientPoolConfig::from_toml_str(toml_str).unwrap();
+        let config = ClientPoolConfig::from_text(toml_str).unwrap();
         assert_eq!(config.servers.len(), 2);
         assert!(config.servers.contains_key("active"));
         assert!(config.servers.contains_key("active-url"));
@@ -406,7 +362,7 @@ command = "npx"
 args = ["-y", "my-server"]
 disabled = false
 "#;
-        let config = ClientPoolConfig::from_toml_str(toml_str).unwrap();
+        let config = ClientPoolConfig::from_text(toml_str).unwrap();
         assert_eq!(config.servers.len(), 1);
         assert!(config.servers.contains_key("myserver"));
     }
@@ -418,7 +374,7 @@ disabled = false
 command = "npx"
 args = ["-y", "my-server"]
 "#;
-        let config = ClientPoolConfig::from_toml_str(toml_str).unwrap();
+        let config = ClientPoolConfig::from_text(toml_str).unwrap();
         assert_eq!(config.servers.len(), 1);
     }
 
@@ -431,7 +387,7 @@ command = "npx"
 args = ["-y", "server"]
 env = { GITHUB_TOKEN = "$TEST_MCP_TOKEN" }
 "#;
-        let config = ClientPoolConfig::from_toml_str(toml_str).unwrap();
+        let config = ClientPoolConfig::from_text(toml_str).unwrap();
         match config.servers.get("github").unwrap() {
             ServerConfig::Stdio { env: Some(env), .. } => {
                 assert_eq!(env.get("GITHUB_TOKEN").unwrap(), "my-token-value");

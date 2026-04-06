@@ -18,6 +18,7 @@ libsql-test = []
 stakpak-api = { workspace = true }
 stakpak-mcp-server = { workspace = true }
 stakpak-mcp-client = { workspace = true }
+stakpak-mcp-config = { workspace = true }
 stakpak-mcp-proxy = { workspace = true }
 stakpak-tui = { workspace = true }
 stakpak-shared = { workspace = true, features = ["sqlite"] }

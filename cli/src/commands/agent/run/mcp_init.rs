@@ -9,7 +9,6 @@
 
 use crate::commands::agent::run::helpers::convert_tools_with_filter;
 use crate::commands::get_client;
-use crate::commands::mcp::find_mcp_proxy_config_file;
 use crate::config::AppConfig;
 use crate::utils::network;
 use stakpak_api::local::skills::default_skill_directories;
@@ -207,7 +206,7 @@ fn build_proxy_config(
     );
 
     // Load external servers from config file (skip mcp_servers with reserved names)
-    if let Ok(config_path) = find_mcp_proxy_config_file() {
+    if let Ok(config_path) = stakpak_mcp_config::find_config_file() {
         match load_external_servers(&config_path) {
             Ok(external_servers) => {
                 let mut loaded_servers = 0;
@@ -239,14 +238,9 @@ fn build_proxy_config(
 
 /// Load external MCP servers from a config file (TOML or JSON).
 fn load_external_servers(config_path: &str) -> Result<HashMap<String, ServerConfig>, String> {
-    let config = if config_path.ends_with(".toml") {
-        ClientPoolConfig::from_toml_file(config_path)
-    } else {
-        ClientPoolConfig::from_json_file(config_path)
-    }
-    .map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
-
-    Ok(config.servers)
+    let config = stakpak_mcp_config::load_config(config_path.as_ref())?;
+    let pool_config = ClientPoolConfig::from(config);
+    Ok(pool_config.servers)
 }
 
 /// Start the proxy server

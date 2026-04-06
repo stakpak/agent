@@ -5889,7 +5889,7 @@ dependencies = [
 
 [[package]]
 name = "shell-tool-approvals"
-version = "0.3.68"
+version = "0.3.71"
 dependencies = [
  "globset",
  "log",
@@ -6148,6 +6148,7 @@ dependencies = [
  "stakpak-api",
  "stakpak-gateway",
  "stakpak-mcp-client",
+ "stakpak-mcp-config",
  "stakpak-mcp-proxy",
  "stakpak-mcp-server",
  "stakpak-server",
@@ -6260,6 +6261,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-mcp-config"
+version = "0.3.71"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stakpak-shared",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "stakpak-mcp-proxy"
 version = "0.3.71"
 dependencies = [
@@ -6272,6 +6283,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "stakpak-mcp-config",
  "stakpak-shared",
  "tokio",
  "toml 0.8.23",
