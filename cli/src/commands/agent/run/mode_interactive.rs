@@ -791,6 +791,7 @@ pub async fn run_interactive(
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
                                 Some(model.id.clone()),
+                                Some(model.provider.clone()),
                             )
                             .await?
                         } else {
