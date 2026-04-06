@@ -336,8 +336,12 @@ impl ProxyServer {
                 if let Some(env_vars) = env {
                     cmd.envs(&env_vars);
                 }
-                let proc = match TokioChildProcess::new(cmd) {
-                    Ok(p) => p,
+                let (proc, _) = match TokioChildProcess::builder(cmd)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(result) => result,
                     Err(e) => {
                         tracing::error!("Failed to create process for {}: {:?}", name, e);
                         return;
