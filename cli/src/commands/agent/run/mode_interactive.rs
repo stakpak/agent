@@ -791,6 +791,7 @@ pub async fn run_interactive(
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
                                 Some(model.id.clone()),
+                                Some(model.provider.clone()),
                             )
                             .await?
                         } else {
@@ -1308,6 +1309,19 @@ pub async fn run_interactive(
                             // Don't fall through to the API call with empty messages.
                             continue;
                         }
+                    }
+                    OutputEvent::InitCommandCalled => {
+                        if let Some(ref anonymous_id) = ctx_clone.anonymous_id
+                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                        {
+                            capture_event(
+                                anonymous_id,
+                                ctx_clone.machine_name.as_deref(),
+                                true,
+                                TelemetryEvent::InitCommandCalled,
+                            );
+                        }
+                        continue;
                     }
                     OutputEvent::PlanFeedback(feedback_text) => {
                         // User submitted feedback from plan review.

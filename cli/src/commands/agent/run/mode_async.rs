@@ -339,6 +339,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                             None,
                             current_session_id,
                             Some(config.model.id.clone()),
+                            Some(config.model.provider.clone()),
                         )
                         .await
                     };
@@ -687,6 +688,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                         None,
                         current_session_id,
                         Some(config.model.id.clone()),
+                        Some(config.model.provider.clone()),
                     )
                     .await
                 };

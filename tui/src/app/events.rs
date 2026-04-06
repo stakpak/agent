@@ -303,6 +303,8 @@ pub enum OutputEvent {
     PlanFeedback(String),
     /// Plan approved — transition to Executing phase.
     PlanApproved,
+    /// /init command was invoked.
+    InitCommandCalled,
     /// Response from ask_user popup with the tool call and result
     AskUserResponse(ToolCallResult),
 }
