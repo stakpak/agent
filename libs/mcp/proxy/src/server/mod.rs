@@ -337,7 +337,6 @@ impl ProxyServer {
                     cmd.envs(&env_vars);
                 }
                 let (proc, _) = match TokioChildProcess::builder(cmd)
-                    .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .spawn()
                 {
