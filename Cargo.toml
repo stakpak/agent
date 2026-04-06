@@ -18,7 +18,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.71"
+version = "0.3.72"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -27,16 +27,16 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.71" }
-stakpak-api = { path = "libs/api", version = "0.3.71" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.71" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.71" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.71" }
-stakpak-agent-core = { path = "libs/agent-core", version = "0.3.71" }
-stakpak-gateway = { path = "libs/gateway", version = "0.3.71" }
-stakpak-server = { path = "libs/server", version = "0.3.71" }
-stakpak-tui = { path = "tui", version = "0.3.71" }
-stakpak-shared = { path = "libs/shared", version = "0.3.71" }
+stakai = { path = "libs/ai", version = "0.3.72" }
+stakpak-api = { path = "libs/api", version = "0.3.72" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.72" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.72" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.72" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.72" }
+stakpak-gateway = { path = "libs/gateway", version = "0.3.72" }
+stakpak-server = { path = "libs/server", version = "0.3.72" }
+stakpak-tui = { path = "tui", version = "0.3.72" }
+stakpak-shared = { path = "libs/shared", version = "0.3.72" }
 shell-tool-approvals = { path = "libs/shell-tool-approvals", version = "0.3.71" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
