@@ -588,8 +588,13 @@ extension AgentViewModel {
                     }
                 }
 
-                // Vision verification: auto-screenshot after UI actions so the LLM can see the result
-                if isVision && !pendingTools.isEmpty {
+                // Vision verification: auto-screenshot after UI actions so the LLM can see the result.
+                // OPT-IN via visionAutoScreenshotEnabled (Settings → Vision Auto-Screenshot).
+                // Default OFF because it (1) hogs the main thread on every UI iteration,
+                // (2) bloats every prompt with a base64 image even for non-vision models,
+                // and (3) the next accessibility(find_element) query usually tells the LLM
+                // what happened just as well, without the screenshot cost.
+                if visionAutoScreenshotEnabled && isVision && !pendingTools.isEmpty {
                     let uiActions: Set<String> = ["ax_click", "ax_click_element", "ax_perform_action", "ax_type_text",
                         "ax_type_into_element", "ax_open_app", "ax_scroll", "ax_drag",
                         "click", "click_element", "perform_action", "type_text", "open_app",

@@ -127,6 +127,14 @@ final class AgentViewModel {
     var autoScaffoldEnabled: Bool = UserDefaults.standard.bool(forKey: "codingAutoScaffold") {
         didSet { UserDefaults.standard.set(autoScaffoldEnabled, forKey: "codingAutoScaffold") }
     }
+    /// Vision auto-screenshot: after every UI action, capture a verification screenshot
+    /// and inject it into the next tool_results. Default OFF — it hogs the main thread
+    /// (screencapture is synchronous-ish), bloats every iteration's prompt with a base64
+    /// image even when the LLM doesn't have vision, and the next AX query usually tells
+    /// the LLM what happened anyway. Opt-in for vision-heavy debugging only.
+    var visionAutoScreenshotEnabled: Bool = UserDefaults.standard.bool(forKey: "visionAutoScreenshot") {
+        didSet { UserDefaults.standard.set(visionAutoScreenshotEnabled, forKey: "visionAutoScreenshot") }
+    }
     var thinkingDismissed: Bool = UserDefaults.standard.object(forKey: "thinkingDismissed") as? Bool ?? true {
         didSet { UserDefaults.standard.set(thinkingDismissed, forKey: "thinkingDismissed") }
     }
