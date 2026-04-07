@@ -100,7 +100,7 @@ extension AgentViewModel {
 
     func executeTabTask(tab: ScriptTab, prompt: String) async {
         tab.isLLMRunning = true
-        tab.llmMessages = []  // Fresh conversation for each task
+        tab.llmMessages = [] // Fresh conversation for each task
         // Auto-expand HUD for THIS tab's run start (not on tab switches)
         tab.thinkingExpanded = true
         tab.thinkingOutputExpanded = true
@@ -163,7 +163,8 @@ extension AgentViewModel {
                 if let data = output.data(using: .utf8),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let title = json["title"] as? String,
-                   let url = json["url"] as? String {
+                   let url = json["url"] as? String
+                {
                     tab.appendLog("✅ \(title)")
                     tab.appendLog("🔗 \(url)")
                     if let content = json["content"] as? String {
@@ -176,7 +177,14 @@ extension AgentViewModel {
             }
             // google_search with results: pass to LLM for formatting
             if cmd.name == "google_search" && output.contains("\"success\": true") {
-                directCommandContext = "Format these Google search results for the user. Be concise — show the top results with titles, URLs, and brief descriptions:\n\n\(output)"
+                directCommandContext =
+                    """
+                    Format these Google search results for the user. \
+                    Be concise — show the top results with titles, \
+                    URLs, and brief descriptions:
+
+                    \(output)
+                    """
                 break
             }
 
@@ -185,7 +193,12 @@ extension AgentViewModel {
             formatter.dateFormat = "HH:mm:ss"
             let time = formatter.string(from: Date())
             tab.tabTaskSummaries.append("[\(time)] \(prompt) → \(completionSummary)")
-            history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: [cmd.name]), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: [cmd.name]),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
             tab.flush()
             if tab.isMessagesTab, let handle = tab.replyHandle {
                 tab.replyHandle = nil
@@ -202,7 +215,12 @@ extension AgentViewModel {
             tab.appendLog("✅ Completed: \(String(reply.prefix(200)))")
             tab.flush()
             completionSummary = String(reply.prefix(200))
-            history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: []), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: []),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
             tab.flush()
             if tab.isMessagesTab, let handle = tab.replyHandle {
                 tab.replyHandle = nil
@@ -274,9 +292,22 @@ extension AgentViewModel {
         // start and again when the fallback chain swaps providers mid-task.
         func buildLLMServices() {
             if provider == .claude {
-                claude = ClaudeService(apiKey: apiKey, model: modelId, historyContext: tabHistoryContext, projectFolder: projectFolder, maxTokens: mt)
+                claude = ClaudeService(
+                    apiKey: apiKey,
+                    model: modelId,
+                    historyContext: tabHistoryContext,
+                    projectFolder: projectFolder,
+                    maxTokens: mt
+                )
             } else if provider == .lmStudio && lmStudioProtocol == .anthropic {
-                claude = ClaudeService(apiKey: lmStudioAPIKey, model: modelId, historyContext: tabHistoryContext, projectFolder: projectFolder, baseURL: lmStudioEndpoint, maxTokens: mt)
+                claude = ClaudeService(
+                    apiKey: lmStudioAPIKey,
+                    model: modelId,
+                    historyContext: tabHistoryContext,
+                    projectFolder: projectFolder,
+                    baseURL: lmStudioEndpoint,
+                    maxTokens: mt
+                )
             } else {
                 claude = nil
             }
@@ -359,7 +390,10 @@ extension AgentViewModel {
 
         // Use tab's own attached images, fall back to global
         let tabImages = tab.attachedImagesBase64.isEmpty ? attachedImagesBase64 : tab.attachedImagesBase64
-        AuditLog.log(.shell, "TabTask images: tab=\(tab.attachedImagesBase64.count) global=\(attachedImagesBase64.count) using=\(tabImages.count)")
+        AuditLog.log(
+            .shell,
+            "TabTask images: tab=\(tab.attachedImagesBase64.count) global=\(attachedImagesBase64.count) using=\(tabImages.count)"
+        )
         if !tabImages.isEmpty {
             tab.appendLog("(\(tabImages.count) screenshot(s) attached, \(tabImages.map(\.count).reduce(0,+)) bytes)")
             tab.flush()
@@ -391,8 +425,8 @@ extension AgentViewModel {
         var textOnlyCount = 0
         var timeoutRetryCount = 0
         let maxTimeoutRetries = maxRetries
-        var recentToolCalls: [String] = []  // Track recent tool calls to detect loops
-        var stuckFiles: [String: Int] = [:]  // Edit failure count per file (for nudge)
+        var recentToolCalls: [String] = [] // Track recent tool calls to detect loops
+        var stuckFiles: [String: Int] = [:] // Edit failure count per file (for nudge)
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
         // Full system prompt + full tool descriptions on every turn — no condensed
@@ -439,12 +473,13 @@ extension AgentViewModel {
 
                     tab.flushStreamBuffer()
                 } else if let openAICompatible {
-                    let r = try await openAICompatible.sendStreaming(messages: sendMessages, activeGroups: activeGroups) { [weak tab] delta in
-                        Task { @MainActor in
-                            tab?.isLLMThinking = false
-                            tab?.appendStreamDelta(delta)
+                    let r = try await openAICompatible
+                        .sendStreaming(messages: sendMessages, activeGroups: activeGroups) { [weak tab] delta in
+                            Task { @MainActor in
+                                tab?.isLLMThinking = false
+                                tab?.appendStreamDelta(delta)
+                            }
                         }
-                    }
                     response = (r.content, r.stopReason, r.inputTokens, r.outputTokens)
 
                     tab.flushStreamBuffer()
@@ -526,7 +561,14 @@ extension AgentViewModel {
                         // Plans are encouraged but never required. Track edited files for
                         // task summary purposes. No mid-stream blocking — the LLM decides
                         // whether to plan up front.
-                        let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "diff_and_apply", "create_diff", "apply_diff"]
+                        let editTools: Set<String> = [
+                            "write_file",
+                            "edit_file",
+                            "diff_apply",
+                            "diff_and_apply",
+                            "create_diff",
+                            "apply_diff"
+                        ]
                         if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
                             filesEditedThisTask.insert(filePath)
                         }
@@ -539,7 +581,11 @@ extension AgentViewModel {
                         let isWrite = name == "write_file" || name == "edit_file"
                             || name == "create_diff" || name == "apply_diff"
                             || name == "diff_and_apply"
-                            || (name == "file_manager" && ["write", "edit", "diff_apply", "create", "apply"].contains(input["action"] as? String ?? ""))
+                            ||
+                            (
+                                name == "file_manager" && ["write", "edit", "diff_apply", "create", "apply"]
+                                    .contains(input["action"] as? String ?? "")
+                            )
                         if isWrite { recentToolCalls.removeAll() }
                         if isRead {
                             let fp = input["file_path"] as? String ?? input["path"] as? String ?? ""
@@ -549,9 +595,25 @@ extension AgentViewModel {
                             let dupeLimit = 20
                             let dupeCount = recentToolCalls.filter { $0 == callKey }.count
                             if dupeCount >= dupeLimit {
-                                tab.appendLog("⚠️ Already read \((fp as NSString).lastPathComponent) \(dupeLimit) times with the same offset/limit — skipping")
+                                tab
+                                    .appendLog(
+                                        """
+                                        ⚠️ Already read \((fp as NSString).lastPathComponent) \
+                                        \(dupeLimit) times with the same offset/limit — skipping
+                                        """
+                                    )
                                 tab.flush()
-                                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": "Error: You already read this file \(dupeLimit) times with the SAME offset and limit. The content has not changed. Use the content you already have, or read a DIFFERENT range of the file."])
+                                toolResults.append([
+                                    "type": "tool_result",
+                                    "tool_use_id": toolId,
+                                    "content": """
+                                        Error: You already read this file \
+                                        \(dupeLimit) times with the SAME offset \
+                                        and limit. The content has not changed. \
+                                        Use the content you already have, or read \
+                                        a DIFFERENT range of the file.
+                                        """
+                                ])
                                 continue
                             }
                             recentToolCalls.append(callKey)
@@ -602,9 +664,11 @@ extension AgentViewModel {
                             // At 3 failures, append an actionable recovery nudge.
                             if editTools.contains(name),
                                let path = input["file_path"] as? String ?? input["path"] as? String,
-                               let output = toolResult["content"] as? String {
+                               let output = toolResult["content"] as? String
+                            {
                                 let lower = output.lowercased()
-                                let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower.contains("not found") || lower.contains("rejected")
+                                let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower
+                                    .contains("not found") || lower.contains("rejected")
                                 if isFailure {
                                     stuckFiles[path, default: 0] += 1
                                     if stuckFiles[path]! == 3 {
@@ -612,11 +676,22 @@ extension AgentViewModel {
                                         ⚠️ 3 consecutive edit failures on \(path). STOP retrying the same approach.
 
                                         Recovery checklist (do these in order):
-                                        1. read_file(file_path:"\(path)") with NO offset/limit to get the FULL fresh content
-                                        2. Find the EXACT lines you want to change in the new output. Do NOT trust the tool_result from earlier reads — the file may have been modified by your previous edits.
-                                        3. For edit_file: copy old_string verbatim from the fresh read, including every space, tab, and newline.
-                                        4. For diff_and_apply: pass start_line and end_line to scope the section.
-                                        5. If you keep failing, switch tools — write_file to overwrite the whole file is a valid last resort.
+                                        1. read_file(file_path:"\(path)") \
+                                        with NO offset/limit to get the FULL \
+                                        fresh content
+                                        2. Find the EXACT lines you want to \
+                                        change in the new output. Do NOT trust \
+                                        the tool_result from earlier reads — \
+                                        the file may have been modified by your \
+                                        previous edits.
+                                        3. For edit_file: copy old_string verbatim \
+                                        from the fresh read, including every space, \
+                                        tab, and newline.
+                                        4. For diff_and_apply: pass start_line and \
+                                        end_line to scope the section.
+                                        5. If you keep failing, switch tools — \
+                                        write_file to overwrite the whole file is \
+                                        a valid last resort.
                                         """
                                         toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_3", "content": nudge])
                                         tab.appendLog("⚠️ Stuck nudge: 3 failures on \((path as NSString).lastPathComponent)")
@@ -642,10 +717,17 @@ extension AgentViewModel {
                     let responseText = response.content.compactMap { $0["text"] as? String }.joined()
                     if responseText.contains("task_complete") || responseText.contains("done(summary") {
                         // Extract summary from task_complete/done(summary: "...") or (summary="...")
-                        if let match = responseText.range(of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#, options: .regularExpression) {
+                        if let match = responseText.range(
+                            of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#,
+                            options: .regularExpression
+                        ) {
                             let raw = String(responseText[match])
                             completionSummary = raw
-                                .replacingOccurrences(of: #"(?:task_complete|done)\(summary[=:]\s*""#, with: "", options: .regularExpression)
+                                .replacingOccurrences(
+                                    of: #"(?:task_complete|done)\(summary[=:]\s*""#,
+                                    with: "",
+                                    options: .regularExpression
+                                )
                                 .replacingOccurrences(of: "\"", with: "")
                         } else {
                             completionSummary = String(responseText.prefix(500))
@@ -660,7 +742,10 @@ extension AgentViewModel {
                         if !responseText.isEmpty { completionSummary = String(responseText.prefix(500)) }
                         break
                     }
-                    messages.append(["role": "user", "content": "Continue with the next step. When you are completely done, call task_complete(summary: \"...\")."])
+                    messages.append([
+                        "role": "user",
+                        "content": "Continue with the next step. When you are completely done, call task_complete(summary: \"...\")."
+                    ])
                 } else {
                     // Check if LLM signaled it's done via text even though it made tool calls
                     let allText = response.content.compactMap { $0["text"] as? String }.joined().lowercased()
@@ -674,11 +759,11 @@ extension AgentViewModel {
             } catch {
                 if !Task.isCancelled {
                     let errMsg = error.localizedDescription
-                    
+
                     // Detect timeout errors
                     let isNetworkTimeout = errMsg.lowercased().contains("timeout") || errMsg.lowercased().contains("timed out")
-                    
-                    
+
+
                     // Determine error source for better logging
                     var errorSource = "Unknown"
                     if claude != nil {
@@ -690,18 +775,18 @@ extension AgentViewModel {
                     } else if foundationModelService != nil {
                         errorSource = "Apple Intelligence"
                     }
-                    
-                    
+
+
                     // Handle timeout errors with retry logic
                     if isNetworkTimeout {
                         // Check if we've already retried this timeout
                         if timeoutRetryCount < maxTimeoutRetries {
                             timeoutRetryCount += 1
-                            
+
                             // Special handling for Ollama timeouts - check server health
                             if errorSource == "Ollama API" || errorSource == "Local Ollama" {
                                 tab.appendLog("🔍 Checking Ollama server health...")
-                                
+
                                 // Run Ollama health check in background
                                 let healthCheckResult = await Self.offMain {
                                     let healthCheckTask = Process()
@@ -712,7 +797,7 @@ extension AgentViewModel {
                                     let pipe = Pipe()
                                     healthCheckTask.standardOutput = pipe
                                     healthCheckTask.standardError = pipe
-                                    
+
                                     do {
                                         try healthCheckTask.run()
                                         healthCheckTask.waitUntilExit()
@@ -721,19 +806,26 @@ extension AgentViewModel {
                                         return -1
                                     }
                                 }
-                                
+
                                 if healthCheckResult != 0 {
                                     tab.appendLog("⚠️ Ollama server not responding. Attempting to restart...")
-                                    
+
                                     // Restart Ollama via UserService XPC
-                                    _ = await userService.execute(command: "pkill -f 'ollama serve' && sleep 2 && open /Applications/Ollama.app")
+                                    _ = await userService
+                                        .execute(command: "pkill -f 'ollama serve' && sleep 2 && open /Applications/Ollama.app")
                                     tab.appendLog("🔄 Restart command executed")
-                                    
+
                                     // Wait longer for Ollama startup
                                     let startupDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
-                                    let retryMessage = "\(errorSource) timeout detected (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — Ollama restart attempted, waiting \(Int(startupDelay)) seconds..."
+                                    let retryMessage =
+                                        """
+                                        \(errorSource) timeout detected \
+                                        (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                                        Ollama restart attempted, \
+                                        waiting \(Int(startupDelay)) seconds...
+                                        """
                                     tab.appendLog(retryMessage)
-                                    
+
                                     try? await Task.sleep(for: .seconds(startupDelay))
                                     if Task.isCancelled { break }
                                     continue
@@ -741,13 +833,18 @@ extension AgentViewModel {
                                     tab.appendLog("✅ Ollama server is running but API timed out")
                                 }
                             }
-                            
+
                             let retryDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
-                            let retryMessage = "\(errorSource) timeout detected (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — retrying in \(Int(retryDelay)) seconds..."
+                            let retryMessage =
+                                """
+                                \(errorSource) timeout detected \
+                                (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                                retrying in \(Int(retryDelay)) seconds...
+                                """
                             tab.appendLog(retryMessage)
-                            
+
                             // Log to task log for debugging
-                            
+
                             try? await Task.sleep(for: .seconds(retryDelay))
                             if Task.isCancelled { break }
                             continue
@@ -755,13 +852,19 @@ extension AgentViewModel {
                             // Max retries reached - try final Ollama restart if applicable
                             if (errorSource == "Ollama API" || errorSource == "Local Ollama") && timeoutRetryCount == maxTimeoutRetries {
                                 tab.appendLog("🔄 Max retries reached. Attempting final Ollama restart...")
-                                
+
                                 // Restart Ollama via UserService XPC
-                                _ = await userService.execute(command: "pkill -f 'ollama serve' && sleep 3 && open /Applications/Ollama.app && sleep 10")
+                                _ = await userService
+                                    .execute(command: "pkill -f 'ollama serve' && sleep 3 && open /Applications/Ollama.app && sleep 10")
                                 tab.appendLog("🔄 Ollama restart attempted. Check Ollama status.")
                             }
-                            
-                            let timeoutMessage = "\(errorSource) timeout after \(maxTimeoutRetries) retries. Please check your network connection or try a different LLM provider."
+
+                            let timeoutMessage =
+                                """
+                                \(errorSource) timeout after \(maxTimeoutRetries) \
+                                retries. Please check your network connection \
+                                or try a different LLM provider.
+                                """
                             tab.appendLog(timeoutMessage)
                             break
                         }
@@ -783,21 +886,36 @@ extension AgentViewModel {
                         // Server/network error — retry every 10 seconds
                         timeoutRetryCount += 1
                         let retryDelay: TimeInterval = 10
-                        tab.appendLog("\(errorSource) recoverable error (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — retrying in \(Int(retryDelay))s...")
+                        tab
+                            .appendLog(
+                                """
+                                \(errorSource) recoverable error \
+                                (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                                retrying in \(Int(retryDelay))s...
+                                """
+                            )
                         tab.flush()
                         try? await Task.sleep(for: .seconds(retryDelay))
                         if Task.isCancelled { break }
                         continue
                     } else if errMsg.lowercased().contains("network")
-                                || errMsg.lowercased().contains("connection")
-                                || errMsg.lowercased().contains("internet")
-                                || (error as? URLError)?.code == .networkConnectionLost
-                                || (error as? URLError)?.code == .notConnectedToInternet {
+                        || errMsg.lowercased().contains("connection")
+                        || errMsg.lowercased().contains("internet")
+                        || (error as? URLError)?.code == .networkConnectionLost
+                        || (error as? URLError)?.code == .notConnectedToInternet
+                    {
                         // Network lost — retry in 60 seconds
                         timeoutRetryCount += 1
                         if timeoutRetryCount <= maxTimeoutRetries {
                             let delay = networkRetryDelay
-                            tab.appendLog("🌐 Network connection lost — retrying in \(delay)s (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))...")
+                            tab
+                                .appendLog(
+                                    """
+                                    🌐 Network connection lost — \
+                                    retrying in \(delay)s \
+                                    (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))...
+                                    """
+                                )
                             tab.flush()
                             try? await Task.sleep(for: .seconds(Double(delay)))
                             if Task.isCancelled { break }
@@ -847,7 +965,12 @@ extension AgentViewModel {
             formatter.dateFormat = "HH:mm:ss"
             let time = formatter.string(from: Date())
             tab.tabTaskSummaries.append("[\(time)] \(prompt) → \(summary)")
-            history.add(TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
         }
 
         // If Messages tab task ended without task_complete, still send a reply
