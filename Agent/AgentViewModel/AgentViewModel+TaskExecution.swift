@@ -638,7 +638,7 @@ extension AgentViewModel {
 
                 // MARK: Overnight coding guards
                 if !pendingTools.isEmpty {
-                    let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "apply_diff"]
+                    let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "apply_diff", "create_diff", "diff_and_apply"]
                     let buildTools: Set<String> = ["xcode_build", "xc_build"]
                     let actionTools: Set<String> = editTools.union(buildTools).union(["git_commit", "run_shell_script",
                         "execute_agent_command", "execute_daemon_command", "task_complete"])
@@ -692,20 +692,45 @@ extension AgentViewModel {
                     }
                     if consecutiveBuildFailures >= 5 { break }
 
-                    // 4. Stuck detection — track failures per file
+                    // 4. Stuck detection — track edit failures per file. Fires at 3
+                    //    failures with an actionable nudge (re-read fresh, copy bytes
+                    //    exactly), then again at 6 with a "skip and move on" message.
+                    //    Lowered from 5 because users were cancelling tasks at 3-4
+                    //    repeated failures, well before the old threshold fired.
                     for tool in pendingTools where editTools.contains(tool.name) {
-                        if let path = tool.input["file_path"] as? String ?? tool.input["path"] as? String {
-                            let output = toolResults.last?["content"] as? String ?? ""
-                            if output.lowercased().contains("error") || output.lowercased().contains("failed") {
-                                stuckFiles[path, default: 0] += 1
-                                if stuckFiles[path]! >= 5 {
-                                    toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard",
-                                        "content": "⚠️ 5 failures on \(path). Skip this file and move to the next task in your plan."])
-                                    stuckFiles[path] = 0
-                                }
-                            } else {
+                        guard let path = tool.input["file_path"] as? String ?? tool.input["path"] as? String else { continue }
+                        let output = toolResults.last?["content"] as? String ?? ""
+                        let lower = output.lowercased()
+                        let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower.contains("not found") || lower.contains("rejected")
+                        if isFailure {
+                            stuckFiles[path, default: 0] += 1
+                            let count = stuckFiles[path]!
+                            if count == 3 {
+                                // First nudge — actionable recovery guidance
+                                let nudge = """
+                                ⚠️ 3 consecutive edit failures on \(path). STOP retrying the same approach.
+
+                                Recovery checklist (do these in order):
+                                1. read_file(file_path:"\(path)") with NO offset/limit to get the FULL fresh content
+                                2. Find the EXACT lines you want to change in the new output. Do NOT trust the tool_result from earlier reads — the file may have been modified by your previous edits or by other code.
+                                3. For edit_file: copy old_string verbatim from the fresh read, including every space, tab, and newline. Even one wrong character causes 'old_string not found'.
+                                4. For diff_and_apply: pass start_line and end_line of the section you're editing so the section is small and unambiguous.
+                                5. If you keep failing, switch tools — write_file to overwrite the whole file is a valid last resort.
+                                """
+                                toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_3",
+                                    "content": nudge])
+                                appendLog("⚠️ Stuck nudge: 3 failures on \((path as NSString).lastPathComponent)")
+                                flushLog()
+                            } else if count >= 6 {
+                                // Second nudge — give up on this file
+                                toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_6",
+                                    "content": "🛑 6 failures on \(path). Stop trying to edit this file. Move on to the next part of your task or call done with what you've completed so far."])
+                                appendLog("🛑 Stuck-out: 6 failures on \((path as NSString).lastPathComponent)")
+                                flushLog()
                                 stuckFiles[path] = 0
                             }
+                        } else {
+                            stuckFiles[path] = 0
                         }
                     }
                 }

@@ -366,6 +366,7 @@ extension AgentViewModel {
         var timeoutRetryCount = 0
         let maxTimeoutRetries = maxRetries
         var recentToolCalls: [String] = []  // Track recent tool calls to detect loops
+        var stuckFiles: [String: Int] = [:]  // Edit failure count per file (for nudge)
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
         var planActive = false
@@ -569,6 +570,35 @@ extension AgentViewModel {
                         }
                         if let toolResult = result.toolResult {
                             toolResults.append(toolResult)
+                            // Stuck-file nudge: if this was an edit tool and the result
+                            // looks like a failure, increment the per-file failure count.
+                            // At 3 failures, append an actionable recovery nudge.
+                            if editTools.contains(name),
+                               let path = input["file_path"] as? String ?? input["path"] as? String,
+                               let output = toolResult["content"] as? String {
+                                let lower = output.lowercased()
+                                let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower.contains("not found") || lower.contains("rejected")
+                                if isFailure {
+                                    stuckFiles[path, default: 0] += 1
+                                    if stuckFiles[path]! == 3 {
+                                        let nudge = """
+                                        ⚠️ 3 consecutive edit failures on \(path). STOP retrying the same approach.
+
+                                        Recovery checklist (do these in order):
+                                        1. read_file(file_path:"\(path)") with NO offset/limit to get the FULL fresh content
+                                        2. Find the EXACT lines you want to change in the new output. Do NOT trust the tool_result from earlier reads — the file may have been modified by your previous edits.
+                                        3. For edit_file: copy old_string verbatim from the fresh read, including every space, tab, and newline.
+                                        4. For diff_and_apply: pass start_line and end_line to scope the section.
+                                        5. If you keep failing, switch tools — write_file to overwrite the whole file is a valid last resort.
+                                        """
+                                        toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_3", "content": nudge])
+                                        tab.appendLog("⚠️ Stuck nudge: 3 failures on \((path as NSString).lastPathComponent)")
+                                        tab.flush()
+                                    }
+                                } else {
+                                    stuckFiles[path] = 0
+                                }
+                            }
                         }
                     }
                 }
