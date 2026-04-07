@@ -6,8 +6,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentAccess.git",
       "state": {
-        "revision": "d0aed7053e1dc0499b130efa91f57fbe7226ebef",
-        "version": "2.8.0"
+        "revision": "6e6c9fd2e9843b34fb26244397b80bbb244d72f3",
+        "version": "2.9.0"
       }
     },
     {
@@ -87,8 +87,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentTools.git",
       "state": {
-        "revision": "6b92b55af1f636a47f5ef5753acf12a912625fa2",
-        "version": "2.42.0"
+        "revision": "97cf2efe5835fbe81c1b513feae228d241bdfa54",
+        "version": "2.43.1"
       }
     },
     {

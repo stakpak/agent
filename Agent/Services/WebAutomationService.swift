@@ -574,52 +574,14 @@ final class WebAutomationService: @unchecked Sendable {
             return "Clicked element via event dispatch: \(selector)"
         }
 
-        // Third try: get element coordinates and do OS-level click via accessibility
-        let jsCoords = isXPath ?
-            """
-            (function() {
-                var result = document.evaluate('\(escaped)', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                var el = result.singleNodeValue;
-                if (!el) return 'not found';
-                var r = el.getBoundingClientRect();
-                return Math.round(r.x + r.width/2) + ',' + Math.round(r.y + r.height/2);
-            })()
-            """ :
-            """
-            (function() {
-                var el = \(Self.querySelectorWithIframes("'\(escaped)'"));
-                if (!el) return 'not found';
-                var r = el.getBoundingClientRect();
-                return Math.round(r.x + r.width/2) + ',' + Math.round(r.y + r.height/2);
-            })()
-            """
-
-        if let coordStr = try? await executeJavaScript(script: jsCoords, browser: browser) as? String,
-           coordStr != "not found",
-           let commaIdx = coordStr.firstIndex(of: ",") {
-            let xStr = String(coordStr[..<commaIdx])
-            let yStr = String(coordStr[coordStr.index(after: commaIdx)...])
-            if let x = Double(xStr), let y = Double(yStr) {
-                // Need to offset by browser window/toolbar position
-                // Get browser window bounds via AppleScript
-                let boundsJS = "JSON.stringify({scrollX: window.scrollX, scrollY: window.scrollY, screenX: window.screenX, screenY: window.screenY, outerHeight: window.outerHeight, innerHeight: window.innerHeight})"
-                if let boundsStr = try? await executeJavaScript(script: boundsJS, browser: browser) as? String,
-                   let boundsData = boundsStr.data(using: .utf8),
-                   let bounds = try? JSONSerialization.jsonObject(with: boundsData) as? [String: Double] {
-                    let screenX = bounds["screenX"] ?? 0
-                    let screenY = bounds["screenY"] ?? 0
-                    let outerH = bounds["outerHeight"] ?? 0
-                    let innerH = bounds["innerHeight"] ?? 0
-                    let toolbarH = outerH - innerH
-                    let absX = screenX + x
-                    let absY = screenY + toolbarH + y
-                    _ = await MainActor.run { AccessibilityService.shared.clickAt(x: CGFloat(absX), y: CGFloat(absY)) }
-                    return "Clicked element via OS click at (\(Int(absX)),\(Int(absY))): \(selector)"
-                }
-            }
-        }
-
-        return "Error: could not click element: \(selector)"
+        // Both JS paths failed. The previous third-try fallback used
+        // AccessibilityService.clickAt to drive a raw OS click at the element's
+        // bounding-rect coordinates, but that path has been removed because
+        // AgentAccess is now AXorcist-only. If the JS dispatch can't reach this
+        // element, the LLM should switch to accessibility(action:"click_element")
+        // against the browser's AXWebArea — Safari and Chrome both expose page
+        // links/buttons as AXLink/AXButton inside the web area.
+        return "Error: could not click element via JavaScript: \(selector). The page may block synthetic events. Try accessibility(action:\"click_element\", role:\"AXLink\" or \"AXButton\", title:..., appBundleId:\"com.apple.Safari\") to click via AXorcist instead."
     }
     
     private func executeJavaScriptType(selector: String, text: String, browser: String) async throws -> String {

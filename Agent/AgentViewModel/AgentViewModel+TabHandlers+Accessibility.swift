@@ -117,13 +117,16 @@ extension AgentViewModel {
             )
 
         case "ax_type_text":
+            // AXorcist-only: typing requires an element. Routed through
+            // typeTextIntoElement; the LLM must pass role/title to identify
+            // the text field. The old typeText(at:y:) coordinate path is gone.
             let text = input["text"] as? String ?? ""
-            let x = (input["x"] as? Double).map { CGFloat($0) }
-            let y = (input["y"] as? Double).map { CGFloat($0) }
-            tab.appendLog("⌨️ \(text.count) characters...")
+            let role = input["role"] as? String
+            let title = input["title"] as? String
+            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            tab.appendLog("⌨️ \(text.count) characters → \(title ?? role ?? "focused")")
             tab.flush()
-            let output = 
-                AccessibilityService.shared.typeText(text, at: x, y: y)
+            let output = AccessibilityService.shared.typeTextIntoElement(role: role, title: title, text: text, appBundleId: appBundleId, verify: input["verify"] as? Bool ?? true)
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -132,21 +135,14 @@ extension AgentViewModel {
             )
 
         case "ax_click":
-            guard let xVal = input["x"] as? Double,
-                  let yVal = input["y"] as? Double else {
-                return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: x and y coordinates are required"],
-                    isComplete: false
-                )
-            }
-            let x = CGFloat(xVal)
-            let y = CGFloat(yVal)
-            let button = input["button"] as? String ?? "left"
-            let clicks = input["clicks"] as? Int ?? 1
-            tab.appendLog("♿️ Clicking at (\(x), \(y))...")
+            // AXorcist-only: click via element identification, never coordinates.
+            let role = input["role"] as? String
+            let title = input["title"] as? String
+            let value = input["value"] as? String
+            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            tab.appendLog("♿️ Click \(title ?? role ?? "?") in \(appBundleId ?? "frontmost")")
             tab.flush()
-            let output = 
-                AccessibilityService.shared.clickAt(x: x, y: y, button: button, clicks: clicks)
+            let output = AccessibilityService.shared.clickElement(role: role, title: title, value: value, appBundleId: appBundleId, timeout: input["timeout"] as? Double ?? 5, verify: input["verify"] as? Bool ?? false)
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -155,21 +151,15 @@ extension AgentViewModel {
             )
 
         case "ax_scroll":
-            guard let xVal = input["x"] as? Double,
-                  let yVal = input["y"] as? Double else {
-                return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: x and y coordinates are required"],
-                    isComplete: false
-                )
-            }
-            let x = CGFloat(xVal)
-            let y = CGFloat(yVal)
-            let deltaX = input["deltaX"] as? Int ?? 0
-            let deltaY = input["deltaY"] as? Int ?? 0
-            tab.appendLog("♿️ Scrolling at (\(x), \(y))...")
+            // AXorcist-only: scroll TO an element by role/title (the AXScrollArea
+            // is found and scrolled until the target is visible). Coordinate-based
+            // scroll wheel events are no longer supported.
+            let role = input["role"] as? String
+            let title = input["title"] as? String
+            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            tab.appendLog("♿️ Scroll to \(title ?? role ?? "?") in \(appBundleId ?? "frontmost")")
             tab.flush()
-            let output = 
-                AccessibilityService.shared.scrollAt(x: x, y: y, deltaX: deltaX, deltaY: deltaY)
+            let output = AccessibilityService.shared.scrollToElement(role: role, title: title, appBundleId: appBundleId)
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -178,22 +168,14 @@ extension AgentViewModel {
             )
 
         case "ax_press_key":
-            guard let keyCodeVal = input["keyCode"] as? Int else {
-                return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: keyCode is required"],
-                    isComplete: false
-                )
-            }
-            let keyCode = UInt16(keyCodeVal)
-            let modifiers = input["modifiers"] as? [String] ?? []
-            tab.appendLog("♿️ Pressing key code: \(keyCodeVal)...")
-            tab.flush()
-            let output = 
-                AccessibilityService.shared.pressKey(virtualKey: keyCode, modifiers: modifiers)
-            tab.appendLog(output)
+            // press_key removed — AXorcist doesn't drive raw key events. Use
+            // ax_click_element on the relevant button or ax_click_menu_item for
+            // keyboard-shortcut menu commands.
+            let err = "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). Use accessibility(action:\"click_element\", role:\"AXButton\", title:..., appBundleId:...) for buttons, or accessibility(action:\"click_menu_item\", appBundleId:..., menuPath:\"File > Save\") for keyboard-shortcut menu commands."
+            tab.appendLog(err)
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err],
                 isComplete: false
             )
 
@@ -335,29 +317,16 @@ extension AgentViewModel {
             )
 
         case "ax_drag":
-            guard let fromXVal = input["fromX"] as? Double,
-                  let fromYVal = input["fromY"] as? Double,
-                  let toXVal = input["toX"] as? Double,
-                  let toYVal = input["toY"] as? Double else {
-                return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: fromX, fromY, toX, toY coordinates are required"],
-                    isComplete: false
-                )
-            }
-            let fromX = CGFloat(fromXVal)
-            let fromY = CGFloat(fromYVal)
-            let toX = CGFloat(toXVal)
-            let toY = CGFloat(toYVal)
-            let button = input["button"] as? String ?? "left"
-            tab.appendLog("🖱️ drag (\(fromX), \(fromY)) → (\(toX), \(toY))...")
-            tab.flush()
-            let output = await MainActor.run {
-                AccessibilityService.shared.drag(fromX: fromX, fromY: fromY, toX: toX, toY: toY, button: button)
-            }
-            tab.appendLog(output)
+            // ax_drag removed — coordinate-based dragging is gone with the rest of
+            // the InputDriver paths. AXorcist-based alternatives:
+            //   - Window move/resize → set_window_frame
+            //   - Slider value       → set_properties on AXSlider with new AXValue
+            //   - List reorder       → typically driven by menu items / buttons
+            let err = "Error: ax_drag is removed. Use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:) for window move/resize, or accessibility(action:\"set_properties\", role:\"AXSlider\", value:..., appBundleId:...) for slider drags."
+            tab.appendLog(err)
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err],
                 isComplete: false
             )
 

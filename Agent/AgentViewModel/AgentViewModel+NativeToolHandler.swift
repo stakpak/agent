@@ -1319,22 +1319,28 @@ extension AgentViewModel {
             return ax.getElementProperties(role: role, title: title, value: value, appBundleId: app, x: x, y: y)
         case "perform_action":
             return ax.performAction(role: role, title: title, value: value, appBundleId: app, x: x, y: y, action: input["ax_action"] as? String ?? "")
-        case "type_text":
-            return ax.typeText(input["text"] as? String ?? "", at: x, y: y)
+        case "type_text", "type_into_element":
+            // AXorcist-only: typing requires an element. There is no "type at the
+            // current focus" path — find the text field by role/title first.
+            return ax.typeTextIntoElement(role: role, title: title, text: input["text"] as? String ?? "", appBundleId: app, verify: input["verify"] as? Bool ?? true)
         case "click", "click_element":
-            // If x/y provided, click at coordinates via InputDriver
-            if let x = x, let y = y {
-                return ax.clickAt(x: x, y: y, button: input["button"] as? String ?? "left", clicks: input["clicks"] as? Int ?? 1)
-            }
+            // AXorcist-only. Coordinate-based click is not supported — provide
+            // role/title/value (and ideally appBundleId) so the click goes through
+            // AXorcist's element-finder.
             return ax.clickElement(role: role, title: title, value: value, appBundleId: app, timeout: input["timeout"] as? Double ?? 5, verify: input["verify"] as? Bool ?? false)
-        case "scroll":
-            // If role/title provided, scroll to that element instead of coordinates
-            if (role != nil || title != nil), x == nil, y == nil {
-                return ax.scrollToElement(role: role, title: title, appBundleId: app)
-            }
-            return ax.scrollAt(x: x ?? 0, y: y ?? 0, deltaX: Int(input["deltaX"] as? Double ?? 0), deltaY: Int(input["deltaY"] as? Double ?? -3))
+        case "scroll", "scroll_to_element":
+            // AXorcist-only: scroll to an element by role/title. The old coordinate
+            // path through InputDriver was removed.
+            return ax.scrollToElement(role: role, title: title, appBundleId: app)
         case "press_key":
-            return ax.pressKey(virtualKey: UInt16(input["keyCode"] as? Int ?? 0), modifiers: input["modifiers"] as? [String] ?? [])
+            // press_key is no longer supported — AXorcist doesn't drive raw key
+            // events and the InputDriver path was removed. Use clickElement for
+            // buttons or clickMenuItem for keyboard-shortcut menu commands.
+            return "Error: press_key is removed. Find the relevant button via accessibility(action:\"click_element\", role:\"AXButton\", title:..., appBundleId:...) or invoke the menu command via accessibility(action:\"click_menu_item\", appBundleId:..., menuPath:\"File > Save\")."
+        case "drag":
+            // drag is no longer supported — see the AccessibilityService+Interaction
+            // comment for the removal rationale and AXorcist-based alternatives.
+            return "Error: drag is removed. For window move/resize use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:). For sliders use accessibility(action:\"set_properties\", role:\"AXSlider\", ...)."
         case "screenshot":
             let w = (input["width"] as? Double).map { CGFloat($0) }
             let h = (input["height"] as? Double).map { CGFloat($0) }
@@ -1353,10 +1359,6 @@ extension AgentViewModel {
             return ax.getChildren(role: role, title: title, value: value, appBundleId: app, x: x, y: y, depth: input["depth"] as? Int ?? 3)
         case "get_audit_log":
             return ax.getAuditLog(limit: input["limit"] as? Int ?? 50)
-        case "type_into_element":
-            return ax.typeTextIntoElement(role: role, title: title, text: input["text"] as? String ?? "", appBundleId: app, verify: input["verify"] as? Bool ?? true)
-        case "drag":
-            return ax.drag(fromX: CGFloat(input["fromX"] as? Double ?? 0), fromY: CGFloat(input["fromY"] as? Double ?? 0), toX: CGFloat(input["toX"] as? Double ?? 0), toY: CGFloat(input["toY"] as? Double ?? 0), button: input["button"] as? String ?? "left")
         case "wait_for_element":
             return ax.waitForElement(role: role, title: title, value: value, appBundleId: app, timeout: input["timeout"] as? Double ?? 10, pollInterval: input["pollInterval"] as? Double ?? 0.5)
         case "wait_adaptive":
@@ -1373,8 +1375,6 @@ extension AgentViewModel {
             return ax.highlightElement(role: role, title: title, value: value, appBundleId: app, x: x, y: y, duration: input["duration"] as? Double ?? 2, color: input["color"] as? String ?? "green")
         case "show_menu":
             return ax.showMenu(role: role, title: title, value: value, appBundleId: app, x: x, y: y)
-        case "scroll_to_element":
-            return ax.scrollToElement(role: role, title: title, appBundleId: app)
         case "read_focused":
             return ax.readFocusedElement(appBundleId: app)
         case "set_properties":
@@ -1397,7 +1397,18 @@ extension AgentViewModel {
                 pb.setString(text, forType: .string)
                 return "Copied to clipboard: \(text.prefix(100))"
             case "paste":
-                return ax.pressKey(virtualKey: 9, modifiers: ["command"])
+                // Cmd+V via AppleScript System Events. The old path used
+                // AXorcist InputDriver hotkey which is gone. NSAppleScript runs
+                // in-process with TCC and produces a real synthesized keystroke
+                // without going through CGEvent directly.
+                let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
+                var asErr: NSDictionary?
+                if let script = NSAppleScript(source: pasteScript) {
+                    _ = script.executeAndReturnError(&asErr)
+                    if let e = asErr { return "Paste failed: \(e)" }
+                    return "Pasted clipboard contents"
+                }
+                return "Paste failed: could not create AppleScript"
             case "copy_image":
                 let path = input["file_path"] as? String ?? ""
                 guard !path.isEmpty else { return "Error: file_path is required" }
