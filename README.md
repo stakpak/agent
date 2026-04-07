@@ -441,15 +441,18 @@ Agent! is a 100% original pure Swift macOS application. It is not a port, fork, 
 | **Platform** | CLI — Linux, macOS, Windows | Native macOS 26 only |
 | **Runtime** | Node.js/Bun | Native compiled binary |
 | **Architecture** | Terminal REPL with streaming | Desktop app with XPC daemons |
-| **Accessibility** | None (CLI) | Full macOS AX via AXorcist (30+ actions) |
-| **AppleScript** | None | Full NSAppleScript + JXA |
-| **Xcode Integration** | None | Native build/run/analyze |
+| **Accessibility** | None (CLI) | Full macOS AX via AXorcist (25 top-level actions, 30+ AX subtypes via `perform_action`) |
+| **AppleScript** | None | Full NSAppleScript + JXA in-process with TCC |
+| **Xcode Integration** | Via Bash (`xcodebuild`) | Native (build/run/analyze/snippet/add_file/bump_version/code_review — 13 actions) |
 | **Apple Intelligence** | None | FoundationModels on-device |
-| **ScriptingBridge** | None | Full SDEF + event bridges |
-| **Vision/Screenshots** | None | Auto-verification after UI actions |
-| **iMessage** | None | Remote agent via Messages |
-| **UI** | Terminal text | Native SwiftUI with CRT shader |
-| **Privilege Model** | User sandbox | XPC Launch Agent + Daemon |
-| **Sub-agents** | Fork-based with shared cache | Independent tasks with mailbox |
+| **ScriptingBridge** | None | Full SDEF + 51 event bridges (Finder, Mail, Music, Safari, Calendar, etc.) |
+| **Vision** | Image input via API | Image input via API |
+| **Auto-screenshots** | None (no UI) | Opt-in auto-verification after UI actions (default OFF — see `visionAutoScreenshotEnabled`) |
+| **iMessage** | None | Remote agent via Messages (Full Disk Access required for `chat.db`) |
+| **Voice** | None | Hotword-anchored dictation via SFSpeechRecognizer |
+| **CRT effect** | None | Optional SwiftUI Canvas scanline overlay (toggle via HUD button) |
+| **Privilege Model** | User sandbox | XPC Launch Agent (user) + Launch Daemon (root) |
+| **Sub-agents** | Task tool (publicly documented; implementation details not stated by Anthropic) | Up to 3 concurrent isolated agents with mailbox messaging |
 | **MCP** | Node.js stdio/SSE | Swift AgentMCP package |
-| **Scripts** | None | Swift dylib compilation at runtime |
+| **Scripts** | None | Swift dylib compilation at runtime, dlopen'd in-process with full TCC |
+| **Prompt caching** | Anthropic `cache_control` ephemeral | Anthropic `cache_control` ephemeral + automatic prefix-cache hit tracking for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek; Ollama `keep_alive: 30m` |
