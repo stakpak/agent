@@ -101,6 +101,34 @@ Control any Mac app through the Accessibility API. Click buttons, type into fiel
 | **Mistral** | AI Studio | High-performance open models |
 | **Mistral Vibe** | Le Chat | High-performance open models |
 
+## Toolbar Features
+
+### 1. MCP Servers
+- **Icon**: `server.rack` (server rack)
+- **Location**: Toolbar, leftmost button
+- **Purpose**: Manage MCP (Model Context Protocol) servers that extend Agent!'s capabilities
+- **Behavior**: Opens a popover showing configured MCP servers
+- **Details**:
+  - Displays list of connected/available MCP servers
+  - When no servers are configured, shows "No servers configured" message
+  - MCP servers provide additional tools prefixed with `mcp_*`
+  - Supports adding, removing, and configuring server connections
+  - Servers extend Agent! capabilities beyond built-in tools
+
+### 2. Agent Selection *(pending review)*
+### 3. Model Selection *(pending review)*
+### 4. Provider Selection *(pending review)*
+### 5. System Prompt *(pending review)*
+### 6. Tools Configuration *(pending review)*
+### 7. Plan Mode *(pending review)*
+### 8. Memory *(pending review)*
+### 9. Settings *(pending review)*
+### 10. Activity History *(pending review)*
+### 11. New Chat *(pending review)*
+### 12. Sidebar Toggle *(pending review)*
+
+---
+
 ### 🎙 Voice Control
 Click the microphone and speak. Agent! transcribes in real time and executes your request.
 

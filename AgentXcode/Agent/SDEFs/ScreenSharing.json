@@ -1,1 +1,0 @@
-{"suites":[{"commands":[{"description":"Open a vnc URL","direct_parameter":{"description":"the vnc URL","type":"text"},"name":"GetURL"}],"name":"Screen Sharing Suite"}]}
