@@ -1282,14 +1282,14 @@ extension AgentViewModel {
                 let axAction = String(name.dropFirst(3))
                 var axInput = input
                 axInput["action"] = axAction
-                return handleAccessibilityAction(action: axAction, input: axInput)
+                return await handleAccessibilityAction(action: axAction, input: axInput)
             }
             return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled — no matching handler found."
         }
     }
 
     /// Direct accessibility dispatch — no recursion through executeNativeTool
-    private func handleAccessibilityAction(action: String, input: [String: Any]) -> String {
+    private func handleAccessibilityAction(action: String, input: [String: Any]) async -> String {
         let ax = AgentAccess.AccessibilityService.shared
         let role = input["role"] as? String
         let title = input["title"] as? String
@@ -1342,14 +1342,17 @@ extension AgentViewModel {
             // comment for the removal rationale and AXorcist-based alternatives.
             return "Error: drag is removed. For window move/resize use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:). For sliders use accessibility(action:\"set_properties\", role:\"AXSlider\", ...)."
         case "screenshot":
+            // All three paths are async — they dispatch screencapture to a
+            // background queue so the main thread stays responsive while the
+            // ~100ms screencapture process runs.
             let w = (input["width"] as? Double).map { CGFloat($0) }
             let h = (input["height"] as? Double).map { CGFloat($0) }
             if let wid = input["windowId"] as? Int, wid > 0 {
-                return ax.captureScreenshot(windowID: wid)
+                return await ax.captureScreenshot(windowID: wid)
             } else if let x, let y, let w, let h {
-                return ax.captureScreenshot(x: x, y: y, width: w, height: h)
+                return await ax.captureScreenshot(x: x, y: y, width: w, height: h)
             } else {
-                return ax.captureAllWindows()
+                return await ax.captureAllWindows()
             }
         case "find_element":
             return ax.findElement(role: role, title: title, value: value, appBundleId: app, timeout: input["timeout"] as? Double ?? 5)

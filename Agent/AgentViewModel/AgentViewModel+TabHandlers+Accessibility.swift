@@ -189,19 +189,16 @@ extension AgentViewModel {
             tab.appendLog("📸 screenshot...")
             tab.flush()
 
+            // The AgentAccess methods are now nonisolated async and dispatch
+            // screencapture to a background queue internally, so we don't need
+            // Self.offMain or MainActor.run wrappers — direct await is correct.
             let output: String
             if let wid = windowId, wid > 0 {
-                output = await Self.offMain {
-                    AccessibilityService.shared.captureScreenshot(windowID: wid)
-                }
+                output = await AccessibilityService.shared.captureScreenshot(windowID: wid)
             } else if let x = x, let y = y, let w = width, let h = height {
-                output = await Self.offMain {
-                    AccessibilityService.shared.captureScreenshot(x: x, y: y, width: w, height: h)
-                }
+                output = await AccessibilityService.shared.captureScreenshot(x: x, y: y, width: w, height: h)
             } else {
-                output = await MainActor.run {
-                    AccessibilityService.shared.captureAllWindows()
-                }
+                output = await AccessibilityService.shared.captureAllWindows()
             }
 
             if output.contains("\"path\"") {
