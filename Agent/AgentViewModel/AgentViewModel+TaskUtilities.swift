@@ -366,12 +366,15 @@ extension AgentViewModel {
                 log(err)
                 return err
             }
-            // Skip compilation if dylib is up to date
+            // Skip compilation if dylib is up to date.
+            // MUST run via executeTCC (in-process) so swift build inherits the
+            // main app's TCC grants for ~/Documents access. The Launch Agent
+            // path (userService.execute) runs in a separate TCC context that
+            // can't getcwd() inside ~/Documents/AgentScript/agents/.
             if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: name) }) {
                 log("🦾 Compiling: \(name)")
                 flush()
-                let compileCmd2 = Self.prependWorkingDirectory(compileCmd, projectFolder: effectiveFolder)
-                let compileResult = await userService.execute(command: compileCmd2)
+                let compileResult = await Self.executeTCC(command: compileCmd)
                 if compileResult.status != 0 {
                     log("Compile error:\n\(compileResult.output)")
                     return compileResult.output
@@ -720,11 +723,17 @@ extension AgentViewModel {
         tab.isLLMThinking = false
         tab.appendLog("--- Direct Run ---")
 
-        // Compile only if needed
+        // Compile only if needed.
+        // Run via executeTCC (in-process) NOT userService.execute (Launch Agent
+        // XPC). The Launch Agent runs in a separate TCC context that doesn't have
+        // Documents folder permission, so swift build can't even getcwd() inside
+        // ~/Documents/AgentScript/agents/ and fails with "couldn't determine the
+        // current working directory". The in-process path inherits the main app's
+        // TCC grants and works.
         if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: name) }) {
             tab.appendLog("🦾 Compiling: \(name)")
             tab.flush()
-            let compileResult = await userService.execute(command: compileCmd)
+            let compileResult = await Self.executeTCC(command: compileCmd)
             if compileResult.status != 0 {
                 tab.appendLog("❌ Compile error:\n\(compileResult.output)")
                 tab.flush()

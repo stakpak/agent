@@ -115,13 +115,16 @@ extension AgentViewModel {
                 )
             }
 
-            // Skip compilation if dylib is up to date
+            // Skip compilation if dylib is up to date.
+            // MUST run via executeTCC (in-process) so swift build inherits the
+            // main app's TCC grants for ~/Documents access. The Launch Agent
+            // path (executeForTab → userService.execute) runs in a separate
+            // TCC context that can't getcwd() inside ~/Documents/AgentScript/.
             if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
                 tab.appendLog("🦾 Compiling: \(scriptName)")
                 tab.flush()
 
-                let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
-                let compileResult = await executeForTab(command: compileCmd, projectFolder: tabFolder)
+                let compileResult = await Self.executeTCC(command: compileCmd)
                 guard !Task.isCancelled else {
                     return TabToolResult(
                         toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Script cancelled"],
