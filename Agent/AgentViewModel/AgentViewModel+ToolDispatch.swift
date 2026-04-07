@@ -94,7 +94,10 @@ extension AgentViewModel {
             let pattern = input["pattern"] as? String ?? ""
             let path = input["path"] as? String ?? pf
             guard !pattern.isEmpty else { return "" }
-            return "grep -rn \(Self.shellEscape(pattern)) \(Self.shellEscape(path)) --include='*.swift' --include='*.py' --include='*.js' --include='*.ts' 2>/dev/null | head -50"
+            return
+                "grep -rn \(Self.shellEscape(pattern)) \(Self.shellEscape(path)) "
+                + "--include='*.swift' --include='*.py' "
+                + "--include='*.js' --include='*.ts' 2>/dev/null | head -50"
         case "read_dir":
             let path = input["path"] as? String ?? pf
             return "ls -la \(Self.shellEscape(path)) 2>/dev/null"

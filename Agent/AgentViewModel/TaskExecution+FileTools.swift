@@ -47,7 +47,10 @@ extension AgentViewModel {
                cached.mtime == currentMtime
             {
                 let stub =
-                    "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
+                        "File unchanged since last read (\(cached.outputCharCount) chars). "
+                        + "The content from the earlier Read tool_result in this "
+                        + "conversation is still current — refer to that instead "
+                        + "of re-reading."
                 appendLog("📖 (unchanged) \(filePath)")
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": stub])
                 return true
@@ -183,7 +186,9 @@ extension AgentViewModel {
                   let endLine = input["end_line"] as? Int else
             {
                 let err =
-                    "Error: start_line and end_line are required. Use read_file first to find the line numbers, then specify the range to edit."
+                    "Error: start_line and end_line are required. "
+                        + "Use read_file first to find the line numbers, "
+                        + "then specify the range to edit."
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
                 return true
@@ -272,7 +277,12 @@ extension AgentViewModel {
                 toolResults.append([
                     "type": "tool_result",
                     "tool_use_id": toolId,
-                    "content": "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Any pending diffs for this file are invalidated. Re-read the file before making more edits.\n\n\(display)"
+                    "content":
+                        "Applied diff to \(filePath) [verified: \(verified)] "
+                        + "— file now has \(newLineCount) lines. "
+                        + "Any pending diffs for this file are invalidated. "
+                        + "Re-read the file before making more edits."
+                        + "\n\n\(display)"
                 ])
             } catch {
                 let err = "Error applying diff: \(error.localizedDescription)"
@@ -425,7 +435,12 @@ extension AgentViewModel {
                 toolResults.append([
                     "type": "tool_result",
                     "tool_use_id": toolId,
-                    "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"
+                    "content":
+                        "Applied diff to \(filePath)\(rangeNote) "
+                        + "[verified: \(verified)] — file now has "
+                        + "\(newLineCount) lines. Re-read the file before "
+                        + "making more edits. diff_id: \(diffId.uuidString)"
+                        + "\n\n\(display)"
                 ])
             } catch {
                 let err = "Error applying diff: \(error.localizedDescription)"
