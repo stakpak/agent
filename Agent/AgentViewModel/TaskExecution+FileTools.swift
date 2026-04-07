@@ -251,7 +251,12 @@ extension AgentViewModel {
                let stored = DiffStore.shared.retrieve(uuid) {
                 // Use D1F's built-in undo: create reverse diff from metadata
                 if let undoDiff = MultiLineDiff.createUndoDiff(from: stored.diff) {
-                    let currentPath = (filePath.isEmpty ? DiffStore.shared.lastAppliedDiffId(for: expandedUndo).flatMap { DiffStore.shared.retrieve($0) }.map { _ in expandedUndo } ?? expandedUndo : expandedUndo)
+                    let fallbackPath: String? = DiffStore.shared.lastAppliedDiffId(for: expandedUndo).flatMap { id in
+                        DiffStore.shared.retrieve(id).map { _ in expandedUndo }
+                    }
+                    let currentPath = filePath.isEmpty
+                        ? (fallbackPath ?? expandedUndo)
+                        : expandedUndo
                     guard let data = FileManager.default.contents(atPath: currentPath),
                           let current = String(data: data, encoding: .utf8) else {
                         let err = "Error: cannot read \(filePath)"

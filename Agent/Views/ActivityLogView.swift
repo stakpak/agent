@@ -336,7 +336,12 @@ struct ActivityLogView: NSViewRepresentable {
                     pendingRenderWork?.cancel()
                     let work = DispatchWorkItem { [weak self] in
                         guard let self, let tv = self.latestTextView else { return }
-                        self.applySearchHighlighting(textView: tv, searchText: self.latestSearchText, caseSensitive: self.latestCaseSensitive, currentMatch: self.latestMatchIndex, onMatchCount: self.latestMatchCallback)
+                        self.applySearchHighlighting(
+                            textView: tv, searchText: self.latestSearchText,
+                            caseSensitive: self.latestCaseSensitive,
+                            currentMatch: self.latestMatchIndex,
+                            onMatchCount: self.latestMatchCallback
+                        )
                     }
                     pendingRenderWork = work
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)

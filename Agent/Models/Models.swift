@@ -156,7 +156,12 @@ final class ErrorHistory {
     private(set) var records: [ErrorRecord] = []
     
     private var fileURL: URL {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("error_history.json") }
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first else {
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("error_history.json")
+        }
         let dir = appSupport.appendingPathComponent("Agent", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("error_history.json")
@@ -249,7 +254,12 @@ final class TaskHistory {
     private(set) var records: [TaskRecord] = []
 
     private var fileURL: URL {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("task_history.json") }
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first else {
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("task_history.json")
+        }
         let dir = appSupport.appendingPathComponent("Agent", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("task_history.json")

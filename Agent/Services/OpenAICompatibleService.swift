@@ -47,7 +47,12 @@ final class OpenAICompatibleService {
     /// Dynamic backoff from Retry-After header (overrides static limit until it expires).
     private static var retryAfterUntil: [APIProvider: CFAbsoluteTime] = [:]
 
-    init(apiKey: String, model: String, baseURL: String, supportsVision: Bool = false, historyContext: String = "", projectFolder: String = "", provider: APIProvider, messagesKey: String = "messages", maxTokens: Int = 0) {
+    init(
+        apiKey: String, model: String, baseURL: String,
+        supportsVision: Bool = false, historyContext: String = "",
+        projectFolder: String = "", provider: APIProvider,
+        messagesKey: String = "messages", maxTokens: Int = 0
+    ) {
         self.apiKey = apiKey
         self.model = model
         self.baseURL = URL(string: baseURL) ?? URL(filePath: "/")

@@ -22,7 +22,12 @@ final class OllamaService {
     let userName: String
     let projectFolder: String
 
-    init(apiKey: String, model: String, endpoint: String, supportsVision: Bool = false, historyContext: String = "", projectFolder: String = "", provider: APIProvider = .ollama, contextSize: Int = 0) {
+    init(
+        apiKey: String, model: String, endpoint: String,
+        supportsVision: Bool = false, historyContext: String = "",
+        projectFolder: String = "", provider: APIProvider = .ollama,
+        contextSize: Int = 0
+    ) {
         self.apiKey = apiKey
         self.model = model
         let effectiveEndpoint = endpoint.isEmpty ? "http://localhost:11434/api/chat" : endpoint
@@ -54,7 +59,12 @@ final class OllamaService {
         return prompt
     }
 
-    func tools(activeGroups: Set<String>? = nil, compact: Bool = false) -> [[String: Any]] { AgentTools.ollamaTools(for: provider, activeGroups: activeGroups, compact: compact, projectFolder: projectFolder) }
+    func tools(activeGroups: Set<String>? = nil, compact: Bool = false) -> [[String: Any]] {
+        AgentTools.ollamaTools(
+            for: provider, activeGroups: activeGroups,
+            compact: compact, projectFolder: projectFolder
+        )
+    }
 
     /// Set to true when a tool call fails — next turn sends full _tool names, then resets.
     var needsFullToolNames: Bool = false

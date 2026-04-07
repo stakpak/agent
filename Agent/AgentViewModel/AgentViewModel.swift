@@ -1209,7 +1209,12 @@ final class AgentViewModel {
     // MARK: - Image snapshot cache (persists across launches)
 
     static let logImageCacheDir: URL = {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Agent/log_images") }
+        guard let caches = FileManager.default.urls(
+            for: .cachesDirectory, in: .userDomainMask
+        ).first else {
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("Agent/log_images")
+        }
         let dir = caches.appendingPathComponent("Agent/log_images")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

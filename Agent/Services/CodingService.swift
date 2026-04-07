@@ -302,8 +302,16 @@ enum CodingService {
         var bestRange: Range<String.Index>?
         var bestScore = 0
         for range in ranges {
-            let windowStart = content.index(range.lowerBound, offsetBy: -min(500, content.distance(from: content.startIndex, to: range.lowerBound)), limitedBy: content.startIndex) ?? content.startIndex
-            let windowEnd = content.index(range.upperBound, offsetBy: min(500, content.distance(from: range.upperBound, to: content.endIndex)), limitedBy: content.endIndex) ?? content.endIndex
+            let windowStart = content.index(
+                range.lowerBound,
+                offsetBy: -min(500, content.distance(from: content.startIndex, to: range.lowerBound)),
+                limitedBy: content.startIndex
+            ) ?? content.startIndex
+            let windowEnd = content.index(
+                range.upperBound,
+                offsetBy: min(500, content.distance(from: range.upperBound, to: content.endIndex)),
+                limitedBy: content.endIndex
+            ) ?? content.endIndex
             let window = String(content[windowStart..<windowEnd])
             var score = 0
             for line in contextLines where window.contains(line) { score += 1 }

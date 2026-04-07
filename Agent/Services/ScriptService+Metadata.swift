@@ -248,7 +248,11 @@ extension ScriptService {
     /// Load and run a compiled script dylib in-process via dlopen/dlsym.
     /// Captures stdout (and optionally stderr) and returns the output + exit status.
     /// Runs on a background thread to avoid blocking the main thread.
-    func loadAndRunScript(name: String, arguments: String = "", captureStderr: Bool = false, isCancelled: (@Sendable () -> Bool)? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async -> (output: String, status: Int32) {
+    func loadAndRunScript(
+        name: String, arguments: String = "", captureStderr: Bool = false,
+        isCancelled: (@Sendable () -> Bool)? = nil,
+        onOutput: (@Sendable (String) -> Void)? = nil
+    ) async -> (output: String, status: Int32) {
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let path = dylibPath(name: scriptName)
 

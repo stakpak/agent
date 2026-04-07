@@ -38,7 +38,11 @@ extension AgentViewModel {
 
         case "plan_mode":
             let action = input["action"] as? String ?? "read"
-            let output = Self.handlePlanMode(action: action, input: input, projectFolder: tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder, tabName: tab.displayTitle, userPrompt: tab.currentTaskPrompt)
+            let output = Self.handlePlanMode(
+                action: action, input: input,
+                projectFolder: tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder,
+                tabName: tab.displayTitle, userPrompt: tab.currentTaskPrompt
+            )
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
