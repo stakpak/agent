@@ -277,9 +277,24 @@ extension AgentViewModel {
             let pat = CodingService.shellEscape(rawPat)
             let rawDir = input["path"] as? String ?? pf
             let displayDir = CodingService.trimHome(rawDir)
-            let result = await executeViaUserAgent(command: "find . -maxdepth 8 -type f -name \(pat) ! -path '*/.*' ! -path '*/.build/*' ! -path '*/.git/*' ! -path '*/.swiftpm/*' ! -name '.DS_Store' ! -name '*.xcuserstate' 2>/dev/null | sed 's|^\\./||' | sort | head -100", workingDirectory: rawDir, silent: true)
+            let findCmd =
+                "find . -maxdepth 8 -type f -name \(pat)"
+                + " ! -path '*/.*' ! -path '*/.build/*'"
+                + " ! -path '*/.git/*' ! -path '*/.swiftpm/*'"
+                + " ! -name '.DS_Store' ! -name '*.xcuserstate'"
+                + " 2>/dev/null | sed 's|^\\./||' | sort | head -100"
+            let result = await executeViaUserAgent(
+                command: findCmd,
+                workingDirectory: rawDir, silent: true)
             let raw = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            return raw.isEmpty ? "No files found" : "[project folder: \(displayDir)] paths are relative to project folder\n\(CodingService.formatFileTree(raw))"
+            if raw.isEmpty {
+                return "No files found"
+            }
+            return """
+                [project folder: \(displayDir)] \
+                paths are relative to project folder
+                \(CodingService.formatFileTree(raw))
+                """
         case "search_files":
             let pat = CodingService.shellEscape(input["pattern"] as? String ?? "")
             let rawDir = input["path"] as? String ?? pf
