@@ -203,6 +203,11 @@ extension CodingService {
             return "Error updating original: \(error.localizedDescription)"
         }
 
-        return "Extracted '\(functionName)' (\(extractedLines.count) lines) → \(newFileName)\nOriginal: \(lines.count) → \(remaining.count) lines\nUse xcode (action: add_file) to add \(newPath) to project, then build."
+        return
+            "Extracted '\(functionName)' (\(extractedLines.count) lines) "
+            + "→ \(newFileName)\n"
+            + "Original: \(lines.count) → \(remaining.count) lines\n"
+            + "Use xcode (action: add_file) to add \(newPath) "
+            + "to project, then build."
     }
 }

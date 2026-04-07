@@ -32,7 +32,11 @@ enum CodingService {
         guard FileManager.default.fileExists(atPath: url.path) else {
             let dir = (path as NSString).deletingLastPathComponent
             let suggestPath = dir.isEmpty ? "." : dir
-            return "Error: file not found: \(path)\nSTOP guessing paths. Call file_manager(action:\"list\", path:\"\(suggestPath)\") to see what files exist."
+            return
+                "Error: file not found: \(path)\n"
+                + "STOP guessing paths. Call file_manager("
+                + "action:\"list\", path:\"\(suggestPath)\") "
+                + "to see what files exist."
         }
 
         // Check if it's a directory
@@ -151,7 +155,11 @@ enum CodingService {
             } else {
                 let trimmed = needle.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty && original.contains(trimmed) {
-                    return "Error: old_string not found (exact match). A similar string exists in \(path) — check whitespace/indentation. Re-read the file to verify content."
+                    return
+                        "Error: old_string not found (exact match). "
+                        + "A similar string exists in \(path) "
+                        + "— check whitespace/indentation. "
+                        + "Re-read the file to verify content."
                 }
                 let firstLine = needle.components(separatedBy: "\n")
                     .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
@@ -168,7 +176,10 @@ enum CodingService {
                 matchRange = range
                 matchNote = " (disambiguated by context)"
             } else {
-                return "Error: old_string appears \(occurrences) times in \(path). Provide more context to make it unique, or set replace_all=true."
+                return
+                    "Error: old_string appears \(occurrences) times "
+                    + "in \(path). Provide more context to make it "
+                    + "unique, or set replace_all=true."
             }
         } else if !replaceAll {
             matchRange = original.range(of: needle)
@@ -190,7 +201,13 @@ enum CodingService {
         //     equivalent after fuzzy matching, OR the matched range already
         //     contains the target text. Don't touch disk and tell the LLM clearly.
         if updated == original {
-            return "Warning: edit is a no-op — applying old_string→new_string produced identical content in \(url.path). The file was NOT modified. Either the matched text already equals new_string, or old_string and new_string are equivalent after whitespace normalization. Re-read the file and verify what actually needs to change."
+            return
+                "Warning: edit is a no-op — applying old_string→new_string "
+                + "produced identical content in \(url.path). The file was NOT "
+                + "modified. Either the matched text already equals new_string, "
+                + "or old_string and new_string are equivalent after whitespace "
+                + "normalization. Re-read the file and verify what actually "
+                + "needs to change."
         }
 
         // 4. Build a structured d1f diff with metadata (line numbers, totals)
