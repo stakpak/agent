@@ -143,18 +143,43 @@ extension AgentViewModel {
                 openAICompatible = nil
             case .lmStudio:
                 let key = lmStudioProtocol == .lmStudio ? "input" : "messages"
-                openAICompatible = OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelName, baseURL: lmStudioEndpoint, historyContext: historyContext, projectFolder: projectFolder, provider: provider, messagesKey: key, maxTokens: mt)
+                openAICompatible = OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelName,
+                    baseURL: lmStudioEndpoint, historyContext: historyContext,
+                    projectFolder: projectFolder, provider: provider,
+                    messagesKey: key, maxTokens: mt
+                )
             case .vLLM:
-                openAICompatible = OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelName, baseURL: vLLMEndpoint, historyContext: historyContext, projectFolder: projectFolder, provider: provider, maxTokens: mt)
+                openAICompatible = OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelName,
+                    baseURL: vLLMEndpoint, historyContext: historyContext,
+                    projectFolder: projectFolder, provider: provider,
+                    maxTokens: mt
+                )
             default:
                 let url = chatURLForProvider(provider)
-                openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelName, baseURL: url, supportsVision: isVision, historyContext: historyContext, projectFolder: projectFolder, provider: provider, maxTokens: mt)
+                openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelName,
+                    baseURL: url, supportsVision: isVision,
+                    historyContext: historyContext, projectFolder: projectFolder,
+                    provider: provider, maxTokens: mt
+                )
             }
             switch provider {
             case .ollama:
-                ollama = OllamaService(apiKey: ollamaAPIKey, model: modelName, endpoint: ollamaEndpoint, supportsVision: isVision, historyContext: historyContext, projectFolder: projectFolder, provider: .ollama)
+                ollama = OllamaService(
+                    apiKey: ollamaAPIKey, model: modelName,
+                    endpoint: ollamaEndpoint, supportsVision: isVision,
+                    historyContext: historyContext, projectFolder: projectFolder,
+                    provider: .ollama
+                )
             case .localOllama:
-                ollama = OllamaService(apiKey: "", model: modelName, endpoint: localOllamaEndpoint, supportsVision: isVision, historyContext: historyContext, projectFolder: projectFolder, provider: .localOllama, contextSize: localOllamaContextSize)
+                ollama = OllamaService(
+                    apiKey: "", model: modelName, endpoint: localOllamaEndpoint,
+                    supportsVision: isVision, historyContext: historyContext,
+                    projectFolder: projectFolder, provider: .localOllama,
+                    contextSize: localOllamaContextSize
+                )
             default:
                 ollama = nil
             }
@@ -218,7 +243,12 @@ extension AgentViewModel {
                     let success = await runAgentDirect(name: agentName, arguments: args)
                     if success {
                         completionSummary = "Ran \(agentName)"
-                        history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: ["run_agent: \(agentName)"]), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+                        history.add(
+                            TaskRecord(prompt: prompt, summary: completionSummary,
+                                       commandsRun: ["run_agent: \(agentName)"]),
+                            maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey,
+                            model: selectedModel
+                        )
                         ChatHistoryStore.shared.endCurrentTask(summary: completionSummary)
                         stopProgressUpdates()
                         flushLog()
@@ -952,7 +982,11 @@ extension AgentViewModel {
                         try? await Task.sleep(for: .seconds(retryDelay))
                         if Task.isCancelled { break }
                         continue
-                    } else if errMsg.lowercased().contains("network") || errMsg.lowercased().contains("connection") || errMsg.lowercased().contains("internet") || (error as? URLError)?.code == .networkConnectionLost || (error as? URLError)?.code == .notConnectedToInternet {
+                    } else if errMsg.lowercased().contains("network")
+                                || errMsg.lowercased().contains("connection")
+                                || errMsg.lowercased().contains("internet")
+                                || (error as? URLError)?.code == .networkConnectionLost
+                                || (error as? URLError)?.code == .notConnectedToInternet {
                         timeoutRetryCount += 1
                         if timeoutRetryCount <= maxTimeoutRetries {
                             let delay = networkRetryDelay
