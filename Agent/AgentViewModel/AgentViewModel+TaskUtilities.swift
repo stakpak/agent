@@ -123,9 +123,17 @@ extension AgentViewModel {
         let isQuestion = isQuestionPrompt(prompt)
         let taskHeader = isQuestion
             ?
-            "[QUESTION — Answer this directly. Do NOT use tools unless the question requires reading files or running commands. Call done(summary:\"...\") with your answer.]\n"
+            """
+            [QUESTION — Answer this directly. Do NOT use tools unless \
+            the question requires reading files or running commands. \
+            Call done(summary:"...") with your answer.]
+            """
             :
-            "[NEW TASK — Do ONLY what is asked below. Ignore all previous task history. When done, call done(summary:\"...\") immediately. Do NOT continue with unrelated work.]\n"
+            """
+            [NEW TASK — Do ONLY what is asked below. Ignore all previous \
+            task history. When done, call done(summary:"...") immediately. \
+            Do NOT continue with unrelated work.]
+            """
         return taskHeader + folderPrefix + configPrefix
     }
 
@@ -394,7 +402,12 @@ extension AgentViewModel {
                 let err = available.isEmpty
                     ? "Error: agent '\(name)' not found. No agents exist yet."
                     :
-                    "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
+                    """
+                    Error: agent '\(name)' not found. \
+                    Available agents: \(available). \
+                    Retry with the exact name \
+                    (no 'script' or 'agent' prefix).
+                    """
                 log(err)
                 return err
             }
@@ -414,7 +427,12 @@ extension AgentViewModel {
                 let err = available.isEmpty
                     ? "Error: agent '\(name)' not found. No agents exist yet — use agent_script(action:create) first."
                     :
-                    "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
+                    """
+                    Error: agent '\(name)' not found. \
+                    Available agents: \(available). \
+                    Retry with the exact name \
+                    (no 'script' or 'agent' prefix).
+                    """
                 log(err)
                 return err
             }
@@ -509,7 +527,11 @@ extension AgentViewModel {
             let url = await WebAutomationService.shared.getPageURL()
             let title = await WebAutomationService.shared.getPageTitle()
             let content = await WebAutomationService.shared.readPageContent(maxLength: 3000)
-            return "{\"url\": \"\(WebAutomationService.escapeJS(url))\", \"title\": \"\(WebAutomationService.escapeJS(title))\", \"content\": \"\(WebAutomationService.escapeJS(content))\"}"
+            return """
+                {"url": "\(WebAutomationService.escapeJS(url))", \
+                "title": "\(WebAutomationService.escapeJS(title))", \
+                "content": "\(WebAutomationService.escapeJS(content))"}
+                """
 
         case "web_click":
             let selector = cmd.argument
@@ -609,7 +631,13 @@ extension AgentViewModel {
                         var text = el.textContent.trim();
                         if (text.toLowerCase().indexOf('\(escaped.lowercased())') >= 0) {
                             var rect = el.getBoundingClientRect();
-                            matches.push({ tag: el.tagName, text: text.substring(0, 100), href: el.href || '', id: el.id || '', className: (el.className || '').substring(0, 80) });
+                            matches.push({
+                                tag: el.tagName,
+                                text: text.substring(0, 100),
+                                href: el.href || '',
+                                id: el.id || '',
+                                className: (el.className || '').substring(0, 80)
+                            });
                         }
                     }
                     return matches;
