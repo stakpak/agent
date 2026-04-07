@@ -123,7 +123,7 @@ final class ChatHistoryStore {
     /// Set to true when save has failed fatally — prevents repeated crash attempts
     private var storeDisabled = false
 
-    /// Dedicated store file — avoids sharing default.store with TrainingDataStore
+    /// Dedicated chat history store file (SwiftData)
     private static var storeURL: URL {
         let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         guard let url = urls.first else {

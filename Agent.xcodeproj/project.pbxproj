@@ -82,8 +82,6 @@
 		AA100000000000000000B7 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000B6 /* ToolsView.swift */; };
 		AA100000000000000000B8 /* AgentOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000B9 /* AgentOptionsView.swift */; };
 		AA100000000000000000BB /* OpenAICompatibleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000BA /* OpenAICompatibleService.swift */; };
-		AA100000000000000000BD /* LoRAAdapterManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000BC /* LoRAAdapterManager.swift */; };
-		AA100000000000000000BF /* LoRASettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000BE /* LoRASettingsView.swift */; };
 		AA100000000000000000C1 /* NewMainTabSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000C0 /* NewMainTabSheet.swift */; };
 		AA100000000000000000C2 /* TaskExecution+ShellTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000C3 /* TaskExecution+ShellTools.swift */; };
 		AA100000000000000000C4 /* TaskExecution+MCPTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100000000000000000C5 /* TaskExecution+MCPTools.swift */; };
@@ -148,7 +146,6 @@
 		EAFA000000000000000001 /* FoundationModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFA000000000000000002 /* FoundationModelService.swift */; };
 		EASP000000000000000001 /* SystemPromptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EASP000000000000000002 /* SystemPromptService.swift */; };
 		EASP000000000000000003 /* SystemPromptEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EASP000000000000000004 /* SystemPromptEditor.swift */; };
-		EATD000000000000000001 /* TrainingData.swift in Sources */ = {isa = PBXBuildFile; fileRef = EATD000000000000000002 /* TrainingData.swift */; };
 		F035BAFA78E9DDFDF6DD5A1C /* TaskBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4128E21FF13BC4029D6548B /* TaskBannerView.swift */; };
 		F123A9EA71C5383EFFFF1A8A /* ActivityLogView+Rendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = C428D9A5859B0E1BB0D2FB6B /* ActivityLogView+Rendering.swift */; };
 		FF10000000000000000011 /* AgentViewModel+Speech.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF10000000000000000010 /* AgentViewModel+Speech.swift */; };
@@ -299,8 +296,6 @@
 		AA100000000000000000B6 /* ToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsView.swift; sourceTree = "<group>"; };
 		AA100000000000000000B9 /* AgentOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOptionsView.swift; sourceTree = "<group>"; };
 		AA100000000000000000BA /* OpenAICompatibleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleService.swift; sourceTree = "<group>"; };
-		AA100000000000000000BC /* LoRAAdapterManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAAdapterManager.swift; sourceTree = "<group>"; };
-		AA100000000000000000BE /* LoRASettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRASettingsView.swift; sourceTree = "<group>"; };
 		AA100000000000000000C0 /* NewMainTabSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMainTabSheet.swift; sourceTree = "<group>"; };
 		AA100000000000000000C3 /* TaskExecution+ShellTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskExecution+ShellTools.swift"; sourceTree = "<group>"; };
 		AA100000000000000000C5 /* TaskExecution+MCPTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskExecution+MCPTools.swift"; sourceTree = "<group>"; };
@@ -366,7 +361,6 @@
 		EAFA000000000000000002 /* FoundationModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationModelService.swift; sourceTree = "<group>"; };
 		EASP000000000000000002 /* SystemPromptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptService.swift; sourceTree = "<group>"; };
 		EASP000000000000000004 /* SystemPromptEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptEditor.swift; sourceTree = "<group>"; };
-		EATD000000000000000002 /* TrainingData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingData.swift; sourceTree = "<group>"; };
 		EF914BA393B97296A51A534F /* AgentViewModel+TabHandlers+Git.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentViewModel+TabHandlers+Git.swift"; sourceTree = "<group>"; };
 		EFC0549F9001505AC8375592 /* AgentViewModel+SubAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentViewModel+SubAgent.swift"; sourceTree = "<group>"; };
 		F03E40CE4E05384C443BA8A9 /* KeyboardShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcuts.swift; sourceTree = "<group>"; };
@@ -557,7 +551,6 @@
 				AA1000000000000000001E /* ClaudeService.swift */,
 				AA10000000000000000028 /* OllamaService.swift */,
 				AA100000000000000000BA /* OpenAICompatibleService.swift */,
-				AA100000000000000000BC /* LoRAAdapterManager.swift */,
 				AA10000000000000000029 /* ScriptService.swift */,
 				SS110000000000000000002 /* ScriptService+Metadata.swift */,
 				SS110000000000000000004 /* ScriptService+Execution.swift */,
@@ -603,7 +596,6 @@
 				DF47A951667916D1F6BCD360 /* CodingPreferencesView.swift */,
 				AA10000000000000000078 /* MessagesView.swift */,
 				AA1000000000000000005D /* SettingsView.swift */,
-				AA100000000000000000BE /* LoRASettingsView.swift */,
 				BB10000000000000000007 /* AppleIntelligencePopover.swift */,
 				AA100000000000000000C0 /* NewMainTabSheet.swift */,
 				AA1000000000000000005E /* HistoryView.swift */,
@@ -691,7 +683,6 @@
 				EABA0FBC2F7B78DA005CCD6E /* ChatModels.swift */,
 				TN10000000000000000000 /* ToolNames.swift */,
 				AA10000000000000000020 /* Models.swift */,
-				EATD000000000000000002 /* TrainingData.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -907,8 +898,6 @@
 				AA10000000000000000039 /* UserProtocol.swift in Sources */,
 				AA1000000000000000003A /* OllamaService.swift in Sources */,
 				AA100000000000000000BB /* OpenAICompatibleService.swift in Sources */,
-				AA100000000000000000BD /* LoRAAdapterManager.swift in Sources */,
-				AA100000000000000000BF /* LoRASettingsView.swift in Sources */,
 				BB10000000000000000017 /* AppleIntelligencePopover.swift in Sources */,
 				AA100000000000000000C1 /* NewMainTabSheet.swift in Sources */,
 				AA1000000000000000003B /* ScriptService.swift in Sources */,
@@ -987,7 +976,6 @@
 				AA10000000000000000066 /* ActivityLogView.swift in Sources */,
 				AA10000000000000000036 /* Models.swift in Sources */,
 				TN10000000000000000001 /* ToolNames.swift in Sources */,
-				EATD000000000000000001 /* TrainingData.swift in Sources */,
 				AA10000000000000000079 /* ScriptTab.swift in Sources */,
 				AA1000000000000000007B /* TabBarView.swift in Sources */,
 				AA100000000000000000C2 /* TaskExecution+ShellTools.swift in Sources */,

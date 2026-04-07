@@ -64,19 +64,13 @@ final class FoundationModelService {
     // MARK: - Session
 
     private func ensureSession() -> LanguageModelSession {
-        var instructions = SystemPromptService.shared.prompt(
+        let instructions = SystemPromptService.shared.prompt(
             for: .foundationModel,
             userName: userName,
             userHome: userHome,
             projectFolder: projectFolder,
             style: .compact
         )
-
-        // Note active LoRA adapter in instructions
-        let lora = LoRAAdapterManager.shared
-        if lora.isLoaded {
-            instructions += "\n[LoRA adapter '\(lora.adapterName)' is active]"
-        }
 
         let s = LanguageModelSession(model: .default, instructions: Instructions(instructions))
         session = s

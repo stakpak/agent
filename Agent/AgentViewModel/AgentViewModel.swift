@@ -348,8 +348,10 @@ final class AgentViewModel {
     var selectedProvider: APIProvider = {
         let rawValue = UserDefaults.standard.string(forKey: "agentProvider") ?? "ollama"
         let provider = APIProvider(rawValue: rawValue) ?? .ollama
-        // foundationModel is NEVER a valid selection - it's for LoRA training only
-        // If somehow stored, fall back to ollama
+        // foundationModel is NEVER a valid main-task provider — it's only used
+        // by AppleIntelligenceMediator for triage/summary/AX intent and by the
+        // Tier 1 token compression path. The selectableProviders list excludes
+        // it, so any stored value falls back to ollama.
         return APIProvider.selectableProviders.contains(provider) ? provider : .ollama
     }() {
         didSet {

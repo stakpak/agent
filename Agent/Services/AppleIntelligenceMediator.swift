@@ -59,19 +59,9 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Whether training data capture is active (captures user prompts,
-    /// Apple AI interjections, LLM responses, and task summaries for LoRA JSONL)
-    @Published var trainingEnabled: Bool = UserDefaults.standard.bool(forKey: "appleIntelligenceTrainingEnabled") {
-        didSet {
-            UserDefaults.standard.set(trainingEnabled, forKey: "appleIntelligenceTrainingEnabled")
-        }
-    }
-
     /// Brain icon color for the toolbar
     var brainIconColor: Color {
         if !isEnabled { return .red }
-        if LoRAAdapterManager.shared.isLoaded { return .blue }
-        if trainingEnabled { return .orange }
         // Yellow when ANY sub-feature is disabled — at-a-glance signal that
         // the mediator is on but partially configured.
         if !showAnnotationsToUser || !tokenCompressionEnabled || !accessibilityIntentEnabled { return .yellow }
@@ -187,7 +177,6 @@ final class AppleIntelligenceMediator: ObservableObject {
         - Never include tags, labels, or prefixes like [AI], LLM:, User:, CLEAR, etc.
         - NEVER change agent names, tool names, script names, or identifiers.
         - Just give the plain helpful text. Nothing else.
-        \(trainingEnabled ? "\nTraining mode is active. Give high-quality, clear annotations for LoRA fine-tuning." : "")
         """
     }
 

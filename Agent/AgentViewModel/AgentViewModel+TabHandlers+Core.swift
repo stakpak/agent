@@ -21,9 +21,6 @@ extension AgentViewModel {
             let mediator = AppleIntelligenceMediator.shared
             if mediator.isEnabled && mediator.showAnnotationsToUser {
                 if let summaryAnnotation = await mediator.summarizeCompletion(summary: summary, commandsRun: []) {
-                    if mediator.trainingEnabled {
-                        TrainingDataStore.shared.captureAppleAIDecision(summaryAnnotation.content)
-                    }
                     tab.appendLog(summaryAnnotation.formatted)
                     tab.flush()
                 }

@@ -112,11 +112,6 @@ extension AgentViewModel {
         }
         if forceVision { isVision = true }
         appendLog("🧠 \(provider.displayName) / \(modelName)\(isVision ? " (vision)" : "")")
-
-        // Start training data capture for Apple AI LoRA fine-tuning (only when toggle is on)
-        if AppleIntelligenceMediator.shared.trainingEnabled {
-            TrainingDataStore.shared.startCapture(userPrompt: prompt, modelUsed: modelName)
-        }
         flushLog()
 
         let mt = maxTokens
@@ -639,10 +634,6 @@ extension AgentViewModel {
                                     if agentReplyHandle != nil {
                                         sendProgressUpdate(summaryAnnotation.formatted)
                                     }
-                                    // Capture Apple AI annotation for training (only when toggle is on)
-                                    if mediator.trainingEnabled {
-                                        TrainingDataStore.shared.captureAppleAIAnnotation(summaryAnnotation.content)
-                                    }
                                 }
                             }
 
@@ -656,10 +647,6 @@ extension AgentViewModel {
                             )
                             // End the task in SwiftData chat history
                             ChatHistoryStore.shared.endCurrentTask(summary: summary)
-                            // Finish training data capture (only when toggle is on)
-                            if mediator.trainingEnabled {
-                                TrainingDataStore.shared.finishCapture(taskSummary: summary, successful: true)
-                            }
                             // Stop progress updates before sending final reply
                             stopProgressUpdates()
                             // Reply to the iMessage sender if this was an Agent! prompt
