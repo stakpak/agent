@@ -1,0 +1,1 @@
+{"suites":[{"commands":[{"description":"Open a folder action associated with a folder, for the purpose of attaching a script.","direct_parameter":{"description":"The associated folder."},"name":"open"}],"enumerations":[{"name":"saveable file format","values":[{"description":"Text File Format","name":"text"}]}],"name":"Folder Actions Setup Suite"}]}

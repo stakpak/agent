@@ -1,0 +1,132 @@
+{
+  "originHash": "0b2060175ed52842fed6219729181779a656b3d0624fafdb9e436e489f289c36",
+  "pins": [
+    {
+      "identity": "agentaccess",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentAccess.git",
+      "state": {
+        "revision": "d0aed7053e1dc0499b130efa91f57fbe7226ebef",
+        "version": "2.8.0"
+      }
+    },
+    {
+      "identity": "agentaudit",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentAudit.git",
+      "state": {
+        "revision": "52f1e1beaa94e63036c817a7179148b50bc74401",
+        "version": "1.2.0"
+      }
+    },
+    {
+      "identity": "agentcolorsyntax",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentColorSyntax.git",
+      "state": {
+        "revision": "8d3f253180e08077b2fe2c7e22290966e3fbdf2d",
+        "version": "1.2.0"
+      }
+    },
+    {
+      "identity": "agentd1f",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentD1F.git",
+      "state": {
+        "revision": "2f65032044581b21d8686be9ddbacd1839d3cbb2",
+        "version": "1.0.2"
+      }
+    },
+    {
+      "identity": "agenteventbridges",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentEventBridges.git",
+      "state": {
+        "revision": "324a9871e32efbecc7eb1cac28fcade76f4bee67",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "identity": "agentllm",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentLLM.git",
+      "state": {
+        "revision": "4bcd668ae68787ee2ff373fb85023353bb497106",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "identity": "agentmcp",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentMCP.git",
+      "state": {
+        "revision": "ddc8ee947e910416e5e6e35e613373730cb3d6f1",
+        "version": "1.5.0"
+      }
+    },
+    {
+      "identity": "agentswift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentSwift.git",
+      "state": {
+        "revision": "6e58d69eadfa7e9f72dd6e505aa04c27f2df0f86",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "identity": "agentterminalneo",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentTerminalNeo.git",
+      "state": {
+        "revision": "d60cc76ba8bccae63b0dd67ce8cab257336ce81d",
+        "version": "1.37.0"
+      }
+    },
+    {
+      "identity": "agenttools",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/macOS26/AgentTools.git",
+      "state": {
+        "revision": "6b92b55af1f636a47f5ef5753acf12a912625fa2",
+        "version": "2.42.0"
+      }
+    },
+    {
+      "identity": "axorcist",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/steipete/AXorcist.git",
+      "state": {
+        "revision": "c75d06f7f93e264a9786edc2b78c04973061cb2f",
+        "version": "0.1.0"
+      }
+    },
+    {
+      "identity": "commander",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/steipete/Commander.git",
+      "state": {
+        "revision": "9e349575c8e3c6745e81fe19e5bb5efa01b078ce",
+        "version": "0.2.1"
+      }
+    },
+    {
+      "identity": "swift-log",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-log.git",
+      "state": {
+        "revision": "8c0f217f01000dd30f60d6e536569ad4e74291f9",
+        "version": "1.11.0"
+      }
+    },
+    {
+      "identity": "swift-syntax",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-syntax.git",
+      "state": {
+        "revision": "4799286537280063c85a32f09884cfbca301b1a1",
+        "version": "602.0.0"
+      }
+    }
+  ],
+  "version": 3
+}

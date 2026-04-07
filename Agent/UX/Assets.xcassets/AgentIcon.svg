@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="shieldOuter" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#B8860B"/>
+    </linearGradient>
+    <linearGradient id="shieldInner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="100%" stop-color="#0A1628"/>
+    </linearGradient>
+    <linearGradient id="letterGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#FFA500"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer shield (Superman diamond shape) -->
+  <path d="M256 20 L460 160 L256 492 L52 160 Z"
+        fill="url(#shieldOuter)"
+        stroke="#8B6914" stroke-width="4"/>
+
+  <!-- Inner shield -->
+  <path d="M256 52 L432 172 L256 460 L80 172 Z"
+        fill="url(#shieldInner)"
+        stroke="#FFD700" stroke-width="3"/>
+
+  <!-- Big "A" letter -->
+  <path d="M256 100
+           L168 380
+           L198 380
+           L218 320
+           L294 320
+           L314 380
+           L344 380
+           Z
+           M230 286
+           L256 180
+           L282 286
+           Z"
+        fill="url(#letterGrad)"
+        fill-rule="evenodd"
+        stroke="#B8860B" stroke-width="2"/>
+</svg>
