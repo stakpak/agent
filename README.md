@@ -459,3 +459,4 @@ Agent! is a 100% original pure Swift macOS application. It is not a port, fork, 
 | **MCP** | Node.js stdio/SSE | Swift AgentMCP package |
 | **Scripts** | None | Swift dylib compilation at runtime, dlopen'd in-process with full TCC |
 | **Prompt caching** | Anthropic `cache_control` ephemeral | Anthropic `cache_control` ephemeral + automatic prefix-cache hit tracking for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek; Ollama `keep_alive: 30m` |
+| **Context compaction** | Cloud Claude (paid tokens; conversation re-sent to Anthropic) | Tiered: Tier 1 = on-device Apple Intelligence summarization (free, private, no API tokens). Tier 2 = aggressive prune if Apple AI unavailable. Triggers at 30K est. tokens, summaries memoized, 3-failure circuit breaker |
