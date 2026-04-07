@@ -101,7 +101,7 @@ Control any Mac app through the Accessibility API. Click buttons, type into fiel
 | **Mistral** | AI Studio | High-performance open models |
 | **Mistral Vibe** | Le Chat | High-performance open models |
 
-## Toolbar Features
+## Toolbar Features (Work in progres)
 
 The Agent! toolbar contains **15 buttons** that provide quick access to core functionality. Each button is represented by a SF Symbol icon:
 
