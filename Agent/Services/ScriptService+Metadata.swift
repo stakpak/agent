@@ -229,7 +229,10 @@ extension ScriptService {
         //
         // Re-sign dylib with the app's identity so macOS attributes AppleScript
         // permission prompts to "Agent!" instead of "Xcode".
-        return "cd '\(agentsPath)' && swift build --product '\(escapedName)' 2>&1 && codesign --force --sign - --identifier \(AppConstants.bundleID) '\(dylibFile)' 2>&1"
+        return
+            "cd '\(agentsPath)' && swift build --product '\(escapedName)' 2>&1 "
+            + "&& codesign --force --sign - --identifier \(AppConstants.bundleID) "
+            + "'\(dylibFile)' 2>&1"
     }
 
     /// Path to the compiled dylib for a script

@@ -191,7 +191,9 @@ final class FoundationModelService {
             let session = LanguageModelSession(
                 model: .default,
                 instructions: Instructions(
-                    "Fix spelling and grammar only. Return ONLY the corrected text. Do not add quotes, explanations, or change meaning. Keep it concise."
+                    "Fix spelling and grammar only. Return ONLY the corrected text. "
+                        + "Do not add quotes, explanations, or change meaning. "
+                        + "Keep it concise."
                 )
             )
             let response: String = try await withThrowingTaskGroup(of: String.self) { group in

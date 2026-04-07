@@ -602,7 +602,9 @@ final class OpenAICompatibleService {
                     let funcName = function["name"] as? String ?? "unknown"
                     AuditLog.log(
                         .api,
-                        "[OpenAIService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))"
+                        "[OpenAIService] Failed to parse tool args for "
+                            + "\(funcName): "
+                            + "\(String(describing: function["arguments"]).prefix(200))"
                     )
                     input = [:]
                 }
