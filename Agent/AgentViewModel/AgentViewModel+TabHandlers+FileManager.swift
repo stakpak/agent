@@ -243,8 +243,10 @@ extension AgentViewModel {
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
-                if fullText.count > 200 && patched.count < source.count / 2 {
-                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars."
+                // Truncation guard: only fires when result is both absolutely tiny
+                // and tiny relative to source — see Self.looksTruncated.
+                if Self.looksTruncated(source: source, patched: patched) {
+                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-send the destination text in full or narrow the line range."
                     tab.appendLog(err); tab.flush()
                     return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
                 }

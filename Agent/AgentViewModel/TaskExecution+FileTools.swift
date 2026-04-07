@@ -5,6 +5,23 @@ import AgentD1F
 // MARK: - File I/O Tool Execution
 extension AgentViewModel {
 
+    /// Heuristic check for an LLM-truncated diff result. Returns true only when
+    /// the patched output is BOTH tiny in absolute terms AND tiny relative to
+    /// source — catches obvious truncation like 27741→38 chars while allowing
+    /// legitimate refactors that delete most of a section (1000→400, 5000→200).
+    ///
+    /// Tunables (if this needs adjustment in the future):
+    ///   - Source must be > 200 chars to even consider — small sections aren't
+    ///     worth guarding because the LLM can easily regenerate them.
+    ///   - Patched must be < 50 chars absolute — legitimate refactors almost
+    ///     always produce more than this even when deleting heavily.
+    ///   - Patched must be < source/20 (5%) — refactors that delete 95%+ are
+    ///     rare; truncations bottom out near 0%.
+    nonisolated static func looksTruncated(source: String, patched: String) -> Bool {
+        guard source.count > 200 else { return false }
+        return patched.count < 50 && patched.count < source.count / 20
+    }
+
     /// Handles file I/O tool calls.
     /// Returns nil if this is not a file tool call.
     @MainActor
@@ -207,9 +224,10 @@ extension AgentViewModel {
                 } else {
                     throw DiffError.invalidDiff
                 }
-                // Safety: reject diffs that would dramatically shrink the file
-                if source.count > 200 && patched.count < source.count / 2 {
-                    let err = "Error: diff rejected — would shrink file from \(source.count) to \(patched.count) chars. Likely truncated. Use start_line/end_line with diff_and_apply instead."
+                // Truncation guard: only fires when the result is both absolutely
+                // tiny and tiny relative to source — see Self.looksTruncated.
+                if Self.looksTruncated(source: source, patched: patched) {
+                    let err = "Error: diff rejected — would shrink file from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-read the file and try again with a smaller section using start_line/end_line."
                     appendLog(err)
                     toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
                     return true
@@ -333,9 +351,10 @@ extension AgentViewModel {
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
-                // Safety check
-                if fullText.count > 200 && patched.count < source.count / 2 {
-                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars. Likely truncated."
+                // Truncation guard: only fires when the result is both absolutely
+                // tiny and tiny relative to source — see Self.looksTruncated.
+                if Self.looksTruncated(source: source, patched: patched) {
+                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-send the destination text in full or narrow the line range."
                     appendLog(err)
                     toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
                     return true

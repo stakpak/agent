@@ -457,19 +457,13 @@ extension AgentViewModel {
                         // Expand consolidated CRUDL tools into legacy tool names
                         (name, input) = Self.expandConsolidatedTool(name: name, input: input)
 
-                        // Plan-mode enforcement: ALL edits require an active plan first
+                        // Plans are encouraged but never required. Track edited files for
+                        // task summary purposes; track plan creation for future signals.
+                        // No mid-stream blocking — the LLM decides whether to plan up front.
                         let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "diff_and_apply", "create_diff", "apply_diff"]
                         if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
-                            if !planActive {
-                                let nudge = "BLOCKED: Create a plan FIRST via plan_tool(action:create, name:..., steps:[...]) before editing any files. This prevents wasted token regeneration."
-                                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": nudge, "is_error": true])
-                                appendLog("🚫 Plan required — blocked edit on \(filePath)")
-                                flushLog()
-                                continue
-                            }
                             filesEditedThisTask.insert(filePath)
                         }
-                        // Track plan creation
                         if name == "plan_mode" || name == "plan" {
                             if let act = input["action"] as? String, act == "create" || act == "update" {
                                 planActive = true
