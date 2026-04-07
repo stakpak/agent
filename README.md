@@ -103,29 +103,113 @@ Control any Mac app through the Accessibility API. Click buttons, type into fiel
 
 ## Toolbar Features
 
-### 1. MCP Servers
-- **Icon**: `server.rack` (server rack)
-- **Location**: Toolbar, leftmost button
-- **Purpose**: Manage MCP (Model Context Protocol) servers that extend Agent!'s capabilities
-- **Behavior**: Opens a popover showing configured MCP servers
-- **Details**:
-  - Displays list of connected/available MCP servers
-  - When no servers are configured, shows "No servers configured" message
-  - MCP servers provide additional tools prefixed with `mcp_*`
-  - Supports adding, removing, and configuring server connections
-  - Servers extend Agent! capabilities beyond built-in tools
+The Agent! toolbar contains **15 buttons** that provide quick access to core functionality. Each button is represented by a SF Symbol icon:
 
-### 2. Agent Selection *(pending review)*
-### 3. Model Selection *(pending review)*
-### 4. Provider Selection *(pending review)*
-### 5. System Prompt *(pending review)*
-### 6. Tools Configuration *(pending review)*
-### 7. Plan Mode *(pending review)*
-### 8. Memory *(pending review)*
-### 9. Settings *(pending review)*
-### 10. Activity History *(pending review)*
-### 11. New Chat *(pending review)*
-### 12. Sidebar Toggle *(pending review)*
+| # | Icon | Name | Description |
+|---|------|------|-------------|
+| 1 | ⚙️ `gearshape.2` | **Services** | Access system services and configuration options |
+| 2 | 💬 `bubble.fill` | **Chat** | Open chat/conversation view for interacting with AI |
+| 3 | ✋ `hand.stop` | **Stop** | Cancel/halt the current running task or operation |
+| 4 | 🖥️ `server.rack` | **Servers** | Manage MCP (Model Context Protocol) servers |
+| 5 | </> `chevron.left.forwardslash.chevron.right` | **Code** | Open code editor or coding mode |
+| 6 | 🔧 `wrench.and.screwdriver` | **Tools** | Access tool configuration and management |
+| 7 | 🖥️ `cpu` | **Settings** | LLM settings — configure AI provider, model, API keys |
+| 8 | 🧠 `brain.head.profile` | **Brain** | AI brain/configuration settings for agent behavior |
+| 9 | 🎚️ `slider.horizontal.3` | **Sliders** | Adjust parameters, thresholds, or preferences |
+| 10 | 🔄 `arrow.clockwise` | **Refresh** | Refresh/reload current state, data, or connection |
+| 11 | ⛶ `arrow.up.left.and.arrow.down.right` | **Fullscreen** | Toggle fullscreen mode for the Agent! window |
+| 12 | 📊 `chart.bar` | **Chart** | View statistics, metrics, or analytics dashboard |
+| 13 | ↩️ `arrow.uturn.backward` | **Undo** | Undo the last action or revert recent changes |
+| 14 | 🕐 `clock.arrow.circlepath` | **History** | View activity history, past tasks, or conversation log |
+| 15 | 🗑️ `trash` | **Trash** | Delete/clear selected item, conversation, or data |
+
+---
+
+### Detailed Button Descriptions
+
+#### 1. Services (`gearshape.2`)
+- **Purpose**: System services hub
+- **Behavior**: Toggles services panel or menu
+- **Details**: Provides access to background services and system-level configurations
+
+#### 2. Chat (`bubble.fill`)
+- **Purpose**: Main conversation interface
+- **Behavior**: Switches to chat view
+- **Details**: Primary interaction point for communicating with the AI agent
+
+#### 3. Stop (`hand.stop`)
+- **Purpose**: Emergency stop / cancel
+- **Behavior**: Immediately halts any running task
+- **Details**: Critical control for stopping long-running or unwanted operations
+
+#### 4. Servers (`server.rack`)
+- **Purpose**: MCP Server management
+- **Behavior**: Opens MCP server configuration popover
+- **Details**:
+  - Displays connected/available MCP servers
+  - Shows "No servers configured" when empty
+  - MCP servers extend capabilities with `mcp_*` prefixed tools
+  - Add, remove, and configure server connections
+
+#### 5. Code (`chevron.left.forwardslash.chevron.right`)
+- **Purpose**: Code editing mode
+- **Behavior**: Activates coding-focused workspace
+- **Details**: Switches context to development tools — file editing, Xcode builds, git operations
+
+#### 6. Tools (`wrench.and.screwdriver`)
+- **Purpose**: Tool configuration
+- **Behavior**: Opens tool management panel
+- **Details**: Configure which tools are available, set up integrations, manage tool groups
+
+#### 7. Settings (`cpu`) ⭐ *Most Used*
+- **Purpose**: LLM Configuration
+- **Behavior**: Opens LLM settings sheet/popover
+- **Details**:
+  - Select AI provider (Claude, Ollama, OpenAI, etc.)
+  - Choose model within provider
+  - Enter API keys
+  - Configure provider-specific parameters
+  - This is the primary setup step for new users
+
+#### 8. Brain (`brain.head.profile`)
+- **Purpose**: Agent intelligence settings
+- **Behavior**: Opens agent behavior configuration
+- **Details**: Adjust how the AI reasons, plans, and makes decisions
+
+#### 9. Sliders (`slider.horizontal.3`)
+- **Purpose**: Parameter adjustment
+- **Behavior**: Opens controls for tuning values
+- **Details**: Adjust temperature, token limits, timeouts, and other configurable thresholds
+
+#### 10. Refresh (`arrow.clockwise`)
+- **Purpose**: Reload/refresh
+- **Behavior**: Refreshes current state
+- **Details**: Reloads data, reconnects to services, or refreshes the active view
+
+#### 11. Fullscreen (`arrow.up.left.and.arrow.down.right`)
+- **Purpose**: Toggle fullscreen
+- **Behavior**: Expands Agent! to fill the screen
+- **Details**: Maximizes workspace for focused task execution; click again to restore
+
+#### 12. Chart (`chart.bar`)
+- **Purpose**: Analytics/Metrics
+- **Behavior**: Opens statistics dashboard
+- **Details**: View usage stats, performance metrics, task history charts
+
+#### 13. Undo (`arrow.uturn.backward`)
+- **Purpose**: Revert last action
+- **Behavior**: Undoes the most recent change
+- **Details**: Works across file edits, configuration changes, and some UI actions
+
+#### 14. History (`clock.arrow.circlepath`)
+- **Purpose**: Activity timeline
+- **Behavior**: Opens history/log view
+- **Details**: Browse past conversations, completed tasks, and previous actions with timestamps
+
+#### 15. Trash (`trash`)
+- **Purpose**: Delete/Clear
+- **Behavior**: Removes selected item or clears data
+- **Details**: Delete conversations, clear cache, remove files, or reset current session
 
 ---
 
