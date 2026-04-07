@@ -7,13 +7,6 @@ import AgentSwift
 import Cocoa
 
 
-// MARK: - Prompt Tiering
-
-enum PromptTier {
-    case full       // Iter 1 — full system prompt with all rules and examples
-    case condensed  // Iter 2+ — condensed prompt (same rules, fewer words)
-}
-
 // MARK: - Task Execution Loop
 
 extension AgentViewModel {
@@ -321,25 +314,12 @@ extension AgentViewModel {
         var unbuiltEditCount = 0              // build enforcement — nudge after edit without build
         var consecutiveBuildFailures = 0      // error budget — stop after 5
         var stuckFiles: [String: Int] = [:]   // stuck detection — skip after 5 failures per file
-        // Two-tier prompt strategy: condensed (default, max KV cache hits) → full (revert on confusion).
-        // The system prompt MUST stay byte-for-byte stable across iterations or Ollama/Anthropic
-        // KV-cache reuse breaks. We start condensed and only swap to full when the LLM is stuck
-        // (consecutive build failures, read-only stalling, or repeated stuck files).
-        var promptTier: PromptTier = .condensed
+        // Full system prompt + full tool descriptions on every turn. The earlier
+        // condensed-prompt + compactTools optimization saved ~4K tokens/turn but the
+        // user prefers the LLM having maximum context every iteration over the savings.
         let userName = NSFullUserName()
         let userHome = NSHomeDirectory()
-        // Apply the condensed prompt + compact tools to all services BEFORE the loop so
-        // iter 1 already has the stable prefix that iter 2+ will hit in the cache.
-        // compactTools=true saves ~4K tokens/turn AND keeps the tools array byte-for-byte
-        // identical across iterations. The action enums in the property schemas still tell
-        // the LLM every valid action even when descriptions are truncated.
-        let initialCondensed = AgentTools.condensedSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
-        claude?.overrideSystemPrompt = initialCondensed
-        ollama?.overrideSystemPrompt = initialCondensed
-        openAICompatible?.overrideSystemPrompt = initialCondensed
-        claude?.compactTools = true
-        ollama?.compactTools = true
-        openAICompatible?.compactTools = true
+        _ = userName; _ = userHome  // kept for any future per-task prompt customization
         // Track unique files edited (write_file/edit_file/diff_apply/create_diff/apply_diff) for plan-mode enforcement
         var filesEditedThisTask: Set<String> = []
         // Track if a plan exists for this task (created via plan_mode tool)
@@ -348,23 +328,9 @@ extension AgentViewModel {
         while !Task.isCancelled {
             iterations += 1
 
-            // Confusion detection: revert to full prompt if LLM is stuck
-            // Triggers: 3+ consecutive build failures, 5+ read-only iters, or stuck file count
-            let isConfused = consecutiveBuildFailures >= 3 || consecutiveReadOnlyCount >= 5 || stuckFiles.values.contains(where: { $0 >= 3 })
-            if isConfused && promptTier == .condensed {
-                promptTier = .full
-                let fullPrompt = AgentTools.systemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
-                claude?.overrideSystemPrompt = fullPrompt
-                ollama?.overrideSystemPrompt = fullPrompt
-                openAICompatible?.overrideSystemPrompt = fullPrompt
-                appendLog("⚠️ Reverted to full system prompt — LLM appears stuck")
-                flushLog()
-            }
-
-            // Mode auto-switching removed: tools are filtered only by the user's UI
-            // toggles in ToolPreferencesService. activeGroups stays nil so every
-            // user-enabled tool is available on every turn. The LLM picks what it
-            // needs without the harness second-guessing it mid-task.
+            // No prompt tiering and no mode auto-switching: every turn sends the
+            // full system prompt with full tool descriptions, filtered only by the
+            // user's UI toggles in ToolPreferencesService.
 
             // Token-aware context compaction — replaces fixed iteration-based triggers
             if iterations > 1 {

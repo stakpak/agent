@@ -369,20 +369,10 @@ extension AgentViewModel {
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
         var planActive = false
-        // Tab tasks always use the condensed prompt — keeps the prefix byte-for-byte stable
-        // across iterations so Ollama / Anthropic KV caches stay hot. No confusion-revert path
-        // here (only the main task loop has that).
-        let userName = NSFullUserName()
-        let userHome = NSHomeDirectory()
-        // Apply the condensed prompt + compact tools to all services BEFORE the loop so
-        // iter 1 already has the stable prefix that iter 2+ will hit in the cache.
-        let initialCondensed = AgentTools.condensedSystemPrompt(userName: userName, userHome: userHome, projectFolder: rawFolder)
-        claude?.overrideSystemPrompt = initialCondensed
-        ollama?.overrideSystemPrompt = initialCondensed
-        openAICompatible?.overrideSystemPrompt = initialCondensed
-        claude?.compactTools = true
-        ollama?.compactTools = true
-        openAICompatible?.compactTools = true
+        // Full system prompt + full tool descriptions on every turn — no condensed
+        // prompt, no compactTools, no mode auto-switching. The LLM always sees the
+        // complete context and the complete tool list (filtered only by the user's
+        // UI toggles in ToolPreferencesService).
 
         while !Task.isCancelled {
             iterations += 1
