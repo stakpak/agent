@@ -11,10 +11,12 @@ xcuserdata/
 *~
 
 # Build directory
+build/
 AgentXcode/build/
 
 # Stray .app bundle dropped by the Copy Agent Resources build phase when
 # its destination env var resolves to an integer (xcodebuild path).
+[0-9]/
 AgentXcode/[0-9]/
 
 # Export options (contains team ID)
@@ -60,25 +62,19 @@ AgentTools/
 
 # ============================================================================
 # Anti-bloat list — paths that historically got committed but shouldn't be in
-# this repo. The only legitimate top-level entries are:
-#   .gitattributes, .gitignore, .mailmap, AgentXcode/, docs/, LICENSE,
-#   README.md, release_notes.md, .github/
-# Anything else listed below was bloat that needs to stay out forever.
+# this repo. The legitimate top-level entries are:
+#   .gitattributes, .gitignore, .mailmap, .github/, Agent/, Agent.xcodeproj/,
+#   AgentHelper/, AgentTests/, AgentUser/, Shared/, docs/, LICENSE,
+#   README.md, release_notes.md, ExportOptions.plist, plan*.md
+# Anything listed below was bloat that needs to stay out forever.
 # ============================================================================
 
 # External Swift packages that historically slipped in (rest are above).
-# Leading / anchors them to repo root so they don't accidentally match
-# nested directories like AgentXcode/Agent/.
-/AgentHelper/
 /MultiLineDiff/
 /XcodeScriptingBridge/
 /xcf-swift/
 /LinkedInAutomation/
 /Sources/
-/Agent/
-
-# Old project layout — Xcode project lives under AgentXcode/ now
-/Agent.xcodeproj/
 /Agent.xcworkspace/
 
 # Historical release-version directories that shouldn't be tracked
