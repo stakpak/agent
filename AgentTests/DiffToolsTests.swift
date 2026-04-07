@@ -51,7 +51,13 @@ import AgentD1F
         let source = lines[s..<e].joined(separator: "\n")
 
         let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-        let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: 2)
+        let diff = MultiLineDiff.createDiff(
+            source: source,
+            destination: destination,
+            algorithm: algorithm,
+            includeMetadata: true,
+            sourceStartLine: 2
+        )
         let d1f = MultiLineDiff.displayDiff(diff: diff, source: source, format: .ai)
         let diffId = DiffStore.shared.store(diff: diff, source: source)
 
@@ -113,7 +119,13 @@ import AgentD1F
         #expect(source != destination, "Source and destination should differ")
 
         let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-        let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine - 1)
+        let diff = MultiLineDiff.createDiff(
+            source: source,
+            destination: destination,
+            algorithm: algorithm,
+            includeMetadata: true,
+            sourceStartLine: startLine - 1
+        )
         let diffId = DiffStore.shared.store(diff: diff, source: source)
         let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 

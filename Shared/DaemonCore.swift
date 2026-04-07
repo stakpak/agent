@@ -17,7 +17,13 @@ enum DaemonCore {
     nonisolated(unsafe) static var runningProcesses: [String: Process] = [:]
     static let lock = NSLock()
 
-    static func execute(script: String, instanceID: String, workingDirectory: String, progressHandler: ((String) -> Void)?, reply: @escaping (Int32, String) -> Void) {
+    static func execute(
+        script: String,
+        instanceID: String,
+        workingDirectory: String,
+        progressHandler: ((String) -> Void)?,
+        reply: @escaping (Int32, String) -> Void
+    ) {
         lock.lock()
         if let old = runningProcesses[instanceID], old.isRunning {
             old.terminate()

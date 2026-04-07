@@ -9,7 +9,13 @@ final class UserCommandHandler: NSObject, UserToolProtocol, @unchecked Sendable 
 
     func execute(script: String, instanceID: String, workingDirectory: String, withReply reply: @escaping (Int32, String) -> Void) {
         let proxy = connection?.remoteObjectProxy as? UserProgressProtocol
-        DaemonCore.execute(script: script, instanceID: instanceID, workingDirectory: workingDirectory, progressHandler: { proxy?.progressUpdate($0) }, reply: reply)
+        DaemonCore.execute(
+            script: script,
+            instanceID: instanceID,
+            workingDirectory: workingDirectory,
+            progressHandler: { proxy?.progressUpdate($0) },
+            reply: reply
+        )
     }
 
     func cancelOperation(instanceID: String, withReply reply: @escaping () -> Void) {

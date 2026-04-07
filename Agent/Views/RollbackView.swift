@@ -32,7 +32,8 @@ struct RollbackView: View {
                     .font(.headline)
                 Spacer()
                 Text(
-                    "\(groupedBackups.count) file\(groupedBackups.count == 1 ? "" : "s"), \(totalVersions) version\(totalVersions == 1 ? "" : "s")"
+                    "\(groupedBackups.count) file\(groupedBackups.count == 1 ? "" : "s"), "
+                        + "\(totalVersions) version\(totalVersions == 1 ? "" : "s")"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

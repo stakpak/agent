@@ -82,7 +82,11 @@ struct WebAutomationTests {
         #expect(fillResult == "TestAgent McTest", "Form fill failed: \(fillResult ?? "nil")")
 
         // Cleanup
-        _ = await runJS("document.querySelector('input[name=firstName]').value='';document.querySelector('input[name=lastName]').value='';'ok'")
+        _ = await runJS(
+            "document.querySelector('input[name=firstName]').value='';"
+                + "document.querySelector('input[name=lastName]').value='';"
+                + "'ok'"
+        )
     }
 
     @Test("Google signup: find Next button")
