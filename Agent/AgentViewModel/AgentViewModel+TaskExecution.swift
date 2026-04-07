@@ -682,16 +682,26 @@ extension AgentViewModel {
                     let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
 
                     // 1. Read guard — nudge at 5, hard snap-out at 10 (no stop)
+                    //
+                    // The previous snap-out message told the model to "pick the most
+                    // likely file and make an edit". That phrasing pushed the LLM into
+                    // confabulating answers from incomplete data — observed in the
+                    // wild as a "gap analysis" tool result that invented findings the
+                    // model had never read. The new wording forces the only two
+                    // legitimate moves when reads are exhausted: narrow the question
+                    // to a SINGLE concrete fact and act on it, OR call done() and
+                    // honestly report what's still unknown. Fabricating from partial
+                    // reads is explicitly worse than admitting uncertainty.
                     if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
                     if consecutiveReadOnlyCount >= 10 {
                         toolResults.append(["type": "tool_result", "tool_use_id": "read_snap",
-                            "content": "🛑 SNAP OUT OF IT: \(consecutiveReadOnlyCount) consecutive reads/searches with NO edits, builds, or actions. STOP searching. Pick the most likely file, make an EDIT now, or call done if you can't proceed. NO MORE READS."])
-                        appendLog("🛑 Snap-out nudge: \(consecutiveReadOnlyCount) consecutive reads")
+                            "content": "🛑 INSUFFICIENT EVIDENCE: \(consecutiveReadOnlyCount) consecutive reads/searches with NO edits, builds, or actions. You do NOT have enough information to produce a confident answer. You have exactly TWO legitimate moves: (a) Narrow your question to ONE specific file/function/fact, look it up, then act ONLY on what you actually read. (b) Call done() and honestly report what you found AND what is still unknown. DO NOT fabricate findings, gap analyses, summaries, or comparisons from incomplete reads. DO NOT 'pick the most likely answer' — confabulating from partial evidence is worse than admitting uncertainty. If you cannot narrow further, call done() with 'I need more information about X' in the summary."])
+                        appendLog("🛑 Snap-out: \(consecutiveReadOnlyCount) reads — narrow or call done()")
                         flushLog()
                         consecutiveReadOnlyCount = 0  // Reset after snap so we don't loop the nudge
                     } else if consecutiveReadOnlyCount >= 5 {
                         toolResults.append(["type": "tool_result", "tool_use_id": "read_guard",
-                            "content": "⚠️ \(consecutiveReadOnlyCount) consecutive reads without editing or building. Take action or call done."])
+                            "content": "⚠️ \(consecutiveReadOnlyCount) consecutive reads without editing or acting. Either narrow to one specific question and act on it, or call done() with what you actually know — do NOT guess or fabricate from partial evidence."])
                     }
 
                     // 2. Build enforcement — only for Xcode projects

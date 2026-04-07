@@ -38,7 +38,13 @@ final class ClaudeService {
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLocalEndpoint {
-            return AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
+            // Local Claude-protocol endpoints (LM Studio with Anthropic protocol)
+            // bypass the on-disk SystemPromptService path, so wrap with the
+            // anti-hallucination rules here too — otherwise this code path
+            // would silently miss them.
+            return SystemPromptService.wrapWithRules(
+                AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
+            )
         }
         var prompt = SystemPromptService.shared.prompt(for: .claude, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {

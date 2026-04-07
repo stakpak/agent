@@ -1,46 +1,53 @@
 import Foundation
+import AgentTools
 
 /// Single source of truth for all tool names and group names.
 /// Use these constants everywhere — never hardcode tool or group strings.
+///
+/// Where possible, names below reference `AgentTools.Name.*` directly so the
+/// canonical string lives in exactly one place (the AgentTools package). The
+/// few entries that don't reference Name.* are tools defined locally in the
+/// Agent app and not yet hoisted into the public AgentTools package
+/// (memory/skill/spawn/tell/ask/fetch/file/git).
 enum Tool {
     // MARK: - Tool Names (what the LLM calls)
 
     // Core
-    static let done = "done"
-    static let tools = "list_tools"
-    static let search = "search"
-    static let folder = "directory"
+    static let done = AgentTools.Name.taskComplete
+    static let tools = AgentTools.Name.listNativeTools
+    static let search = AgentTools.Name.webSearch
+    static let folder = AgentTools.Name.projectFolderTool
 
     // Core (also)
-    static let chat = "chat"
-    static let msg = "msg"
+    static let chat = AgentTools.Name.conversation
+    static let msg = AgentTools.Name.sendMessage
 
     // Work
-    static let agent = "agent_script"
-    static let plan = "plan"
-    static let git = "git"
-    static let batch = "batch"
-    static let multi = "multi"
+    static let agent = AgentTools.Name.agentScript
+    static let plan = AgentTools.Name.planMode
+    static let git = AgentTools.Name.git
+    static let batch = AgentTools.Name.batchCommands
+    static let multi = AgentTools.Name.batchTools
 
     // Code
-    static let file = "file"
-    static let xc = "xcode"
-    static let sh = "shell"
+    static let file = AgentTools.Name.fileManager
+    static let xc = AgentTools.Name.xcode
+    static let sh = AgentTools.Name.runShellScript
 
     // Auto
-    static let `as` = "applescript"
-    static let ax = "accessibility"
-    static let js = "javascript"
+    static let `as` = AgentTools.Name.appleScriptTool
+    static let ax = AgentTools.Name.accessibility
+    static let js = AgentTools.Name.javascriptTool
 
     // User / Root
-    static let user = "user_shell"
-    static let root = "root_shell"
+    static let user = AgentTools.Name.executeAgentCommand
+    static let root = AgentTools.Name.executeDaemonCommand
 
     // Web
-    static let web = "safari"
+    static let web = AgentTools.Name.safari
 
     // Exp
-    static let sel = "selenium"
+    static let sel = AgentTools.Name.seleniumTool
 
     // Memory
     static let mem = "memory"
@@ -74,11 +81,12 @@ enum Tool {
     // LLM sends short name, alias resolves to the handler the app uses
 
     static let aliases: [String: String] = [
-        // Bare canonical names → handler names. ONLY include entries here when the
-        // canonical name maps to a single leaf handler (no action sub-dispatch). For
-        // consolidated tools that need action dispatch (chat, javascript, applescript,
-        // etc.), let expandConsolidatedTool's switch handle them — adding them here
-        // would short-circuit the action routing and break the tool.
+        // Canonical short names (the strings the LLM actually emits, defined in
+        // AgentTools.Name.*) → internal handler names. ONLY include entries here
+        // when the canonical maps to a single leaf handler. For consolidated
+        // tools that need action sub-dispatch (chat, javascript, applescript,
+        // etc.), let expandConsolidatedTool's switch handle them — adding them
+        // here would short-circuit the action routing and break the tool.
         "user_shell": "execute_agent_command",
         "root_shell": "execute_daemon_command",
         "batch": "batch_commands",
@@ -90,23 +98,13 @@ enum Tool {
         "skill": "invoke_skill",
         "fetch": "web_fetch",
         "ask": "ask_user",
-        "ask_user_question": "ask_user",
         "spawn": "spawn_agent",
-        "message_agent": "tell_agent",
-        "send_message_to_agent": "tell_agent",
-        // Backwards-compat for AgentTools 2.41.0 holistic rename — old canonicals batch_shell/
-        // invoke_skill/web_fetch may still be in cached LLM contexts. invoke_skill/web_fetch
-        // need no entry because their handler cases are still 'invoke_skill' / 'web_fetch'.
-        // batch_shell needs an entry because the new short 'batch' aliases to 'batch_commands'.
-        "batch_shell": "batch_commands",
-        // Legacy short names (still accepted)
-        "user": "execute_agent_command",
-        "sh": "run_shell_script",
-        "root": "execute_daemon_command",
         "multi": "batch_tools",
         "msg": "send_message",
-        "dir": "project_folder",
-        "tools": "list_tools",
-        "mem": "memory",
+        // No legacy aliases below this line. Older short names (sh/user/root/dir/
+        // tools/mem/batch_shell/ask_user_question/message_agent/
+        // send_message_to_agent) were retired — every supported provider now sees
+        // and emits the canonical names from AgentTools.Name.*. Re-add an entry
+        // ONLY if a model in active use is observed emitting the old name.
     ]
 }

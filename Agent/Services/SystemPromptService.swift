@@ -46,7 +46,33 @@ final class SystemPromptService {
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
     /// Bump this when system prompt content changes to force re-sync of saved prompts.
-    private static let promptRevision = "77"
+    private static let promptRevision = "78"
+
+    /// Anti-hallucination rule appended to every system prompt (full + compact).
+    /// Triggered by an observed real-world failure: the in-app Agent produced a
+    /// confident, structured "gap analysis" of its own codebase right after the
+    /// 10-consecutive-reads guard fired, citing tools and files it had never
+    /// actually read. The lesson: when evidence runs out, models default to
+    /// confabulating polished prose rather than admitting "I don't know yet."
+    /// This rule forbids that move explicitly.
+    static let antiHallucinationRules = """
+
+    ANTI-HALLUCINATION (HIGHEST PRIORITY — overrides any other rule):
+    - NEVER fabricate, guess, infer, or hallucinate. If you do not have direct evidence from a tool result for a claim, you may NOT make the claim.
+    - When asked to analyze, audit, compare, or summarize: report ONLY what you have read directly. Cite the file path and line number for every claim about the codebase. If you have not read a file, you do not know what is in it — period.
+    - "Probably", "I think", "based on my understanding", "typically", "this kind of project usually..." are confabulation flags. If you catch yourself writing them, STOP, go read the actual file, or call done() and say what you don't know.
+    - Producing a confident, structured, polished answer from incomplete evidence is the WORST possible outcome — strictly worse than admitting uncertainty. Users would much rather hear "I read 3 files and here's what they say; I don't know about the other 47" than a fabricated comprehensive summary.
+    - When the read guard fires (🛑 INSUFFICIENT EVIDENCE), you have exactly two legitimate moves: narrow to one concrete fact and look it up, OR call done() and honestly report what is still unknown. You may NOT produce a synthesis, gap analysis, or comparison from partial reads.
+    - If a previous tool call failed or returned ambiguous output, do NOT reinterpret or extrapolate. Re-run with more specific input or call done() and report the ambiguity.
+    """
+
+    /// Wrap an AgentTools-provided base prompt with the anti-hallucination
+    /// rules. Used by both the on-disk default-prompt seeding and by the local
+    /// endpoint code paths in ClaudeService / OpenAICompatibleService that
+    /// bypass the on-disk path.
+    static func wrapWithRules(_ base: String) -> String {
+        return base + "\n" + antiHallucinationRules
+    }
 
     /// Combined version: app version + prompt revision. Change in either triggers re-sync.
     private static let appVersion: String = {
@@ -208,11 +234,13 @@ final class SystemPromptService {
 
     /// The built-in default system prompt.
     private static func defaultPrompt() -> String {
-        return AgentTools.systemPrompt(userName: "{userName}", userHome: "{userHome}", projectFolder: "{projectFolder}")
+        let base = AgentTools.systemPrompt(userName: "{userName}", userHome: "{userHome}", projectFolder: "{projectFolder}")
+        return wrapWithRules(base)
     }
 
     /// The built-in default compact prompt (Apple AI).
     private static func defaultCompactPrompt() -> String {
-        return AgentTools.compactSystemPrompt(userName: "{userName}", userHome: "{userHome}", projectFolder: "{projectFolder}")
+        let base = AgentTools.compactSystemPrompt(userName: "{userName}", userHome: "{userHome}", projectFolder: "{projectFolder}")
+        return wrapWithRules(base)
     }
 }

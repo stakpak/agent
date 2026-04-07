@@ -74,7 +74,12 @@ final class OpenAICompatibleService {
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLMStudio {
-            return AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
+            // LM Studio bypasses the on-disk SystemPromptService path. Wrap
+            // with the anti-hallucination rules here so this code path matches
+            // the disk-seeded prompts every other provider receives.
+            return SystemPromptService.wrapWithRules(
+                AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
+            )
         }
         var prompt = SystemPromptService.shared.prompt(for: provider, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {
