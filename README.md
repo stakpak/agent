@@ -121,7 +121,7 @@ The Agent! toolbar contains **15 buttons** that provide quick access to core fun
 | 12 | 📊 `chart.bar` | **Chart** | View statistics, metrics, or analytics dashboard |
 | 13 | ↩️ `arrow.uturn.backward` | **Undo** | Undo the last action or revert recent changes |
 | 14 | 🕐 `clock.arrow.circlepath` | **History** | View activity history, past tasks, or conversation log |
-| 15 | 🗑️ `trash` | **Trash** | Delete/clear selected item, conversation, or data |
+| 15 | 🗑️ `trash` | **Trash** | Delete/clear History / Activity LogView / Prompts |
 
 ---
 
