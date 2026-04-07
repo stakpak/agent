@@ -17,7 +17,11 @@ public func scriptMain() -> Int32 {
     }
     
     let releaseVersion = args[0]
-    let releaseNotes = args.count > 1 ? formatReleaseNotes(args[1].replacingOccurrences(of: "\\n", with: "\n")) : "Release \(releaseVersion)"
+    let releaseNotes = args.count > 1
+        ? formatReleaseNotes(
+            args[1].replacingOccurrences(of: "\\n", with: "\n")
+        )
+        : "Release \(releaseVersion)"
     let binaryPath = args.count > 2 ? args[2] : ""
     let workingDir = args.count > 3 ? args[3] : FileManager.default.currentDirectoryPath
     

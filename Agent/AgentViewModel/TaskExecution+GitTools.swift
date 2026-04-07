@@ -122,7 +122,9 @@ extension AgentViewModel {
                 let suspectFiles = filesToCommit.filter { f in secretPatterns.contains(where: { f.lowercased().contains($0) }) }
                 if !suspectFiles.isEmpty {
                     let warning =
-                        "⚠️ Warning: committing files that may contain secrets: \(suspectFiles.joined(separator: ", ")). Proceeding anyway — review before pushing."
+                        "⚠️ Warning: committing files that may contain "
+                            + "secrets: \(suspectFiles.joined(separator: ", ")). "
+                            + "Proceeding anyway — review before pushing."
                     appendLog(warning)
                     flushLog()
                 }
@@ -154,7 +156,9 @@ extension AgentViewModel {
             let tempName = "agent_patch_\(UUID().uuidString).patch"
             let tempPath = "/tmp/\(tempName)"
             let cmd =
-                "cat > \(tempPath) << 'AGENT_PATCH_EOF'\n\(patch)\nAGENT_PATCH_EOF\ngit apply --verbose \(tempPath); STATUS=$?; rm -f \(tempPath); exit $STATUS"
+                "cat > \(tempPath) << 'AGENT_PATCH_EOF'\n\(patch)\n"
+                    + "AGENT_PATCH_EOF\ngit apply --verbose \(tempPath); "
+                    + "STATUS=$?; rm -f \(tempPath); exit $STATUS"
             let result = await executeViaUserAgent(command: cmd, workingDirectory: dir)
             guard !Task.isCancelled else { return true }
             if !result.output.isEmpty { appendLog(result.output) }
