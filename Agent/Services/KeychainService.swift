@@ -104,7 +104,8 @@ final class KeychainService: Sendable {
 
         guard status == errSecSuccess,
               let data = result as? Data,
-              let value = String(data: data, encoding: .utf8) else {
+              let value = String(data: data, encoding: .utf8) else
+        {
             return nil
         }
         return value

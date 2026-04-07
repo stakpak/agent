@@ -21,7 +21,12 @@ extension AgentViewModel {
             return tabResult(compileResult.output, toolId: toolId)
         }
         let cancelFlag = tab._cancelFlag
-        let result = await scriptService.loadAndRunScriptViaProcess(name: "Selenium", arguments: args, captureStderr: false, isCancelled: { cancelFlag.value }) { _ in }
+        let result = await scriptService.loadAndRunScriptViaProcess(
+            name: "Selenium",
+            arguments: args,
+            captureStderr: false,
+            isCancelled: { cancelFlag.value }
+        ) { _ in }
         tab.appendLog(result.output); tab.flush()
         return tabResult(result.output, toolId: toolId)
     }
@@ -74,8 +79,14 @@ extension AgentViewModel {
             let port = input["port"] as? Int ?? 7055
             let escapedText = WebAutomationService.escapeJSON(text)
             let escapedValue = WebAutomationService.escapeJSON(value)
-            let args = "{\"action\":\"type\",\"strategy\":\"\(strategy)\",\"value\":\"\(escapedValue)\",\"text\":\"\(escapedText)\",\"port\":\(port)}"
-            return await runSeleniumHelper(tab: tab, toolId: toolId, args: args, logMessage: "Typing \(text.count) chars into: \(strategy)=\(value)...")
+            let args =
+                "{\"action\":\"type\",\"strategy\":\"\(strategy)\",\"value\":\"\(escapedValue)\",\"text\":\"\(escapedText)\",\"port\":\(port)}"
+            return await runSeleniumHelper(
+                tab: tab,
+                toolId: toolId,
+                args: args,
+                logMessage: "Typing \(text.count) chars into: \(strategy)=\(value)..."
+            )
 
         case "selenium_execute":
             let script = input["script"] as? String ?? ""
@@ -95,13 +106,14 @@ extension AgentViewModel {
             let value = input["value"] as? String ?? ""
             let timeout = input["timeout"] as? Double ?? 10.0
             let port = input["port"] as? Int ?? 7055
-            let args = "{\"action\":\"waitFor\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"timeout\":\(timeout),\"port\":\(port)}"
+            let args =
+                "{\"action\":\"waitFor\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"timeout\":\(timeout),\"port\":\(port)}"
             return await runSeleniumHelper(tab: tab, toolId: toolId, args: args, logMessage: "Waiting for element: \(strategy)=\(value)...")
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

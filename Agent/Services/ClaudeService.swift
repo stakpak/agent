@@ -20,7 +20,14 @@ final class ClaudeService {
     /// Max output tokens. 0 = use default (16384). Claude API requires this field.
     let maxTokens: Int
 
-    init(apiKey: String, model: String, historyContext: String = "", projectFolder: String = "", baseURL: String? = nil, maxTokens: Int = 0) {
+    init(
+        apiKey: String,
+        model: String,
+        historyContext: String = "",
+        projectFolder: String = "",
+        baseURL: String? = nil,
+        maxTokens: Int = 0
+    ) {
         self.apiKey = apiKey
         self.model = model
         self.endpointURL = baseURL.flatMap { URL(string: $0) } ?? Self.defaultBaseURL
@@ -48,7 +55,9 @@ final class ClaudeService {
         }
         var prompt = SystemPromptService.shared.prompt(for: .claude, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {
-            prompt = "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" + prompt
+            prompt =
+                "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" +
+                prompt
         }
         if !historyContext.isEmpty {
             prompt += historyContext
@@ -83,7 +92,8 @@ final class ClaudeService {
                 result[i]["content"] = prefix + text
             } else if var blocks = result[i]["content"] as? [[String: Any]],
                       let first = blocks.first, first["type"] as? String == "text",
-                      let existing = first["text"] as? String {
+                      let existing = first["text"] as? String
+            {
                 blocks[0]["text"] = prefix + existing
                 result[i]["content"] = blocks
             }
@@ -95,7 +105,12 @@ final class ClaudeService {
     var temperature: Double = 0.2
     var compactTools: Bool = false
 
-    func send(messages: [[String: Any]], activeGroups: Set<String>? = nil) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
+    func send(
+        messages: [[String: Any]],
+        activeGroups: Set<String>? = nil
+    ) async throws
+        -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
+    {
         guard isLocalEndpoint || !apiKey.isEmpty else { throw AgentError.noAPIKey }
 
         // Use structured system prompt with cache_control for prompt caching
@@ -156,7 +171,8 @@ final class ClaudeService {
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
-              let stopReason = json["stop_reason"] as? String else {
+              let stopReason = json["stop_reason"] as? String else
+        {
             throw AgentError.invalidResponse
         }
 
@@ -255,7 +271,8 @@ final class ClaudeService {
             switch type {
             case "message_start":
                 if let message = event["message"] as? [String: Any],
-                   let usage = message["usage"] as? [String: Any] {
+                   let usage = message["usage"] as? [String: Any]
+                {
                     inputTokens = usage["input_tokens"] as? Int ?? 0
                     // Track prompt cache metrics
                     let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
@@ -269,7 +286,8 @@ final class ClaudeService {
 
             case "content_block_start":
                 if let block = event["content_block"] as? [String: Any],
-                   let blockType = block["type"] as? String {
+                   let blockType = block["type"] as? String
+                {
                     if blockType == "text" {
                         currentTextBlock = ""
                         inToolUse = false
@@ -293,7 +311,8 @@ final class ClaudeService {
 
             case "content_block_delta":
                 if let delta = event["delta"] as? [String: Any],
-                   let deltaType = delta["type"] as? String {
+                   let deltaType = delta["type"] as? String
+                {
                     if deltaType == "text_delta", let text = delta["text"] as? String {
                         currentTextBlock += text
                         onTextDelta(text)
@@ -308,7 +327,10 @@ final class ClaudeService {
                     if let parsed = try? JSONSerialization.jsonObject(with: Data(currentToolJson.utf8)) as? [String: Any] {
                         input = parsed
                     } else {
-                        AuditLog.log(.api, "[ClaudeService] Failed to parse tool args for \(currentToolName): \(currentToolJson.prefix(200))")
+                        AuditLog.log(
+                            .api,
+                            "[ClaudeService] Failed to parse tool args for \(currentToolName): \(currentToolJson.prefix(200))"
+                        )
                         input = [:]
                     }
                     let blockType = inServerToolUse ? "server_tool_use" : "tool_use"
@@ -333,7 +355,8 @@ final class ClaudeService {
 
             case "message_delta":
                 if let delta = event["delta"] as? [String: Any],
-                   let reason = delta["stop_reason"] as? String {
+                   let reason = delta["stop_reason"] as? String
+                {
                     stopReason = reason
                 }
                 if let usage = event["usage"] as? [String: Any] {

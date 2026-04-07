@@ -257,7 +257,8 @@ final class XcodeService: @unchecked Sendable {
         }
 
         guard let workspace = xcode.open?(projectPath as Any) as? XcodeWorkspaceDocument,
-              let schemes = workspace.schemes?() else {
+              let schemes = workspace.schemes?() else
+        {
             return []
         }
 
@@ -280,7 +281,8 @@ final class XcodeService: @unchecked Sendable {
 
             if let filePath = issue.filePath,
                let startLine = issue.startingLineNumber,
-               let col = issue.startingColumnNumber {
+               let col = issue.startingColumnNumber
+            {
                 let endLine = issue.endingLineNumber ?? startLine
                 output += "\(filePath):\(startLine):\(col) [\(type)] \(message)\n"
 
@@ -298,7 +300,8 @@ final class XcodeService: @unchecked Sendable {
     /// Extract a code snippet from a file around the error location.
     private nonisolated func codeSnippet(filePath: String, startLine: Int, endLine: Int) -> String {
         guard let data = FileManager.default.contents(atPath: filePath),
-              let content = String(data: data, encoding: .utf8) else {
+              let content = String(data: data, encoding: .utf8) else
+        {
             return ""
         }
 
@@ -337,10 +340,12 @@ final class XcodeService: @unchecked Sendable {
     private nonisolated func generateUniqueID(existing: String) -> String {
         var id: String
         repeat {
-            id = String(format: "%08X%08X%08X",
-                        UInt32.random(in: 0...UInt32.max),
-                        UInt32.random(in: 0...UInt32.max),
-                        UInt32.random(in: 0...UInt32.max))
+            id = String(
+                format: "%08X%08X%08X",
+                UInt32.random(in: 0...UInt32.max),
+                UInt32.random(in: 0...UInt32.max),
+                UInt32.random(in: 0...UInt32.max)
+            )
         } while existing.contains(id)
         return id
     }
@@ -368,7 +373,8 @@ final class XcodeService: @unchecked Sendable {
         let fileType = fileName.hasSuffix(".swift") ? "sourcecode.swift" : "text"
 
         // 1. Add PBXFileReference before end marker
-        let fileRef = "\t\t\(fileRefID) /* \(fileName) */ = {isa = PBXFileReference; lastKnownFileType = \(fileType); path = \"\(fileName)\"; sourceTree = \"<group>\"; };\n"
+        let fileRef =
+            "\t\t\(fileRefID) /* \(fileName) */ = {isa = PBXFileReference; lastKnownFileType = \(fileType); path = \"\(fileName)\"; sourceTree = \"<group>\"; };\n"
         guard let refEnd = content.range(of: "/* End PBXFileReference section */") else {
             return "Error: Cannot find PBXFileReference section"
         }
@@ -376,7 +382,8 @@ final class XcodeService: @unchecked Sendable {
 
         // 2. Add PBXBuildFile for compilable sources
         if fileName.hasSuffix(".swift") || fileName.hasSuffix(".m") || fileName.hasSuffix(".c") {
-            let buildFile = "\t\t\(buildFileID) /* \(fileName) in Sources */ = {isa = PBXBuildFile; fileRef = \(fileRefID) /* \(fileName) */; };\n"
+            let buildFile =
+                "\t\t\(buildFileID) /* \(fileName) in Sources */ = {isa = PBXBuildFile; fileRef = \(fileRefID) /* \(fileName) */; };\n"
             if let bfEnd = content.range(of: "/* End PBXBuildFile section */") {
                 content.insert(contentsOf: buildFile, at: bfEnd.lowerBound)
             }
@@ -385,7 +392,8 @@ final class XcodeService: @unchecked Sendable {
             if let sourcesStart = content.range(of: "/* Begin PBXSourcesBuildPhase section */") {
                 let after = content[sourcesStart.upperBound...]
                 if let filesStart = after.range(of: "files = ("),
-                   let filesEnd = after.range(of: ");", range: filesStart.upperBound..<after.endIndex) {
+                   let filesEnd = after.range(of: ");", range: filesStart.upperBound..<after.endIndex)
+                {
                     let entry = "\t\t\t\t\(buildFileID) /* \(fileName) in Sources */,\n"
                     content.insert(contentsOf: entry, at: filesEnd.lowerBound)
                 }
@@ -428,7 +436,8 @@ final class XcodeService: @unchecked Sendable {
         let pattern = "([A-F0-9]{24}) /\\* \(escaped) \\*/ = \\{isa = PBXFileReference"
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
-              match.numberOfRanges >= 2 else {
+              match.numberOfRanges >= 2 else
+        {
             return "Error: '\(fileName)' not found in project"
         }
         let fileRefID = (content as NSString).substring(with: match.range(at: 1))
@@ -442,7 +451,8 @@ final class XcodeService: @unchecked Sendable {
         let remaining = filtered.joined(separator: "\n")
         if let buildRegex = try? NSRegularExpression(pattern: buildPattern),
            let buildMatch = buildRegex.firstMatch(in: remaining, range: NSRange(remaining.startIndex..., in: remaining)),
-           buildMatch.numberOfRanges >= 2 {
+           buildMatch.numberOfRanges >= 2
+        {
             let buildID = (remaining as NSString).substring(with: buildMatch.range(at: 1))
             filtered = filtered.filter { !$0.contains(buildID) }
         }
@@ -465,19 +475,24 @@ final class XcodeService: @unchecked Sendable {
             return "Error: no Xcode project selected or pbxproj not found."
         }
         guard let data = FileManager.default.contents(atPath: pbxPath),
-              let content = String(data: data, encoding: .utf8) else {
+              let content = String(data: data, encoding: .utf8) else
+        {
             return "Error: could not read \(pbxPath)"
         }
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
 
         let version: String
-        if let vMatch = try? NSRegularExpression(pattern: #"MARKETING_VERSION\s*=\s*(\d+[\.\d]*)"#).firstMatch(in: content, range: fullRange) {
+        if let vMatch = try? NSRegularExpression(pattern: #"MARKETING_VERSION\s*=\s*(\d+[\.\d]*)"#)
+            .firstMatch(in: content, range: fullRange)
+        {
             version = nsContent.substring(with: vMatch.range(at: 1))
         } else { version = "not found" }
 
         let build: String
-        if let bMatch = try? NSRegularExpression(pattern: #"CURRENT_PROJECT_VERSION\s*=\s*(\d+)"#).firstMatch(in: content, range: fullRange) {
+        if let bMatch = try? NSRegularExpression(pattern: #"CURRENT_PROJECT_VERSION\s*=\s*(\d+)"#)
+            .firstMatch(in: content, range: fullRange)
+        {
             build = nsContent.substring(with: bMatch.range(at: 1))
         } else { build = "not found" }
 
@@ -490,7 +505,8 @@ final class XcodeService: @unchecked Sendable {
             return "Error: no Xcode project selected or pbxproj not found."
         }
         guard let data = FileManager.default.contents(atPath: pbxPath),
-              var content = String(data: data, encoding: .utf8) else {
+              var content = String(data: data, encoding: .utf8) else
+        {
             return "Error: could not read \(pbxPath)"
         }
 
@@ -498,7 +514,8 @@ final class XcodeService: @unchecked Sendable {
         let fullRange = NSRange(location: 0, length: nsContent.length)
 
         guard let vPattern = try? NSRegularExpression(pattern: #"MARKETING_VERSION\s*=\s*(\d+[\.\d]*)"#),
-              let vMatch = vPattern.firstMatch(in: content, range: fullRange) else {
+              let vMatch = vPattern.firstMatch(in: content, range: fullRange) else
+        {
             return "Error: MARKETING_VERSION not found in pbxproj."
         }
         let oldVersion = nsContent.substring(with: vMatch.range(at: 1))
@@ -519,7 +536,10 @@ final class XcodeService: @unchecked Sendable {
             oldBuild = nsContent2.substring(with: bMatch.range(at: 1))
             if let n = Int(oldBuild) {
                 newBuild = String(max(1, n + delta))
-                content = content.replacingOccurrences(of: "CURRENT_PROJECT_VERSION = \(oldBuild)", with: "CURRENT_PROJECT_VERSION = \(newBuild)")
+                content = content.replacingOccurrences(
+                    of: "CURRENT_PROJECT_VERSION = \(oldBuild)",
+                    with: "CURRENT_PROJECT_VERSION = \(newBuild)"
+                )
             }
         }
 
@@ -538,7 +558,8 @@ final class XcodeService: @unchecked Sendable {
             return "Error: no Xcode project selected or pbxproj not found."
         }
         guard let data = FileManager.default.contents(atPath: pbxPath),
-              var content = String(data: data, encoding: .utf8) else {
+              var content = String(data: data, encoding: .utf8) else
+        {
             return "Error: could not read \(pbxPath)"
         }
 

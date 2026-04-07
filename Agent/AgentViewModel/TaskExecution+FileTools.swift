@@ -44,8 +44,10 @@ extension AgentViewModel {
             if let cached = Self.taskFileReadCache[cacheKey],
                let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
                let currentMtime = attrs[.modificationDate] as? Date,
-               cached.mtime == currentMtime {
-                let stub = "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
+               cached.mtime == currentMtime
+            {
+                let stub =
+                    "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
                 appendLog("📖 (unchanged) \(filePath)")
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": stub])
                 return true
@@ -65,7 +67,8 @@ extension AgentViewModel {
 
             // Store mtime + size in cache so the next read of the same range can short-circuit
             if let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let mtime = attrs[.modificationDate] as? Date {
+               let mtime = attrs[.modificationDate] as? Date
+            {
                 Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
 
@@ -74,7 +77,8 @@ extension AgentViewModel {
             let capped: String
             let lineCount = output.components(separatedBy: "\n").count
             if output.count > maxChars {
-                capped = String(output.prefix(maxChars)) + "\n\n... [truncated — \(output.count) chars total, \(lineCount) lines. Use offset/limit to read specific sections.]"
+                capped = String(output.prefix(maxChars)) +
+                    "\n\n... [truncated — \(output.count) chars total, \(lineCount) lines. Use offset/limit to read specific sections.]"
             } else {
                 capped = output
             }
@@ -92,13 +96,22 @@ extension AgentViewModel {
             FileBackupService.shared.backup(filePath: expandedWrite, tabID: selectedTabId ?? Self.mainTabID)
             appendLog("📝 Write: \(filePath)")
             let output = await Self.offMain { CodingService.writeFile(path: filePath, content: content) }
-            FileChangeJournal.shared.log(action: "write", filePath: expandedWrite, beforeContent: beforeContent, afterContent: content, tool: "write_file")
+            FileChangeJournal.shared.log(
+                action: "write",
+                filePath: expandedWrite,
+                beforeContent: beforeContent,
+                afterContent: content,
+                tool: "write_file"
+            )
             Self.invalidateFileReadCache(path: expandedWrite)
             appendLog(output)
             let lang = Self.langFromPath(filePath)
             appendLog(Self.codeFence(Self.preview(content, lines: readFilePreviewLines), language: lang))
             commandsRun.append("write_file: \(filePath)")
-            let writeDiag = await Self.postEditDiagnostic(filePath: (filePath as NSString).expandingTildeInPath, projectFolder: projectFolder)
+            let writeDiag = await Self.postEditDiagnostic(
+                filePath: (filePath as NSString).expandingTildeInPath,
+                projectFolder: projectFolder
+            )
             let writeResult = writeDiag.isEmpty ? output : output + "\n\n⚠️ Diagnostics:\n" + writeDiag
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": writeResult])
             return true
@@ -116,7 +129,8 @@ extension AgentViewModel {
 
             // Single read from disk
             guard let data = FileManager.default.contents(atPath: expandedEdit),
-                  let originalContent = String(data: data, encoding: .utf8) else {
+                  let originalContent = String(data: data, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
@@ -124,7 +138,13 @@ extension AgentViewModel {
             }
 
             // Use CodingService for the replacement (handles fuzzy match, context, etc.)
-            let output = await Self.offMain { CodingService.editFile(path: filePath, oldString: oldString, newString: newString, replaceAll: replaceAll, context: context) }
+            let output = await Self.offMain { CodingService.editFile(
+                path: filePath,
+                oldString: oldString,
+                newString: newString,
+                replaceAll: replaceAll,
+                context: context
+            ) }
 
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
@@ -141,7 +161,13 @@ extension AgentViewModel {
             appendLog(output)
             // Log edit to journal
             let afterEdit = try? String(contentsOfFile: expandedEdit, encoding: .utf8)
-            FileChangeJournal.shared.log(action: "edit", filePath: expandedEdit, beforeContent: originalContent, afterContent: afterEdit, tool: "edit_file")
+            FileChangeJournal.shared.log(
+                action: "edit",
+                filePath: expandedEdit,
+                beforeContent: originalContent,
+                afterContent: afterEdit,
+                tool: "edit_file"
+            )
             commandsRun.append("edit_file: \(filePath)")
             // Post-edit diagnostic: quick syntax check for Swift files in Xcode projects
             let editDiag = await Self.postEditDiagnostic(filePath: expandedEdit, projectFolder: projectFolder)
@@ -154,8 +180,10 @@ extension AgentViewModel {
             let filePath = input["file_path"] as? String ?? ""
             let destination = input["destination"] as? String ?? ""
             guard let startLine = input["start_line"] as? Int,
-                  let endLine = input["end_line"] as? Int else {
-                let err = "Error: start_line and end_line are required. Use read_file first to find the line numbers, then specify the range to edit."
+                  let endLine = input["end_line"] as? Int else
+            {
+                let err =
+                    "Error: start_line and end_line are required. Use read_file first to find the line numbers, then specify the range to edit."
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
                 return true
@@ -163,7 +191,8 @@ extension AgentViewModel {
 
             let expanded = (filePath as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expanded),
-                  let fullText = String(data: data, encoding: .utf8) else {
+                  let fullText = String(data: data, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
@@ -176,7 +205,13 @@ extension AgentViewModel {
             let source = lines[s..<e].joined(separator: "\n")
 
             let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-            let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine - 1)
+            let diff = MultiLineDiff.createDiff(
+                source: source,
+                destination: destination,
+                algorithm: algorithm,
+                includeMetadata: true,
+                sourceStartLine: startLine - 1
+            )
             let d1f = MultiLineDiff.displayDiff(diff: diff, source: source, format: .ai)
             let diffId = DiffStore.shared.store(diff: diff, source: source)
             resetStreamCounters()
@@ -193,7 +228,8 @@ extension AgentViewModel {
             let asciiDiff = input["diff"] as? String ?? ""
             let expandedPath = (filePath as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expandedPath),
-                  let source = String(data: data, encoding: .utf8) else {
+                  let source = String(data: data, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
@@ -202,7 +238,8 @@ extension AgentViewModel {
             do {
                 let patched: String
                 if let uuid = UUID(uuidString: diffIdStr),
-                   let stored = DiffStore.shared.retrieve(uuid) {
+                   let stored = DiffStore.shared.retrieve(uuid)
+                {
                     patched = try MultiLineDiff.applyDiff(to: source, diff: stored.diff)
                 } else if !asciiDiff.isEmpty {
                     patched = try MultiLineDiff.applyASCIIDiff(to: source, asciiDiff: asciiDiff)
@@ -232,7 +269,11 @@ extension AgentViewModel {
                 // Invalidate all pending diffs for this file — line numbers have shifted
                 DiffStore.shared.invalidateDiffs(for: expandedPath)
                 commandsRun.append("apply_diff: \(filePath)")
-                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Any pending diffs for this file are invalidated. Re-read the file before making more edits.\n\n\(display)"])
+                toolResults.append([
+                    "type": "tool_result",
+                    "tool_use_id": toolId,
+                    "content": "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Any pending diffs for this file are invalidated. Re-read the file before making more edits.\n\n\(display)"
+                ])
             } catch {
                 let err = "Error applying diff: \(error.localizedDescription)"
                 appendLog(err)
@@ -248,7 +289,8 @@ extension AgentViewModel {
 
             // Try UUID-based undo first (uses D1F library's createUndoDiff)
             if let idStr = diffIdStr, let uuid = UUID(uuidString: idStr),
-               let stored = DiffStore.shared.retrieve(uuid) {
+               let stored = DiffStore.shared.retrieve(uuid)
+            {
                 // Use D1F's built-in undo: create reverse diff from metadata
                 if let undoDiff = MultiLineDiff.createUndoDiff(from: stored.diff) {
                     let fallbackPath: String? = DiffStore.shared.lastAppliedDiffId(for: expandedUndo).flatMap { id in
@@ -258,7 +300,8 @@ extension AgentViewModel {
                         ? (fallbackPath ?? expandedUndo)
                         : expandedUndo
                     guard let data = FileManager.default.contents(atPath: currentPath),
-                          let current = String(data: data, encoding: .utf8) else {
+                          let current = String(data: data, encoding: .utf8) else
+                    {
                         let err = "Error: cannot read \(filePath)"
                         appendLog(err)
                         toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
@@ -272,7 +315,11 @@ extension AgentViewModel {
                         appendLog(display)
                         appendLog("↩️ Undo applied (diff_id: \(idStr))")
                         commandsRun.append("undo_edit: \(filePath)")
-                        toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": "Undo applied for diff_id \(idStr)\n\n\(display)"])
+                        toolResults.append([
+                            "type": "tool_result",
+                            "tool_use_id": toolId,
+                            "content": "Undo applied for diff_id \(idStr)\n\n\(display)"
+                        ])
                         return true
                     } catch {
                         appendLog("D1F undo failed: \(error.localizedDescription), falling back to edit history")
@@ -305,7 +352,8 @@ extension AgentViewModel {
 
             let expanded = (filePath as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expanded),
-                  let fullText = String(data: data, encoding: .utf8) else {
+                  let fullText = String(data: data, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 appendLog(err)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
@@ -332,7 +380,13 @@ extension AgentViewModel {
 
             // Step 2: Create diff with full metadata (same as create_diff)
             let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-            let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine.map { $0 - 1 })
+            let diff = MultiLineDiff.createDiff(
+                source: source,
+                destination: destination,
+                algorithm: algorithm,
+                includeMetadata: true,
+                sourceStartLine: startLine.map { $0 - 1 }
+            )
             let diffId = DiffStore.shared.store(diff: diff, source: source)
 
             // Step 3: Apply diff (same as apply_diff). No truncation guard —
@@ -368,7 +422,11 @@ extension AgentViewModel {
                 // Invalidate all pending diffs for this file — line numbers have shifted
                 DiffStore.shared.invalidateDiffs(for: expanded)
                 commandsRun.append("diff_and_apply: \(filePath)")
-                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"])
+                toolResults.append([
+                    "type": "tool_result",
+                    "tool_use_id": toolId,
+                    "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"
+                ])
             } catch {
                 let err = "Error applying diff: \(error.localizedDescription)"
                 appendLog(err)
@@ -377,7 +435,7 @@ extension AgentViewModel {
             return true
 
         default:
-        return false
+            return false
         }
     }
 

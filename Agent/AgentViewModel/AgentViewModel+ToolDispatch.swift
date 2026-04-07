@@ -153,7 +153,8 @@ extension AgentViewModel {
 
     /// Build cache key from tool name + input.
     private static func cacheKey(name: String, input: [String: Any]) -> String {
-        let inputStr = (try? JSONSerialization.data(withJSONObject: input, options: .sortedKeys)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let inputStr = (try? JSONSerialization.data(withJSONObject: input, options: .sortedKeys))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
         return "\(name):\(inputStr)"
     }
 
@@ -272,13 +273,25 @@ extension AgentViewModel {
 
     // MARK: - Handler Implementations
 
-    private static func handleNativeTool(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleNativeTool(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let output = await vm.executeNativeTool(name, input: input)
         vm.appendLog(output); vm.flushLog()
         return .handled(output)
     }
 
-    private static func handleListFiles(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleListFiles(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let pattern = input["pattern"] as? String ?? "*"
         let path = input["path"] as? String
         if let pathErr = Self.checkPath(path) { vm.appendLog(pathErr); return .handled(pathErr) }
@@ -294,7 +307,13 @@ extension AgentViewModel {
         return .handled(raw.isEmpty ? formatted : "[project folder: \(displayPath)] paths are relative to project folder\n\(formatted)")
     }
 
-    private static func handleSearchFiles(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleSearchFiles(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let pattern = input["pattern"] as? String ?? ""
         let path = input["path"] as? String
         let include = input["include"] as? String
@@ -310,7 +329,13 @@ extension AgentViewModel {
         return .handled(output)
     }
 
-    private static func handleReadDir(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleReadDir(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let path = input["path"] as? String ?? ctx.projectFolder
         if let pathErr = Self.checkPath(path) { vm.appendLog(pathErr); return .handled(pathErr) }
         let displayPath = CodingService.trimHome(path)
@@ -323,7 +348,13 @@ extension AgentViewModel {
         return .handled(raw.isEmpty ? "Directory not found or empty" : "[project folder: \(displayPath)]\n\(raw)")
     }
 
-    private static func handleIfToSwitch(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleIfToSwitch(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let filePath = input["file_path"] as? String ?? ""
         vm.appendLog("🔄 if→switch: \(filePath)")
         let output = await Self.offMain { CodingService.convertIfToSwitch(path: filePath) }
@@ -331,17 +362,33 @@ extension AgentViewModel {
         return .handled(output)
     }
 
-    private static func handleExtractFunction(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleExtractFunction(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let filePath = input["file_path"] as? String ?? ""
         let funcName = input["function_name"] as? String ?? ""
         let newFile = input["new_file"] as? String ?? ""
         vm.appendLog("📦 Extract: \(funcName) → \(newFile)")
-        let output = await Self.offMain { CodingService.extractFunctionToFile(sourcePath: filePath, functionName: funcName, newFileName: newFile) }
+        let output = await Self.offMain { CodingService.extractFunctionToFile(
+            sourcePath: filePath,
+            functionName: funcName,
+            newFileName: newFile
+        ) }
         vm.appendLog(output)
         return .handled(output)
     }
 
-    private static func handleWebSearch(_ vm: AgentViewModel, _ name: String, _ input: [String: Any], _ ctx: ToolContext) async -> ToolHandlerResult {
+    private static func handleWebSearch(
+        _ vm: AgentViewModel,
+        _ name: String,
+        _ input: [String: Any],
+        _ ctx: ToolContext
+    ) async -> ToolHandlerResult
+    {
         let query = input["query"] as? String ?? ""
         vm.appendLog("Web search: \(query)"); vm.flushLog()
         let output = await Self.performWebSearchForTask(query: query, apiKey: ctx.tavilyAPIKey, provider: ctx.selectedProvider)

@@ -47,7 +47,11 @@ extension AgentViewModel {
                 tab.appendLog("⚠️ Batch blocked by preflight checks")
                 tab.flush()
                 return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": blocks + "(batch aborted — fix errors and retry)"],
+                    toolResult: [
+                        "type": "tool_result",
+                        "tool_use_id": toolId,
+                        "content": blocks + "(batch aborted — fix errors and retry)"
+                    ],
                     isComplete: false
                 )
             }
@@ -179,7 +183,8 @@ extension AgentViewModel {
         case "execute_agent_command", "execute_daemon_command", "run_shell_script":
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
             let command = Self.prependWorkingDirectory(
-                input["command"] as? String ?? "", projectFolder: tabFolder)
+                input["command"] as? String ?? "", projectFolder: tabFolder
+            )
             if let suggestion = Self.suggestTool(command) {
                 tab.appendLog(suggestion)
                 tab.flush()
@@ -235,9 +240,9 @@ extension AgentViewModel {
             )
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

@@ -65,9 +65,13 @@ struct AccessibilitySettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Accessibility Automation")
                             .font(.headline)
-                        Text(settings.accessibilityGlobalEnabled ? "Agent can interact with UI elements via AXorcist" : "All accessibility actions are blocked")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text(
+                            settings
+                                .accessibilityGlobalEnabled ? "Agent can interact with UI elements via AXorcist" :
+                                "All accessibility actions are blocked"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 .toggleStyle(.switch)

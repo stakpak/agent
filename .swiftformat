@@ -1,0 +1,11 @@
+# SwiftFormat config for Agent project - wrap long lines only
+--maxwidth 140
+--swiftversion 6.0
+--indent 4
+--exclude Agent/GitHubReleasePro.swift
+--wraparguments before-first
+--wrapcollections before-first
+
+# Disable everything except wrap-related rules
+--disable all
+--enable wrap, wrapArguments, wrapAttributes, wrapMultilineStatementBraces, indent, linebreaks, consecutiveSpaces, trailingSpace, linebreakAtEndOfFile

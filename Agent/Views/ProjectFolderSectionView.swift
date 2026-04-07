@@ -4,7 +4,7 @@ import SwiftUI
 struct ProjectFolderSectionView: View {
     @Bindable var viewModel: AgentViewModel
     var selectedTab: ScriptTab?
-    
+
     var body: some View {
         if let tab = selectedTab {
             // Per-tab project folder (when a tab is selected)

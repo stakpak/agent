@@ -157,7 +157,8 @@ extension ScriptService {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 let remaining = stdoutPipe.fileHandleForReading.availableData
                 if !remaining.isEmpty,
-                   let chunk = String(data: remaining, encoding: .utf8) {
+                   let chunk = String(data: remaining, encoding: .utf8)
+                {
                     collected.append(chunk)
                     onOutput?(chunk)
                 }

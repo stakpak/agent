@@ -4,9 +4,9 @@ import Foundation
 // MARK: - Logging, Streaming & Media
 
 extension AgentViewModel {
-    
+
     // MARK: - Error History
-    
+
     /// Log an error to both the log and error history
     func appendError(_ error: Error, context: String = "") {
         let timestamp = Self.timestampFormatter.string(from: Date())
@@ -16,13 +16,13 @@ extension AgentViewModel {
         } else {
             errorMessage = error.localizedDescription
         }
-        
+
         let fullMessage = context.isEmpty ? errorMessage : "\(context): \(errorMessage)"
         let formattedMessage = "[\(timestamp)] ERROR: \(fullMessage)"
-        
+
         // Store in SwiftData
         ChatHistoryStore.shared.appendMessage(formattedMessage)
-        
+
         // Also store in error history
         let errorRecord = ErrorRecord(
             timestamp: Date(),
@@ -35,7 +35,8 @@ extension AgentViewModel {
 
         // Also store per-tab error if a tab is active
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             tab.tabErrors.append("[\(timestamp)] \(String(describing: type(of: error))): \(fullMessage.truncate(to: 100))")
         }
 
@@ -46,7 +47,7 @@ extension AgentViewModel {
         logBuffer += formattedMessage + "\n"
         scheduleLogFlush()
     }
-    
+
     /// Log a tool error with specific tool context
     func appendToolError(tool: String, error: Error, input: [String: Any]? = nil) {
         var context = "Tool '\(tool)' failed"
@@ -56,7 +57,7 @@ extension AgentViewModel {
         }
         appendError(error, context: context)
     }
-    
+
     /// Log a task error (when a whole task fails)
     func appendTaskError(task: String, error: Error, commandsRun: [String] = []) {
         var context = "Task '\(task.truncate(to: 50))' failed"
@@ -96,7 +97,8 @@ extension AgentViewModel {
                   let image = NSImage(contentsOfFile: tempPath),
                   let tiffData = image.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiffData),
-                  let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                  let pngData = bitmap.representation(using: .png, properties: [:]) else
+            {
                 if status != 0 && status != -1 {
                     appendLog("❌ Screenshot failed (exit \(status))")
                 }
@@ -134,9 +136,12 @@ extension AgentViewModel {
         var rawData: Data?
 
         // Try raw data types first (avoids full NSImage deserialization overhead)
-        for type in [NSPasteboard.PasteboardType.png,
-                     NSPasteboard.PasteboardType.tiff,
-                     NSPasteboard.PasteboardType(rawValue: "public.jpeg")] {
+        for type in [
+            NSPasteboard.PasteboardType.png,
+            NSPasteboard.PasteboardType.tiff,
+            NSPasteboard.PasteboardType(rawValue: "public.jpeg")
+        ]
+        {
             if let data = pb.data(forType: type) {
                 rawData = data
                 break
@@ -147,17 +152,20 @@ extension AgentViewModel {
         if rawData == nil,
            let images = pb.readObjects(forClasses: [NSImage.self]) as? [NSImage],
            let img = images.first,
-           let tiff = img.tiffRepresentation {
+           let tiff = img.tiffRepresentation
+        {
             rawData = tiff
         }
 
         // Try file URLs (e.g. screenshot file copied from Finder)
         if rawData == nil,
-           let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL] {
+           let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL]
+        {
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 if ["png", "jpg", "jpeg", "tiff", "bmp", "gif"].contains(ext),
-                   let data = try? Data(contentsOf: url) {
+                   let data = try? Data(contentsOf: url)
+                {
                     rawData = data
                     break
                 }
@@ -347,7 +355,8 @@ extension AgentViewModel {
     /// Clear the selected tab's log, or main log if no tab selected.
     func clearSelectedLog() {
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             tab.activityLog = ""
             tab.logBuffer = ""
             tab.logFlushTask?.cancel()
@@ -395,7 +404,8 @@ extension AgentViewModel {
         sessionOutputTokens = 0
         // Clear selected tab if applicable
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             tab.rawLLMOutput = ""
             tab.llmMessages = []
             tab.promptHistory.removeAll()

@@ -9,7 +9,7 @@ final class FileBackupService {
     static let shared = FileBackupService()
 
     private let backupsDir: URL
-    private let ttl: TimeInterval = 7 * 24 * 60 * 60  // 1 week
+    private let ttl: TimeInterval = 7 * 24 * 60 * 60 // 1 week
 
     private init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -64,7 +64,8 @@ final class FileBackupService {
         let formatter = ISO8601DateFormatter()
         return files.compactMap { name -> (String, String, Date)? in
             // Parse timestamp_filename format: 2026-04-03T04-46-51Z_README.md
-            guard let underscoreRange = name.range(of: "_", range: name.index(name.startIndex, offsetBy: 15)..<name.endIndex) else { return nil }
+            guard let underscoreRange = name.range(of: "_", range: name.index(name.startIndex, offsetBy: 15)..<name.endIndex)
+            else { return nil }
             var timestampStr = String(name[..<underscoreRange.lowerBound])
             // Only restore colons in the time portion (after T), not the date hyphens
             if let tIdx = timestampStr.firstIndex(of: "T") {
@@ -127,7 +128,8 @@ final class FileBackupService {
                 let filePath = tabPath.appendingPathComponent(file)
                 if let attrs = try? fm.attributesOfItem(atPath: filePath.path),
                    let modified = attrs[.modificationDate] as? Date,
-                   modified < cutoff {
+                   modified < cutoff
+                {
                     try? fm.removeItem(at: filePath)
                 }
             }

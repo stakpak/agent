@@ -2,19 +2,19 @@ import Foundation
 
 /// Memory types — user, feedback, project, reference.
 enum MemoryType: String, CaseIterable {
-    case user       // role, goals, preferences, knowledge
-    case feedback   // approach guidance — what to avoid or repeat
-    case project    // ongoing work, deadlines, decisions
-    case reference  // pointers to external systems
+    case user // role, goals, preferences, knowledge
+    case feedback // approach guidance — what to avoid or repeat
+    case project // ongoing work, deadlines, decisions
+    case reference // pointers to external systems
 }
 
 /// A single memory entry with frontmatter metadata and content.
 struct MemoryEntry: Identifiable {
-    let id: String          // filename without extension
+    let id: String // filename without extension
     var name: String
     var description: String
     var type: MemoryType
-    var content: String     // body text below frontmatter
+    var content: String // body text below frontmatter
 
     /// Parse a .md file with YAML-style frontmatter.
     static func parse(id: String, raw: String) -> MemoryEntry? {
@@ -137,13 +137,16 @@ final class MemoryStore {
 
     /// List all memory entries (frontmatter only — content loaded lazily).
     func listAll() -> [MemoryEntry] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: memoryDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: memoryDir,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
         return files
             .filter { $0.pathExtension == "md" && $0.lastPathComponent != "MEMORY.md" }
             .sorted { a, b in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return da > db  // newest first
+                return da > db // newest first
             }
             .compactMap { url in
                 let id = url.deletingPathExtension().lastPathComponent
@@ -173,7 +176,7 @@ final class MemoryStore {
         guard !entries.isEmpty else { return "" }
 
         var block = "\n\nUSER MEMORY (follow these preferences):\n"
-        for entry in entries.prefix(10) {  // cap at 10 entries for context size
+        for entry in entries.prefix(10) { // cap at 10 entries for context size
             block += "\n## \(entry.name) [\(entry.type.rawValue)]\n\(entry.content)\n"
         }
         return block
@@ -202,7 +205,8 @@ final class MemoryStore {
 
     /// Append a line to the "general" memory entry.
     func append(_ line: String) {
-        var entry = load(id: "general") ?? MemoryEntry(id: "general", name: "General", description: "User preferences and notes", type: .user, content: "")
+        var entry = load(id: "general") ??
+            MemoryEntry(id: "general", name: "General", description: "User preferences and notes", type: .user, content: "")
         if !entry.content.isEmpty && !entry.content.hasSuffix("\n") { entry.content += "\n" }
         entry.content += line + "\n"
         save(entry)

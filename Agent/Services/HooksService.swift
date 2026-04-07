@@ -2,17 +2,17 @@ import Foundation
 
 /// Events that can trigger hooks.
 enum HookEvent: String, CaseIterable, Codable {
-    case preToolUse      // Before a tool executes — can block or modify
-    case postToolUse     // After a tool executes — can transform output
-    case taskStart       // When a new task begins
-    case taskComplete    // When a task finishes
-    case buildFailure    // When xc build fails
+    case preToolUse // Before a tool executes — can block or modify
+    case postToolUse // After a tool executes — can transform output
+    case taskStart // When a new task begins
+    case taskComplete // When a task finishes
+    case buildFailure // When xc build fails
 }
 
 /// Result of a pre-tool hook — determines whether the tool call proceeds.
 enum HookDecision: String {
-    case allow    // Proceed normally
-    case block    // Block the tool call, return the message instead
+    case allow // Proceed normally
+    case block // Block the tool call, return the message instead
 }
 
 /// A user-defined hook that runs on specific events.

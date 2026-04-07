@@ -43,7 +43,7 @@ enum LMStudioProtocol: String, CaseIterable, Codable {
 enum PromptStyle: String, CaseIterable, Codable {
     case full
     case compact
-    
+
     var displayName: String {
         switch self {
         case .full: "Full"
@@ -179,7 +179,8 @@ final class AgentViewModel {
     /// Finds the most recent matching entry by name and stores its UUID for exact removal.
     func notifyAgentFailed(name: String, arguments: String) {
         if let entry = RecentAgentsService.shared.entries.first(where: { $0.agentName == name && $0.arguments == arguments })
-            ?? RecentAgentsService.shared.entries.first(where: { $0.agentName == name }) {
+            ?? RecentAgentsService.shared.entries.first(where: { $0.agentName == name })
+        {
             failedAgentName = name
             failedAgentId = entry.id
             showFailedAgentAlert = true
@@ -898,15 +899,69 @@ final class AgentViewModel {
     var availableClaudeModels: [ClaudeModelInfo] = []
 
     nonisolated static let defaultClaudeModels: [ClaudeModelInfo] = [
-        ClaudeModelInfo(id: "claude-sonnet-4-6", name: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", createdAt: "2026-02-17", description: nil),
-        ClaudeModelInfo(id: "claude-opus-4-6", name: "claude-opus-4-6", displayName: "Claude Opus 4.6", createdAt: "2026-02-04", description: nil),
-        ClaudeModelInfo(id: "claude-opus-4-5-20251101", name: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", createdAt: "2025-11-24", description: nil),
-        ClaudeModelInfo(id: "claude-haiku-4-5-20251001", name: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", createdAt: "2025-10-15", description: nil),
-        ClaudeModelInfo(id: "claude-sonnet-4-5-20250929", name: "claude-sonnet-4-5-20250929", displayName: "Claude Sonnet 4.5", createdAt: "2025-09-29", description: nil),
-        ClaudeModelInfo(id: "claude-opus-4-1-20250805", name: "claude-opus-4-1-20250805", displayName: "Claude Opus 4.1", createdAt: "2025-08-05", description: nil),
-        ClaudeModelInfo(id: "claude-opus-4-20250514", name: "claude-opus-4-20250514", displayName: "Claude Opus 4", createdAt: "2025-05-22", description: nil),
-        ClaudeModelInfo(id: "claude-sonnet-4-20250514", name: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4", createdAt: "2025-05-22", description: nil),
-        ClaudeModelInfo(id: "claude-3-haiku-20240307", name: "claude-3-haiku-20240307", displayName: "Claude Haiku 3", createdAt: "2024-03-07", description: nil)
+        ClaudeModelInfo(
+            id: "claude-sonnet-4-6",
+            name: "claude-sonnet-4-6",
+            displayName: "Claude Sonnet 4.6",
+            createdAt: "2026-02-17",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-opus-4-6",
+            name: "claude-opus-4-6",
+            displayName: "Claude Opus 4.6",
+            createdAt: "2026-02-04",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-opus-4-5-20251101",
+            name: "claude-opus-4-5-20251101",
+            displayName: "Claude Opus 4.5",
+            createdAt: "2025-11-24",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-haiku-4-5-20251001",
+            name: "claude-haiku-4-5-20251001",
+            displayName: "Claude Haiku 4.5",
+            createdAt: "2025-10-15",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-sonnet-4-5-20250929",
+            name: "claude-sonnet-4-5-20250929",
+            displayName: "Claude Sonnet 4.5",
+            createdAt: "2025-09-29",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-opus-4-1-20250805",
+            name: "claude-opus-4-1-20250805",
+            displayName: "Claude Opus 4.1",
+            createdAt: "2025-08-05",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-opus-4-20250514",
+            name: "claude-opus-4-20250514",
+            displayName: "Claude Opus 4",
+            createdAt: "2025-05-22",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-sonnet-4-20250514",
+            name: "claude-sonnet-4-20250514",
+            displayName: "Claude Sonnet 4",
+            createdAt: "2025-05-22",
+            description: nil
+        ),
+        ClaudeModelInfo(
+            id: "claude-3-haiku-20240307",
+            name: "claude-3-haiku-20240307",
+            displayName: "Claude Haiku 3",
+            createdAt: "2024-03-07",
+            description: nil
+        )
     ]
 
     var ollamaModels: [OllamaModelInfo] = []
@@ -958,7 +1013,8 @@ final class AgentViewModel {
     /// Prompt history for whichever tab is currently selected.
     var currentTabPromptHistory: [String] {
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             return tab.promptHistory
         }
         return promptHistory
@@ -967,17 +1023,19 @@ final class AgentViewModel {
     /// Display name for the currently selected tab.
     var currentTabName: String {
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             return tab.displayTitle
         }
         return "Main"
     }
-    
+
     /// Error history for UI display — per-tab when a tab is selected, global for main
     var errorHistory: [String] {
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId),
-           !tab.isMainTab {
+           !tab.isMainTab
+        {
             return tab.tabErrors
         }
         return ErrorHistory.shared.recentErrors(limit: 50).map { error in
@@ -993,7 +1051,8 @@ final class AgentViewModel {
     var taskSummaries: [String] {
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId),
-           !tab.isMainTab {
+           !tab.isMainTab
+        {
             return tab.tabTaskSummaries
         }
         return history.records.suffix(50).map { record in
@@ -1007,7 +1066,8 @@ final class AgentViewModel {
     /// Clear prompt history for whichever tab is currently selected.
     func clearCurrentTabPromptHistory() {
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             tab.promptHistory.removeAll()
             tab.historyIndex = -1
             tab.savedInput = ""
@@ -1023,7 +1083,8 @@ final class AgentViewModel {
     func clearHistory(type: String) {
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId),
-           !tab.isMainTab {
+           !tab.isMainTab
+        {
             switch type {
             case "Prompts":
                 tab.promptHistory.removeAll()
@@ -1110,7 +1171,7 @@ final class AgentViewModel {
     var scriptTabs: [ScriptTab] = [] {
         didSet { rebuildTabIndex() }
     }
-    var selectedTabId: UUID?   // nil = Main tab
+    var selectedTabId: UUID? // nil = Main tab
 
     /// O(1) tab lookup by UUID
     private var tabsByID: [UUID: ScriptTab] = [:]
@@ -1387,7 +1448,7 @@ final class AgentViewModel {
             "model": model,
             "messages": [["role": "user", "content": "hi"]],
             "stream": false,
-            "options": ["num_predict": 1]  // Generate just 1 token — enough to load model
+            "options": ["num_predict": 1] // Generate just 1 token — enough to load model
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 

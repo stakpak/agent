@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Saved Script Tools
 
 extension AgentViewModel {
-    
+
     /// Handles saved script management tools (AppleScript and JXA)
     func handleSavedScriptTool(name: String, input: [String: Any]) async -> String {
         // Saved AppleScripts
@@ -55,7 +55,7 @@ extension AgentViewModel {
             return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
 
         default:
-        return "Error: Unknown saved script tool: \(name)"
+            return "Error: Unknown saved script tool: \(name)"
         }
     }
 }

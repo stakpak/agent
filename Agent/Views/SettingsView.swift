@@ -33,25 +33,25 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("LLM Provider")
                     .font(.headline)
-                
+
                 Text("Configure your AI provider and API keys.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
+
                 Picker("AI", selection: $viewModel.selectedProvider) {
                     ForEach(APIProvider.selectableProviders, id: \.self) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
                 .labelsHidden()
-                
+
                 Text("Ollama Pro is preferred")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Divider()
-            
+
             if viewModel.selectedProvider == .claude {
                 // Claude settings
                 VStack(alignment: .leading, spacing: 10) {
@@ -457,7 +457,11 @@ struct SettingsView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("API Key").font(.caption).foregroundStyle(.secondary)
-                        LockedSecureField(text: $viewModel.codestralAPIKey, placeholder: "Codestral API key", lockKey: "lock.codestralAPIKey")
+                        LockedSecureField(
+                            text: $viewModel.codestralAPIKey,
+                            placeholder: "Codestral API key",
+                            lockKey: "lock.codestralAPIKey"
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -744,9 +748,12 @@ struct SettingsView: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 100)
 
-                            Text(viewModel.localOllamaContextSize == 0 ? "Model default" : "\(viewModel.localOllamaContextSize / 1024)K tokens")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Text(
+                                viewModel
+                                    .localOllamaContextSize == 0 ? "Model default" : "\(viewModel.localOllamaContextSize / 1024)K tokens"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -765,9 +772,13 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
 
-                        Text(viewModel.maxTokens == 0 ? (viewModel.selectedProvider == .claude ? "Defaults to 16384" : "Provider default") : "\(viewModel.maxTokens) tokens")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text(
+                            viewModel
+                                .maxTokens == 0 ? (viewModel.selectedProvider == .claude ? "Defaults to 16384" : "Provider default") :
+                                "\(viewModel.maxTokens) tokens"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }

@@ -27,7 +27,7 @@ extension CodingService {
         guard !paths.isEmpty else { return output }
 
         // Group by directory
-        var dirs: [String: [String]] = [:]  // dir -> [filename]
+        var dirs: [String: [String]] = [:] // dir -> [filename]
         var rootFiles: [String] = []
         for path in paths {
             let comps = path.components(separatedBy: "/")
@@ -94,7 +94,8 @@ extension CodingService {
         if let include {
             cmd += " --include=\(shellEscape(include))"
         }
-        cmd += " --exclude-dir=.git --exclude-dir=.build --exclude-dir=build --exclude-dir=.swiftpm --exclude-dir=node_modules --exclude-dir=DerivedData --exclude-dir=Library --exclude-dir=Movies --exclude-dir=Music --exclude-dir=Pictures"
+        cmd +=
+            " --exclude-dir=.git --exclude-dir=.build --exclude-dir=build --exclude-dir=.swiftpm --exclude-dir=node_modules --exclude-dir=DerivedData --exclude-dir=Library --exclude-dir=Movies --exclude-dir=Music --exclude-dir=Pictures"
         cmd += " --binary-files=without-match"
         cmd += " \(pat) \(dir) 2>/dev/null | head -100"
         return cmd

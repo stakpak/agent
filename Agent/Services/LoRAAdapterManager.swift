@@ -3,7 +3,7 @@ import AppKit
 import FoundationModels
 
 /// Manages LoRA adapter files for Apple Intelligence training.
-/// 
+///
 /// LoRA adapters are trained using Apple Intelligence on-device, capturing
 /// response patterns and behaviors. While Apple Intelligence itself is not
 /// directly selectable as an LLM provider (due to context limitations), the
@@ -257,12 +257,14 @@ final class LoRAAdapterManager {
             p.standardError = pipe
             try? p.run()
             p.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if let range = output.range(of: #"\d+\.\d+"#, options: .regularExpression) {
                 let ver = String(output[range])
                 let parts = ver.split(separator: ".")
                 if parts.count >= 2, let major = Int(parts[0]), let minor = Int(parts[1]),
-                   major >= 3, minor >= 11 {
+                   major >= 3, minor >= 11
+                {
                     return (true, output, path)
                 }
             }
@@ -388,7 +390,9 @@ final class LoRAAdapterManager {
             echo "To train:"
             echo "  source \(envPath)/bin/activate"
             echo "  cd $TOOLKIT"
-            echo "  python -m examples.train_adapter --train-data \(jsonlPath)/your_file.jsonl --epochs 10 --batch-size 4 --learning-rate 1e-3 --checkpoint-dir \(adapterPath)/checkpoints/"
+            echo "  python -m examples.train_adapter --train-data \(
+                jsonlPath
+            )/your_file.jsonl --epochs 10 --batch-size 4 --learning-rate 1e-3 --checkpoint-dir \(adapterPath)/checkpoints/"
             echo "  python -m examples.export_adapter --checkpoint-dir \(adapterPath)/checkpoints/ --output \(adapterPath)/Agent.fmadapter"
         fi
         """

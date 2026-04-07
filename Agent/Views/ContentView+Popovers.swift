@@ -4,18 +4,18 @@ import SwiftUI
 
 struct ServicesPopover: View {
     @Bindable var viewModel: AgentViewModel
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Services")
                 .font(.headline)
-            
+
             Text("Background agents for shell commands and automation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
             Divider()
-            
+
             Grid(alignment: .leading, verticalSpacing: 10) {
                 GridRow {
                     StatusDot(
@@ -48,9 +48,9 @@ struct ServicesPopover: View {
                         .labelsHidden()
                 }
             }
-            
+
             Divider()
-            
+
             // Action Buttons
             HStack(spacing: 8) {
                 Button("Unregister") {
@@ -59,14 +59,14 @@ struct ServicesPopover: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                
+
                 Button("Register") {
                     viewModel.registerAgent()
                     viewModel.registerDaemon()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                
+
                 Button("Connect") {
                     viewModel.testConnection()
                 }

@@ -8,7 +8,8 @@ extension CodingService {
     static func convertIfToSwitch(path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
-              let source = String(data: data, encoding: .utf8) else {
+              let source = String(data: data, encoding: .utf8) else
+        {
             return "Error: cannot read \(path)"
         }
 
@@ -107,7 +108,8 @@ extension CodingService {
     static func extractFunctionToFile(sourcePath: String, functionName: String, newFileName: String) -> String {
         let expanded = (sourcePath as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
-              let source = String(data: data, encoding: .utf8) else {
+              let source = String(data: data, encoding: .utf8) else
+        {
             return "Error: cannot read \(sourcePath)"
         }
 

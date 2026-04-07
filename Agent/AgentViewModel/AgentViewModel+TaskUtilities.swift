@@ -35,7 +35,8 @@ extension AgentViewModel {
         for path in candidates {
             if fm.fileExists(atPath: path),
                let content = try? String(contentsOfFile: path, encoding: .utf8),
-               !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 parts.append(processIncludes(content, basePath: projectFolder))
                 break
             }
@@ -47,7 +48,8 @@ extension AgentViewModel {
             for file in ruleFiles.sorted() where file.hasSuffix(".md") {
                 let path = "\(rulesDir)/\(file)"
                 if let content = try? String(contentsOfFile: path, encoding: .utf8),
-                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
                     parts.append(content)
                 }
             }
@@ -61,7 +63,24 @@ extension AgentViewModel {
     /// Process @include directives in config content.
     /// Supports: @path, @./relative, @~/home, @/absolute
     private nonisolated static func processIncludes(_ content: String, basePath: String, processed: Set<String> = []) -> String {
-        let allowedExtensions = Set(["md", "txt", "json", "yaml", "yml", "toml", "swift", "py", "js", "ts", "rs", "go", "java", "c", "cpp", "h"])
+        let allowedExtensions = Set([
+            "md",
+            "txt",
+            "json",
+            "yaml",
+            "yml",
+            "toml",
+            "swift",
+            "py",
+            "js",
+            "ts",
+            "rs",
+            "go",
+            "java",
+            "c",
+            "cpp",
+            "h"
+        ])
         var result: [String] = []
         var seen = processed
 
@@ -83,7 +102,8 @@ extension AgentViewModel {
             let ext = (path as NSString).pathExtension.lowercased()
             guard allowedExtensions.contains(ext),
                   !seen.contains(path),
-                  let included = try? String(contentsOfFile: path, encoding: .utf8) else {
+                  let included = try? String(contentsOfFile: path, encoding: .utf8) else
+            {
                 result.append(line) // keep original line if can't include
                 continue
             }
@@ -102,18 +122,41 @@ extension AgentViewModel {
         let configPrefix = projectConfig.isEmpty ? "" : "[Project instructions:\n\(projectConfig)]\n\n"
         let isQuestion = isQuestionPrompt(prompt)
         let taskHeader = isQuestion
-            ? "[QUESTION — Answer this directly. Do NOT use tools unless the question requires reading files or running commands. Call done(summary:\"...\") with your answer.]\n"
-            : "[NEW TASK — Do ONLY what is asked below. Ignore all previous task history. When done, call done(summary:\"...\") immediately. Do NOT continue with unrelated work.]\n"
+            ?
+            "[QUESTION — Answer this directly. Do NOT use tools unless the question requires reading files or running commands. Call done(summary:\"...\") with your answer.]\n"
+            :
+            "[NEW TASK — Do ONLY what is asked below. Ignore all previous task history. When done, call done(summary:\"...\") immediately. Do NOT continue with unrelated work.]\n"
         return taskHeader + folderPrefix + configPrefix
     }
 
     /// Detect if a prompt is a question (How/What/When/Where/Why/Can/Is/Does/Do/Which)
     nonisolated static func isQuestionPrompt(_ prompt: String) -> Bool {
         let lower = prompt.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let questionStarters = ["how ", "what ", "when ", "where ", "why ", "who ",
-                                "can ", "is ", "does ", "do ", "which ", "should ",
-                                "could ", "would ", "will ", "are ", "was ", "were ",
-                                "has ", "have ", "explain ", "describe ", "tell me "]
+        let questionStarters = [
+            "how ",
+            "what ",
+            "when ",
+            "where ",
+            "why ",
+            "who ",
+            "can ",
+            "is ",
+            "does ",
+            "do ",
+            "which ",
+            "should ",
+            "could ",
+            "would ",
+            "will ",
+            "are ",
+            "was ",
+            "were ",
+            "has ",
+            "have ",
+            "explain ",
+            "describe ",
+            "tell me "
+        ]
         return questionStarters.contains { lower.hasPrefix($0) } || lower.hasSuffix("?")
     }
 
@@ -121,7 +164,11 @@ extension AgentViewModel {
     static func stripCompletionText(_ text: inout String) {
         // Remove done(summary: "...") and task_complete(summary: "...")
         if let regex = try? NSRegularExpression(pattern: #"(?:done|task_complete)\(summary[=:]\s*"[^"]*"\)"#) {
-            text = regex.stringByReplacingMatches(in: text, range: NSRange(location: 0, length: (text as NSString).length), withTemplate: "")
+            text = regex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(location: 0, length: (text as NSString).length),
+                withTemplate: ""
+            )
         }
         // Trim trailing whitespace left behind
         while text.hasSuffix("\n\n") { text = String(text.dropLast()) }
@@ -145,7 +192,9 @@ extension AgentViewModel {
         var totalChars = truncated.reduce(0) { $0 + ((($1["content"] as? String)?.count) ?? 0) }
         while totalChars > maxToolResultsPerMessage && truncated.count > 1 {
             // Find largest result and truncate it further
-            if let maxIdx = truncated.enumerated().max(by: { (($0.element["content"] as? String)?.count ?? 0) < (($1.element["content"] as? String)?.count ?? 0) })?.offset {
+            if let maxIdx = truncated.enumerated()
+                .max(by: { (($0.element["content"] as? String)?.count ?? 0) < (($1.element["content"] as? String)?.count ?? 0) })?.offset
+            {
                 let content = truncated[maxIdx]["content"] as? String ?? ""
                 truncated[maxIdx]["content"] = String(content.prefix(2000)) + "\n\n... [budget-truncated from \(content.count) chars]"
                 totalChars = truncated.reduce(0) { $0 + ((($1["content"] as? String)?.count) ?? 0) }
@@ -249,7 +298,8 @@ extension AgentViewModel {
                 let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
                 return "Error: Ollama API returned \(httpResponse.statusCode): \(errorBody)"
             }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "Error: Failed to parse Ollama response" }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return "Error: Failed to parse Ollama response" }
             if let results = json["results"] as? [[String: Any]], !results.isEmpty {
                 var output = ""
                 for (i, result) in results.enumerated() {
@@ -343,7 +393,8 @@ extension AgentViewModel {
                 let available = await Self.offMain { [ss = scriptService] in ss.compactNameList() }
                 let err = available.isEmpty
                     ? "Error: agent '\(name)' not found. No agents exist yet."
-                    : "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
+                    :
+                    "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
                 log(err)
                 return err
             }
@@ -362,7 +413,8 @@ extension AgentViewModel {
                 let available = await Self.offMain { [ss = scriptService] in ss.compactNameList() }
                 let err = available.isEmpty
                     ? "Error: agent '\(name)' not found. No agents exist yet — use agent_script(action:create) first."
-                    : "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
+                    :
+                    "Error: agent '\(name)' not found. Available agents: \(available). Retry with the exact name (no 'script' or 'agent' prefix)."
                 log(err)
                 return err
             }
@@ -535,14 +587,17 @@ extension AgentViewModel {
             return await ws.getPageTitle(browser: browser)
 
         case "web_click":
-            do { return try await ws.click(selector: selector, strategy: .javascript) } catch { return "Error: \(error.localizedDescription)" }
+            do { return try await ws.click(selector: selector, strategy: .javascript) } catch {
+                return "Error: \(error.localizedDescription)" }
 
         case "web_type":
             let text = input["text"] as? String ?? ""
-            do { return try await ws.type(text: text, selector: selector, strategy: .javascript) } catch { return "Error: \(error.localizedDescription)" }
+            do { return try await ws.type(text: text, selector: selector, strategy: .javascript) } catch {
+                return "Error: \(error.localizedDescription)" }
 
         case "web_find":
-            let isPlainText = !selector.contains(".") && !selector.contains("#") && !selector.contains("[") && !selector.contains(":") && !selector.contains("/") && !selector.contains(">")
+            let isPlainText = !selector.contains(".") && !selector.contains("#") && !selector.contains("[") && !selector
+                .contains(":") && !selector.contains("/") && !selector.contains(">")
             if isPlainText {
                 let escaped = WebAutomationService.escapeJS(selector)
                 let js = """
@@ -565,7 +620,10 @@ extension AgentViewModel {
             }
             do {
                 let el = try await ws.findElement(selector: selector)
-                if let data = try? JSONSerialization.data(withJSONObject: el, options: .prettyPrinted), let s = String(data: data, encoding: .utf8) { return s }
+                if let data = try? JSONSerialization.data(withJSONObject: el, options: .prettyPrinted), let s = String(
+                    data: data,
+                    encoding: .utf8
+                ) { return s }
                 return "Found: \(el)"
             } catch { return "Error: \(error.localizedDescription)" }
 
@@ -591,7 +649,13 @@ extension AgentViewModel {
             return await ws.scrollToElement(selector: selector, browser: browser)
 
         case "web_select":
-            return await ws.selectOption(selector: selector, value: input["value"] as? String, text: input["text"] as? String, index: input["index"] as? Int, browser: browser)
+            return await ws.selectOption(
+                selector: selector,
+                value: input["value"] as? String,
+                text: input["text"] as? String,
+                index: input["index"] as? Int,
+                browser: browser
+            )
 
         case "web_submit":
             return await ws.submitForm(selector: selector.isEmpty ? nil : selector, browser: browser)
@@ -664,9 +728,9 @@ extension AgentViewModel {
              0x1F300...0x1F5FF, // Misc Symbols and Pictographs
              0x1F680...0x1F6FF, // Transport and Map Symbols
              0x1F1E6...0x1F1FF, // Regional indicator symbols
-             0x2600...0x26FF,   // Misc symbols
-             0x2700...0x27BF,   // Dingbats
-             0xFE00...0xFE0F,   // Variation Selectors
+             0x2600...0x26FF, // Misc symbols
+             0x2700...0x27BF, // Dingbats
+             0xFE00...0xFE0F, // Variation Selectors
              0x1F900...0x1F9FF, // Supplemental Symbols and Pictographs
              0x1FA00...0x1FA6F, // Chess Symbols
              0x1FA70...0x1FAFF: // Symbols and Pictographs Extended-A

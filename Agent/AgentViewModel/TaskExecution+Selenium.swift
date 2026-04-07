@@ -10,10 +10,10 @@ import Foundation
 // MARK: - Selenium WebDriver Tool Execution
 
 extension AgentViewModel {
-    
+
     /// Handles Selenium WebDriver tool calls (selenium_start, selenium_stop, selenium_navigate, etc.)
     func handleSeleniumTool(name: String, input: [String: Any]) async -> String? {
-        
+
         // Helper for Selenium operations
         func runSeleniumNative(action: String, args: String) async -> String {
             let fullArgs = args.isEmpty ? "{\"action\":\"\(action)\"}" : args
@@ -24,7 +24,12 @@ extension AgentViewModel {
             if compileResult.status != 0 {
                 return "Compile failed: \(compileResult.output)"
             }
-            let result = await scriptService.loadAndRunScript(name: "Selenium", arguments: fullArgs, captureStderr: false, isCancelled: nil) { _ in }
+            let result = await scriptService.loadAndRunScript(
+                name: "Selenium",
+                arguments: fullArgs,
+                captureStderr: false,
+                isCancelled: nil
+            ) { _ in }
             return result.output
         }
 
@@ -73,7 +78,8 @@ extension AgentViewModel {
             let text = input["text"] as? String ?? ""
             let port = input["port"] as? Int ?? 7055
             let escapedText = text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let args = "{\"action\":\"type\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"text\":\"\(escapedText)\",\"port\":\(port)}"
+            let args =
+                "{\"action\":\"type\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"text\":\"\(escapedText)\",\"port\":\(port)}"
             return await runSeleniumNative(action: "type", args: args)
 
         // selenium_execute
@@ -97,11 +103,12 @@ extension AgentViewModel {
             let value = input["value"] as? String ?? ""
             let timeout = input["timeout"] as? Double ?? 10.0
             let port = input["port"] as? Int ?? 7055
-            let args = "{\"action\":\"waitFor\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"timeout\":\(timeout),\"port\":\(port)}"
+            let args =
+                "{\"action\":\"waitFor\",\"strategy\":\"\(strategy)\",\"value\":\"\(value)\",\"timeout\":\(timeout),\"port\":\(port)}"
             return await runSeleniumNative(action: "waitFor", args: args)
 
         default:
-        return nil
+            return nil
         }
     }
 }

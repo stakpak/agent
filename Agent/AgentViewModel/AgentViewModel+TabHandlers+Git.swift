@@ -81,9 +81,9 @@ extension AgentViewModel {
             )
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

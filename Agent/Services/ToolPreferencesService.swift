@@ -17,7 +17,7 @@ final class ToolPreferencesService {
     private var disabledTools: Set<String> = [] {
         didSet { persist() }
     }
-    
+
     /// Globally disabled tool groups - applies to ALL providers
     private var disabledGroups: Set<String> = [] {
         didSet { persistGroups() }
@@ -90,13 +90,13 @@ final class ToolPreferencesService {
         for name in all where !Self.appleAIDefaults.contains(name) {
             updated.insert(toolKey(.foundationModel, name))
         }
-        disabledTools = updated  // single persist
+        disabledTools = updated // single persist
     }
 
     private func persist() {
         UserDefaults.standard.set(Array(disabledTools), forKey: Self.udKey)
     }
-    
+
     private func persistGroups() {
         UserDefaults.standard.set(Array(disabledGroups), forKey: Self.udGroupsKey)
     }
@@ -115,12 +115,12 @@ final class ToolPreferencesService {
         // Then check per-provider setting
         return !disabledTools.contains(toolKey(provider, toolName))
     }
-    
+
     /// Check if a group is enabled (not in disabledGroups)
     func isGroupEnabled(_ groupName: String) -> Bool {
         !disabledGroups.contains(groupName)
     }
-    
+
     /// Toggle a group globally
     func toggleGroup(_ groupName: String) {
         if disabledGroups.contains(groupName) {
@@ -129,19 +129,19 @@ final class ToolPreferencesService {
             disabledGroups.insert(groupName)
         }
     }
-    
+
     /// Enable all groups (except Experimental, which must be toggled explicitly)
     func enableAllGroups() {
         let keepDisabled = disabledGroups.contains(Tool.Group.exp)
         disabledGroups.removeAll()
         if keepDisabled { disabledGroups.insert(Tool.Group.exp) }
     }
-    
+
     /// Disable all groups
     func disableAllGroups() {
         disabledGroups = Set(Self.toolGroups.keys)
     }
-    
+
     /// Get all group names sorted alphabetically
     static var allGroupNames: [String] {
         toolGroups.keys.sorted()

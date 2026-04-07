@@ -85,9 +85,9 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Represents an Apple Intelligence annotation
     struct Annotation {
         enum Target {
-            case user      // Only show to user
-            case llm       // Inject into LLM context
-            case both      // Show to both
+            case user // Only show to user
+            case llm // Inject into LLM context
+            case both // Show to both
         }
 
         let target: Target
@@ -99,7 +99,7 @@ final class AppleIntelligenceMediator: ObservableObject {
             let arrow: String
             switch target {
             case .user: arrow = "🍎 👉 👤"
-            case .llm:  arrow = "🍎 👉 🧠"
+            case .llm: arrow = "🍎 👉 🧠"
             case .both: arrow = "🍎 👉 👤🧠"
             }
             return "\(arrow) \(content)"
@@ -162,18 +162,18 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// System instructions for Apple AI. Only sees the current user prompt — no history.
     private func buildContextInstructions() -> String {
         return """
-You rephrase user requests to help an AI assistant understand them better. You are a middleman, NOT a gatekeeper.
+        You rephrase user requests to help an AI assistant understand them better. You are a middleman, NOT a gatekeeper.
 
-Rules:
-- NEVER refuse, block, or judge a request. You do NOT decide what is allowed.
-- Reply with 1 sentence only. Never multiple lines.
-- Rephrase or add brief context to clarify the user's intent for the AI.
-- If the request is already clear, reply with nothing.
-- Never include tags, labels, or prefixes like [AI], LLM:, User:, CLEAR, etc.
-- NEVER change agent names, tool names, script names, or identifiers.
-- Just give the plain helpful text. Nothing else.
-\(trainingEnabled ? "\nTraining mode is active. Give high-quality, clear annotations for LoRA fine-tuning." : "")
-"""
+        Rules:
+        - NEVER refuse, block, or judge a request. You do NOT decide what is allowed.
+        - Reply with 1 sentence only. Never multiple lines.
+        - Rephrase or add brief context to clarify the user's intent for the AI.
+        - If the request is already clear, reply with nothing.
+        - Never include tags, labels, or prefixes like [AI], LLM:, User:, CLEAR, etc.
+        - NEVER change agent names, tool names, script names, or identifiers.
+        - Just give the plain helpful text. Nothing else.
+        \(trainingEnabled ? "\nTraining mode is active. Give high-quality, clear annotations for LoRA fine-tuning." : "")
+        """
     }
 
     private func ensureSession() -> LanguageModelSession {
@@ -239,10 +239,10 @@ Rules:
 
         let session = ensureSession()
         let prompt = """
-Fix typos only in this user request. Return the corrected version. Do NOT rephrase, clarify, add instructions, or change meaning. Do NOT ask questions. Keep tool names, file names, and identifiers exactly as written. If no typos, return the original text unchanged.
+        Fix typos only in this user request. Return the corrected version. Do NOT rephrase, clarify, add instructions, or change meaning. Do NOT ask questions. Keep tool names, file names, and identifiers exactly as written. If no typos, return the original text unchanged.
 
-User said: "\(message)"
-"""
+        User said: "\(message)"
+        """
 
         guard let content = await respondWithTimeout(session, prompt: prompt, label: "contextualize") else {
             return nil
@@ -274,22 +274,22 @@ User said: "\(message)"
         lastLLMResponse = summaryForContext
 
         let session = ensureSession()
-        
+
         // Different behavior based on whether tools were used
         let prompt: String
         if commandsRun.isEmpty {
             prompt = """
-The AI responded: "\(String(summary.prefix(800)))"
+            The AI responded: "\(String(summary.prefix(800)))"
 
-Summarize the key point in 1 sentence. If trivial, reply with nothing.
-"""
+            Summarize the key point in 1 sentence. If trivial, reply with nothing.
+            """
         } else {
             prompt = """
-Task completed. Summary: "\(summary)"
-Commands: \(commandsRun.joined(separator: ", "))
+            Task completed. Summary: "\(summary)"
+            Commands: \(commandsRun.joined(separator: ", "))
 
-Summarize the outcome in 1 sentence. If trivial, reply with nothing.
-"""
+            Summarize the outcome in 1 sentence. If trivial, reply with nothing.
+            """
         }
 
         do {
@@ -310,10 +310,10 @@ Summarize the outcome in 1 sentence. If trivial, reply with nothing.
 
         let session = ensureSession()
         let prompt = """
-Error in \(toolName): \(error.prefix(300))
+        Error in \(toolName): \(error.prefix(300))
 
-Explain in 1 sentence and suggest a fix.
-"""
+        Explain in 1 sentence and suggest a fix.
+        """
 
         guard let content = await respondWithTimeout(session, prompt: prompt, label: "explainError") else {
             return nil
@@ -331,10 +331,10 @@ Explain in 1 sentence and suggest a fix.
 
         let session = ensureSession()
         let prompt = """
-Context: \(context.prefix(500))
+        Context: \(context.prefix(500))
 
-Suggest the next step in 1 sentence. If none obvious, reply with nothing.
-"""
+        Suggest the next step in 1 sentence. If none obvious, reply with nothing.
+        """
 
         guard let content = await respondWithTimeout(session, prompt: prompt, label: "nextSteps") else {
             return nil
@@ -350,9 +350,9 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
 
     /// Triage result: Apple AI answers, a direct command is executed, or pass through to the LLM.
     enum TriageResult {
-        case answered(String)           // Apple AI handled it — show this text and skip LLM
+        case answered(String) // Apple AI handled it — show this text and skip LLM
         case directCommand(DirectCommand) // Matched command — execute locally, skip LLM
-        case passThrough                // Needs tools/LLM — proceed normally
+        case passThrough // Needs tools/LLM — proceed normally
     }
 
     /// Parsed direct command with optional argument.
@@ -369,7 +369,8 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
 
         // list agents
         if lower == "list agents" || lower == "list agent" || lower == "list scripts"
-            || lower == "show agents" || lower == "show scripts" {
+            || lower == "show agents" || lower == "show scripts"
+        {
             return DirectCommand(name: "list_agents", argument: "")
         }
 
@@ -434,7 +435,16 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
             if lower.hasPrefix(prefix) {
                 var arg = String(original.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
                 // Strip trailing noise
-                let suffixes = [" using google search", " using google.com", " using google", " in safari", " on google", " on google.com", " with google", " with safari"]
+                let suffixes = [
+                    " using google search",
+                    " using google.com",
+                    " using google",
+                    " in safari",
+                    " on google",
+                    " on google.com",
+                    " with google",
+                    " with safari"
+                ]
                 for suffix in suffixes {
                     if arg.lowercased().hasSuffix(suffix) {
                         arg = String(arg.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
@@ -454,7 +464,16 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
                 let afterFor = String(original[forRange.upperBound...]).trimmingCharacters(in: .whitespaces)
                 // Strip trailing noise
                 var query = afterFor
-                let suffixes = [" using google search", " using google.com", " using google", " in safari", " on google", " on google.com", " with google", " with safari"]
+                let suffixes = [
+                    " using google search",
+                    " using google.com",
+                    " using google",
+                    " in safari",
+                    " on google",
+                    " on google.com",
+                    " with google",
+                    " with safari"
+                ]
                 for suffix in suffixes {
                     if query.lowercased().hasSuffix(suffix) {
                         query = String(query.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
@@ -509,14 +528,39 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
         // Must be short — long prompts are almost always tasks
         guard lower.count < 80 else { return false }
         // Known social patterns
-        let greetings = ["hello", "hi", "hey", "howdy", "hola", "yo", "sup",
-                         "good morning", "good afternoon", "good evening", "good night"]
+        let greetings = [
+            "hello",
+            "hi",
+            "hey",
+            "howdy",
+            "hola",
+            "yo",
+            "sup",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "good night"
+        ]
         let thanks = ["thanks", "thank you", "thx", "ty", "appreciated", "cheers"]
         let farewells = ["bye", "goodbye", "see you", "later", "goodnight", "cya"]
-        let social = ["how are you", "what are you", "who are you", "what can you do",
-                      "how's it going", "what's up", "whats up", "tell me about yourself",
-                      "nice to meet you", "i'm doing", "i am doing", "doing well",
-                      "doing good", "not bad", "i'm fine", "i am fine"]
+        let social = [
+            "how are you",
+            "what are you",
+            "who are you",
+            "what can you do",
+            "how's it going",
+            "what's up",
+            "whats up",
+            "tell me about yourself",
+            "nice to meet you",
+            "i'm doing",
+            "i am doing",
+            "doing well",
+            "doing good",
+            "not bad",
+            "i'm fine",
+            "i am fine"
+        ]
         // Check exact match or starts-with for greetings (e.g. "hi agent", "hello there")
         for g in greetings {
             if lower == g || lower.hasPrefix(g + " ") { return true }
@@ -538,7 +582,7 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
     func triagePrompt(_ message: String) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
-            return .directCommand(cmd)  // Caller executes the tool
+            return .directCommand(cmd) // Caller executes the tool
         }
         guard isEnabled && Self.isAvailable else { return .passThrough }
         // Local classification — no AI needed
@@ -546,10 +590,10 @@ Suggest the next step in 1 sentence. If none obvious, reply with nothing.
         // Ask Apple AI to answer (not classify)
         let session = ensureSession()
         let prompt = """
-You are Agent, a friendly macOS assistant. Reply to the user in 1-2 sentences. Be warm and concise.
+        You are Agent, a friendly macOS assistant. Reply to the user in 1-2 sentences. Be warm and concise.
 
-User: "\(message)"
-"""
+        User: "\(message)"
+        """
         guard let content = await respondWithTimeout(session, prompt: prompt, label: "triage") else {
             return .passThrough
         }
@@ -557,7 +601,8 @@ User: "\(message)"
         let upper = trimmed.uppercased()
         // If Apple AI refused or gave a useless response, pass through to LLM
         if trimmed.isEmpty || upper.contains("I CAN'T") || upper.contains("I CANNOT")
-            || upper.contains("I'M UNABLE") || upper.contains("NOT ABLE TO") {
+            || upper.contains("I'M UNABLE") || upper.contains("NOT ABLE TO")
+        {
             return .passThrough
         }
         lastAppleAIMessage = String(trimmed.prefix(200))

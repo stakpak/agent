@@ -13,7 +13,8 @@ extension AgentViewModel {
 
         // Block accessibility when Safari is frontmost — use web tool instead
         if let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, bid == "com.apple.Safari" {
-            let msg = "Error: Safari is active. Use the web tool: web(action: \"scan\"), web(action: \"open\", url: \"...\"), web(action: \"type\", selector: \"...\", text: \"...\"), web(action: \"click\", selector: \"...\"), web(action: \"read_content\")."
+            let msg =
+                "Error: Safari is active. Use the web tool: web(action: \"scan\"), web(action: \"open\", url: \"...\"), web(action: \"type\", selector: \"...\", text: \"...\"), web(action: \"click\", selector: \"...\"), web(action: \"read_content\")."
             tab.appendLog(msg)
             tab.flush()
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": msg], isComplete: false)
@@ -22,7 +23,8 @@ extension AgentViewModel {
         switch name {
         case "ax_check_permission":
             let hasPermission = AccessibilityService.hasAccessibilityPermission()
-            let output = hasPermission ? "Accessibility permission: granted" : "Accessibility permission: NOT granted. Use ax_request_permission to prompt the user."
+            let output = hasPermission ? "Accessibility permission: granted" :
+                "Accessibility permission: NOT granted. Use ax_request_permission to prompt the user."
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -33,7 +35,8 @@ extension AgentViewModel {
         case "ax_request_permission":
             tab.appendLog("♿️ Requesting Accessibility permission...")
             let granted = AccessibilityService.requestAccessibilityPermission()
-            let output = granted ? "Accessibility permission granted!" : "Accessibility permission denied. Please enable it in System Settings > Privacy & Security > Accessibility."
+            let output = granted ? "Accessibility permission granted!" :
+                "Accessibility permission denied. Please enable it in System Settings > Privacy & Security > Accessibility."
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -55,7 +58,8 @@ extension AgentViewModel {
 
         case "ax_inspect_element":
             guard let xVal = input["x"] as? Double,
-                  let yVal = input["y"] as? Double else {
+                  let yVal = input["y"] as? Double else
+            {
                 return TabToolResult(
                     toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: x and y coordinates are required"],
                     isComplete: false
@@ -83,7 +87,7 @@ extension AgentViewModel {
             let y = (input["y"] as? Double).map { CGFloat($0) }
             tab.appendLog("📋 element properties...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.getElementProperties(
                     role: role, title: title, value: value, appBundleId: appBundleId, x: x, y: y
                 )
@@ -104,7 +108,7 @@ extension AgentViewModel {
             let y = (input["y"] as? Double).map { CGFloat($0) }
             tab.appendLog("⚡ \(action)...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.performAction(
                     role: role, title: title, value: value, appBundleId: appBundleId, x: x, y: y,
                     action: action
@@ -123,10 +127,17 @@ extension AgentViewModel {
             let text = input["text"] as? String ?? ""
             let role = input["role"] as? String
             let title = input["title"] as? String
-            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            let appBundleId = AccessibilityService.shared
+                .resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
             tab.appendLog("⌨️ \(text.count) characters → \(title ?? role ?? "focused")")
             tab.flush()
-            let output = AccessibilityService.shared.typeTextIntoElement(role: role, title: title, text: text, appBundleId: appBundleId, verify: input["verify"] as? Bool ?? true)
+            let output = AccessibilityService.shared.typeTextIntoElement(
+                role: role,
+                title: title,
+                text: text,
+                appBundleId: appBundleId,
+                verify: input["verify"] as? Bool ?? true
+            )
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -139,10 +150,18 @@ extension AgentViewModel {
             let role = input["role"] as? String
             let title = input["title"] as? String
             let value = input["value"] as? String
-            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            let appBundleId = AccessibilityService.shared
+                .resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
             tab.appendLog("♿️ Click \(title ?? role ?? "?") in \(appBundleId ?? "frontmost")")
             tab.flush()
-            let output = AccessibilityService.shared.clickElement(role: role, title: title, value: value, appBundleId: appBundleId, timeout: input["timeout"] as? Double ?? 5, verify: input["verify"] as? Bool ?? false)
+            let output = AccessibilityService.shared.clickElement(
+                role: role,
+                title: title,
+                value: value,
+                appBundleId: appBundleId,
+                timeout: input["timeout"] as? Double ?? 5,
+                verify: input["verify"] as? Bool ?? false
+            )
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(
@@ -156,7 +175,8 @@ extension AgentViewModel {
             // scroll wheel events are no longer supported.
             let role = input["role"] as? String
             let title = input["title"] as? String
-            let appBundleId = AccessibilityService.shared.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+            let appBundleId = AccessibilityService.shared
+                .resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
             tab.appendLog("♿️ Scroll to \(title ?? role ?? "?") in \(appBundleId ?? "frontmost")")
             tab.flush()
             let output = AccessibilityService.shared.scrollToElement(role: role, title: title, appBundleId: appBundleId)
@@ -171,7 +191,8 @@ extension AgentViewModel {
             // press_key removed — AXorcist doesn't drive raw key events. Use
             // ax_click_element on the relevant button or ax_click_menu_item for
             // keyboard-shortcut menu commands.
-            let err = "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). Use accessibility(action:\"click_element\", role:\"AXButton\", title:..., appBundleId:...) for buttons, or accessibility(action:\"click_menu_item\", appBundleId:..., menuPath:\"File > Save\") for keyboard-shortcut menu commands."
+            let err =
+                "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). Use accessibility(action:\"click_element\", role:\"AXButton\", title:..., appBundleId:...) for buttons, or accessibility(action:\"click_menu_item\", appBundleId:..., menuPath:\"File > Save\") for keyboard-shortcut menu commands."
             tab.appendLog(err)
             tab.flush()
             return TabToolResult(
@@ -216,7 +237,7 @@ extension AgentViewModel {
             let limit = input["limit"] as? Int ?? 50
             tab.appendLog("📋 audit log...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.getAuditLog(limit: limit)
             tab.appendLog(Self.preview(output, lines: 30))
             tab.flush()
@@ -244,7 +265,8 @@ extension AgentViewModel {
             let propertiesData = try? JSONSerialization.data(withJSONObject: propertiesInput)
             let output: String
             if let data = propertiesData,
-               let properties = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+               let properties = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
                 output = AccessibilityService.shared.setProperties(
                     role: role, title: title, value: value, appBundleId: appBundleId, x: x, y: y,
                     properties: properties
@@ -283,7 +305,7 @@ extension AgentViewModel {
             let appBundleId = input["appBundleId"] as? String
             tab.appendLog("🎯 focused element...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.getFocusedElement(appBundleId: appBundleId)
             tab.appendLog(Self.preview(output, lines: 30))
             tab.flush()
@@ -302,7 +324,7 @@ extension AgentViewModel {
             let depth = input["depth"] as? Int ?? 3
             tab.appendLog("📋 element children...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.getChildren(
                     role: role, title: title, value: value, appBundleId: appBundleId, x: x, y: y, depth: depth
                 )
@@ -319,7 +341,8 @@ extension AgentViewModel {
             //   - Window move/resize → set_window_frame
             //   - Slider value       → set_properties on AXSlider with new AXValue
             //   - List reorder       → typically driven by menu items / buttons
-            let err = "Error: ax_drag is removed. Use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:) for window move/resize, or accessibility(action:\"set_properties\", role:\"AXSlider\", value:..., appBundleId:...) for slider drags."
+            let err =
+                "Error: ax_drag is removed. Use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:) for window move/resize, or accessibility(action:\"set_properties\", role:\"AXSlider\", value:..., appBundleId:...) for slider drags."
             tab.appendLog(err)
             tab.flush()
             return TabToolResult(
@@ -423,7 +446,7 @@ extension AgentViewModel {
             let color = input["color"] as? String ?? "green"
             tab.appendLog("✨ element (duration: \(duration)s, color: \(color))...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.highlightElement(
                     role: role, title: title, value: value, appBundleId: appBundleId,
                     x: x, y: y, duration: duration, color: color
@@ -439,7 +462,7 @@ extension AgentViewModel {
             let windowId = input["windowId"] as? Int ?? 0
             tab.appendLog("📐 window \(windowId) frame...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.getWindowFrame(windowId: windowId)
             tab.appendLog(output)
             tab.flush()
@@ -457,7 +480,7 @@ extension AgentViewModel {
             let y = (input["y"] as? Double).map { CGFloat($0) }
             tab.appendLog("📋 context menu...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.showMenu(
                     role: role, title: title, value: value, appBundleId: appBundleId, x: x, y: y
                 )
@@ -473,7 +496,7 @@ extension AgentViewModel {
             let menuPath = input["menu_path"] as? [String] ?? []
             tab.appendLog("👆 menu: \(menuPath.joined(separator: " > "))...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.clickMenuItem(appBundleId: app, menuPath: menuPath)
             tab.appendLog(output)
             tab.flush()
@@ -487,7 +510,7 @@ extension AgentViewModel {
             let height = (input["height"] as? Double).map { CGFloat($0) }
             tab.appendLog("⚙️ window frame...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.setWindowFrame(appBundleId: app, x: x, y: y, width: width, height: height)
             tab.appendLog(output)
             tab.flush()
@@ -499,7 +522,7 @@ extension AgentViewModel {
             let appName = input["name"] as? String
             tab.appendLog("📱 \(action)...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.manageApp(action: action, bundleId: bundleId, name: appName)
             tab.appendLog(output)
             tab.flush()
@@ -522,16 +545,16 @@ extension AgentViewModel {
             let app = input["app"] as? String ?? input["appBundleId"] as? String
             tab.appendLog("🎯 reading focused element...")
             tab.flush()
-            let output = 
+            let output =
                 AccessibilityService.shared.readFocusedElement(appBundleId: app)
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

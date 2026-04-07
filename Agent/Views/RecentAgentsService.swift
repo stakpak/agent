@@ -10,10 +10,10 @@ final class RecentAgentsService: ObservableObject {
     private let maxCount = 20
 
     enum RunStatus: String, Codable {
-        case pending   // recorded upfront, not yet finished
-        case success   // exit 0
+        case pending // recorded upfront, not yet finished
+        case success // exit 0
         case cancelled // user cancelled
-        case failed    // non-zero exit / usage error
+        case failed // non-zero exit / usage error
     }
 
     struct AgentEntry: Codable, Identifiable {

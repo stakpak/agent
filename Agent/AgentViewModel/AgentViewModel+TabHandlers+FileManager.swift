@@ -29,8 +29,10 @@ extension AgentViewModel {
             if let cached = Self.taskFileReadCache[cacheKey],
                let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
                let currentMtime = attrs[.modificationDate] as? Date,
-               cached.mtime == currentMtime {
-                let stub = "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
+               cached.mtime == currentMtime
+            {
+                let stub =
+                    "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
                 tab.appendLog("📖 (unchanged) \(filePath)")
                 tab.flush()
                 return TabToolResult(
@@ -43,7 +45,8 @@ extension AgentViewModel {
             let output = await Self.offMain { CodingService.readFile(path: filePath, offset: offset, limit: limit) }
             // Store mtime for next dedup check
             if let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let mtime = attrs[.modificationDate] as? Date {
+               let mtime = attrs[.modificationDate] as? Date
+            {
                 Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
             let lang = Self.langFromPath(filePath)
@@ -84,7 +87,13 @@ extension AgentViewModel {
                       let text = String(data: data, encoding: .utf8) else { return nil }
                 return text
             }
-            let output = await Self.offMain { CodingService.editFile(path: filePath, oldString: oldString, newString: newString, replaceAll: replaceAll, context: context) }
+            let output = await Self.offMain { CodingService.editFile(
+                path: filePath,
+                oldString: oldString,
+                newString: newString,
+                replaceAll: replaceAll,
+                context: context
+            ) }
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
             }
@@ -116,7 +125,8 @@ extension AgentViewModel {
             if let fp = input["file_path"] as? String, !fp.isEmpty {
                 let expanded = (fp as NSString).expandingTildeInPath
                 if let data = FileManager.default.contents(atPath: expanded),
-                   let text = String(data: data, encoding: .utf8) {
+                   let text = String(data: data, encoding: .utf8)
+                {
                     if let sl = startLine, let el = endLine {
                         let lines = text.components(separatedBy: "\n")
                         let s = max(sl - 1, 0)
@@ -128,7 +138,13 @@ extension AgentViewModel {
                 }
             }
             let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-            let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine.map { $0 - 1 })
+            let diff = MultiLineDiff.createDiff(
+                source: source,
+                destination: destination,
+                algorithm: algorithm,
+                includeMetadata: true,
+                sourceStartLine: startLine.map { $0 - 1 }
+            )
             let d1f = MultiLineDiff.displayDiff(diff: diff, source: source, format: .ai)
             let diffId = DiffStore.shared.store(diff: diff, source: source)
             tab.appendLog(d1f)
@@ -145,7 +161,8 @@ extension AgentViewModel {
             tab.appendLog("📝 Apply D1F diff: \(filePath)")
             let expandedPath = (filePath as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expandedPath),
-                  let source = String(data: data, encoding: .utf8) else {
+                  let source = String(data: data, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 tab.appendLog(err)
                 tab.flush()
@@ -157,7 +174,8 @@ extension AgentViewModel {
             do {
                 let patched: String
                 if let uuid = UUID(uuidString: diffIdStr),
-                   let stored = DiffStore.shared.retrieve(uuid) {
+                   let stored = DiffStore.shared.retrieve(uuid)
+                {
                     patched = try MultiLineDiff.applyDiff(to: source, diff: stored.diff)
                 } else if !asciiDiff.isEmpty {
                     patched = try MultiLineDiff.applyASCIIDiff(to: source, asciiDiff: asciiDiff)
@@ -171,7 +189,8 @@ extension AgentViewModel {
                 let verifyDiff = MultiLineDiff.displayDiff(diff: verifyResult, source: source, format: .ai)
                 tab.appendLog(verifyDiff)
                 let newLineCount = patched.components(separatedBy: "\n").count
-                let output = "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits."
+                let output =
+                    "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits."
                 DiffStore.shared.invalidateDiffs(for: expandedPath)
                 tab.appendLog(output)
                 tab.flush()
@@ -212,7 +231,8 @@ extension AgentViewModel {
 
             let expanded = (filePath as NSString).expandingTildeInPath
             guard let daData = FileManager.default.contents(atPath: expanded),
-                  let fullText = String(data: daData, encoding: .utf8) else {
+                  let fullText = String(data: daData, encoding: .utf8) else
+            {
                 let err = "Error: cannot read \(filePath)"
                 tab.appendLog(err); tab.flush()
                 return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
@@ -231,12 +251,21 @@ extension AgentViewModel {
 
             if source == destination {
                 tab.appendLog("❌ source and destination are identical"); tab.flush()
-                return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: source and destination are identical"], isComplete: false)
+                return TabToolResult(
+                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Error: source and destination are identical"],
+                    isComplete: false
+                )
             }
 
             // Step 2: Create diff with metadata
             let algorithm = CodingService.selectDiffAlgorithm(source: source, destination: destination)
-            let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine.map { $0 - 1 })
+            let diff = MultiLineDiff.createDiff(
+                source: source,
+                destination: destination,
+                algorithm: algorithm,
+                includeMetadata: true,
+                sourceStartLine: startLine.map { $0 - 1 }
+            )
             let diffId = DiffStore.shared.store(diff: diff, source: source)
 
             // Step 3: Apply diff
@@ -270,7 +299,14 @@ extension AgentViewModel {
                 tab.appendLog("📝 Diff+Apply: \(filePath)\(rangeNote) [verified: \(verified)] (\(newLineCount) lines)")
                 DiffStore.shared.invalidateDiffs(for: expanded)
                 tab.flush()
-                return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"], isComplete: false)
+                return TabToolResult(
+                    toolResult: [
+                        "type": "tool_result",
+                        "tool_use_id": toolId,
+                        "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"
+                    ],
+                    isComplete: false
+                )
             } catch {
                 let err = "Error applying diff: \(error.localizedDescription)"
                 tab.appendLog(err); tab.flush()
@@ -280,7 +316,8 @@ extension AgentViewModel {
         case "list_files":
             let pattern = input["pattern"] as? String ?? "*.swift"
             if pattern == "*" || pattern == "*.*" {
-                let err = "Error: pattern '*' is too broad. Use a file extension like '*.swift', '*.json', '*.py'. Example: list_files(pattern: \"*.swift\")"
+                let err =
+                    "Error: pattern '*' is too broad. Use a file extension like '*.swift', '*.json', '*.py'. Example: list_files(pattern: \"*.swift\")"
                 tab.appendLog(err); tab.flush()
                 return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
             }
@@ -316,7 +353,8 @@ extension AgentViewModel {
             let result = await executeForTab(command: cmd, projectFolder: resolvedSearch)
             guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
             let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "No matches for '\(pattern)'" : "[project folder: \(displaySearch)] paths are relative to project folder\n\(result.output)"
+                ? "No matches for '\(pattern)'" :
+                "[project folder: \(displaySearch)] paths are relative to project folder\n\(result.output)"
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
                 isComplete: false
@@ -330,19 +368,23 @@ extension AgentViewModel {
                 return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
             }
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
-            let resolved = rawPath.hasPrefix("/") || rawPath.hasPrefix("~") ? rawPath : (tabFolder as NSString).appendingPathComponent(rawPath)
+            let resolved = rawPath.hasPrefix("/") || rawPath.hasPrefix("~") ? rawPath : (tabFolder as NSString)
+                .appendingPathComponent(rawPath)
             tab.appendLog("📁 mkdir -p \(CodingService.trimHome(resolved))")
             tab.flush()
-            let result = await executeForTab(command: "mkdir -p \(CodingService.shellEscape(resolved)) && echo 'Created: \(resolved)'", projectFolder: tabFolder)
+            let result = await executeForTab(
+                command: "mkdir -p \(CodingService.shellEscape(resolved)) && echo 'Created: \(resolved)'",
+                projectFolder: tabFolder
+            )
             let out = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             let output = out.isEmpty ? "Error creating directory" : out
             tab.appendLog(output); tab.flush()
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

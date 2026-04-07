@@ -9,7 +9,8 @@ extension AgentViewModel {
         let tab = ScriptTab(scriptName: scriptName)
         // Inherit LLM config from the currently selected main tab
         if let selId = selectedTabId,
-           let parent = self.tab(for: selId), parent.isMainTab {
+           let parent = self.tab(for: selId), parent.isMainTab
+        {
             tab.parentTabId = parent.id
         }
         // Inherit project folder from current context (resolve to directory, not file)
@@ -47,7 +48,8 @@ extension AgentViewModel {
         }
         if let parentId = tab.parentTabId,
            let parent = self.tab(for: parentId),
-           let config = parent.llmConfig {
+           let config = parent.llmConfig
+        {
             return (config.provider, config.model)
         }
         return (selectedProvider, globalModelForProvider(selectedProvider))
@@ -235,7 +237,8 @@ extension AgentViewModel {
 
         // On a script tab - find its parent
         if let parentId = currentTab.parentTabId,
-           let parentTab = self.tab(for: parentId), parentTab.isMainTab {
+           let parentTab = self.tab(for: parentId), parentTab.isMainTab
+        {
             // Switch to parent LLM tab
             selectedTabId = parentTab.id
             persistScriptTabs()
@@ -276,16 +279,26 @@ extension AgentViewModel {
                       let data = try? JSONEncoder().encode(tab.tabErrors) else { return nil }
                 return String(data: data, encoding: .utf8)
             }()
-            return (id: tab.id, scriptName: tab.scriptName, activityLog: tab.activityLog,
-                    exitCode: tab.exitCode, llmConfigJSON: configJSON,
-                    parentTabIdString: tab.parentTabId?.uuidString,
-                    isMessagesTab: tab.isMessagesTab, projectFolder: tab.projectFolder,
-                    promptHistoryJSON: historyJSON, taskSummariesJSON: summariesJSON,
-                    errorsJSON: tabErrorsJSON,
-                    rawLLMOutput: tab.rawLLMOutput, lastElapsed: tab.lastElapsed,
-                    thinkingExpanded: tab.thinkingExpanded, thinkingOutputExpanded: tab.thinkingOutputExpanded,
-                    thinkingDismissed: tab.thinkingDismissed,
-                    tabInputTokens: tab.tabInputTokens, tabOutputTokens: tab.tabOutputTokens)
+            return (
+                id: tab.id,
+                scriptName: tab.scriptName,
+                activityLog: tab.activityLog,
+                exitCode: tab.exitCode,
+                llmConfigJSON: configJSON,
+                parentTabIdString: tab.parentTabId?.uuidString,
+                isMessagesTab: tab.isMessagesTab,
+                projectFolder: tab.projectFolder,
+                promptHistoryJSON: historyJSON,
+                taskSummariesJSON: summariesJSON,
+                errorsJSON: tabErrorsJSON,
+                rawLLMOutput: tab.rawLLMOutput,
+                lastElapsed: tab.lastElapsed,
+                thinkingExpanded: tab.thinkingExpanded,
+                thinkingOutputExpanded: tab.thinkingOutputExpanded,
+                thinkingDismissed: tab.thinkingDismissed,
+                tabInputTokens: tab.tabInputTokens,
+                tabOutputTokens: tab.tabOutputTokens
+            )
         }
         ChatHistoryStore.shared.saveScriptTabs(tabData)
     }

@@ -80,7 +80,8 @@ struct HeaderToolbarButtons: View {
 
     var currentTabColor: Color {
         guard let selectedId = viewModel.selectedTabId,
-              let tab = viewModel.tab(for: selectedId) else {
+              let tab = viewModel.tab(for: selectedId) else
+        {
             return .primary
         }
         return ContentView.tabColor(for: tab.id, in: viewModel.scriptTabs)
@@ -138,7 +139,10 @@ struct HeaderToolbarButtons: View {
 
         Button { showCodingPrefs.toggle() } label: {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
-                .foregroundStyle(viewModel.autoVerifyEnabled || viewModel.visualTestsEnabled || viewModel.autoPREnabled || viewModel.autoScaffoldEnabled ? Color.green : Color.secondary)
+                .foregroundStyle(
+                    viewModel.autoVerifyEnabled || viewModel.visualTestsEnabled || viewModel.autoPREnabled || viewModel
+                        .autoScaffoldEnabled ? Color.green : Color.secondary
+                )
         }
         .help("Coding Preferences")
         .accessibilityLabel("Coding Preferences")
@@ -241,7 +245,8 @@ struct HeaderToolbarButtons: View {
                 onClear: { type in viewModel.clearHistory(type: type) },
                 onRerun: { prompt in
                     if let selectedId = viewModel.selectedTabId,
-                       let tab = viewModel.tab(for: selectedId) {
+                       let tab = viewModel.tab(for: selectedId)
+                    {
                         tab.taskInput = prompt
                         viewModel.runTabTask(tab: tab)
                     } else {
@@ -261,9 +266,11 @@ struct HeaderToolbarButtons: View {
             Button("Clear", role: .destructive) { viewModel.clearSelectedLog() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text(viewModel.selectedTabId != nil
-                 ? "Clear this tab's log?"
-                 : "Clear all task history?")
+            Text(
+                viewModel.selectedTabId != nil
+                    ? "Clear this tab's log?"
+                    : "Clear all task history?"
+            )
         }
     }
 }

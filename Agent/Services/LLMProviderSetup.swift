@@ -89,7 +89,7 @@ enum LLMProviderSetup {
         switch region {
         case "CN": baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         case "HK": baseURL = "https://cn-hongkong.aliyuncs.com/compatible-mode/v1"
-        default:   baseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        default: baseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         }
         return LLMProviderConfig(
             id: "qwen", displayName: "Qwen",

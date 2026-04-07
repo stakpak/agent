@@ -148,7 +148,9 @@ struct FallbackChainView: View {
                     }
                     .labelsHidden()
                     .frame(width: 160)
-                    .onAppear { if selectedModel.isEmpty { selectedModel = modelsForProvider(selectedProvider).first ?? defaultModel(for: selectedProvider) } }
+                    .onAppear {
+                        if selectedModel
+                            .isEmpty { selectedModel = modelsForProvider(selectedProvider).first ?? defaultModel(for: selectedProvider) } }
 
                     Button {
                         guard !selectedModel.isEmpty else { return }

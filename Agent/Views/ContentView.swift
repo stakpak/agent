@@ -71,7 +71,8 @@ struct ContentView: View {
                     showAppleAIBanner: $showAppleAIBanner,
                     onCancel: {
                         if let selId = viewModel.selectedTabId,
-                           let tab = viewModel.tab(for: selId) {
+                           let tab = viewModel.tab(for: selId)
+                        {
                             if tab.isLLMRunning {
                                 viewModel.stopTabTask(tab: tab)
                             } else if tab.isRunning {
@@ -228,7 +229,8 @@ struct ContentView: View {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 // Cmd+W to close current tab or quit
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "w" {
+                   event.charactersIgnoringModifiers == "w"
+                {
                     if let selId = viewModel.selectedTabId {
                         viewModel.closeScriptTab(id: selId)
                     } else if viewModel.scriptTabs.isEmpty {
@@ -241,14 +243,16 @@ struct ContentView: View {
 
                 // Cmd+T to create a new main LLM tab
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "t" {
+                   event.charactersIgnoringModifiers == "t"
+                {
                     showNewTabSheet = true
                     return nil
                 }
 
                 // Cmd+F to toggle search bar
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "f" {
+                   event.charactersIgnoringModifiers == "f"
+                {
                     showSearch.toggle()
                     if showSearch {
                         isSearchFieldFocused = true
@@ -267,23 +271,26 @@ struct ContentView: View {
 
                 // Intercept Cmd+V for image paste
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "v" {
+                   event.charactersIgnoringModifiers == "v"
+                {
                     if viewModel.pasteImageFromClipboard() {
                         return nil
                     }
                 }
-                
+
                 // Keyboard shortcuts for common actions
                 // Cmd+N: New task (focus input)
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "n" {
+                   event.charactersIgnoringModifiers == "n"
+                {
                     // Focus is already on text field, this is just a quick way to clear and start new
                     return nil
                 }
-                
+
                 // Cmd+B: Toggle LLM Overlay
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "b" {
+                   event.charactersIgnoringModifiers == "b"
+                {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         if let selId = viewModel.selectedTabId, let tab = viewModel.tab(for: selId) {
                             tab.thinkingDismissed.toggle()
@@ -296,9 +303,11 @@ struct ContentView: View {
 
                 // Cmd+Return: Run current task
                 if event.modifierFlags.contains(.command),
-                   event.keyCode == 36 {
+                   event.keyCode == 36
+                {
                     if let selId = viewModel.selectedTabId,
-                       let tab = viewModel.tab(for: selId) {
+                       let tab = viewModel.tab(for: selId)
+                    {
                         if !tab.taskInput.isEmpty && !tab.isLLMRunning {
                             viewModel.runTabTask(tab: tab)
                         }
@@ -307,13 +316,15 @@ struct ContentView: View {
                     }
                     return nil
                 }
-                
+
                 // Cmd+.: Cancel current task
                 if event.modifierFlags.contains(.command),
-                   event.charactersIgnoringModifiers == "." {
+                   event.charactersIgnoringModifiers == "."
+                {
                     if let selId = viewModel.selectedTabId,
                        let tab = viewModel.tab(for: selId),
-                       tab.isBusy {
+                       tab.isBusy
+                    {
                         if tab.isLLMRunning {
                             viewModel.stopTabTask(tab: tab)
                         } else if tab.isRunning {
@@ -324,19 +335,21 @@ struct ContentView: View {
                     }
                     return nil
                 }
-                
+
                 // Cmd+Shift+P: Open System Prompts
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "p" {
+                   event.charactersIgnoringModifiers == "p"
+                {
                     // System prompts window would be opened here
                     // For now, focus on settings
                     showSettings = true
                     return nil
                 }
-                
+
                 // Cmd+Shift+M: Toggle Messages Monitor
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "m" {
+                   event.charactersIgnoringModifiers == "m"
+                {
                     viewModel.messagesMonitorEnabled.toggle()
                     return nil
                 }
@@ -344,10 +357,12 @@ struct ContentView: View {
                 // Cmd+B: Toggle entire LLM Output overlay visibility
                 if event.modifierFlags.contains(.command),
                    !event.modifierFlags.contains(.shift),
-                   event.charactersIgnoringModifiers == "b" {
+                   event.charactersIgnoringModifiers == "b"
+                {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         if let selId = viewModel.selectedTabId,
-                           let tab = viewModel.tab(for: selId) {
+                           let tab = viewModel.tab(for: selId)
+                        {
                             tab.thinkingDismissed.toggle()
                         } else {
                             viewModel.thinkingDismissed.toggle()
@@ -359,10 +374,12 @@ struct ContentView: View {
                 // Cmd+D: Toggle both LLM chevrons on current tab
                 if event.modifierFlags.contains(.command),
                    !event.modifierFlags.contains(.shift),
-                   event.charactersIgnoringModifiers == "d" {
+                   event.charactersIgnoringModifiers == "d"
+                {
                     withAnimation(.easeInOut(duration: 0.25)) {
                         if let selId = viewModel.selectedTabId,
-                           let tab = viewModel.tab(for: selId) {
+                           let tab = viewModel.tab(for: selId)
+                        {
                             let expand = !tab.thinkingExpanded
                             tab.thinkingExpanded = expand
                             tab.thinkingOutputExpanded = expand
@@ -374,25 +391,28 @@ struct ContentView: View {
                     }
                     return nil
                 }
-                
+
                 // Cmd+L: Clear log
                 if event.modifierFlags.contains(.command),
                    !event.modifierFlags.contains(.shift),
-                   event.charactersIgnoringModifiers == "l" {
+                   event.charactersIgnoringModifiers == "l"
+                {
                     viewModel.clearSelectedLog()
                     return nil
                 }
 
                 // Cmd+Shift+K: Clear all
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "k" {
+                   event.charactersIgnoringModifiers == "k"
+                {
                     viewModel.clearAll()
                     return nil
                 }
 
                 // Cmd+Shift+L: Clear LLM output
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "l" {
+                   event.charactersIgnoringModifiers == "l"
+                {
                     viewModel.rawLLMOutput = ""
                     if let selId = viewModel.selectedTabId, let tab = viewModel.tab(for: selId) {
                         tab.rawLLMOutput = ""
@@ -402,7 +422,8 @@ struct ContentView: View {
 
                 // Cmd+Shift+H: Clear prompt history
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "h" {
+                   event.charactersIgnoringModifiers == "h"
+                {
                     viewModel.promptHistory.removeAll()
                     UserDefaults.standard.removeObject(forKey: "agentPromptHistory")
                     if let selId = viewModel.selectedTabId, let tab = viewModel.tab(for: selId) {
@@ -413,14 +434,16 @@ struct ContentView: View {
 
                 // Cmd+Shift+J: Clear task history
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "j" {
+                   event.charactersIgnoringModifiers == "j"
+                {
                     viewModel.history.clearAll()
                     return nil
                 }
 
                 // Cmd+Shift+U: Clear tokens
                 if event.modifierFlags.contains([.command, .shift]),
-                   event.charactersIgnoringModifiers == "u" {
+                   event.charactersIgnoringModifiers == "u"
+                {
                     viewModel.taskInputTokens = 0; viewModel.taskOutputTokens = 0
                     viewModel.sessionInputTokens = 0; viewModel.sessionOutputTokens = 0
                     return nil
@@ -430,21 +453,24 @@ struct ContentView: View {
                 if event.modifierFlags.contains(.command),
                    let char = event.charactersIgnoringModifiers,
                    let number = Int(char),
-                   number >= 1, number <= 9 {
+                   number >= 1, number <= 9
+                {
                     selectTab(viewModel: viewModel, number: number)
                     return nil
                 }
-                
+
                 // Cmd+Shift+]: Next tab
                 if event.modifierFlags.contains(.command),
-                   event.keyCode == 124 { // Right arrow
+                   event.keyCode == 124
+                { // Right arrow
                     nextTab(viewModel: viewModel)
                     return nil
                 }
-                
+
                 // Cmd+Shift+[: Previous tab
                 if event.modifierFlags.contains(.command),
-                   event.keyCode == 123 { // Left arrow
+                   event.keyCode == 123
+                { // Left arrow
                     previousTab(viewModel: viewModel)
                     return nil
                 }
@@ -453,7 +479,8 @@ struct ContentView: View {
                 if event.keyCode == 53 {
                     if let selId = viewModel.selectedTabId,
                        let tab = viewModel.tab(for: selId),
-                       tab.isBusy {
+                       tab.isBusy
+                    {
                         if tab.isLLMRunning {
                             viewModel.stopTabTask(tab: tab)
                         } else if tab.isRunning {
@@ -474,7 +501,8 @@ struct ContentView: View {
                     let text: String
                     let browsingHistory: Bool
                     if let tabId = viewModel.selectedTabId,
-                       let tab = viewModel.tab(for: tabId) {
+                       let tab = viewModel.tab(for: tabId)
+                    {
                         text = tab.taskInput
                         browsingHistory = tab.historyIndex != -1
                     } else {
@@ -487,7 +515,8 @@ struct ContentView: View {
                     if isSingleLine || browsingHistory {
                         let direction = event.keyCode == 126 ? -1 : 1
                         if let tabId = viewModel.selectedTabId,
-                           let tab = viewModel.tab(for: tabId) {
+                           let tab = viewModel.tab(for: tabId)
+                        {
                             tab.navigateHistory(direction: direction)
                         } else {
                             viewModel.navigatePromptHistory(direction: direction)
@@ -615,7 +644,8 @@ struct ContentView: View {
     @ViewBuilder
     private var thinkingIndicator: some View {
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             if !tab.thinkingDismissed {
                 ThinkingIndicatorView(viewModel: viewModel, tab: tab)
             }
@@ -627,7 +657,8 @@ struct ContentView: View {
     /// Whether the active context's thinking indicator has been dismissed.
     private var isActiveDismissed: Bool {
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             return tab.thinkingDismissed
         }
         return viewModel.thinkingDismissed
@@ -636,7 +667,8 @@ struct ContentView: View {
     /// Whether the active context (selected tab or main) is in thinking state.
     private var isActiveThinking: Bool {
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             return tab.isLLMThinking
         }
         return viewModel.isThinking
@@ -645,7 +677,8 @@ struct ContentView: View {
     /// Whether the active context is doing anything — thinking, running, or executing.
     private var isActiveRunning: Bool {
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             return tab.isLLMRunning || tab.isLLMThinking || tab.isRunning
         }
         return viewModel.isRunning || viewModel.isThinking
@@ -655,7 +688,8 @@ struct ContentView: View {
     private var activeTaskPrompt: String? {
         // Check selected tab first
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             if tab.isLLMRunning { return tab.currentTaskPrompt }
             if tab.isRunning { return "Running: \(tab.scriptName)" }
         }
@@ -668,7 +702,8 @@ struct ContentView: View {
     private var activeAppleAIPrompt: String? {
         // Check selected tab first
         if let selId = viewModel.selectedTabId,
-           let tab = viewModel.tab(for: selId) {
+           let tab = viewModel.tab(for: selId)
+        {
             let p = tab.currentAppleAIPrompt
             if !p.isEmpty { return p }
         }

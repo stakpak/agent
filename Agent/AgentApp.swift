@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let insertIdx = min(1, mainMenu.items.count)
         mainMenu.insertItem(agentsItem, at: insertIdx)
     }
-    
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Tell the view model to stop all running tasks, MCP servers, etc.
         NotificationCenter.default.post(name: .appWillQuit, object: nil)
@@ -122,7 +122,7 @@ struct AgentApp: App {
                 .task {
                     // Initialize SwiftData chat history store
                     ChatHistoryStore.shared.migrateFromUserDefaults()
-                    
+
                     await MCPService.shared.startAutoStartServers()
                     // Sync registry enabled flags with actual connection state
                     let registry = MCPServerRegistry.shared

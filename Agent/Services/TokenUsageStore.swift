@@ -66,7 +66,7 @@ final class TokenUsageStore {
     static let shared = TokenUsageStore()
 
     struct DayRecord: Codable {
-        let date: String          // "2026-03-29"
+        let date: String // "2026-03-29"
         var inputTokens: Int
         var outputTokens: Int
         var totalTokens: Int { inputTokens + outputTokens }

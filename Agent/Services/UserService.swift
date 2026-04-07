@@ -32,13 +32,14 @@ enum SafeSMAppService {
         guard let data = FileManager.default.contents(atPath: path),
               !data.isEmpty,
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              plist is [String: Any] else {
+              plist is [String: Any] else
+        {
             return false
         }
 
         return true
     }
-    
+
     /// Create user agent service ONLY if plist is valid
     static func createUserAgent() -> SMAppService? {
         // CRITICAL: Only create SMAppService if plist exists and is valid
@@ -46,33 +47,33 @@ enum SafeSMAppService {
         guard userAgentPlistExists() else { return nil }
         return SMAppService.agent(plistName: userAgentPlistName)
     }
-    
+
     /// Safely check if user agent is ready - returns false if any issue
     static func isUserAgentReady() -> Bool {
         // First verify plist exists
         guard userAgentPlistExists() else { return false }
-        
+
         // Create service and check status (may still crash in ObjC)
         guard let service = createUserAgent() else { return false }
-        
+
         // Accessing .status could crash if plist is malformed, but we validated above
         return service.status == .enabled
     }
-    
+
     /// Safely register user agent with comprehensive error handling
     static func registerUserAgent() -> (success: Bool, message: String) {
         // First verify plist exists
         guard userAgentPlistExists() else {
             return (false, "User agent plist not found in app bundle. Rebuild and reinstall Agent.")
         }
-        
+
         guard let service = createUserAgent() else {
             return (false, "User agent unavailable. Reinstall Agent.")
         }
-        
+
         let status = service.status
         let statusName = statusNameFor(status)
-        
+
         do {
             try service.register()
             return (true, "User agent registered. (was: \(statusName))")
@@ -99,14 +100,14 @@ enum SafeSMAppService {
             return (false, "Registration failed: \(error.localizedDescription)")
         }
     }
-    
+
     /// Safely unregister user agent
     static func unregisterUserAgent() {
         guard userAgentPlistExists(),
               let service = createUserAgent() else { return }
         try? service.unregister()
     }
-    
+
     /// Get status name safely
     private static func statusNameFor(_ status: SMAppService.Status) -> String {
         switch status {
@@ -257,7 +258,7 @@ final class UserService {
     }
 
     func cancel() {
-        onOutput = nil  // Clear handler to prevent memory leaks
+        onOutput = nil // Clear handler to prevent memory leaks
         Self.cancelProcess(instanceID: instanceID)
     }
 
@@ -279,7 +280,12 @@ final class UserService {
         return connection
     }
 
-    nonisolated private func executeViaXPC(script: String, workingDirectory: String = "", outputHandler: UserOutputHandler) async -> (status: Int32, output: String) {
+    nonisolated private func executeViaXPC(
+        script: String,
+        workingDirectory: String = "",
+        outputHandler: UserOutputHandler
+    ) async -> (status: Int32, output: String)
+    {
         await withCheckedContinuation { continuation in
             var didResume = false
             let resumeLock = NSLock()

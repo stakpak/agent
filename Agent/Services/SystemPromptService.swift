@@ -109,7 +109,8 @@ final class SystemPromptService {
         if !fm.fileExists(atPath: url.path) {
             needsWrite = true
         } else if let existing = try? String(contentsOf: url, encoding: .utf8),
-                  let firstLine = existing.components(separatedBy: "\n").first {
+                  let firstLine = existing.components(separatedBy: "\n").first
+        {
             if firstLine.hasPrefix(Self.readOnlyPrefix) {
                 needsWrite = false
             } else if firstLine.hasPrefix(Self.customPrefix) {
@@ -137,7 +138,14 @@ final class SystemPromptService {
 
     /// Read the on-disk prompt, substituting {userName}, {userHome}, and {projectFolder}.
     /// Strips the version comment line before returning.
-    func prompt(for provider: APIProvider, userName: String, userHome: String, projectFolder: String = "", style: PromptStyle = .full) -> String {
+    func prompt(
+        for provider: APIProvider,
+        userName: String,
+        userHome: String,
+        projectFolder: String = "",
+        style: PromptStyle = .full
+    ) -> String
+    {
         ensureDefaults()
         let fileName: String
         switch style {
@@ -226,7 +234,8 @@ final class SystemPromptService {
         let fileName = compact ? Self.compactFileName : Self.commonFileName
         let url = Self.systemDir.appendingPathComponent(fileName)
         guard let existing = try? String(contentsOf: url, encoding: .utf8),
-              let firstLine = existing.components(separatedBy: "\n").first else {
+              let firstLine = existing.components(separatedBy: "\n").first else
+        {
             return false
         }
         return firstLine.hasPrefix(Self.readOnlyPrefix)

@@ -46,7 +46,7 @@ extension AgentViewModel {
             appendLog(mcpOutput)
             flushLog()
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": mcpOutput])
-    
+
             return true
         }
 
@@ -95,7 +95,8 @@ extension AgentViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"),
               let data = trimmed.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
+        {
             return text
         }
 

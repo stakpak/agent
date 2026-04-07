@@ -83,7 +83,10 @@ final class FileChangeJournal {
     /// Remove journals older than 30 days.
     private func cleanOld() {
         let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
-        let files = (try? FileManager.default.contentsOfDirectory(at: journalDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: journalDir,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
         for file in files {
             if let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate), date < cutoff {
                 try? FileManager.default.removeItem(at: file)

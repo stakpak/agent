@@ -9,19 +9,20 @@ struct AgentOptionsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Options")
                     .font(.headline)
-                
+
                 Text("Configure agent behavior and limits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.bottom, 8)
-            
+
             row {
                 Text("Iterations").font(.subheadline)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Max per task").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.maxIterations)",
+                    Stepper(
+                        "\(viewModel.maxIterations)",
                         onIncrement: {
                             let opts = AgentViewModel.iterationOptions
                             if let i = opts.firstIndex(of: viewModel.maxIterations), i > 0 {
@@ -33,7 +34,8 @@ struct AgentOptionsView: View {
                             if let i = opts.firstIndex(of: viewModel.maxIterations), i + 1 < opts.count {
                                 viewModel.maxIterations = opts[i + 1]
                             }
-                        })
+                        }
+                    )
                 }
             }
 
@@ -42,7 +44,8 @@ struct AgentOptionsView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("On server/timeout errors").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.maxRetries)",
+                    Stepper(
+                        "\(viewModel.maxRetries)",
                         onIncrement: {
                             let opts = AgentViewModel.retryOptions
                             if let i = opts.firstIndex(of: viewModel.maxRetries), i + 1 < opts.count {
@@ -54,7 +57,8 @@ struct AgentOptionsView: View {
                             if let i = opts.firstIndex(of: viewModel.maxRetries), i > 0 {
                                 viewModel.maxRetries = opts[i - 1]
                             }
-                        })
+                        }
+                    )
                 }
             }
 
@@ -78,7 +82,8 @@ struct AgentOptionsView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Lines before truncated").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.maxOutputLines)",
+                    Stepper(
+                        "\(viewModel.maxOutputLines)",
                         onIncrement: {
                             let opts = AgentViewModel.outputLineOptions
                             if let i = opts.firstIndex(of: viewModel.maxOutputLines), i > 0 {
@@ -90,7 +95,8 @@ struct AgentOptionsView: View {
                             if let i = opts.firstIndex(of: viewModel.maxOutputLines), i + 1 < opts.count {
                                 viewModel.maxOutputLines = opts[i + 1]
                             }
-                        })
+                        }
+                    )
                 }
             }
 
@@ -99,7 +105,8 @@ struct AgentOptionsView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Preview lines").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.readFilePreviewLines)",
+                    Stepper(
+                        "\(viewModel.readFilePreviewLines)",
                         onIncrement: {
                             let opts = AgentViewModel.readPreviewOptions
                             if let i = opts.firstIndex(of: viewModel.readFilePreviewLines), i > 0 {
@@ -111,7 +118,8 @@ struct AgentOptionsView: View {
                             if let i = opts.firstIndex(of: viewModel.readFilePreviewLines), i + 1 < opts.count {
                                 viewModel.readFilePreviewLines = opts[i + 1]
                             }
-                        })
+                        }
+                    )
                 }
             }
 
@@ -137,16 +145,20 @@ struct AgentOptionsView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Summarize after").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.maxHistoryBeforeSummary) tasks",
+                    Stepper(
+                        "\(viewModel.maxHistoryBeforeSummary) tasks",
                         onIncrement: { if viewModel.maxHistoryBeforeSummary > 5 { viewModel.maxHistoryBeforeSummary -= 5 } },
-                        onDecrement: { if viewModel.maxHistoryBeforeSummary < 50 { viewModel.maxHistoryBeforeSummary += 5 } })
+                        onDecrement: { if viewModel.maxHistoryBeforeSummary < 50 { viewModel.maxHistoryBeforeSummary += 5 } }
+                    )
                 }
                 Spacer().frame(width: 12)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Visible in chat").font(.caption).foregroundStyle(.secondary)
-                    Stepper("\(viewModel.visibleTaskCount)",
+                    Stepper(
+                        "\(viewModel.visibleTaskCount)",
                         onIncrement: { if viewModel.visibleTaskCount > 1 { viewModel.visibleTaskCount -= 1 } },
-                        onDecrement: { if viewModel.visibleTaskCount < 5 { viewModel.visibleTaskCount += 1 } })
+                        onDecrement: { if viewModel.visibleTaskCount < 5 { viewModel.visibleTaskCount += 1 } }
+                    )
                 }
             }
 
@@ -177,7 +189,8 @@ struct AgentOptionsView: View {
                     .labelsHidden()
 
                     if viewModel.tokenBudgetCeiling > 0 {
-                        Stepper(Self.formatBudget(viewModel.tokenBudgetCeiling),
+                        Stepper(
+                            Self.formatBudget(viewModel.tokenBudgetCeiling),
                             onIncrement: {
                                 let opts = Self.budgetOptions
                                 if let i = opts.firstIndex(of: viewModel.tokenBudgetCeiling), i > 0 {
@@ -193,7 +206,8 @@ struct AgentOptionsView: View {
                                 } else if let next = opts.first(where: { $0 > viewModel.tokenBudgetCeiling }) {
                                     viewModel.tokenBudgetCeiling = next
                                 }
-                            })
+                            }
+                        )
                         Button {
                             viewModel.budgetUsedFraction = 0
                         } label: {

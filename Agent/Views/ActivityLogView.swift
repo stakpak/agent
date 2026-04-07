@@ -10,9 +10,9 @@ import AgentTerminalNeo
 struct ActivityLogView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     let text: String
-    var tabID: UUID?  // nil = main tab
-    var isActive: Bool = false  // true when tab/task is running — skip truncation
-    var textProvider: (@MainActor () -> String)? = nil  // polled for live updates
+    var tabID: UUID? // nil = main tab
+    var isActive: Bool = false // true when tab/task is running — skip truncation
+    var textProvider: (@MainActor () -> String)? = nil // polled for live updates
     var searchText: String = ""
     var caseSensitive: Bool = false
     var currentMatchIndex: Int = 0
@@ -56,7 +56,8 @@ struct ActivityLogView: NSViewRepresentable {
         let len = (text as NSString).length
         let tabChanged = tabID != coord.latestTabID
         let textChanged = len != coord.updateNSViewLastLength
-        let searchChanged = searchText != coord.latestSearchText || currentMatchIndex != coord.latestMatchIndex || caseSensitive != coord.latestCaseSensitive
+        let searchChanged = searchText != coord.latestSearchText || currentMatchIndex != coord.latestMatchIndex || caseSensitive != coord
+            .latestCaseSensitive
         guard tabChanged || textChanged || searchChanged else { return }
 
         coord.latestText = text
@@ -190,8 +191,10 @@ struct ActivityLogView: NSViewRepresentable {
                     textView.animator().alphaValue = 1
                 }
                 textView.textStorage?.setAttributedString(
-                    NSAttributedString(string: "Ready. Enter a task below to begin.",
-                                       attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
+                    NSAttributedString(
+                        string: "Ready. Enter a task below to begin.",
+                        attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor]
+                    )
                 )
                 showingPlaceholder = true
                 lastLength = 0
@@ -331,7 +334,13 @@ struct ActivityLogView: NSViewRepresentable {
             if !searchText.isEmpty || !lastSearch.isEmpty {
                 if searchChanged {
                     pendingRenderWork?.cancel()
-                    applySearchHighlighting(textView: textView, searchText: searchText, caseSensitive: caseSensitive, currentMatch: currentMatchIndex, onMatchCount: onMatchCount)
+                    applySearchHighlighting(
+                        textView: textView,
+                        searchText: searchText,
+                        caseSensitive: caseSensitive,
+                        currentMatch: currentMatchIndex,
+                        onMatchCount: onMatchCount
+                    )
                 } else if textChanged && !searchText.isEmpty {
                     pendingRenderWork?.cancel()
                     let work = DispatchWorkItem { [weak self] in
@@ -413,7 +422,8 @@ struct ActivityLogView: NSViewRepresentable {
         /// Instant scroll to end — no animation
         func snapToEnd(_ textView: NSTextView) {
             guard let scrollView = textView.enclosingScrollView,
-                  let textContainer = textView.textContainer else {
+                  let textContainer = textView.textContainer else
+            {
                 textView.scrollToEndOfDocument(nil)
                 return
             }
@@ -428,7 +438,8 @@ struct ActivityLogView: NSViewRepresentable {
         /// Smooth animated scroll to end
         func smoothScrollToEnd(_ textView: NSTextView) {
             guard let scrollView = textView.enclosingScrollView,
-                  let textContainer = textView.textContainer else {
+                  let textContainer = textView.textContainer else
+            {
                 textView.scrollToEndOfDocument(nil)
                 return
             }
@@ -480,7 +491,13 @@ struct ActivityLogView: NSViewRepresentable {
         var pendingSearchWork: DispatchWorkItem?
 
         /// Highlight search matches in the text view's text storage
-        func applySearchHighlighting(textView: NSTextView, searchText: String, caseSensitive: Bool = false, currentMatch: Int, onMatchCount: ((Int) -> Void)?) {
+        func applySearchHighlighting(
+            textView: NSTextView,
+            searchText: String,
+            caseSensitive: Bool = false,
+            currentMatch: Int,
+            onMatchCount: ((Int) -> Void)?
+        ) {
             guard let storage = textView.textStorage else { return }
 
             let highlightColor = NSColor.systemYellow.withAlphaComponent(0.3)
@@ -666,7 +683,7 @@ struct ActivityLogView: NSViewRepresentable {
         /// Starts generous (200K), shrinks when renders get slow, grows when fast.
         var renderCap = 500_000
         /// Threshold in seconds — if a render takes longer, shrink the cap
-        private static let beachBallThreshold: CFAbsoluteTime = 0.08  // 80ms
+        private static let beachBallThreshold: CFAbsoluteTime = 0.08 // 80ms
 
         /// Call after a render completes to adapt the cap for next time.
         func adaptRenderCap(elapsed: CFAbsoluteTime) {
@@ -702,7 +719,11 @@ struct ActivityLogView: NSViewRepresentable {
             // Strip ANSI escape codes from the text
             let cleanText: String
             if let rx = MarkdownPatterns.ansiEscapePattern {
-                cleanText = rx.stringByReplacingMatches(in: renderText, range: NSRange(location: 0, length: (renderText as NSString).length), withTemplate: "")
+                cleanText = rx.stringByReplacingMatches(
+                    in: renderText,
+                    range: NSRange(location: 0, length: (renderText as NSString).length),
+                    withTemplate: ""
+                )
             } else {
                 cleanText = renderText
             }
@@ -819,8 +840,11 @@ struct ActivityLogView: NSViewRepresentable {
             if isReadFileOutput {
                 let hl = CodeBlockHighlighter.highlight(code: text, language: "swift", font: font)
                 let block = NSMutableAttributedString(attributedString: hl)
-                block.addAttribute(.backgroundColor, value: CodeBlockTheme.bg,
-                                   range: NSRange(location: 0, length: block.length))
+                block.addAttribute(
+                    .backgroundColor,
+                    value: CodeBlockTheme.bg,
+                    range: NSRange(location: 0, length: block.length)
+                )
                 return block
             }
 
@@ -831,15 +855,33 @@ struct ActivityLogView: NSViewRepresentable {
                 let t = line.trimmingCharacters(in: .whitespaces)
                 return t.hasPrefix("#") || t.hasPrefix("```") || t.hasPrefix("- ") || t.hasPrefix("* ")
             }
-            let codeIndicators = ["import ", "func ", "class ", "struct ", "enum ", "protocol ", "@MainActor", "@Observable", "let ", "var ", "private ", "public ", "extension "]
-            let codeLineCount = lines.filter { line in codeIndicators.contains(where: { line.trimmingCharacters(in: .whitespaces).hasPrefix($0) }) }.count
+            let codeIndicators = [
+                "import ",
+                "func ",
+                "class ",
+                "struct ",
+                "enum ",
+                "protocol ",
+                "@MainActor",
+                "@Observable",
+                "let ",
+                "var ",
+                "private ",
+                "public ",
+                "extension "
+            ]
+            let codeLineCount = lines
+                .filter { line in codeIndicators.contains(where: { line.trimmingCharacters(in: .whitespaces).hasPrefix($0) }) }.count
             let isCodeOutput = !hasMarkdownStructure && lines.count >= 3 && codeLineCount >= 2
 
             if isCodeOutput {
                 let hl = CodeBlockHighlighter.highlight(code: text, language: "swift", font: font)
                 let block = NSMutableAttributedString(attributedString: hl)
-                block.addAttribute(.backgroundColor, value: CodeBlockTheme.bg,
-                                   range: NSRange(location: 0, length: block.length))
+                block.addAttribute(
+                    .backgroundColor,
+                    value: CodeBlockTheme.bg,
+                    range: NSRange(location: 0, length: block.length)
+                )
                 return block
             }
 
@@ -886,8 +928,11 @@ struct ActivityLogView: NSViewRepresentable {
                 let block = NSMutableAttributedString(string: "\n", attributes: baseAttrs)
                 block.append(hl)
                 block.append(NSAttributedString(string: "\n", attributes: baseAttrs))
-                block.addAttribute(.backgroundColor, value: CodeBlockTheme.bg,
-                                   range: NSRange(location: 0, length: block.length))
+                block.addAttribute(
+                    .backgroundColor,
+                    value: CodeBlockTheme.bg,
+                    range: NSRange(location: 0, length: block.length)
+                )
                 result.append(block)
 
                 cursor = fence.range.location + fence.range.length
@@ -919,7 +964,8 @@ struct ActivityLogView: NSViewRepresentable {
                         j += 1
                     }
                     if tableLines.count >= 3, isTableSeparator(tableLines[1]),
-                       let tableAttr = renderMarkdownTable(tableLines) {
+                       let tableAttr = renderMarkdownTable(tableLines)
+                    {
                         result.append(tableAttr)
                         i = j
                         continue
@@ -996,7 +1042,8 @@ struct ActivityLogView: NSViewRepresentable {
                 let align = col < alignments.count ? alignments[col] : .left
                 result.append(makeTableCell(
                     text: cell, table: table, row: 0, column: col,
-                    bg: headerBg, cellFont: boldFont, align: align, border: borderColor))
+                    bg: headerBg, cellFont: boldFont, align: align, border: borderColor
+                ))
             }
 
             let evenBg = NSColor.controlBackgroundColor
@@ -1008,7 +1055,8 @@ struct ActivityLogView: NSViewRepresentable {
                     let align = col < alignments.count ? alignments[col] : .left
                     result.append(makeTableCell(
                         text: cellText, table: table, row: rowIdx + 1, column: col,
-                        bg: bg, cellFont: font, align: align, border: borderColor))
+                        bg: bg, cellFont: font, align: align, border: borderColor
+                    ))
                 }
             }
 
@@ -1021,7 +1069,8 @@ struct ActivityLogView: NSViewRepresentable {
         ) -> NSAttributedString {
             let block = NSTextTableBlock(
                 table: table, startingRow: row, rowSpan: 1,
-                startingColumn: column, columnSpan: 1)
+                startingColumn: column, columnSpan: 1
+            )
             block.backgroundColor = bg
             block.setBorderColor(border)
             block.setWidth(0.5, type: .absoluteValueType, for: .border)
@@ -1187,10 +1236,17 @@ struct ActivityLogView: NSViewRepresentable {
                     let urlRange = match.range(at: 2)
                     let displayText = (text as NSString).substring(with: displayRange)
                     let urlString = (text as NSString).substring(with: urlRange)
-                    let linked = NSMutableAttributedString(string: displayText, attributes: result.attributes(at: match.range.location, effectiveRange: nil))
+                    let linked = NSMutableAttributedString(
+                        string: displayText,
+                        attributes: result.attributes(at: match.range.location, effectiveRange: nil)
+                    )
                     linked.addAttribute(.link, value: urlString, range: NSRange(location: 0, length: displayText.count))
                     linked.addAttribute(.foregroundColor, value: NSColor.linkColor, range: NSRange(location: 0, length: displayText.count))
-                    linked.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: displayText.count))
+                    linked.addAttribute(
+                        .underlineStyle,
+                        value: NSUnderlineStyle.single.rawValue,
+                        range: NSRange(location: 0, length: displayText.count)
+                    )
                     result.replaceCharacters(in: match.range, with: linked)
                 }
             }
@@ -1217,7 +1273,10 @@ struct ActivityLogView: NSViewRepresentable {
             let resultText = result.string
             if resultText.contains(": error:") || resultText.contains(": warning:") || resultText.contains(": note:") {
                 let errorPattern = try? NSRegularExpression(pattern: #"(/[^\s:]+\.\w+):(\d+):(\d+): (error|warning|note):"#)
-                let errorMatches = errorPattern?.matches(in: resultText, range: NSRange(location: 0, length: (resultText as NSString).length)) ?? []
+                let errorMatches = errorPattern?.matches(
+                    in: resultText,
+                    range: NSRange(location: 0, length: (resultText as NSString).length)
+                ) ?? []
                 for match in errorMatches.reversed() {
                     let filePath = (resultText as NSString).substring(with: match.range(at: 1))
                     let line = (resultText as NSString).substring(with: match.range(at: 2))
@@ -1287,7 +1346,8 @@ struct ActivityLogView: NSViewRepresentable {
             if urlString.hasPrefix("xcode://open?") {
                 if let comps = URLComponents(string: urlString),
                    let file = comps.queryItems?.first(where: { $0.name == "file" })?.value,
-                   let line = comps.queryItems?.first(where: { $0.name == "line" })?.value {
+                   let line = comps.queryItems?.first(where: { $0.name == "line" })?.value
+                {
                     let script = "tell application \"Xcode\" to open \"\(file)\""
                     // Open file in Xcode, then jump to line via xed
                     Task { @MainActor in

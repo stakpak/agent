@@ -282,7 +282,9 @@ struct ThinkingIndicatorView: View {
                                     .foregroundStyle(barColor)
                             }
                             .accessibilityLabel("Context usage")
-                            .accessibilityValue("\(Int(fraction * 100)) percent, \(Self.fmtTokens(used)) of \(Self.fmtTokens(contextWindow))")
+                            .accessibilityValue(
+                                "\(Int(fraction * 100)) percent, \(Self.fmtTokens(used)) of \(Self.fmtTokens(contextWindow))"
+                            )
                         }
 
 
@@ -377,7 +379,7 @@ struct ThinkingIndicatorView: View {
         }
         .onReceive(refreshTimer) { _ in
             guard isActive else { return }
-            tick += 1  // Just refresh UI — elapsed is computed from taskStartDate
+            tick += 1 // Just refresh UI — elapsed is computed from taskStartDate
             switch dots.count {
             case 0: dots = "."
             case 1: dots = ".."
@@ -461,12 +463,14 @@ private struct LLMOutputBox: View {
             // Detect table block: header | sep | 1+ data rows
             if i + 2 < lines.count,
                lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("|"),
-               TableRendering.isTableSeparator(lines[i + 1]) {
+               TableRendering.isTableSeparator(lines[i + 1])
+            {
                 let tableStart = i
                 var tableEnd = i + 2
                 while tableEnd < lines.count,
                       lines[tableEnd].trimmingCharacters(in: .whitespaces).hasPrefix("|"),
-                      !TableRendering.isTableSeparator(lines[tableEnd]) {
+                      !TableRendering.isTableSeparator(lines[tableEnd])
+                {
                     tableEnd += 1
                 }
                 // Parse all rows
@@ -572,7 +576,8 @@ private struct LLMOutputBox: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Hide cursor only while actively inside a table (last line starts with |)
         let lastLine = trimmed.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespaces) ?? ""
-        let inTable = lastLine.hasPrefix("|") || lastLine.allSatisfy({ $0 == "-" || $0 == ":" || $0 == "|" || $0 == " " }) && lastLine.contains("-")
+        let inTable = lastLine.hasPrefix("|") || lastLine.allSatisfy({ $0 == "-" || $0 == ":" || $0 == "|" || $0 == " " }) && lastLine
+            .contains("-")
         let cursor = inTable ? "" : (cursorVisible ? "█" : " ")
         let displayText = trimmed.isEmpty ? "" : trimmed + cursor
         VStack(spacing: 0) {
@@ -739,46 +744,46 @@ struct ToolStepsView: View {
 
             if isExpanded {
                 ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(steps.enumerated()), id: \.element.id) { idx, step in
-                    HStack(spacing: 6) {
-                        Text("\(idx + 1)")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 20, alignment: .trailing)
-                        switch step.status {
-                        case .running:
-                            ProgressView().controlSize(.mini)
-                        case .success:
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.green)
-                        case .error:
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.red)
-                        }
-                        Text(step.name)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.primary)
-                        if !step.detail.isEmpty {
-                            Text(step.detail)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        Spacer()
-                        if let d = step.duration {
-                            Text(String(format: "%.1fs", d))
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(steps.enumerated()), id: \.element.id) { idx, step in
+                            HStack(spacing: 6) {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 20, alignment: .trailing)
+                                switch step.status {
+                                case .running:
+                                    ProgressView().controlSize(.mini)
+                                case .success:
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.green)
+                                case .error:
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.red)
+                                }
+                                Text(step.name)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                if !step.detail.isEmpty {
+                                    Text(step.detail)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                if let d = step.duration {
+                                    Text(String(format: "%.1fs", d))
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .padding(.vertical, 1)
                         }
                     }
-                    .padding(.vertical, 1)
-                }
-                }
-                .padding(.top, 2)
+                    .padding(.top, 2)
                 }
                 .frame(maxHeight: min(CGFloat(steps.count) * 18, 200))
             }
@@ -806,7 +811,8 @@ extension LLMOutputBox {
             // Detect table: line starts with |, next line is separator
             if i + 2 < lines.count,
                trimmed.hasPrefix("|"),
-               TerminalNeoRenderer.isTableSeparator(lines[i + 1]) {
+               TerminalNeoRenderer.isTableSeparator(lines[i + 1])
+            {
                 // Flush plain text
                 if !plainLines.isEmpty {
                     chunks.append(TextChunk(text: plainLines.joined(separator: "\n"), isTable: false))
@@ -817,7 +823,8 @@ extension LLMOutputBox {
                 var j = i + 2
                 while j < lines.count,
                       lines[j].trimmingCharacters(in: .whitespaces).hasPrefix("|"),
-                      !TerminalNeoRenderer.isTableSeparator(lines[j]) {
+                      !TerminalNeoRenderer.isTableSeparator(lines[j])
+                {
                     tableLines.append(lines[j])
                     j += 1
                 }

@@ -23,7 +23,10 @@ struct TabBarView: View {
 
                 ForEach(viewModel.scriptTabs) { tab in
                     let isDragging = draggingTabId == tab.id
-                    let color = tab.isMessagesTab ? Color.green : tab.isMainTab ? Color.blue : ContentView.tabColor(for: tab.id, in: viewModel.scriptTabs)
+                    let color = tab.isMessagesTab ? Color.green : tab.isMainTab ? Color.blue : ContentView.tabColor(
+                        for: tab.id,
+                        in: viewModel.scriptTabs
+                    )
                     TabItem(
                         title: tab.displayTitle,
                         isSelected: viewModel.selectedTabId == tab.id,
@@ -105,9 +108,11 @@ private struct TabItem: View {
         .foregroundStyle(isSelected ? tint : .secondary)
         .background(
             Capsule()
-                .fill(isSelected
-                      ? tint.opacity(0.2)
-                      : isHovering ? tint.opacity(0.1) : Color(nsColor: .separatorColor).opacity(0.5))
+                .fill(
+                    isSelected
+                        ? tint.opacity(0.2)
+                        : isHovering ? tint.opacity(0.1) : Color(nsColor: .separatorColor).opacity(0.5)
+                )
         )
         .overlay(
             Capsule()

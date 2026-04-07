@@ -11,18 +11,18 @@ import FoundationModels
 // MARK: - AboutSelf Tool
 
 extension AgentViewModel {
-    
+
     /// Handles the about_self tool - returns information about Agent's capabilities
     func handleAboutSelfTool(name: String, input: [String: Any]) async -> String? {
         guard name == "about_self" else { return nil }
-        
+
         let topic = input["topic"] as? String ?? "all"
         let detail = input["detail"] as? String ?? "standard"
-        
+
         let detailPrefix = detail == "brief" ? "Brief" : detail == "detailed" ? "Detailed" : ""
-        
+
         let aboutText: String
-        
+
         switch topic.lowercased() {
         case "tools":
             aboutText = """
@@ -60,54 +60,54 @@ extension AgentViewModel {
 
             Use list_tools to see all available tools.
             """
-            
+
         case "features":
             aboutText = """
             \(detailPrefix) Agent! Features
-            
+
             CORE FEATURES:
             - Multi-provider LLM support (Claude, OpenAI, Ollama, Apple Intelligence)
             - Streaming output with real-time display
             - Task history with AI-powered summarization
             - Chat history management with persistence
             - Screenshot and image attachment support
-            
+
             AUTOMATION FEATURES:
             - Full TCC permissions (Accessibility, Automation, Screen Recording)
             - ScriptingBridge integration for app control
             - MCP (Model Context Protocol) server support
             - Reusable AgentScripts for complex automation
-            
+
             DEVELOPER FEATURES:
             - Xcode project building and running
             - Git integration for version control
             - Code editing with diff visualization
             - Swift script compilation and execution
-            
+
             UI FEATURES:
             - Native macOS design with split-pane interface
             - Conversation history with task tracking
             - Tab-based workflow for multiple tasks
             - Keyboard shortcuts for efficiency
-            
+
             PRIVACY:
             - All automation runs locally on your Mac
             - API keys stored securely in Keychain
             - No data collection or telemetry
             """
-            
+
         case "scripting":
             aboutText = """
             \(detailPrefix) Agent! Scripting Guide
-            
+
             SWIFT AGENTSCRIPTS:
             Agent! can compile and run Swift scripts with full TCC permissions.
             Scripts are stored in ~/Documents/AgentScript/agents/
-            
+
             Script template:
             ```swift
             import Foundation
-            
+
             @_cdecl("script_main")
             public func scriptMain() -> Int32 {
                 // Your automation code here
@@ -115,13 +115,13 @@ extension AgentViewModel {
                 return 0
             }
             ```
-            
+
             Rules:
             - Use @_cdecl("script_main") and return Int32
             - No exit() calls or top-level code
             - Access arguments via AGENT_SCRIPT_ARGS environment variable
             - Or use JSON files: ~/Documents/AgentScript/json/{Name}_input.json
-            
+
             APPLESCRIPT:
             - applescript_tool (action: execute): Run AppleScript directly
             - applescript_tool (action: save, run, list, delete): Manage saved scripts
@@ -134,11 +134,11 @@ extension AgentViewModel {
             SCRIPTINGBRIDGE:
             - applescript_tool (action: lookup_sdef): Read app dictionaries
             """
-            
+
         case "automation":
             aboutText = """
             \(detailPrefix) Agent! Automation Capabilities
-            
+
             APP CONTROL:
             Agent! can control macOS apps using:
             - applescript_tool (action: execute): AppleScript with full TCC
@@ -169,23 +169,23 @@ extension AgentViewModel {
             No additional permission prompts needed
             Always operate under least privilege — escalate only when necessary
             """
-            
+
         case "coding":
             aboutText = """
             \(detailPrefix) Agent! Coding Assistance
-            
+
             CODE OPERATIONS:
             - Read any text file with line numbers
             - Write new files or edit existing ones
             - Search files by content or pattern
             - Apply diffs for precise changes
-            
+
             GIT WORKFLOW:
             - View status, diffs, and history
             - Stage and commit changes
             - Create and switch branches
             - Apply patches
-            
+
             XCODE INTEGRATION:
             - xcode (action: build): Build projects
             - xcode (action: run): Run apps
@@ -197,7 +197,7 @@ extension AgentViewModel {
             Use file_manager for file operations, git for version control
             Build Xcode projects with xcode (action: build)
             """
-            
+
         default: // "all"
             let aiInsight = await generateAppleAIInsight()
             aboutText = """
@@ -258,7 +258,7 @@ extension AgentViewModel {
             Just tell me what you want done.
             """
         }
-        
+
         return aboutText
     }
 
@@ -267,7 +267,8 @@ extension AgentViewModel {
         guard AppleIntelligenceMediator.isAvailable else { return "" }
         do {
             let session = LanguageModelSession()
-            let prompt = "In one sentence, what's something creative or useful a Mac automation agent could do for the user right now? Be specific and practical. No filler."
+            let prompt =
+                "In one sentence, what's something creative or useful a Mac automation agent could do for the user right now? Be specific and practical. No filler."
             let response = try await session.respond(to: prompt)
             return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {

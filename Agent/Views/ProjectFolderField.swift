@@ -75,9 +75,14 @@ private struct PathTextField: NSViewRepresentable {
             parent.onFocusChange(false)
         }
 
-        func control(_ control: NSControl, textView: NSTextView, completions words: [String],
-                     forPartialWordRange charRange: NSRange,
-                     indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String] {
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            completions words: [String],
+            forPartialWordRange charRange: NSRange,
+            indexOfSelectedItem index: UnsafeMutablePointer<Int>
+        ) -> [String]
+        {
             index.pointee = -1
             return []
         }
@@ -119,106 +124,106 @@ struct ProjectFolderField: View {
 
     var body: some View {
         VStack(spacing: 0) {
-        HStack(spacing: 4) {
-            Button { showTree.toggle() } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: "folder")
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
+            HStack(spacing: 4) {
+                Button { showTree.toggle() } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "folder")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .frame(width: 36)
                 }
-                .frame(width: 36)
-            }
-            .buttonStyle(.bordered)
-            .clipShape(Capsule())
-            .controlSize(.small)
-            .help("Pick project folder")
-            .popover(isPresented: $showTree) {
-                FolderTreePopover(
-                    selectedFolder: projectFolder,
-                    onSelect: selectFolder
-                )
-            }
+                .buttonStyle(.bordered)
+                .clipShape(Capsule())
+                .controlSize(.small)
+                .help("Pick project folder")
+                .popover(isPresented: $showTree) {
+                    FolderTreePopover(
+                        selectedFolder: projectFolder,
+                        onSelect: selectFolder
+                    )
+                }
 
-            Button {
-                let panel = NSOpenPanel()
-                panel.canChooseFiles = false
-                panel.canChooseDirectories = true
-                panel.allowsMultipleSelection = false
-                panel.message = "Select a project folder"
-                if !projectFolder.isEmpty {
-                    panel.directoryURL = URL(fileURLWithPath: Self.resolveToFolder(projectFolder))
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.message = "Select a project folder"
+                    if !projectFolder.isEmpty {
+                        panel.directoryURL = URL(fileURLWithPath: Self.resolveToFolder(projectFolder))
+                    }
+                    if panel.runModal() == .OK, let url = panel.url {
+                        projectFolder = Self.resolveToFolder(url.path)
+                        RecentFoldersService.shared.addFolder(projectFolder)
+                        onFolderSelected?()
+                    }
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                        .frame(width: 36)
                 }
-                if panel.runModal() == .OK, let url = panel.url {
-                    projectFolder = Self.resolveToFolder(url.path)
+                .buttonStyle(.bordered)
+                .clipShape(Capsule())
+                .controlSize(.small)
+                .help("Browse for folder")
+
+                Button {
+                    projectFolder = FileManager.default.homeDirectoryForCurrentUser.path
                     RecentFoldersService.shared.addFolder(projectFolder)
                     onFolderSelected?()
+                } label: {
+                    Image(systemName: "house")
+                        .frame(width: 18)
                 }
-            } label: {
-                Image(systemName: "folder.badge.plus")
-                    .frame(width: 36)
-            }
-            .buttonStyle(.bordered)
-            .clipShape(Capsule())
-            .controlSize(.small)
-            .help("Browse for folder")
+                .buttonStyle(.bordered)
+                .clipShape(Capsule())
+                .controlSize(.small)
+                .help("Home folder")
 
-            Button {
-                projectFolder = FileManager.default.homeDirectoryForCurrentUser.path
-                RecentFoldersService.shared.addFolder(projectFolder)
-                onFolderSelected?()
-            } label: {
-                Image(systemName: "house")
-                    .frame(width: 18)
-            }
-            .buttonStyle(.bordered)
-            .clipShape(Capsule())
-            .controlSize(.small)
-            .help("Home folder")
-
-            Button {
-                projectFolder = ""
-                onFolderSelected?()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
-            }
-            .buttonStyle(.bordered)
-            .clipShape(Capsule())
-            .controlSize(.small)
-            .help("Clear project folder")
-
-            PathTextField(
-                text: $projectFolder,
-                placeholder: "Project folder...",
-                onSubmit: {
-                    if !projectFolder.isEmpty {
-                        projectFolder = Self.resolveToFolder(projectFolder)
-                        RecentFoldersService.shared.addFolder(projectFolder)
-                    }
-                    showRecentFolders = false
+                Button {
+                    projectFolder = ""
                     onFolderSelected?()
-                },
-                onFocusChange: { clicked in
-                    if clicked {
-                        isFieldFocused = true
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            if recentFolders.isEmpty {
-                                showRecentFolders = false
-                            } else {
-                                showRecentFolders.toggle()
-                            }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                }
+                .buttonStyle(.bordered)
+                .clipShape(Capsule())
+                .controlSize(.small)
+                .help("Clear project folder")
+
+                PathTextField(
+                    text: $projectFolder,
+                    placeholder: "Project folder...",
+                    onSubmit: {
+                        if !projectFolder.isEmpty {
+                            projectFolder = Self.resolveToFolder(projectFolder)
+                            RecentFoldersService.shared.addFolder(projectFolder)
                         }
-                    } else {
-                        isFieldFocused = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            if !isFieldFocused {
-                                withAnimation(.easeInOut(duration: 0.2)) { showRecentFolders = false }
+                        showRecentFolders = false
+                        onFolderSelected?()
+                    },
+                    onFocusChange: { clicked in
+                        if clicked {
+                            isFieldFocused = true
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if recentFolders.isEmpty {
+                                    showRecentFolders = false
+                                } else {
+                                    showRecentFolders.toggle()
+                                }
+                            }
+                        } else {
+                            isFieldFocused = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                if !isFieldFocused {
+                                    withAnimation(.easeInOut(duration: 0.2)) { showRecentFolders = false }
+                                }
                             }
                         }
                     }
-                }
-            )
+                )
                 .padding(.leading, 10)
                 .padding(.trailing, 5)
                 .padding(.vertical, 3)
@@ -226,55 +231,55 @@ struct ProjectFolderField: View {
                 .clipShape(Capsule())
                 .overlay(Capsule().stroke(Color.gray.opacity(0.4), lineWidth: 1))
 
-        }
-
-        // Recent folders dropdown (shows when text field is focused)
-        if showRecentFolders && !recentFolders.isEmpty {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(recentFolders, id: \.self) { folder in
-                        Button {
-                            projectFolder = folder
-                            RecentFoldersService.shared.addFolder(folder)
-                            showRecentFolders = false
-                            onFolderSelected?()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "folder.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 16)
-
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text((folder as NSString).lastPathComponent)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .lineLimit(1)
-
-                                    Text(folder)
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .background(folder == projectFolder ? Color.accentColor.opacity(0.15) : Color.clear)
-                        .cornerRadius(4)
-                    }
-                }
-                .padding(4)
             }
-            .frame(maxHeight: min(CGFloat(recentFolders.count) * 44, 200))
-            .background(Color(nsColor: .windowBackgroundColor))
-            .cornerRadius(6)
-            .shadow(radius: 2)
-            .padding(.top, 4)
-            .padding(.horizontal, 12)
-        }
+
+            // Recent folders dropdown (shows when text field is focused)
+            if showRecentFolders && !recentFolders.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(recentFolders, id: \.self) { folder in
+                            Button {
+                                projectFolder = folder
+                                RecentFoldersService.shared.addFolder(folder)
+                                showRecentFolders = false
+                                onFolderSelected?()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "folder.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 16)
+
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text((folder as NSString).lastPathComponent)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .lineLimit(1)
+
+                                        Text(folder)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .background(folder == projectFolder ? Color.accentColor.opacity(0.15) : Color.clear)
+                            .cornerRadius(4)
+                        }
+                    }
+                    .padding(4)
+                }
+                .frame(maxHeight: min(CGFloat(recentFolders.count) * 44, 200))
+                .background(Color(nsColor: .windowBackgroundColor))
+                .cornerRadius(6)
+                .shadow(radius: 2)
+                .padding(.top, 4)
+                .padding(.horizontal, 12)
+            }
 
         } // VStack
         .onAppear {
@@ -330,10 +335,18 @@ private struct FolderTreePopover: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     let home = FileManager.default.homeDirectoryForCurrentUser.path
-                    FolderTreeRow(path: home, name: "Home", depth: 0, selectedFolder: highlighted.isEmpty ? selectedFolder : highlighted, onSelect: { path in
-                        highlighted = path
-                        onSelect(path)
-                    }, onDone: { dismiss() }, startExpanded: true)
+                    FolderTreeRow(
+                        path: home,
+                        name: "Home",
+                        depth: 0,
+                        selectedFolder: highlighted.isEmpty ? selectedFolder : highlighted,
+                        onSelect: { path in
+                            highlighted = path
+                            onSelect(path)
+                        },
+                        onDone: { dismiss() },
+                        startExpanded: true
+                    )
                 }
                 .padding(6)
             }
@@ -355,7 +368,15 @@ private struct FolderTreeRow: View {
     @State private var isExpanded: Bool
     @State private var children: [String]?
 
-    init(path: String, name: String, depth: Int, selectedFolder: String, onSelect: @escaping (String) -> Void, onDone: (() -> Void)? = nil, startExpanded: Bool = false) {
+    init(
+        path: String,
+        name: String,
+        depth: Int,
+        selectedFolder: String,
+        onSelect: @escaping (String) -> Void,
+        onDone: (() -> Void)? = nil,
+        startExpanded: Bool = false
+    ) {
         self.path = path
         self.name = name
         self.depth = depth

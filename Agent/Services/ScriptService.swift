@@ -31,10 +31,10 @@ final class ScriptService: @unchecked Sendable {
     }
 
     // MARK: - Thread Safety
-    
+
     /// Lock to prevent concurrent Package.swift modifications
     let packageLock = NSLock()
-    
+
     /// Serial queue for script compilation (prevents concurrent swift build calls)
     nonisolated static let compilationQueue = DispatchQueue(label: "com.agent.scriptcompilation", qos: .userInitiated)
 

@@ -43,7 +43,8 @@ enum CodingService {
         }
 
         guard let data = FileManager.default.contents(atPath: url.path),
-              let content = String(data: data, encoding: .utf8) else {
+              let content = String(data: data, encoding: .utf8) else
+        {
             return "Error: could not read file (binary or encoding issue): \(path)"
         }
 
@@ -120,7 +121,8 @@ enum CodingService {
             return "Error: file not found: \(path)"
         }
         guard let data = FileManager.default.contents(atPath: url.path),
-              let raw = String(data: data, encoding: .utf8) else {
+              let raw = String(data: data, encoding: .utf8) else
+        {
             return "Error: could not read file: \(path)"
         }
 
@@ -161,7 +163,8 @@ enum CodingService {
             }
         } else if occurrences > 1 && !replaceAll {
             if let context = context, !context.isEmpty,
-               let range = findOccurrenceByContext(in: original, target: needle, context: context) {
+               let range = findOccurrenceByContext(in: original, target: needle, context: context)
+            {
                 matchRange = range
                 matchNote = " (disambiguated by context)"
             } else {
@@ -272,7 +275,7 @@ enum CodingService {
             for start in 0...(contentLines.count - targetLines.count) {
                 let window = contentLines[start..<(start + targetLines.count)]
                 if window.enumerated().allSatisfy({ normalize($0.element) == targetNorm[$0.offset] }) {
-                    let beforeCount = contentLines[..<start].reduce(0) { $0 + $1.count + 1 }  // +1 for \n
+                    let beforeCount = contentLines[..<start].reduce(0) { $0 + $1.count + 1 } // +1 for \n
                     let matchStr = contentLines[start..<(start + targetLines.count)].joined(separator: "\n")
                     let startIdx = content.index(content.startIndex, offsetBy: beforeCount)
                     let endIdx = content.index(startIdx, offsetBy: matchStr.count)
@@ -337,12 +340,20 @@ enum CodingService {
     // MARK: - Diff + Apply (single call)
 
     /// Create a diff and apply it to a file in one call.
-    static func diffAndApply(path: String, source: String?, destination: String, startLine: Int? = nil, endLine: Int? = nil) -> (output: String, display: String) {
+    static func diffAndApply(
+        path: String,
+        source: String?,
+        destination: String,
+        startLine: Int? = nil,
+        endLine: Int? = nil
+    ) -> (output: String, display: String)
+    {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
         // Read the full file
         guard let data = FileManager.default.contents(atPath: url.path),
-              let fullText = String(data: data, encoding: .utf8) else {
+              let fullText = String(data: data, encoding: .utf8) else
+        {
             return ("Error: cannot read \(path)", "")
         }
 
@@ -379,7 +390,13 @@ enum CodingService {
         }
 
         let algorithm = selectDiffAlgorithm(source: actualSource, destination: destination)
-        let diff = MultiLineDiff.createDiff(source: actualSource, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine.map { $0 - 1 })
+        let diff = MultiLineDiff.createDiff(
+            source: actualSource,
+            destination: destination,
+            algorithm: algorithm,
+            includeMetadata: true,
+            sourceStartLine: startLine.map { $0 - 1 }
+        )
         let display = MultiLineDiff.displayDiff(diff: diff, source: actualSource, format: .ai)
         let verified = MultiLineDiff.verifyDiff(diff)
         do {

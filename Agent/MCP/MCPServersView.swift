@@ -17,11 +17,11 @@ struct MCPServersView: View {
             // Header
             Text("MCP Servers")
                 .font(.headline)
-            
+
             Text("Connect external tools via Model Context Protocol.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                    
+
             HStack {
                 Spacer()
                 Button {
@@ -333,7 +333,7 @@ struct MCPServerEditView: View {
     ) -> MCPServerConfig {
         let useHTTP = useHTTPOverride ?? (server?.isHTTP ?? false)
         let name = nameOverride ?? server?.name ?? ""
-        
+
         if useHTTP {
             var config = MCPServerConfig(
                 id: server?.id ?? UUID(),
@@ -539,7 +539,7 @@ struct MCPServerEditView: View {
             return stdioConfig.toJSON()
         }
     }
-    
+
     /// Debug helper: dump all fields from a JSON dict
     private func debugDump(_ dict: [String: Any], prefix: String = "") {
         for (key, value) in dict {
@@ -559,7 +559,8 @@ struct MCPServerEditView: View {
     /// Preserves unsupported fields for export round-tripping
     private func applyJSON(_ json: String) {
         guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
+        {
             jsonError = "Invalid JSON"
             return
         }
@@ -595,7 +596,8 @@ struct MCPServerEditView: View {
         }
 
         guard let dict = innerDict,
-              var config = MCPServerConfig(from: dict) else {
+              var config = MCPServerConfig(from: dict) else
+        {
             jsonError = "Invalid MCP server config"
             return
         }
@@ -623,10 +625,10 @@ struct MCPServerEditView: View {
         }
         enabled = config.enabled
         autoStart = config.autoStart
-        
+
         // Store unsupported fields for round-tripping
         currentUnsupportedFieldsJSON = config.unsupportedFieldsJSON
-        
+
         updatingFromJSON = false
     }
 

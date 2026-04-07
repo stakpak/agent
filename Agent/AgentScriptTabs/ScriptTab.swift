@@ -127,8 +127,8 @@ final class ScriptTab: Identifiable {
     var dripDisplayIndex: Int = 0
     var dripTask: Task<Void, Never>?
     var lastElapsed: Double = 0
-    var taskStartDate: Date?     // Set when task starts, nil when idle
-    var taskElapsed: Double {    // Computes live elapsed — works even when tab is in background
+    var taskStartDate: Date? // Set when task starts, nil when idle
+    var taskElapsed: Double { // Computes live elapsed — works even when tab is in background
         get {
             if let start = taskStartDate, isRunning || isLLMRunning {
                 return Date().timeIntervalSince(start)
@@ -137,7 +137,7 @@ final class ScriptTab: Identifiable {
         }
         set { _taskElapsedFrozen = newValue }
     }
-    var _taskElapsedFrozen: Double = 0  // Stored value when task stops
+    var _taskElapsedFrozen: Double = 0 // Stored value when task stops
     var tabInputTokens: Int = 0
     var tabOutputTokens: Int = 0
     var llmStreamFlushTask: Task<Void, Never>?
@@ -174,19 +174,22 @@ final class ScriptTab: Identifiable {
             self.parentTabId = UUID(uuidString: parentStr)
         }
         if let json = record.promptHistoryJSON, let data = json.data(using: .utf8),
-           let history = try? JSONDecoder().decode([String].self, from: data) {
+           let history = try? JSONDecoder().decode([String].self, from: data)
+        {
             self.promptHistory = history
         }
         if let json = record.taskSummariesJSON, let data = json.data(using: .utf8),
-           let summaries = try? JSONDecoder().decode([String].self, from: data) {
+           let summaries = try? JSONDecoder().decode([String].self, from: data)
+        {
             self.tabTaskSummaries = summaries
         }
         if let json = record.errorsJSON, let data = json.data(using: .utf8),
-           let errors = try? JSONDecoder().decode([String].self, from: data) {
+           let errors = try? JSONDecoder().decode([String].self, from: data)
+        {
             self.tabErrors = errors
         }
         self.rawLLMOutput = record.rawLLMOutput
-        self.displayedLLMOutput = record.rawLLMOutput  // Show full text on restore (no drip)
+        self.displayedLLMOutput = record.rawLLMOutput // Show full text on restore (no drip)
         self.dripDisplayIndex = record.rawLLMOutput.count
         self.lastElapsed = record.lastElapsed
         self.thinkingExpanded = record.thinkingExpanded

@@ -33,10 +33,10 @@ final class ChatTask {
     var prompt: String
     var summary: String?
     var isCancelled: Bool
-    
+
     @Relationship(deleteRule: .cascade)
     var messages: [ChatMessage] = []
-    
+
     init(id: UUID = UUID(), startTime: Date = Date(), prompt: String = "") {
         self.id = id
         self.startTime = startTime
@@ -51,29 +51,43 @@ final class ScriptTabRecord {
     var tabId: UUID
     var scriptName: String
     var activityLog: String
-    var exitCode: Int  // -999 = nil (SwiftData doesn't support optional Int32)
-    var llmConfigJSON: String?       // JSON-encoded LLMConfig for main tabs
-    var parentTabIdString: String?   // UUID string of parent main tab
-    var isMessagesTab: Bool          // Dedicated Messages tab flag
-    var projectFolder: String        // Per-tab project folder
-    var promptHistoryJSON: String?   // JSON-encoded [String] for prompt history
-    var taskSummariesJSON: String?    // JSON-encoded [String] for per-tab task summaries
-    var errorsJSON: String?           // JSON-encoded [String] for per-tab errors
-    var rawLLMOutput: String = ""     // Last LLM Output text
-    var lastElapsed: Double = 0       // Last thinking elapsed seconds
+    var exitCode: Int // -999 = nil (SwiftData doesn't support optional Int32)
+    var llmConfigJSON: String? // JSON-encoded LLMConfig for main tabs
+    var parentTabIdString: String? // UUID string of parent main tab
+    var isMessagesTab: Bool // Dedicated Messages tab flag
+    var projectFolder: String // Per-tab project folder
+    var promptHistoryJSON: String? // JSON-encoded [String] for prompt history
+    var taskSummariesJSON: String? // JSON-encoded [String] for per-tab task summaries
+    var errorsJSON: String? // JSON-encoded [String] for per-tab errors
+    var rawLLMOutput: String = "" // Last LLM Output text
+    var lastElapsed: Double = 0 // Last thinking elapsed seconds
     var thinkingExpanded: Bool = false
     var thinkingOutputExpanded: Bool = false
     var thinkingDismissed: Bool = true
     var tabInputTokens: Int = 0
     var tabOutputTokens: Int = 0
 
-    init(tabId: UUID, scriptName: String, activityLog: String, exitCode: Int = -999,
-         llmConfigJSON: String? = nil, parentTabIdString: String? = nil, isMessagesTab: Bool = false,
-         projectFolder: String = "", promptHistoryJSON: String? = nil,
-         taskSummariesJSON: String? = nil, errorsJSON: String? = nil,
-         rawLLMOutput: String = "", lastElapsed: Double = 0,
-         thinkingExpanded: Bool = false, thinkingOutputExpanded: Bool = false, thinkingDismissed: Bool = true,
-         tabInputTokens: Int = 0, tabOutputTokens: Int = 0) {
+    init(
+        tabId: UUID,
+        scriptName: String,
+        activityLog: String,
+        exitCode: Int = -999,
+        llmConfigJSON: String? = nil,
+        parentTabIdString: String? = nil,
+        isMessagesTab: Bool = false,
+        projectFolder: String = "",
+        promptHistoryJSON: String? = nil,
+        taskSummariesJSON: String? = nil,
+        errorsJSON: String? = nil,
+        rawLLMOutput: String = "",
+        lastElapsed: Double = 0,
+        thinkingExpanded: Bool = false,
+        thinkingOutputExpanded: Bool = false,
+        thinkingDismissed: Bool = true,
+        tabInputTokens: Int = 0,
+        tabOutputTokens: Int = 0
+    )
+    {
         self.tabId = tabId
         self.scriptName = scriptName
         self.activityLog = activityLog
@@ -99,7 +113,7 @@ final class ScriptTabRecord {
 @MainActor
 final class ChatHistoryStore {
     static let shared = ChatHistoryStore()
-    
+
     var container: ModelContainer?
     var context: ModelContext?
 
@@ -108,7 +122,7 @@ final class ChatHistoryStore {
     private var nextOrdinal: Int = 0
     /// Set to true when save has failed fatally — prevents repeated crash attempts
     private var storeDisabled = false
-    
+
     /// Dedicated store file — avoids sharing default.store with TrainingDataStore
     private static var storeURL: URL {
         let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -198,9 +212,9 @@ final class ChatHistoryStore {
             try? fm.removeItem(at: URL(fileURLWithPath: url.path + suffix))
         }
     }
-    
+
     // MARK: - Task Management
-    
+
     /// Start a new task grouping
     @discardableResult
     func startNewTask(prompt: String) -> UUID {
@@ -211,7 +225,7 @@ final class ChatHistoryStore {
         safeSave()
         return task.id
     }
-    
+
     /// End current task with optional summary — crash-safe against stale SwiftData objects.
     /// Does NOT call context.save() — SwiftData auto-saves, and calling save() here
     /// triggers _PFFaultHandlerLookupRow crashes via inverse relationship maintenance
@@ -225,12 +239,12 @@ final class ChatHistoryStore {
         task.isCancelled = cancelled
         // Don't save — SwiftData auto-saves. Explicit save crashes on stale objects.
     }
-    
+
     /// Get the current active task
     var activeTask: ChatTask? { currentTask }
-    
+
     // MARK: - Message Operations
-    
+
     /// Append a message to the current task
     func appendMessage(_ content: String, timestamp: Date = Date()) {
         guard let task = currentTask, task.modelContext != nil else { return }
@@ -246,7 +260,7 @@ final class ChatHistoryStore {
         nextOrdinal += 1
         context?.insert(message)
     }
-    
+
     /// Save pending changes — guarded against stale/deleted managed objects.
     /// Rolls back inserted objects whose relationships point to deleted/faulted
     /// targets, preventing _PFFaultHandlerLookupRow crashes during inverse
@@ -266,7 +280,8 @@ final class ChatHistoryStore {
         for obj in context.insertedModelsArray {
             if let msg = obj as? ChatMessage,
                let task = msg.task,
-               task.modelContext == nil || task.isDeleted {
+               task.modelContext == nil || task.isDeleted
+            {
                 context.delete(msg)
             }
         }
@@ -281,19 +296,19 @@ final class ChatHistoryStore {
 
     /// Alias for save()
     private func safeSave() { save() }
-    
+
     /// Fetch recent tasks with their messages
     func fetchRecentTasks(limit: Int = 3) -> [(task: ChatTask, messages: [ChatMessage])] {
         guard let context else { return [] }
-        
+
         let descriptor = FetchDescriptor<ChatTask>(
             sortBy: [SortDescriptor(\.startTime, order: .reverse)]
         )
-        
+
         do {
             let tasks = try context.fetch(descriptor)
             let recent = Array(tasks.prefix(limit))
-            
+
             return recent.compactMap { task in
                 let sorted = task.messages.sorted {
                     // Primary: ordinal (monotonic insertion order)
@@ -307,7 +322,7 @@ final class ChatHistoryStore {
             return []
         }
     }
-    
+
     // MARK: - UI Display (full messages, never summarized)
 
     /// Build the activity log text for the UI. Always uses full messages — never summaries.
@@ -389,17 +404,31 @@ final class ChatHistoryStore {
 
         return result
     }
-    
+
     // MARK: - Script Tab Persistence
 
     /// Save script tab data to SwiftData. Replaces any existing records.
     func saveScriptTabs(_ tabs: [
-        (id: UUID, scriptName: String, activityLog: String, exitCode: Int32?,
-         llmConfigJSON: String?, parentTabIdString: String?, isMessagesTab: Bool,
-         projectFolder: String, promptHistoryJSON: String?, taskSummariesJSON: String?,
-         errorsJSON: String?, rawLLMOutput: String, lastElapsed: Double,
-         thinkingExpanded: Bool, thinkingOutputExpanded: Bool, thinkingDismissed: Bool,
-         tabInputTokens: Int, tabOutputTokens: Int)
+        (
+            id: UUID,
+            scriptName: String,
+            activityLog: String,
+            exitCode: Int32?,
+            llmConfigJSON: String?,
+            parentTabIdString: String?,
+            isMessagesTab: Bool,
+            projectFolder: String,
+            promptHistoryJSON: String?,
+            taskSummariesJSON: String?,
+            errorsJSON: String?,
+            rawLLMOutput: String,
+            lastElapsed: Double,
+            thinkingExpanded: Bool,
+            thinkingOutputExpanded: Bool,
+            thinkingDismissed: Bool,
+            tabInputTokens: Int,
+            tabOutputTokens: Int
+        )
     ]) {
         guard !storeDisabled, let context else { return }
         // Delete old records
@@ -464,7 +493,7 @@ final class ChatHistoryStore {
             AuditLog.log(.storage, "Failed to recreate store after clear: \(error)")
         }
     }
-    
+
     /// Count total tasks
     func taskCount() -> Int {
         guard let context else { return 0 }
@@ -474,7 +503,7 @@ final class ChatHistoryStore {
             return 0
         }
     }
-    
+
     /// Count total messages
     func messageCount() -> Int {
         guard let context else { return 0 }
@@ -484,34 +513,34 @@ final class ChatHistoryStore {
             return 0
         }
     }
-    
+
     /// Migrate old UserDefaults data to SwiftData (one-time)
     func migrateFromUserDefaults() {
         let key = "agentActivityLog"
         guard let saved = UserDefaults.standard.string(forKey: key),
               !saved.isEmpty else { return }
-        
+
         // Check if we've already migrated
         if UserDefaults.standard.bool(forKey: "agentActivityLogMigrated") {
             return
         }
-        
+
         // Don't migrate if we already have tasks in SwiftData
         if taskCount() > 0 {
             UserDefaults.standard.set(true, forKey: "agentActivityLogMigrated")
             return
         }
-        
+
         let marker = AgentViewModel.newTaskMarker
         let sections = saved.components(separatedBy: marker)
-        
+
         let timestampPattern = #"^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$"#
         guard let regex = try? NSRegularExpression(pattern: timestampPattern) else { return }
-        
+
         for section in sections where !section.isEmpty {
             let lines = section.components(separatedBy: "\n")
             var taskPrompt = "Migrated task"
-            
+
             // First non-timestamp line might be the task description
             for line in lines.prefix(3) {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -520,35 +549,36 @@ final class ChatHistoryStore {
                     break
                 }
             }
-            
+
             let task = ChatTask(prompt: taskPrompt)
             context?.insert(task)
-            
+
             for line in lines {
                 let nsLine = line as NSString
                 let range = NSRange(location: 0, length: nsLine.length)
-                
+
                 if let match = regex.firstMatch(in: line, range: range) {
                     let timeStr = nsLine.substring(with: match.range(at: 1))
                     let content = nsLine.substring(with: match.range(at: 2))
-                    
+
                     // Parse time and create date
                     let parts = timeStr.components(separatedBy: ":")
                     var date = Date()
                     if parts.count == 3,
                        let hour = Int(parts[0]),
                        let minute = Int(parts[1]),
-                       let second = Int(parts[2]) {
+                       let second = Int(parts[2])
+                    {
                         let cal = Calendar.current
                         date = cal.date(bySettingHour: hour, minute: minute, second: second, of: Date()) ?? Date()
                     }
-                    
+
                     let message = ChatMessage(timestamp: date, content: content, task: task)
                     context?.insert(message)
                 }
             }
         }
-        
+
         if !storeDisabled { try? context?.save() }
         UserDefaults.standard.set(true, forKey: "agentActivityLogMigrated")
         AuditLog.log(.storage, "Migrated chat history to SwiftData")

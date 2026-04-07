@@ -22,9 +22,9 @@ final class DiffStore {
 
     private var diffs: [UUID: DiffResult] = [:]
     private var sources: [UUID: String] = [:]
-    private var filePaths: [UUID: String] = [:]             // diff_id → file path it was applied to
-    private var appliedDiffs: [String: [UUID]] = [:]        // file path → stack of applied diff_ids
-    private var editHistory: [String: String] = [:]         // file path → original content before first edit
+    private var filePaths: [UUID: String] = [:] // diff_id → file path it was applied to
+    private var appliedDiffs: [String: [UUID]] = [:] // file path → stack of applied diff_ids
+    private var editHistory: [String: String] = [:] // file path → original content before first edit
 
     private init() {}
 

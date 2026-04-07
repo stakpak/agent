@@ -4,7 +4,7 @@ import AgentTools
 /// A single entry in the model fallback chain.
 struct FallbackEntry: Codable, Identifiable {
     let id: UUID
-    var provider: String   // APIProvider.rawValue
+    var provider: String // APIProvider.rawValue
     var model: String
     var enabled: Bool
 

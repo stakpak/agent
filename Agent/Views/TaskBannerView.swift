@@ -13,7 +13,7 @@ struct TaskBannerView: View {
     let appleAIPrompt: String?
     @Binding var showAppleAIBanner: Bool
     let onCancel: () -> Void
-    
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -31,15 +31,15 @@ struct TaskBannerView: View {
                 }
                 .buttonStyle(.plain)
                 .help("User prompt")
-                
+
                 Text(prompt)
                     .font(.caption)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(.white)
-                
+
                 Spacer()
-                
+
                 Button(action: onCancel) {
                     Label("Cancel", systemImage: "xmark.circle.fill")
                         .font(.caption)
@@ -50,7 +50,7 @@ struct TaskBannerView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(Color.green.opacity(0.7))
-            
+
             // Apple AI prompt row (toggled by tapping person icon)
             if showAppleAIBanner, let aiPrompt = appleAIPrompt {
                 HStack(spacing: 6) {

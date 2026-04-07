@@ -24,7 +24,8 @@ extension AgentViewModel {
                     try process.run()
                     process.waitUntilExit()
                     guard process.terminationStatus == 0,
-                          let data = try? Data(contentsOf: URL(fileURLWithPath: tempPath)) else {
+                          let data = try? Data(contentsOf: URL(fileURLWithPath: tempPath)) else
+                    {
                         continuation.resume(returning: nil)
                         return
                     }
@@ -48,9 +49,15 @@ extension AgentViewModel {
         let newW = Int(CGFloat(image.width) * scale)
         let newH = Int(CGFloat(image.height) * scale)
         guard newW > 0, newH > 0 else { return data }
-        guard let ctx = CGContext(data: nil, width: newW, height: newH, bitsPerComponent: 8,
-                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return data }
+        guard let ctx = CGContext(
+            data: nil,
+            width: newW,
+            height: newH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return data }
         ctx.interpolationQuality = .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: newW, height: newH))
         guard let resized = ctx.makeImage() else { return data }
@@ -67,7 +74,12 @@ extension AgentViewModel {
 
     /// Execute a command via UserService XPC with streaming output.
     /// Falls back to in-process execution when working directory is TCC-protected.
-    func executeViaUserAgent(command: String, workingDirectory: String = "", silent: Bool = false) async -> (status: Int32, output: String) {
+    func executeViaUserAgent(
+        command: String,
+        workingDirectory: String = "",
+        silent: Bool = false
+    ) async -> (status: Int32, output: String)
+    {
         resetStreamCounters()
         userServiceActive = true
         userWasActive = true
@@ -158,7 +170,12 @@ extension AgentViewModel {
 
     /// Run a command in the Agent app process with streaming output.
     /// Inherits TCC permissions (Automation, Accessibility, ScreenRecording).
-    nonisolated static func executeTCCStreaming(command: String, workingDirectory: String = "", onOutput: @escaping @Sendable (String) -> Void) async -> (status: Int32, output: String) {
+    nonisolated static func executeTCCStreaming(
+        command: String,
+        workingDirectory: String = "",
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> (status: Int32, output: String)
+    {
         await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
                 let process = Process()

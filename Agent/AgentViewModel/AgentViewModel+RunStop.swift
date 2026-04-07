@@ -135,7 +135,8 @@ extension AgentViewModel {
         UserDefaults.standard.set(promptHistory, forKey: "agentPromptHistory")
         // Sync to selected tab so arrow keys work — seed from viewModel if tab is empty
         if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId) {
+           let tab = tab(for: selectedId)
+        {
             if tab.promptHistory.isEmpty && !promptHistory.isEmpty {
                 tab.promptHistory = promptHistory
             } else {

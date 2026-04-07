@@ -50,7 +50,8 @@ struct LoRASettingsView: View {
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
                 let count = adapterManager.importJSONL(from: url)
-                alertMessage = count > 0 ? "Imported \(count) training samples from \(url.lastPathComponent)" : "No valid samples found in file."
+                alertMessage = count > 0 ? "Imported \(count) training samples from \(url.lastPathComponent)" :
+                    "No valid samples found in file."
                 showAlert = true
             }
         }
@@ -255,10 +256,12 @@ struct LoRASettingsView: View {
                     .controlSize(.small)
             }
 
-            Text("1. Click a Setup script \u{2192} run it in Terminal\n2. Download toolkit from developer.apple.com\n3. Export JSONL \u{2192} train \u{2192} install .fmadapter")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
+            Text(
+                "1. Click a Setup script \u{2192} run it in Terminal\n2. Download toolkit from developer.apple.com\n3. Export JSONL \u{2192} train \u{2192} install .fmadapter"
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(4)
         }
     }
 }

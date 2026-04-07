@@ -73,9 +73,12 @@ extension ScriptService {
             let path = dir.appendingPathComponent(file).path
             guard let attrs = try? fm.attributesOfItem(atPath: path) else { return nil }
             let name = file.replacingOccurrences(of: ".js", with: "")
-            return ScriptInfo(name: name, path: path,
-                              modifiedDate: attrs[.modificationDate] as? Date ?? Date(),
-                              size: attrs[.size] as? Int ?? 0)
+            return ScriptInfo(
+                name: name,
+                path: path,
+                modifiedDate: attrs[.modificationDate] as? Date ?? Date(),
+                size: attrs[.size] as? Int ?? 0
+            )
         }
     }
 

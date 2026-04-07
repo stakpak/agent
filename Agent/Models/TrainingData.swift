@@ -9,31 +9,31 @@ import AgentAudit
 final class TrainingRecord {
     var id: UUID
     var timestamp: Date
-    
+
     // User input
     var userPrompt: String
-    
+
     // Apple AI mediation (contextual annotations)
-    var appleAIDecision: String?        // Apple AI's clarification/context injection
-    var appleAIAnnotation: String?       // Apple AI's summary/explanation for user
-    
+    var appleAIDecision: String? // Apple AI's clarification/context injection
+    var appleAIAnnotation: String? // Apple AI's summary/explanation for user
+
     // LLM response (full text, not just summary)
     var llmResponse: String?
-    var llmResponseTruncated: Bool      // True if response exceeded max length
-    
+    var llmResponseTruncated: Bool // True if response exceeded max length
+
     // Task outcome
     var taskSummary: String?
-    var commandsExecuted: [String]       // Tools/commands run during task
+    var commandsExecuted: [String] // Tools/commands run during task
     var taskSuccessful: Bool?
-    
+
     // Context for next turn (conversation continuity)
-    var conversationContext: String?    // Running summary passed to next session
-    
+    var conversationContext: String? // Running summary passed to next session
+
     // Metadata
-    var modelUsed: String?              // Which LLM provider was used
-    var toolsUsed: [String]              // List of tools invoked
-    var durationSeconds: Double?        // How long the task took
-    
+    var modelUsed: String? // Which LLM provider was used
+    var toolsUsed: [String] // List of tools invoked
+    var durationSeconds: Double? // How long the task took
+
     init(
         userPrompt: String,
         appleAIDecision: String? = nil,
@@ -65,7 +65,7 @@ final class TrainingRecord {
 @MainActor
 final class TrainingDataStore {
     static let shared = TrainingDataStore()
-    
+
     var container: ModelContainer?
     var context: ModelContext?
 
@@ -135,72 +135,72 @@ final class TrainingDataStore {
             try? fm.removeItem(at: URL(fileURLWithPath: url.path + suffix))
         }
     }
-    
+
     // MARK: - Capture Methods (called during task execution)
-    
+
     /// Start capturing a new task. Call when user submits a prompt.
     func startCapture(userPrompt: String, modelUsed: String? = nil) {
         currentRecord = TrainingRecord(userPrompt: userPrompt, modelUsed: modelUsed)
         startTime = Date()
     }
-    
+
     /// Capture Apple AI's decision/context injection for LLM.
     func captureAppleAIDecision(_ decision: String) {
         currentRecord?.appleAIDecision = String(decision.prefix(1000))
     }
-    
+
     /// Capture Apple AI's annotation shown to user.
     func captureAppleAIAnnotation(_ annotation: String) {
         currentRecord?.appleAIAnnotation = String(annotation.prefix(1000))
     }
-    
+
     /// Capture LLM response text (truncated if too long).
     func captureLLMResponse(_ response: String) {
         let truncated = response.count > Self.maxResponseLength
         currentRecord?.llmResponse = String(response.prefix(Self.maxResponseLength))
         currentRecord?.llmResponseTruncated = truncated
     }
-    
+
     /// Capture a tool/command that was executed.
     func captureToolCall(_ toolName: String) {
         currentRecord?.toolsUsed.append(toolName)
     }
-    
+
     /// Capture a shell command that was run.
     func captureCommand(_ command: String) {
         currentRecord?.commandsExecuted.append(String(command.prefix(200)))
     }
-    
+
     /// Capture conversation context for continuity.
     func captureConversationContext(_ context: String) {
         currentRecord?.conversationContext = String(context.prefix(500))
     }
-    
+
     /// Finish capture and persist the training record.
     func finishCapture(taskSummary: String?, successful: Bool?) {
         guard let record = currentRecord else { return }
-        
+
         record.taskSummary = taskSummary
         record.taskSuccessful = successful
         if let start = startTime {
             record.durationSeconds = Date().timeIntervalSince(start)
         }
-        
+
         context?.insert(record)
         save()
-        
+
         currentRecord = nil
         startTime = nil
     }
-    
+
     /// Cancel the current capture (task failed or was cancelled).
     func cancelCapture() {
         currentRecord = nil
         startTime = nil
     }
-    
+
     // MARK: - Persistence
-    
+
     private func save() {
         guard !storeDisabled, let context else { return }
         do {
@@ -211,9 +211,9 @@ final class TrainingDataStore {
             context.rollback()
         }
     }
-    
+
     // MARK: - Query
-    
+
     /// Fetch recent training records.
     func fetchRecentRecords(limit: Int = 20) -> [TrainingRecord] {
         guard let context else { return [] }
@@ -227,7 +227,7 @@ final class TrainingDataStore {
             return []
         }
     }
-    
+
     /// Count total training records.
     func recordCount() -> Int {
         guard let context else { return 0 }
@@ -237,7 +237,7 @@ final class TrainingDataStore {
             return 0
         }
     }
-    
+
     /// Get all records for export.
     func allRecords() -> [TrainingRecord] {
         guard let context else { return [] }
@@ -250,36 +250,36 @@ final class TrainingDataStore {
             return []
         }
     }
-    
+
     // MARK: - JSONL Export for LoRA Training
-    
+
     /// Export training records as JSONL for Apple Intelligence fine-tuning.
     /// Format matches Apple's training data requirements.
     func exportAsJSONL() -> URL? {
         let records = allRecords()
         guard !records.isEmpty else { return nil }
-        
+
         var lines: [String] = []
-        
+
         for record in records {
             // Build the training example
             // Format: {"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
-            
+
             var userContent = record.userPrompt
-            
+
             // Include Apple AI decision as context if available
             if let decision = record.appleAIDecision, !decision.isEmpty {
                 userContent = "[Context: \(decision)]\n\n\(userContent)"
             }
-            
+
             // Build assistant response
             var assistantContent = ""
-            
+
             // If we have Apple AI annotation, include it as reasoning
             if let annotation = record.appleAIAnnotation, !annotation.isEmpty {
                 assistantContent += "[AI → User] \(annotation)\n\n"
             }
-            
+
             // Include the LLM response
             if let response = record.llmResponse, !response.isEmpty {
                 assistantContent += response
@@ -288,33 +288,34 @@ final class TrainingDataStore {
             } else {
                 assistantContent += "Task completed."
             }
-            
+
             // Include tools used as metadata
             if !record.toolsUsed.isEmpty {
                 assistantContent += "\n\n[Tools: \(record.toolsUsed.joined(separator: ", "))]"
             }
-            
+
             let entry: [String: Any] = [
                 "messages": [
                     ["role": "user", "content": userContent],
                     ["role": "assistant", "content": assistantContent]
                 ]
             ]
-            
+
             if let data = try? JSONSerialization.data(withJSONObject: entry),
-               let line = String(data: data, encoding: .utf8) {
+               let line = String(data: data, encoding: .utf8)
+            {
                 lines.append(line)
             }
         }
-        
+
         guard !lines.isEmpty else { return nil }
-        
+
         let content = lines.joined(separator: "\n")
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let filename = "apple_ai_training_\(formatter.string(from: Date())).jsonl"
         let fileURL = LoRAAdapterManager.jsonlDir.appendingPathComponent(filename)
-        
+
         do {
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             return fileURL
@@ -323,20 +324,20 @@ final class TrainingDataStore {
             return nil
         }
     }
-    
+
     /// Export in Apple's preferred training format (prompt-completion pairs).
     func exportAsPromptCompletion() -> URL? {
         let records = allRecords()
         guard !records.isEmpty else { return nil }
-        
+
         var lines: [String] = []
-        
+
         for record in records {
             var prompt = record.userPrompt
             if let decision = record.appleAIDecision, !decision.isEmpty {
                 prompt = "[Context: \(decision)]\n\n\(prompt)"
             }
-            
+
             var completion = ""
             if let annotation = record.appleAIAnnotation, !annotation.isEmpty {
                 completion += "[AI → User] \(annotation)\n\n"
@@ -346,26 +347,27 @@ final class TrainingDataStore {
             } else if let summary = record.taskSummary, !summary.isEmpty {
                 completion += summary
             }
-            
+
             let entry: [String: Any] = [
                 "prompt": prompt,
                 "completion": completion
             ]
-            
+
             if let data = try? JSONSerialization.data(withJSONObject: entry),
-               let line = String(data: data, encoding: .utf8) {
+               let line = String(data: data, encoding: .utf8)
+            {
                 lines.append(line)
             }
         }
-        
+
         guard !lines.isEmpty else { return nil }
-        
+
         let content = lines.joined(separator: "\n")
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let filename = "apple_ai_prompts_\(formatter.string(from: Date())).jsonl"
         let fileURL = LoRAAdapterManager.jsonlDir.appendingPathComponent(filename)
-        
+
         do {
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             return fileURL
@@ -373,7 +375,7 @@ final class TrainingDataStore {
             return nil
         }
     }
-    
+
     /// Clear all training records.
     func clearAll() {
         guard !storeDisabled, let context else { return }

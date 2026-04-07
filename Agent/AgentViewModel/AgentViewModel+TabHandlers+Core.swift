@@ -16,7 +16,7 @@ extension AgentViewModel {
             let summary = input["summary"] as? String ?? "Done"
             tab.appendLog("✅ Completed: \(summary)")
             tab.flush()
-            
+
             // Apple Intelligence mediator summary (same as main task)
             let mediator = AppleIntelligenceMediator.shared
             if mediator.isEnabled && mediator.showAnnotationsToUser {
@@ -28,7 +28,7 @@ extension AgentViewModel {
                     tab.flush()
                 }
             }
-            
+
             // If this is the Messages tab, reply to the iMessage sender
             if tab.isMessagesTab, let handle = tab.replyHandle {
                 tab.replyHandle = nil
@@ -60,9 +60,9 @@ extension AgentViewModel {
             )
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

@@ -226,9 +226,9 @@ struct SystemPromptsView: View {
 
     private var currentDirty: Bool { isCompact ? isCompactDirty : isFullDirty }
 
-    private let fullColor = Color(red: 0.20, green: 0.90, blue: 0.30)       // Terminal green
+    private let fullColor = Color(red: 0.20, green: 0.90, blue: 0.30) // Terminal green
     private let fullNSColor = NSColor(red: 0.20, green: 0.90, blue: 0.30, alpha: 1.0)
-    private let compactColor = Color(red: 1.0, green: 0.40, blue: 0.60)    // Apple pink
+    private let compactColor = Color(red: 1.0, green: 0.40, blue: 0.60) // Apple pink
     private let compactNSColor = NSColor(red: 1.0, green: 0.40, blue: 0.60, alpha: 1.0)
 
     var body: some View {

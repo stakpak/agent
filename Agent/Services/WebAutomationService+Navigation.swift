@@ -279,7 +279,8 @@ extension WebAutomationService {
         while CFAbsoluteTimeGetCurrent() - start < timeout {
             let js = "(function(){ var el = \(Self.querySelectorWithIframes("'\(escaped)'")); return el ? 'found' : 'waiting'; })()"
             if let result = try? await executeJavaScript(script: js, browser: browserId) as? String,
-               result == "found" {
+               result == "found"
+            {
                 return "Element found: \(selector)"
             }
             try? await Task.sleep(for: .milliseconds(500))
@@ -302,7 +303,8 @@ extension WebAutomationService {
         """
         // First try — element might already exist
         if let result = try? await executeJavaScript(script: js, browser: browserId) as? String,
-           result == "scrolled" {
+           result == "scrolled"
+        {
             return "Scrolled to: \(selector)"
         }
         // Scroll down incrementally to trigger lazy loading
@@ -310,7 +312,8 @@ extension WebAutomationService {
             _ = try? await executeJavaScript(script: "window.scrollBy(0, window.innerHeight * 0.8)", browser: browserId)
             try? await Task.sleep(for: .milliseconds(300))
             if let result = try? await executeJavaScript(script: js, browser: browserId) as? String,
-               result == "scrolled" {
+               result == "scrolled"
+            {
                 return "Scrolled to: \(selector) (after \(i + 1) scroll(s))"
             }
         }
@@ -320,7 +323,14 @@ extension WebAutomationService {
     // MARK: - Select Dropdown
 
     /// Select an option in a <select> dropdown by value, text, or index
-    func selectOption(selector: String, value: String? = nil, text: String? = nil, index: Int? = nil, browser: String? = nil) async -> String {
+    func selectOption(
+        selector: String,
+        value: String? = nil,
+        text: String? = nil,
+        index: Int? = nil,
+        browser: String? = nil
+    ) async -> String
+    {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let escapedSel = Self.escapeJS(selector)
 
@@ -383,13 +393,15 @@ extension WebAutomationService {
             if let k = key {
                 js = "localStorage.getItem('\(Self.escapeJS(k))') || '(not set)'"
             } else {
-                js = "(function(){var r={};for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);r[k]=localStorage.getItem(k);}return JSON.stringify(r);})()"
+                js =
+                    "(function(){var r={};for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);r[k]=localStorage.getItem(k);}return JSON.stringify(r);})()"
             }
         case "sessionStorage":
             if let k = key {
                 js = "sessionStorage.getItem('\(Self.escapeJS(k))') || '(not set)'"
             } else {
-                js = "(function(){var r={};for(var i=0;i<sessionStorage.length;i++){var k=sessionStorage.key(i);r[k]=sessionStorage.getItem(k);}return JSON.stringify(r);})()"
+                js =
+                    "(function(){var r={};for(var i=0;i<sessionStorage.length;i++){var k=sessionStorage.key(i);r[k]=sessionStorage.getItem(k);}return JSON.stringify(r);})()"
             }
         default: // cookies
             js = "document.cookie || '(no cookies)'"

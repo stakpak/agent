@@ -11,7 +11,7 @@ struct ScreenshotPreviewView: View {
     let images: [NSImage]
     let onRemove: (Int) -> Void
     let onRemoveAll: () -> Void
-    
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {

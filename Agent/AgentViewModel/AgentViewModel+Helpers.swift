@@ -157,121 +157,121 @@ extension AgentViewModel {
         switch name {
         case "git":
             switch action {
-            case "status":     return ("git_status", newInput)
-            case "diff":       return ("git_diff", newInput)
-            case "log":        return ("git_log", newInput)
-            case "commit":     return ("git_commit", newInput)
+            case "status": return ("git_status", newInput)
+            case "diff": return ("git_diff", newInput)
+            case "log": return ("git_log", newInput)
+            case "commit": return ("git_commit", newInput)
             case "diff_patch": return ("git_diff_patch", newInput)
-            case "branch":     return ("git_branch", newInput)
-            case "worktree":   return ("git_worktree", newInput)
-            default:           return ("git_status", newInput)
+            case "branch": return ("git_branch", newInput)
+            case "worktree": return ("git_worktree", newInput)
+            default: return ("git_status", newInput)
             }
 
         case "agent_script", "agent":
             switch action {
-            case "list":    return ("list_agents", newInput)
-            case "read":    return ("read_agent", newInput)
-            case "create":  return ("create_agent", newInput)
-            case "update":  return ("update_agent", newInput)
-            case "run":     return ("run_agent", newInput)
-            case "delete":  return ("delete_agent", newInput)
+            case "list": return ("list_agents", newInput)
+            case "read": return ("read_agent", newInput)
+            case "create": return ("create_agent", newInput)
+            case "update": return ("update_agent", newInput)
+            case "run": return ("run_agent", newInput)
+            case "delete": return ("delete_agent", newInput)
             case "combine": return ("combine_agents", newInput)
-            default:        return ("list_agents", newInput)
+            default: return ("list_agents", newInput)
             }
 
         case "applescript", "as":
             switch action {
-            case "execute":     return ("run_applescript", newInput)
+            case "execute": return ("run_applescript", newInput)
             case "lookup_sdef": return ("lookup_sdef", newInput)
-            case "list":        return ("list_apple_scripts", newInput)
-            case "run":         return ("run_apple_script", newInput)
-            case "save":        return ("save_apple_script", newInput)
-            case "delete":      return ("delete_apple_script", newInput)
-            default:            return ("list_apple_scripts", newInput)
+            case "list": return ("list_apple_scripts", newInput)
+            case "run": return ("run_apple_script", newInput)
+            case "save": return ("save_apple_script", newInput)
+            case "delete": return ("delete_apple_script", newInput)
+            default: return ("list_apple_scripts", newInput)
             }
 
         case "javascript", "jxa", "js":
             switch action {
             case "execute": return ("execute_javascript", newInput)
-            case "list":    return ("list_javascript", newInput)
-            case "run":     return ("run_javascript", newInput)
-            case "save":    return ("save_javascript", newInput)
-            case "delete":  return ("delete_javascript", newInput)
-            default:        return ("list_javascript", newInput)
+            case "list": return ("list_javascript", newInput)
+            case "run": return ("run_javascript", newInput)
+            case "save": return ("save_javascript", newInput)
+            case "delete": return ("delete_javascript", newInput)
+            default: return ("list_javascript", newInput)
             }
 
         case "file", "file_manager":
             switch action {
-            case "read":             return ("read_file", newInput)
-            case "write":            return ("write_file", newInput)
-            case "edit":             return ("edit_file", newInput)
-            case "create":           return ("create_diff", newInput)
-            case "apply":            return ("apply_diff", newInput)
-            case "list":             return ("list_files", newInput)
-            case "search":           return ("search_files", newInput)
-            case "read_dir":         return ("list_files", newInput)
-            case "if_to_switch":     return ("if_to_switch", newInput)
+            case "read": return ("read_file", newInput)
+            case "write": return ("write_file", newInput)
+            case "edit": return ("edit_file", newInput)
+            case "create": return ("create_diff", newInput)
+            case "apply": return ("apply_diff", newInput)
+            case "list": return ("list_files", newInput)
+            case "search": return ("search_files", newInput)
+            case "read_dir": return ("list_files", newInput)
+            case "if_to_switch": return ("if_to_switch", newInput)
             case "extract_function": return ("extract_function", newInput)
-            case "undo":             return ("undo_edit", newInput)
-            case "diff_apply":       return ("diff_and_apply", newInput)
-            case "mkdir":            return ("mkdir", newInput)
-            case "cd":               return ("project_folder", ["action": "cd", "path": newInput["path"] as? String ?? "~"])
-            default:                 return ("read_file", newInput)
+            case "undo": return ("undo_edit", newInput)
+            case "diff_apply": return ("diff_and_apply", newInput)
+            case "mkdir": return ("mkdir", newInput)
+            case "cd": return ("project_folder", ["action": "cd", "path": newInput["path"] as? String ?? "~"])
+            default: return ("read_file", newInput)
             }
 
         case "xcode", "xc":
             switch action {
-            case "build":            return ("xcode_build", newInput)
-            case "run":              return ("xcode_run", newInput)
-            case "list_projects":    return ("xcode_list_projects", newInput)
-            case "select_project":   return ("xcode_select_project", newInput)
+            case "build": return ("xcode_build", newInput)
+            case "run": return ("xcode_run", newInput)
+            case "list_projects": return ("xcode_list_projects", newInput)
+            case "select_project": return ("xcode_select_project", newInput)
             case "grant_permission": return ("xcode_grant_permission", newInput)
-            case "add_file":        return ("xcode_add_file", newInput)
-            case "remove_file":     return ("xcode_remove_file", newInput)
-            case "analyze":         return ("xcode_analyze", newInput)
-            case "snippet":         return ("xcode_snippet", newInput)
-            case "code_review":     return ("xcode_code_review", newInput)
-            case "bump_version":    return ("xcode_bump_version", newInput)
-            case "bump_build":      return ("xcode_bump_build", newInput)
-            case "get_version":     return ("xcode_get_version", newInput)
-            default:                return ("xcode_build", newInput)
+            case "add_file": return ("xcode_add_file", newInput)
+            case "remove_file": return ("xcode_remove_file", newInput)
+            case "analyze": return ("xcode_analyze", newInput)
+            case "snippet": return ("xcode_snippet", newInput)
+            case "code_review": return ("xcode_code_review", newInput)
+            case "bump_version": return ("xcode_bump_version", newInput)
+            case "bump_build": return ("xcode_bump_build", newInput)
+            case "get_version": return ("xcode_get_version", newInput)
+            default: return ("xcode_build", newInput)
             }
 
         case "safari", "web", "w":
             switch action {
-            case "open":          return ("web_open", newInput)
-            case "find":          return ("web_find", newInput)
-            case "click":         return ("web_click", newInput)
-            case "type":          return ("web_type", newInput)
-            case "execute_js":    return ("web_execute_js", newInput)
-            case "get_url":       return ("web_get_url", newInput)
-            case "get_title":     return ("web_get_title", newInput)
-            case "read_content":  return ("web_read_content", newInput)
+            case "open": return ("web_open", newInput)
+            case "find": return ("web_find", newInput)
+            case "click": return ("web_click", newInput)
+            case "type": return ("web_type", newInput)
+            case "execute_js": return ("web_execute_js", newInput)
+            case "get_url": return ("web_get_url", newInput)
+            case "get_title": return ("web_get_title", newInput)
+            case "read_content": return ("web_read_content", newInput)
             case "google_search": return ("web_google_search", newInput)
-            case "scroll_to":     return ("web_scroll_to", newInput)
-            case "select":        return ("web_select", newInput)
-            case "submit":        return ("web_submit", newInput)
-            case "navigate":      return ("web_navigate", newInput)
-            case "list_tabs":     return ("web_list_tabs", newInput)
-            case "switch_tab":    return ("web_switch_tab", newInput)
-            case "list_windows":  return ("web_list_windows", newInput)
-            case "scan":          return ("web_scan", newInput)
-            case "search":        return ("web_search", newInput)
-            default:              return ("web_open", newInput)
+            case "scroll_to": return ("web_scroll_to", newInput)
+            case "select": return ("web_select", newInput)
+            case "submit": return ("web_submit", newInput)
+            case "navigate": return ("web_navigate", newInput)
+            case "list_tabs": return ("web_list_tabs", newInput)
+            case "switch_tab": return ("web_switch_tab", newInput)
+            case "list_windows": return ("web_list_windows", newInput)
+            case "scan": return ("web_scan", newInput)
+            case "search": return ("web_search", newInput)
+            default: return ("web_open", newInput)
             }
 
         case "selenium", "sel":
             switch action {
-            case "start":      return ("selenium_start", newInput)
-            case "stop":       return ("selenium_stop", newInput)
-            case "navigate":   return ("selenium_navigate", newInput)
-            case "find":       return ("selenium_find", newInput)
-            case "click":      return ("selenium_click", newInput)
-            case "type":       return ("selenium_type", newInput)
-            case "execute":    return ("selenium_execute", newInput)
+            case "start": return ("selenium_start", newInput)
+            case "stop": return ("selenium_stop", newInput)
+            case "navigate": return ("selenium_navigate", newInput)
+            case "find": return ("selenium_find", newInput)
+            case "click": return ("selenium_click", newInput)
+            case "type": return ("selenium_type", newInput)
+            case "execute": return ("selenium_execute", newInput)
             case "screenshot": return ("selenium_screenshot", newInput)
-            case "wait":       return ("selenium_wait", newInput)
-            default:           return ("selenium_start", newInput)
+            case "wait": return ("selenium_wait", newInput)
+            default: return ("selenium_start", newInput)
             }
 
         case "accessibility", "ax":
@@ -281,40 +281,40 @@ extension AgentViewModel {
                 mapped["action"] = axAction
             }
             switch action {
-            case "list_windows":      return ("ax_list_windows", mapped)
-            case "get_properties":    return ("ax_get_properties", mapped)
-            case "perform_action":    return ("ax_perform_action", mapped)
-            case "type_text":         return ("ax_type_text", mapped)
-            case "click":             return ("ax_click", mapped)
-            case "press_key":         return ("ax_press_key", mapped)
-            case "screenshot":        return ("ax_screenshot", mapped)
-            case "set_properties":    return ("ax_set_properties", mapped)
-            case "find_element":      return ("ax_find_element", mapped)
-            case "click_element":     return ("ax_click_element", mapped)
+            case "list_windows": return ("ax_list_windows", mapped)
+            case "get_properties": return ("ax_get_properties", mapped)
+            case "perform_action": return ("ax_perform_action", mapped)
+            case "type_text": return ("ax_type_text", mapped)
+            case "click": return ("ax_click", mapped)
+            case "press_key": return ("ax_press_key", mapped)
+            case "screenshot": return ("ax_screenshot", mapped)
+            case "set_properties": return ("ax_set_properties", mapped)
+            case "find_element": return ("ax_find_element", mapped)
+            case "click_element": return ("ax_click_element", mapped)
             case "type_into_element": return ("ax_type_into_element", mapped)
-            case "get_children":      return ("ax_get_children", mapped)
-            case "inspect_element":   return ("ax_inspect_element", mapped)
+            case "get_children": return ("ax_get_children", mapped)
+            case "inspect_element": return ("ax_inspect_element", mapped)
             case "get_focused_element": return ("ax_get_focused_element", mapped)
-            case "drag":              return ("ax_drag", mapped)
-            case "wait":              return ("ax_wait_for_element", mapped)
-            case "scroll":            return ("ax_scroll", mapped)
+            case "drag": return ("ax_drag", mapped)
+            case "wait": return ("ax_wait_for_element", mapped)
+            case "scroll": return ("ax_scroll", mapped)
             case "highlight_element": return ("ax_highlight_element", mapped)
             case "scroll_to_element": return ("ax_scroll_to_element", mapped)
-            case "manage_app":        return ("ax_manage_app", mapped)
-            case "show_menu":         return ("ax_show_menu", mapped)
-            case "click_menu_item":   return ("ax_click_menu_item", mapped)
-            case "check_permission":  return ("ax_check_permission", mapped)
+            case "manage_app": return ("ax_manage_app", mapped)
+            case "show_menu": return ("ax_show_menu", mapped)
+            case "click_menu_item": return ("ax_click_menu_item", mapped)
+            case "check_permission": return ("ax_check_permission", mapped)
             case "request_permission": return ("ax_request_permission", mapped)
-            default:                  return ("ax_\(action)", mapped)
+            default: return ("ax_\(action)", mapped)
             }
 
         case "conversation", "chat":
             switch action {
-            case "write":     return ("write_text", newInput)
+            case "write": return ("write_text", newInput)
             case "transform": return ("transform_text", newInput)
-            case "fix":       return ("fix_text", newInput)
-            case "about":     return ("about_self", newInput)
-            default:          return ("about_self", newInput)
+            case "fix": return ("fix_text", newInput)
+            case "about": return ("about_self", newInput)
+            default: return ("about_self", newInput)
             }
 
         default:
@@ -332,7 +332,7 @@ extension AgentViewModel {
         if let dict = value as? [String: Any] { return .object(dict.mapValues { toJSONValue($0) }) }
         return .string(String(describing: value))
     }
-    
+
     /// Generate a short name for auto-saving an AppleScript from its source.
     /// Uses the first meaningful words from the script, capped at 40 chars.
     static func autoScriptName(from source: String) -> String {
@@ -350,7 +350,7 @@ extension AgentViewModel {
             .replacingOccurrences(of: ".", with: "_")
         return name.isEmpty ? "untitled_\(Int(Date().timeIntervalSince1970))" : String(name)
     }
-    
+
     /// Brief one-line summary of a tool call for batch_tools progress display.
     static func briefToolSummary(_ name: String, input: [String: Any]) -> String {
         // Pick the most informative parameter to show
@@ -391,12 +391,12 @@ extension AgentViewModel {
         if lines.count <= count { return text.trimmingCharacters(in: .newlines) }
         return lines.prefix(count).joined(separator: "\n") + "\n..."
     }
-    
+
     /// Wrap text in a markdown code fence with language tag for syntax highlighting.
     static func codeFence(_ text: String, language: String = "") -> String {
         "```\(language)\n\(text.trimmingCharacters(in: .newlines))\n```"
     }
-    
+
     /// Guess language from file extension for syntax highlighting.
     static func langFromPath(_ path: String) -> String {
         let ext = (path as NSString).pathExtension.lowercased()
@@ -423,7 +423,7 @@ extension AgentViewModel {
         default: return ""
         }
     }
-    
+
     /// Validate that a path exists. Returns an error string if invalid, nil if OK.
     static func checkPath(_ path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
@@ -433,7 +433,7 @@ extension AgentViewModel {
         }
         return nil
     }
-    
+
     /// Extract user-directory paths from a shell command for preflight validation.
     /// Catches typos like "/Users/foo/Documets/..." before running the command.
     /// Resolve project folder to a directory (strip filename if path points to a file).
@@ -446,7 +446,7 @@ extension AgentViewModel {
         // Path doesn't exist yet — treat as directory
         return path
     }
-    
+
     /// Prepend `cd <projectFolder> &&` so the shell runs in the right directory.
     /// Skips if folder is empty or command already starts with `cd `.
     static func prependWorkingDirectory(_ command: String, projectFolder: String) -> String {
@@ -454,7 +454,7 @@ extension AgentViewModel {
         let escaped = "'" + projectFolder.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return "cd \(escaped) && \(command)"
     }
-    
+
     /// Extract the target directory from a command starting with `cd `.
     /// Resolves relative paths against the current project folder.
     static func extractCdTarget(_ command: String, relativeTo base: String) -> String? {
@@ -473,7 +473,8 @@ extension AgentViewModel {
         // Strip surrounding quotes
         var cleaned = path
         if (cleaned.hasPrefix("'") && cleaned.hasSuffix("'")) ||
-           (cleaned.hasPrefix("\"") && cleaned.hasSuffix("\"")) {
+            (cleaned.hasPrefix("\"") && cleaned.hasSuffix("\""))
+        {
             cleaned = String(cleaned.dropFirst().dropLast())
         }
         guard !cleaned.isEmpty else { return nil }
@@ -492,7 +493,7 @@ extension AgentViewModel {
         cleaned = (cleaned as NSString).standardizingPath
         return cleaned
     }
-    
+
     /// Intercept shell commands that should use built-in tools instead
     static func suggestTool(_ command: String) -> String? {
         // Let all commands run through the Launch Agent without blocking
@@ -604,7 +605,13 @@ extension AgentViewModel {
 
     /// Handle plan_mode tool calls: create, update, read, list, or delete.
     /// tabName is used as the plan ID — "main" for the main tab, or the tab's display title.
-    static func handlePlanMode(action: String, input: [String: Any], projectFolder: String, tabName: String = "main", userPrompt: String = "") -> String {
+    static func handlePlanMode(
+        action: String,
+        input: [String: Any],
+        projectFolder: String,
+        tabName: String = "main",
+        userPrompt: String = ""
+    ) -> String {
 
         let fm = FileManager.default
         guard let dir = planDir(projectFolder) else {
@@ -671,7 +678,8 @@ extension AgentViewModel {
             let path: String
             if let id = planIdFromInput, !id.isEmpty,
                let p = planFilePath(id, projectFolder: projectFolder),
-               fm.fileExists(atPath: p) {
+               fm.fileExists(atPath: p)
+            {
                 // Explicit plan_id that exists on disk
                 planId = id
                 path = p
@@ -690,7 +698,8 @@ extension AgentViewModel {
             }
             guard fm.fileExists(atPath: path),
                   let data = fm.contents(atPath: path),
-                  let content = String(data: data, encoding: .utf8) else {
+                  let content = String(data: data, encoding: .utf8) else
+            {
                 let available = (try? fm.contentsOfDirectory(atPath: dir))?
                     .filter { $0.hasPrefix("plan_") && $0.hasSuffix(".md") }
                     .map { "plan_id: " + String($0.dropFirst(5).dropLast(3)) }
@@ -711,7 +720,10 @@ extension AgentViewModel {
             var found = false
             for i in 0..<lines.count {
                 let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-                if trimmed.contains(target) && (trimmed.hasPrefix("- [") || trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [⏳]") || trimmed.hasPrefix("- [❌]")) {
+                if trimmed
+                    .contains(target) &&
+                    (trimmed.hasPrefix("- [") || trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [⏳]") || trimmed.hasPrefix("- [❌]"))
+                {
                     if let bracketEnd = lines[i].range(of: "] ") {
                         let rest = String(lines[i][bracketEnd.upperBound...])
                         let indent = String(lines[i].prefix(while: { $0 == " " || $0 == "\t" }))
@@ -763,7 +775,8 @@ extension AgentViewModel {
             let planId: String
             if let id = planIdFromInput, !id.isEmpty,
                let p = planFilePath(id, projectFolder: projectFolder),
-               fm.fileExists(atPath: p) {
+               fm.fileExists(atPath: p)
+            {
                 // Explicit plan_id that exists on disk
                 planId = id
                 path = p
@@ -782,7 +795,8 @@ extension AgentViewModel {
             }
             guard fm.fileExists(atPath: path),
                   let data = fm.contents(atPath: path),
-                  let content = String(data: data, encoding: .utf8) else {
+                  let content = String(data: data, encoding: .utf8) else
+            {
                 // Include available plans in error so LLM can self-correct
                 let available = (try? fm.contentsOfDirectory(atPath: dir))?
                     .filter { $0.hasPrefix("plan_") && $0.hasSuffix(".md") }
@@ -806,7 +820,8 @@ extension AgentViewModel {
                 if let data = fm.contents(atPath: path),
                    let content = String(data: data, encoding: .utf8),
                    let firstLine = content.components(separatedBy: "\n").first,
-                   firstLine.hasPrefix("# ") {
+                   firstLine.hasPrefix("# ")
+                {
                     title = String(firstLine.dropFirst(2))
                 } else {
                     title = id

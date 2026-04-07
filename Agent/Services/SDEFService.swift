@@ -143,7 +143,8 @@ final class SDEFService: @unchecked Sendable {
             return nil
         }
         guard let data = try? Data(contentsOf: url),
-              let doc = try? JSONDecoder().decode(SDEFDocument.self, from: data) else {
+              let doc = try? JSONDecoder().decode(SDEFDocument.self, from: data) else
+        {
             return nil
         }
         cache[name] = doc
@@ -161,7 +162,8 @@ final class SDEFService: @unchecked Sendable {
     /// List all available SDEF names.
     func availableSDEFs() -> [String] {
         guard let url = Bundle.main.url(forResource: "SDEFs", withExtension: nil),
-              let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else {
+              let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else
+        {
             return []
         }
         return files.filter { $0.hasSuffix(".json") }

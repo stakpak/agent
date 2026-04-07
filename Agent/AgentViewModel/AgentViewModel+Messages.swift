@@ -126,16 +126,16 @@ extension AgentViewModel {
     }
 
     // MARK: - Progress Updates for Long-Running Tasks
-    
+
     /// Start periodic progress updates via iMessage for long-running tasks.
     /// Sends an update every 10 minutes with elapsed time and current status.
     func startProgressUpdates(for taskDescription: String) {
         stopProgressUpdates() // Cancel any existing updates
-        
+
         currentTaskDescription = taskDescription
         taskStartTime = Date()
         progressUpdateCount = 0
-        
+
         progressUpdateTask = Task { [weak self] in
             while !Task.isCancelled {
                 // Wait 10 minutes between updates
@@ -144,9 +144,9 @@ extension AgentViewModel {
                 } catch {
                     break // Task cancelled
                 }
-                
+
                 guard let self = self, self.isRunning else { break }
-                
+
                 self.progressUpdateCount += 1
                 let elapsed: String
                 if let startTime = self.taskStartTime {
@@ -161,7 +161,7 @@ extension AgentViewModel {
                 } else {
                     elapsed = "unknown"
                 }
-                
+
                 let statusMessage: String
                 if self.isThinking {
                     statusMessage = "thinking..."
@@ -170,14 +170,14 @@ extension AgentViewModel {
                 } else {
                     statusMessage = "processing..."
                 }
-                
+
                 // Send progress update
                 let update = "⏳ Progress: \(elapsed) elapsed, \(statusMessage) (update #\(self.progressUpdateCount))"
                 self.sendProgressUpdate(update)
             }
         }
     }
-    
+
     /// Stop progress updates when task completes or is cancelled.
     func stopProgressUpdates() {
         progressUpdateTask?.cancel()
@@ -186,7 +186,7 @@ extension AgentViewModel {
         progressUpdateCount = 0
         currentTaskDescription = ""
     }
-    
+
     /// Send a progress update message via iMessage.
     func sendProgressUpdate(_ message: String) {
         guard let handle = agentReplyHandle else { return }
@@ -244,8 +244,8 @@ extension AgentViewModel {
     nonisolated static func hasAgentPrefix(_ text: String) -> Bool {
         let lower = text.lowercased()
         guard lower.hasPrefix("agent") else { return false }
-        let after = lower.index(lower.startIndex, offsetBy: 5)  // 5 = len("agent")
-        guard after < lower.endIndex else { return true }       // bare "agent"
+        let after = lower.index(lower.startIndex, offsetBy: 5) // 5 = len("agent")
+        guard after < lower.endIndex else { return true } // bare "agent"
         let nextChar = lower[after]
         return nextChar == "!" || nextChar == " " || nextChar == "\t" || nextChar == "\n"
     }
@@ -276,8 +276,8 @@ extension AgentViewModel {
         let whereClause: String
         switch filter {
         case .fromOthers: whereClause = "m.ROWID > ?1 AND m.is_from_me = 0"
-        case .fromMe:     whereClause = "m.ROWID > ?1 AND m.is_from_me = 1"
-        case .noFilter:   whereClause = "m.ROWID > ?1"
+        case .fromMe: whereClause = "m.ROWID > ?1 AND m.is_from_me = 1"
+        case .noFilter: whereClause = "m.ROWID > ?1"
         }
 
         let sql = """
@@ -321,7 +321,15 @@ extension AgentViewModel {
                 }
             }
 
-            results.append(RawMessage(rowid: rowid, text: text ?? "", handleId: handleId, handleRowId: handleRowId, chatId: chatId, service: service, account: account))
+            results.append(RawMessage(
+                rowid: rowid,
+                text: text ?? "",
+                handleId: handleId,
+                handleRowId: handleRowId,
+                chatId: chatId,
+                service: service,
+                account: account
+            ))
         }
         return results
     }
@@ -363,8 +371,8 @@ extension AgentViewModel {
     var filteredRecipients: [MessageRecipient] {
         switch messageFilter {
         case .fromOthers: return messageRecipients.filter { !$0.fromMe }
-        case .fromMe:     return messageRecipients.filter { $0.fromMe }
-        case .noFilter:   return messageRecipients
+        case .fromMe: return messageRecipients.filter { $0.fromMe }
+        case .noFilter: return messageRecipients
         }
     }
 

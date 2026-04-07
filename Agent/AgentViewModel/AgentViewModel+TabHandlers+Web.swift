@@ -13,7 +13,8 @@ extension AgentViewModel {
         switch name {
         case "web_open":
             guard let urlString = input["url"] as? String,
-                  let url = URL(string: urlString) else {
+                  let url = URL(string: urlString) else
+            {
                 let errorMsg = "Error: Invalid or missing URL"
                 tab.appendLog(errorMsg)
                 return TabToolResult(
@@ -46,7 +47,8 @@ extension AgentViewModel {
             tab.appendLog("🔍 \(selector)...")
             tab.flush()
             // If it looks like plain text (not CSS selector), search for clickable elements containing that text
-            let isPlainText = !selector.contains(".") && !selector.contains("#") && !selector.contains("[") && !selector.contains(":") && !selector.contains("/") && !selector.contains(">")
+            let isPlainText = !selector.contains(".") && !selector.contains("#") && !selector.contains("[") && !selector
+                .contains(":") && !selector.contains("/") && !selector.contains(">")
             var resultContent = ""
             if isPlainText {
                 // Use JS to find elements containing the text
@@ -72,7 +74,9 @@ extension AgentViewModel {
                     return matches;
                 })())
                 """
-                if let result = try? await WebAutomationService.shared.executeJavaScript(script: js) as? String, !result.isEmpty, result != "[]" {
+                if let result = try? await WebAutomationService.shared.executeJavaScript(script: js) as? String, !result.isEmpty,
+                   result != "[]"
+                {
                     resultContent = result
                     tab.appendLog(result)
                 } else {
@@ -88,7 +92,8 @@ extension AgentViewModel {
                         fuzzyThreshold: fuzzyThreshold, appBundleId: appBundleId
                     )
                     if let jsonData = try? JSONSerialization.data(withJSONObject: output, options: .prettyPrinted),
-                       let jsonStr = String(data: jsonData, encoding: .utf8) {
+                       let jsonStr = String(data: jsonData, encoding: .utf8)
+                    {
                         resultContent = jsonStr
                         tab.appendLog(jsonStr)
                     } else {
@@ -261,7 +266,13 @@ extension AgentViewModel {
             let browser = input["browser"] as? String
             tab.appendLog("☑️ \(selector)...")
             tab.flush()
-            let output = await WebAutomationService.shared.selectOption(selector: selector, value: value, text: text, index: index, browser: browser)
+            let output = await WebAutomationService.shared.selectOption(
+                selector: selector,
+                value: value,
+                text: text,
+                index: index,
+                browser: browser
+            )
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
@@ -370,9 +381,9 @@ extension AgentViewModel {
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": elements], isComplete: false)
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

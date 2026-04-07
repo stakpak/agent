@@ -54,20 +54,26 @@ struct DependencyOverlay: View {
                         .foregroundColor(.secondary)
                         .padding(.top, 4)
 
-                    row(ok: status.xcodeTools,
+                    row(
+                        ok: status.xcodeTools,
                         name: "Xcode Command Line Tools",
                         hint: "xcode-select --install",
-                        show: showRow1)
+                        show: showRow1
+                    )
 
-                    row(ok: status.clang,
+                    row(
+                        ok: status.clang,
                         name: "Clang Compiler",
                         hint: "Installed with Xcode CLT",
-                        show: showRow2)
+                        show: showRow2
+                    )
 
-                    rowWithStatus(ok: status.appleIntelligence,
-                                  name: "Apple Intelligence",
-                                  status: status.appleIntelligenceStatus,
-                                  show: showRow3)
+                    rowWithStatus(
+                        ok: status.appleIntelligence,
+                        name: "Apple Intelligence",
+                        status: status.appleIntelligenceStatus,
+                        show: showRow3
+                    )
 
                     if !status.allGood {
                         HStack {

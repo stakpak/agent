@@ -31,9 +31,11 @@ struct RollbackView: View {
                 Text("File Backups")
                     .font(.headline)
                 Spacer()
-                Text("\(groupedBackups.count) file\(groupedBackups.count == 1 ? "" : "s"), \(totalVersions) version\(totalVersions == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "\(groupedBackups.count) file\(groupedBackups.count == 1 ? "" : "s"), \(totalVersions) version\(totalVersions == 1 ? "" : "s")"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             if backups.isEmpty {

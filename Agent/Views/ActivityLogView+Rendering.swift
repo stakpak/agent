@@ -53,12 +53,21 @@ class CopyButtonCell: NSTextAttachmentCell {
         emoji.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
     }
 
-    override func wantsToTrackMouse(for theEvent: NSEvent, in cellFrame: NSRect,
-                                     of controlView: NSView?, atCharacterIndex charIndex: Int) -> Bool { true }
+    override func wantsToTrackMouse(
+        for theEvent: NSEvent,
+        in cellFrame: NSRect,
+        of controlView: NSView?,
+        atCharacterIndex charIndex: Int
+    ) -> Bool { true }
 
-    override func trackMouse(with theEvent: NSEvent, in cellFrame: NSRect,
-                              of controlView: NSView?, atCharacterIndex charIndex: Int,
-                              untilMouseUp flag: Bool) -> Bool {
+    override func trackMouse(
+        with theEvent: NSEvent,
+        in cellFrame: NSRect,
+        of controlView: NSView?,
+        atCharacterIndex charIndex: Int,
+        untilMouseUp flag: Bool
+    ) -> Bool
+    {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(codeText, forType: .string)
         // Brief flash feedback

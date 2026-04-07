@@ -62,50 +62,54 @@ struct InputSectionView: View {
                     }())
                 }
 
-                TextField(tab.isMainTab ? "Enter task..." : tab.isMessagesTab ? "Messages task..." : "Ask about \(tab.scriptName)...", text: Binding(
-                    get: { tab.taskInput },
-                    set: { tab.taskInput = $0 }
-                ), axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 7)
-                    .background(Color(nsColor: .controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.4), lineWidth: 1))
-                    .lineLimit(2...16)
-                    .background(GeometryReader { geo in
-                        Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
-                            viewModel.inputFieldWidth = w - 14 // minus horizontal padding
-                        }
-                    })
-                    .onKeyPress(.tab) {
-                        if showSuggestions && !suggestions.isEmpty {
-                            let idx = min(selectedSuggestionIndex, suggestions.count - 1)
-                            tab.taskInput = suggestions[idx]
-                            showSuggestions = false
-                            return .handled
-                        }
-                        return .ignored
+                TextField(
+                    tab.isMainTab ? "Enter task..." : tab.isMessagesTab ? "Messages task..." : "Ask about \(tab.scriptName)...",
+                    text: Binding(
+                        get: { tab.taskInput },
+                        set: { tab.taskInput = $0 }
+                    ),
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 7)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.4), lineWidth: 1))
+                .lineLimit(2...16)
+                .background(GeometryReader { geo in
+                    Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
+                        viewModel.inputFieldWidth = w - 14 // minus horizontal padding
                     }
-                    .onKeyPress(.escape) {
-                        if showSuggestions {
-                            showSuggestions = false
-                            return .handled
-                        }
-                        return .ignored
-                    }
-                    .onChange(of: tab.taskInput) { _, newValue in
-                        selectedSuggestionIndex = 0
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            showSuggestions = viewModel.taskAutoComplete && !newValue.isEmpty && !suggestions.isEmpty
-                        }
-                    }
-                    .onSubmit {
+                })
+                .onKeyPress(.tab) {
+                    if showSuggestions && !suggestions.isEmpty {
+                        let idx = min(selectedSuggestionIndex, suggestions.count - 1)
+                        tab.taskInput = suggestions[idx]
                         showSuggestions = false
-                        if !tab.taskInput.isEmpty {
-                            viewModel.runTabTask(tab: tab)
-                        }
+                        return .handled
                     }
+                    return .ignored
+                }
+                .onKeyPress(.escape) {
+                    if showSuggestions {
+                        showSuggestions = false
+                        return .handled
+                    }
+                    return .ignored
+                }
+                .onChange(of: tab.taskInput) { _, newValue in
+                    selectedSuggestionIndex = 0
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        showSuggestions = viewModel.taskAutoComplete && !newValue.isEmpty && !suggestions.isEmpty
+                    }
+                }
+                .onSubmit {
+                    showSuggestions = false
+                    if !tab.taskInput.isEmpty {
+                        viewModel.runTabTask(tab: tab)
+                    }
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 14)
@@ -295,7 +299,7 @@ struct InputSectionView: View {
                     .buttonStyle(.plain)
                     .background(
                         hoveredSuggestionIndex == idx ? Color.blue.opacity(0.2) :
-                        idx == selectedSuggestionIndex ? Color.accentColor.opacity(0.15) : Color.clear
+                            idx == selectedSuggestionIndex ? Color.accentColor.opacity(0.15) : Color.clear
                     )
                     .onHover { hovering in
                         hoveredSuggestionIndex = hovering ? idx : -1
@@ -393,17 +397,21 @@ struct InputSectionView: View {
 
                 Button { viewModel.toggleHotwordListening() } label: {
                     Image(systemName: viewModel.isHotwordListening ? "waveform.circle.fill" : "waveform.circle")
-                        .foregroundStyle(viewModel.isHotwordListening
-                            ? (viewModel.isHotwordCapturing ? Color.green : Color.orange)
-                            : .primary)
+                        .foregroundStyle(
+                            viewModel.isHotwordListening
+                                ? (viewModel.isHotwordCapturing ? Color.green : Color.orange)
+                                : .primary
+                        )
                         .frame(width: buttonWidth)
                 }
                 .buttonStyle(.bordered)
                 .clipShape(Capsule())
                 .controlSize(.small)
-                .help(viewModel.isHotwordListening
-                    ? (viewModel.isHotwordCapturing ? "Capturing command..." : "Listening for \"Agent!\" — click to stop")
-                    : "Say \"Agent!\" to send a voice command")
+                .help(
+                    viewModel.isHotwordListening
+                        ? (viewModel.isHotwordCapturing ? "Capturing command..." : "Listening for \"Agent!\" — click to stop")
+                        : "Say \"Agent!\" to send a voice command"
+                )
                 .accessibilityLabel("Hotword")
                 .accessibilityValue(viewModel.isHotwordListening ? (viewModel.isHotwordCapturing ? "Capturing" : "Listening") : "Off")
             }

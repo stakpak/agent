@@ -47,7 +47,9 @@ final class OllamaService {
         if let override = overrideSystemPrompt { return override }
         var prompt = SystemPromptService.shared.prompt(for: provider, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {
-            prompt = "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" + prompt
+            prompt =
+                "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" +
+                prompt
         }
         if supportsVision {
             prompt += "\nYou have VISION. When images are attached, you can see and analyze them."
@@ -80,7 +82,8 @@ final class OllamaService {
                 result[i]["content"] = prefix + text
             } else if var blocks = result[i]["content"] as? [[String: Any]],
                       let first = blocks.first, first["type"] as? String == "text",
-                      let existing = first["text"] as? String {
+                      let existing = first["text"] as? String
+            {
                 blocks[0]["text"] = prefix + existing
                 result[i]["content"] = blocks
             }
@@ -91,7 +94,12 @@ final class OllamaService {
 
     /// Send messages via OpenAI-compatible chat completions API.
     /// Translates response into the same format as ClaudeService for the task loop.
-    func send(messages: [[String: Any]], activeGroups: Set<String>? = nil) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
+    func send(
+        messages: [[String: Any]],
+        activeGroups: Set<String>? = nil
+    ) async throws
+        -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
+    {
         // Convert Claude-format messages to OpenAI-format
         var chatMessages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt]
@@ -122,11 +130,13 @@ final class OllamaService {
                         var images: [String] = []
                         for block in blocks {
                             if block["type"] as? String == "text",
-                               let t = block["text"] as? String {
+                               let t = block["text"] as? String
+                            {
                                 text += t
                             } else if block["type"] as? String == "image",
                                       let source = block["source"] as? [String: Any],
-                                      let base64 = source["data"] as? String {
+                                      let base64 = source["data"] as? String
+                            {
                                 images.append(base64)
                             }
                         }
@@ -245,11 +255,13 @@ final class OllamaService {
                         var images: [String] = []
                         for block in blocks {
                             if block["type"] as? String == "text",
-                               let t = block["text"] as? String {
+                               let t = block["text"] as? String
+                            {
                                 text += t
                             } else if block["type"] as? String == "image",
                                       let source = block["source"] as? [String: Any],
-                                      let base64 = source["data"] as? String {
+                                      let base64 = source["data"] as? String
+                            {
                                 images.append(base64)
                             }
                         }
@@ -396,7 +408,8 @@ final class OllamaService {
                 // Extract text before the first <function_calls> or <invoke tag
                 let cleaned = text.replacingOccurrences(of: "｜DSML｜", with: "").replacingOccurrences(of: "|DSML|", with: "")
                 if let markerStart = cleaned.range(of: "<function_calls>") ?? cleaned.range(of: "<invoke") {
-                    let beforeText = String(cleaned[cleaned.startIndex..<markerStart.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let beforeText = String(cleaned[cleaned.startIndex..<markerStart.lowerBound])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
                     if !beforeText.isEmpty {
                         contentBlocks.append(["type": "text", "text": beforeText])
                     }
@@ -442,11 +455,15 @@ final class OllamaService {
                 if let args = function["arguments"] as? [String: Any] {
                     input = args
                 } else if let argsString = function["arguments"] as? String,
-                          let parsed = try? JSONSerialization.jsonObject(with: Data(argsString.utf8)) as? [String: Any] {
+                          let parsed = try? JSONSerialization.jsonObject(with: Data(argsString.utf8)) as? [String: Any]
+                {
                     input = parsed
                 } else {
                     let funcName = function["name"] as? String ?? "unknown"
-                    AuditLog.log(.api, "[OllamaService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))")
+                    AuditLog.log(
+                        .api,
+                        "[OllamaService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))"
+                    )
                     input = [:]
                 }
 
@@ -502,7 +519,7 @@ final class OllamaService {
         var contentBlocks: [[String: Any]] = []
         let stopReason = "end_turn"
         var insideToolCall = false
-        var pendingBuffer = ""  // Buffer text that might be the start of a tool call
+        var pendingBuffer = "" // Buffer text that might be the start of a tool call
         var repetitionCount = 0
         var lastSegment = ""
         var streamInputTokens = 0
@@ -512,14 +529,16 @@ final class OllamaService {
         for try await line in bytes.lines {
             guard !line.isEmpty,
                   let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
+            {
                 continue
             }
 
             // Each line has: {"message": {"content": "...", "role": "assistant"}, "done": false}
             if let message = json["message"] as? [String: Any],
                let content = message["content"] as? String,
-               !content.isEmpty {
+               !content.isEmpty
+            {
                 fullText += content
 
                 // Repetition detection: if the model keeps emitting the same ~50 char segment, bail out
@@ -571,7 +590,8 @@ final class OllamaService {
                     insideToolCall = true
                     // Flush any text before the marker
                     if let range = check.range(of: marker) {
-                        let before = String(pendingBuffer[pendingBuffer.startIndex..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let before = String(pendingBuffer[pendingBuffer.startIndex..<range.lowerBound])
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
                         if !before.isEmpty { onTextDelta(before) }
                     }
                     pendingBuffer = ""
@@ -580,7 +600,7 @@ final class OllamaService {
 
                 // If buffer might be the start of a tag, hold it back
                 if check.contains("<") {
-                    continue  // Keep buffering — might be XML tag
+                    continue // Keep buffering — might be XML tag
                 }
 
                 // If buffer ends with (or contains) a known tool name, hold it back
@@ -595,7 +615,7 @@ final class OllamaService {
                         }
                     }
                     if containsToolName {
-                        continue  // Keep buffering — waiting for '{'
+                        continue // Keep buffering — waiting for '{'
                     }
                 }
 
@@ -606,10 +626,12 @@ final class OllamaService {
 
             // Check for tool calls in streaming response
             if let message = json["message"] as? [String: Any],
-               let toolCalls = message["tool_calls"] as? [[String: Any]] {
+               let toolCalls = message["tool_calls"] as? [[String: Any]]
+            {
                 for toolCall in toolCalls {
                     if let function = toolCall["function"] as? [String: Any],
-                       let name = function["name"] as? String {
+                       let name = function["name"] as? String
+                    {
                         let id = toolCall["id"] as? String ?? "call_\(UUID().uuidString.prefix(8).lowercased())"
                         let input = function["arguments"] as? [String: Any] ?? [:]
                         contentBlocks.append([
@@ -744,7 +766,8 @@ final class OllamaService {
                 if !funcName.isEmpty {
                     var params: [String: Any] = [:]
                     if let data = argsText.data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    {
                         params = json
                     }
                     results.append((funcName, params))
@@ -753,7 +776,8 @@ final class OllamaService {
             // Legacy format: {"name": "...", "parameters": {...}}
             else if let data = rawContent.data(using: .utf8),
                     let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    let name = json["name"] as? String {
+                    let name = json["name"] as? String
+            {
                 let params = json["parameters"] as? [String: Any]
                     ?? json["arguments"] as? [String: Any]
                     ?? [:]
@@ -814,7 +838,8 @@ final class OllamaService {
                     } else {
                         // Try to parse as JSON value (number, bool, object, array)
                         if let data = value.data(using: .utf8),
-                           let parsed = try? JSONSerialization.jsonObject(with: data) {
+                           let parsed = try? JSONSerialization.jsonObject(with: data)
+                        {
                             params[key] = parsed
                         } else {
                             params[key] = value
@@ -828,7 +853,8 @@ final class OllamaService {
                 let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmedBody.hasPrefix("{"),
                    let data = trimmedBody.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                {
                     params = json
                 }
             }

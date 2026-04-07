@@ -9,11 +9,11 @@ struct MessagesView: View {
             // Header
             Text("Messages Monitor")
                 .font(.headline)
-            
+
             Text("Monitor iMessage for \"Agent!\" commands.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
             HStack {
                 Picker("Active", selection: $viewModel.messageFilter) {
                     ForEach(AgentViewModel.MessageFilter.allCases, id: \.self) { filter in
@@ -21,9 +21,9 @@ struct MessagesView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                
+
                 Spacer()
-                
+
                 Toggle("", isOn: $viewModel.messagesMonitorEnabled)
                     .toggleStyle(.switch)
                     .controlSize(.mini)

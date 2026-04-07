@@ -50,10 +50,10 @@ final class AgentsMenuDelegate: NSObject, NSMenuDelegate {
             let statusColor: NSColor = {
                 guard let latest = group.first else { return .labelColor }
                 switch latest.status {
-                case .success:   return .systemGreen
+                case .success: return .systemGreen
                 case .cancelled: return .systemOrange
-                case .failed:    return .systemRed
-                case .pending:   return .labelColor
+                case .failed: return .systemRed
+                case .pending: return .labelColor
                 }
             }()
             let agentItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -150,7 +150,8 @@ final class AgentsMenuDelegate: NSObject, NSMenuDelegate {
         guard let prompt = sender.representedObject as? String,
               let vm = viewModel else { return }
         if let selId = vm.selectedTabId,
-           let tab = vm.tab(for: selId) {
+           let tab = vm.tab(for: selId)
+        {
             tab.taskInput = prompt
         } else {
             vm.taskInput = prompt

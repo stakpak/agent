@@ -62,7 +62,8 @@ extension AgentViewModel {
             }
             tab.appendLog("📖 SDEF: \(bundleID)\(className.map { " → \($0)" } ?? "")")
             let preview = output.components(separatedBy: "\n").prefix(20).joined(separator: "\n")
-            let truncated = output.components(separatedBy: "\n").count > 20 ? "\n... (\(output.components(separatedBy: "\n").count) lines total)" : ""
+            let truncated = output.components(separatedBy: "\n")
+                .count > 20 ? "\n... (\(output.components(separatedBy: "\n").count) lines total)" : ""
             tab.appendLog(preview + truncated)
             tab.flush()
             return TabToolResult(
@@ -91,9 +92,9 @@ extension AgentViewModel {
             )
 
         default:
-        let output = await executeNativeTool(name, input: input)
-        tab.appendLog(output); tab.flush()
-        return tabResult(output, toolId: toolId)
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
         }
     }
 }

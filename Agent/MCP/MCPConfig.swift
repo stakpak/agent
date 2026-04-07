@@ -27,7 +27,15 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
     /// Display string for the server's connection target
     var displayAddress: String { isHTTP ? (url ?? "") : command }
 
-    init(id: UUID = UUID(), name: String, command: String, arguments: [String] = [], environment: [String: String] = [:], enabled: Bool = true, autoStart: Bool = true) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        command: String,
+        arguments: [String] = [],
+        environment: [String: String] = [:],
+        enabled: Bool = true,
+        autoStart: Bool = true
+    ) {
         self.id = id
         self.name = name
         self.command = command
@@ -54,26 +62,28 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
     // SSE/HTTP transport endpoint paths (for servers that use separate endpoints)
     var sseEndpoint: String?
     var httpEndpoint: String?
-    
+
     /// Unsupported fields that aren't part of the standard MCP spec but are preserved for export.
     /// Stored as JSON string for Hashable conformance.
     var unsupportedFieldsJSON: String? = nil
-    
+
     /// Get unsupported fields as a dictionary
     var unsupportedFields: [String: Any] {
         guard let json = unsupportedFieldsJSON,
               let data = json.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
+        {
             return [:]
         }
         return dict
     }
-    
+
     /// Set unsupported fields from a dictionary
     mutating func setUnsupportedFields(_ dict: [String: Any]) {
         guard !dict.isEmpty,
               let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
+              let json = String(data: data, encoding: .utf8) else
+        {
             unsupportedFieldsJSON = nil
             return
         }
@@ -107,14 +117,14 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         autoStart = true
         unsupportedFieldsJSON = nil
     }
-    
+
     /// Initialize from a dictionary, capturing unsupported fields
     init?(from dict: [String: Any]) {
         // Determine transport type first
         let transport = dict["transport"] as? String
         let hasURL = (dict["url"] as? String) != nil
         let isHTTPTransport = (transport == "http" || transport == "https") || hasURL
-        
+
         // Extract all fields
         command = dict["command"] as? String ?? ""
         arguments = dict["args"] as? [String] ?? []
@@ -127,15 +137,15 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         id = UUID()
         enabled = true
         autoStart = true
-        
+
         // Standard fields for the ACTUAL transport type
         // HTTP transport uses: transport, url, headers, sseEndpoint, httpEndpoint
         // Stdio transport uses: transport, command, args, env
         let httpStandardFields = Set(["transport", "url", "headers", "sseEndpoint", "httpEndpoint"])
         let stdioStandardFields = Set(["transport", "command", "args", "env"])
-        
+
         var unsupported: [String: Any] = [:]
-        
+
         if isHTTPTransport {
             // HTTP server: preserve stdio fields as unsupported for round-tripping
             if !command.isEmpty { unsupported["command"] = command }
@@ -145,7 +155,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
             command = ""
             arguments = []
             environment = [:]
-            
+
             // Capture any other non-standard fields
             for (key, value) in dict {
                 if !httpStandardFields.contains(key) {
@@ -163,7 +173,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
             headers = [:]
             sseEndpoint = nil
             httpEndpoint = nil
-            
+
             // Capture any other non-standard fields
             for (key, value) in dict {
                 if !stdioStandardFields.contains(key) {
@@ -171,7 +181,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
                 }
             }
         }
-        
+
         setUnsupportedFields(unsupported)
     }
 
@@ -196,11 +206,11 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
             try c.encode(environment, forKey: .env)
         }
     }
-    
+
     /// Convert to dictionary including unsupported fields
     func toDictionary() -> [String: Any] {
         var dict: [String: Any] = [:]
-        
+
         if isHTTP {
             dict["transport"] = "http"
             dict["url"] = url ?? ""
@@ -213,7 +223,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
             if !arguments.isEmpty { dict["args"] = arguments }
             if !environment.isEmpty { dict["env"] = environment }
         }
-        
+
         // Merge in unsupported fields (preserved for export)
         for (key, value) in unsupportedFields {
             dict[key] = value
@@ -224,7 +234,8 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
     /// Create from a JSON string (for importing)
     static func fromJSON(_ jsonString: String) -> MCPServerConfig? {
         guard let data = jsonString.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
+        {
             return nil
         }
         return MCPServerConfig(from: obj)
@@ -235,7 +246,8 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         let inner = toDictionary()
         let wrapper: [String: Any] = ["mcpServers": [name: inner]]
         guard let wrapperData = try? JSONSerialization.data(withJSONObject: wrapper, options: [.prettyPrinted]),
-              let json = String(data: wrapperData, encoding: .utf8) else {
+              let json = String(data: wrapperData, encoding: .utf8) else
+        {
             return "{}"
         }
         return json
@@ -397,7 +409,8 @@ final class MCPServerRegistry {
         guard FileManager.default.fileExists(atPath: configFileURL.path),
               let data = try? Data(contentsOf: configFileURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let mcpServers = json["mcpServers"] as? [String: Any] else {
+              let mcpServers = json["mcpServers"] as? [String: Any] else
+        {
             servers = Self.defaultServers
             return
         }

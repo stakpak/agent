@@ -9,7 +9,7 @@ extension ScriptService {
 
     struct ScriptMetadata: Codable {
         var requiresArguments: Bool
-        var requiresInput: Bool       // stdin / readLine / JSON input
+        var requiresInput: Bool // stdin / readLine / JSON input
         var lastModified: Date
     }
 
@@ -39,7 +39,8 @@ extension ScriptService {
     /// Load all script metadata from UserDefaults
     func loadAllMetadata() -> [String: ScriptMetadata] {
         guard let data = UserDefaults.standard.data(forKey: Self.metadataKey),
-              let dict = try? JSONDecoder().decode([String: ScriptMetadata].self, from: data) else {
+              let dict = try? JSONDecoder().decode([String: ScriptMetadata].self, from: data) else
+        {
             return [:]
         }
         return dict
@@ -116,8 +117,16 @@ extension ScriptService {
         // Auto-convert to UpperCamelCase
         let scriptName = Self.toUpperCamelCase(raw)
         // Reject invalid names: pure numbers, names with dots, tool name conflicts
-        let invalidNames: Set<String> = ["ListAgents", "RunAgent", "ReadAgent", "CreateAgent",
-                                          "UpdateAgent", "DeleteAgent", "CombineAgents", "Agent"]
+        let invalidNames: Set<String> = [
+            "ListAgents",
+            "RunAgent",
+            "ReadAgent",
+            "CreateAgent",
+            "UpdateAgent",
+            "DeleteAgent",
+            "CombineAgents",
+            "Agent"
+        ]
         if Int(scriptName) != nil {
             return "Error: script name cannot be a number. Use a descriptive name like 'MyScript'."
         }
@@ -239,7 +248,8 @@ extension ScriptService {
               let sourceAttrs = try? fm.attributesOfItem(atPath: sourceFile.path),
               let dylibAttrs = try? fm.attributesOfItem(atPath: dylib),
               let sourceDate = sourceAttrs[.modificationDate] as? Date,
-              let dylibDate = dylibAttrs[.modificationDate] as? Date else {
+              let dylibDate = dylibAttrs[.modificationDate] as? Date else
+        {
             return false
         }
         return dylibDate > sourceDate

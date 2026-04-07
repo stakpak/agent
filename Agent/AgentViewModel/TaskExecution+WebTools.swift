@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Web Automation Tool Execution
 
 extension AgentViewModel {
-    
+
     /// Handles web automation tool calls (web_open, web_find, web_click, web_type, etc.)
     func handleWebTool(name: String, input: [String: Any]) async -> String? {
         // web_open
@@ -18,7 +18,8 @@ extension AgentViewModel {
 
         case "web_open":
             guard let urlString = input["url"] as? String,
-                  let url = URL(string: urlString) else {
+                  let url = URL(string: urlString) else
+            {
                 return "Error: Invalid or missing URL"
             }
             let browserStr = input["browser"] as? String ?? "safari"
@@ -43,7 +44,8 @@ extension AgentViewModel {
                     fuzzyThreshold: fuzzyThreshold, appBundleId: appBundleId
                 )
                 if let jsonData = try? JSONSerialization.data(withJSONObject: output, options: .prettyPrinted),
-                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                   let jsonStr = String(data: jsonData, encoding: .utf8)
+                {
                     return jsonStr
                 }
                 return "Found element: \(output)"
@@ -117,7 +119,7 @@ extension AgentViewModel {
             return await WebAutomationService.shared.scanInteractiveElements()
 
         default:
-        return nil
+            return nil
         }
     }
 }

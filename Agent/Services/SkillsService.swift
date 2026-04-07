@@ -2,11 +2,11 @@ import Foundation
 
 /// A reusable prompt template loaded from a .md file with YAML frontmatter.
 struct Skill: Identifiable {
-    let id: String          // filename without extension
+    let id: String // filename without extension
     var name: String
     var description: String
-    var whenToUse: String   // helps LLM decide when to invoke
-    var content: String     // the prompt template body
+    var whenToUse: String // helps LLM decide when to invoke
+    var content: String // the prompt template body
 
     /// Parse a skill .md file with frontmatter.
     static func parse(id: String, raw: String) -> Skill? {

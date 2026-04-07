@@ -10,7 +10,8 @@ final class SoundPlayer {
     func playStartupSound() {
         guard let soundURL = Bundle.main.url(
             forResource: "StartupTwentiethAnniversaryMac",
-            withExtension: "wav") else { return }
+            withExtension: "wav"
+        ) else { return }
 
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: soundURL)

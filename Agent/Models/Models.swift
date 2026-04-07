@@ -42,7 +42,7 @@ enum AgentError: Error, LocalizedError {
         case .unknown(let error): "Unexpected error: \(error.localizedDescription)"
         }
     }
-    
+
     var recoverySuggestion: String? {
         switch self {
         case .noAPIKey: "Add your API key in Settings (Cmd+,)"
@@ -71,7 +71,7 @@ enum AgentError: Error, LocalizedError {
         case .invalidURL: nil
         }
     }
-    
+
     /// Whether this error is recoverable by retrying
     var isRecoverable: Bool {
         switch self {
@@ -90,7 +90,7 @@ enum AgentError: Error, LocalizedError {
         if case .apiError(429, _) = self { return true }
         return false
     }
-    
+
     /// Create AgentError from any Error
     static func wrap(_ error: Error) -> AgentError {
         if let agentError = error as? AgentError {
@@ -138,7 +138,7 @@ struct ErrorRecord: Codable, Identifiable {
     let errorType: String
     let context: String
     let stackTrace: String
-    
+
     init(timestamp: Date = Date(), message: String, errorType: String, context: String = "", stackTrace: String = "") {
         self.id = UUID()
         self.timestamp = timestamp
@@ -152,9 +152,9 @@ struct ErrorRecord: Codable, Identifiable {
 @MainActor @Observable
 final class ErrorHistory {
     static let shared = ErrorHistory()
-    
+
     private(set) var records: [ErrorRecord] = []
-    
+
     private var fileURL: URL {
         guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -166,29 +166,29 @@ final class ErrorHistory {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("error_history.json")
     }
-    
+
     private init() {
         load()
     }
-    
+
     func add(_ record: ErrorRecord) {
         records.append(record)
         save()
     }
-    
+
     func clear() {
         records.removeAll()
         save()
     }
-    
+
     func recentErrors(limit: Int = 50) -> [ErrorRecord] {
         Array(records.suffix(limit))
     }
-    
+
     func errorsByType(_ type: String) -> [ErrorRecord] {
         records.filter { $0.errorType == type }
     }
-    
+
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
@@ -198,7 +198,7 @@ final class ErrorHistory {
             records = []
         }
     }
-    
+
     private func save() {
         // Capture data synchronously on main actor, then write async
         let data: Data?
@@ -208,7 +208,7 @@ final class ErrorHistory {
             data = nil
         }
         guard let data else { return }
-        
+
         let fileURL = self.fileURL
         Task.detached(priority: .background) {
             try? data.write(to: fileURL, options: .atomic)
@@ -379,7 +379,8 @@ final class TaskHistory {
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
               let textBlock = content.first(where: { $0["type"] as? String == "text" }),
-              let summaryText = textBlock["text"] as? String else {
+              let summaryText = textBlock["text"] as? String else
+        {
             throw AgentError.invalidResponse
         }
         return summaryText
@@ -460,7 +461,7 @@ final class TaskHistory {
             data = nil
         }
         guard let data else { return }
-        
+
         let fileURL = self.fileURL
         Task.detached(priority: .background) {
             try? data.write(to: fileURL, options: .atomic)

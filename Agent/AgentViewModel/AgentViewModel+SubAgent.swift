@@ -11,7 +11,7 @@ final class SubAgent: Identifiable {
     let name: String
     let prompt: String
     let projectFolder: String
-    var toolGroups: Set<String>?  // nil = default (Core+Work+Code)
+    var toolGroups: Set<String>? // nil = default (Core+Work+Code)
     var maxIterations: Int = 15
     var status: Status = .running
     var result: String = ""
@@ -94,12 +94,25 @@ extension AgentViewModel {
         let mt = maxTokens
 
         // Build a minimal service for this sub-agent
-        let historyContext = ""  // Sub-agents start with clean context
+        let historyContext = "" // Sub-agents start with clean context
         let claude: ClaudeService?
         if provider == .claude {
-            claude = ClaudeService(apiKey: apiKey, model: selectedModel, historyContext: historyContext, projectFolder: agent.projectFolder, maxTokens: mt)
+            claude = ClaudeService(
+                apiKey: apiKey,
+                model: selectedModel,
+                historyContext: historyContext,
+                projectFolder: agent.projectFolder,
+                maxTokens: mt
+            )
         } else if provider == .lmStudio && lmStudioProtocol == .anthropic {
-            claude = ClaudeService(apiKey: lmStudioAPIKey, model: lmStudioModel, historyContext: historyContext, projectFolder: agent.projectFolder, baseURL: lmStudioEndpoint, maxTokens: mt)
+            claude = ClaudeService(
+                apiKey: lmStudioAPIKey,
+                model: lmStudioModel,
+                historyContext: historyContext,
+                projectFolder: agent.projectFolder,
+                baseURL: lmStudioEndpoint,
+                maxTokens: mt
+            )
         } else {
             claude = nil
         }
@@ -208,7 +221,12 @@ extension AgentViewModel {
                         }
 
                         // Execute tool (sub-agent shares parent's dispatch)
-                        let ctx = ToolContext(toolId: toolId, projectFolder: agent.projectFolder, selectedProvider: selectedProvider, tavilyAPIKey: tavilyAPIKey)
+                        let ctx = ToolContext(
+                            toolId: toolId,
+                            projectFolder: agent.projectFolder,
+                            selectedProvider: selectedProvider,
+                            tavilyAPIKey: tavilyAPIKey
+                        )
                         var results: [[String: Any]] = []
                         _ = await dispatchTool(name: name, input: input, ctx: ctx, toolResults: &results)
                         toolResults.append(contentsOf: results)
@@ -233,7 +251,7 @@ extension AgentViewModel {
                     let capped = Self.truncateToolResults(toolResults)
                     messages.append(["role": "user", "content": capped])
                 } else if !hasToolUse {
-                    break  // Text-only response = done
+                    break // Text-only response = done
                 }
 
             } catch {
@@ -247,7 +265,9 @@ extension AgentViewModel {
 
         agent.status = .completed
         agent.result = String(finalResult.prefix(2000))
-        appendLog("🔀 Sub-agent '\(agent.name)' completed (\(agent.inputTokens + agent.outputTokens) tokens, \(String(format: "%.1f", agent.duration))s)")
+        appendLog(
+            "🔀 Sub-agent '\(agent.name)' completed (\(agent.inputTokens + agent.outputTokens) tokens, \(String(format: "%.1f", agent.duration))s)"
+        )
         flushLog()
         return agent.notification
     }

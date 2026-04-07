@@ -20,7 +20,7 @@ func nextTab(viewModel: AgentViewModel) {
         }
         return
     }
-    
+
     guard let currentIndex = viewModel.scriptTabs.firstIndex(where: { $0.id == currentId }) else { return }
     let nextIndex = (currentIndex + 1) % viewModel.scriptTabs.count
     viewModel.selectedTabId = viewModel.scriptTabs[nextIndex].id
@@ -38,7 +38,7 @@ func previousTab(viewModel: AgentViewModel) {
         }
         return
     }
-    
+
     guard let currentIndex = viewModel.scriptTabs.firstIndex(where: { $0.id == currentId }) else { return }
     let prevIndex = (currentIndex - 1 + viewModel.scriptTabs.count) % viewModel.scriptTabs.count
     viewModel.selectedTabId = viewModel.scriptTabs[prevIndex].id
@@ -54,7 +54,7 @@ func selectTab(viewModel: AgentViewModel, number: Int) {
         viewModel.selectMainTab()
         return
     }
-    
+
     // Cmd+2-9 = Script tabs (0-indexed from index 1)
     let tabIndex = number - 2
     guard tabIndex < viewModel.scriptTabs.count else { return }

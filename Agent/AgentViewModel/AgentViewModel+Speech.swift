@@ -107,7 +107,8 @@ extension AgentViewModel {
 
         preDictationTabId = selectedTabId
         if let tabId = selectedTabId,
-           let tab = tab(for: tabId) {
+           let tab = tab(for: tabId)
+        {
             preDictationText = tab.taskInput
         } else {
             preDictationText = taskInput
@@ -130,7 +131,8 @@ extension AgentViewModel {
                         let newText = prefix + separator + transcription
 
                         if let tabId = self.preDictationTabId,
-                           let tab = self.tab(for: tabId) {
+                           let tab = self.tab(for: tabId)
+                        {
                             tab.taskInput = newText
                         } else {
                             self.taskInput = newText
@@ -165,7 +167,7 @@ extension AgentViewModel {
     /// and "script" as the command, which matches user expectation.
     private static func wakeWordAnchor(in transcription: String) -> String.Index? {
         let lower = transcription.lowercased()
-        let wakes = ["agent!", "agent"]  // try the punctuated form first
+        let wakes = ["agent!", "agent"] // try the punctuated form first
         var bestEnd: String.Index?
         for wake in wakes {
             var searchStart = lower.startIndex
@@ -181,11 +183,11 @@ extension AgentViewModel {
                     return !next.isLetter
                 }()
                 if beforeOK && afterOK {
-                    bestEnd = range.upperBound  // keep walking — we want the LAST hit
+                    bestEnd = range.upperBound // keep walking — we want the LAST hit
                 }
                 searchStart = lower.index(after: range.lowerBound)
             }
-            if bestEnd != nil { break }  // prefer "agent!" over "agent" if both matched
+            if bestEnd != nil { break } // prefer "agent!" over "agent" if both matched
         }
         return bestEnd
     }
@@ -227,7 +229,8 @@ extension AgentViewModel {
         let newText = prefix + separator + text
 
         if let tabId = preDictationTabId,
-           let tab = tab(for: tabId) {
+           let tab = tab(for: tabId)
+        {
             tab.taskInput = newText
         } else {
             taskInput = newText
@@ -260,7 +263,8 @@ extension AgentViewModel {
 
         // Submit the command
         if let tabId = preDictationTabId,
-           let tab = tab(for: tabId) {
+           let tab = tab(for: tabId)
+        {
             if !tab.taskInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 runTabTask(tab: tab)
             }

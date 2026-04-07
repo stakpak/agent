@@ -42,12 +42,14 @@ extension AgentViewModel {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == 200 else
+        {
             throw AgentError.apiError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, message: "API error")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let modelsData = json["data"] as? [[String: Any]] else {
+              let modelsData = json["data"] as? [[String: Any]] else
+        {
             return defaultClaudeModels
         }
 
@@ -197,7 +199,8 @@ extension AgentViewModel {
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let modelsArray = json["data"] as? [[String: Any]] else {
+              let modelsArray = json["data"] as? [[String: Any]] else
+        {
             return defaultOpenAIModels
         }
 
@@ -230,7 +233,8 @@ extension AgentViewModel {
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let modelsArray = json["data"] as? [[String: Any]] else {
+              let modelsArray = json["data"] as? [[String: Any]] else
+        {
             return defaultDeepSeekModels
         }
 
@@ -260,7 +264,8 @@ extension AgentViewModel {
 
         // Router returns OpenAI-compatible format: {"data": [{"id": "model-id", ...}]}
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let dataArray = json["data"] as? [[String: Any]] {
+           let dataArray = json["data"] as? [[String: Any]]
+        {
             let models = dataArray.compactMap { model -> OpenAIModelInfo? in
                 guard let id = model["id"] as? String else { return nil }
                 // Use last path component as display name
@@ -302,13 +307,15 @@ extension AgentViewModel {
         let (data, response) = try await URLSession.shared.data(for: tagsRequest)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == 200 else
+        {
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw AgentError.apiError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, message: errorBody)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let models = json["models"] as? [[String: Any]] else {
+              let models = json["models"] as? [[String: Any]] else
+        {
             throw AgentError.invalidResponse
         }
 
@@ -346,7 +353,8 @@ extension AgentViewModel {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let capabilities = json["capabilities"] as? [String] else {
+                  let capabilities = json["capabilities"] as? [String] else
+            {
                 return false
             }
             return capabilities.contains("vision")
@@ -410,14 +418,20 @@ extension AgentViewModel {
         // Text models (coding endpoint)
         let textSchemas = ["ChatCompletionTextRequest"]
         // Vision/non-coding models (general endpoint, tagged :v)
-        let visionSchemas = ["ChatCompletionVisionRequest", "CreateImageRequest", "AsyncCreateImageRequest",
-                             "LayoutParsingRequest", "AudioTranscriptionRequest"]
+        let visionSchemas = [
+            "ChatCompletionVisionRequest",
+            "CreateImageRequest",
+            "AsyncCreateImageRequest",
+            "LayoutParsingRequest",
+            "AudioTranscriptionRequest"
+        ]
 
         for name in textSchemas {
             if let schema = schemas[name] as? [String: Any],
                let props = schema["properties"] as? [String: Any],
                let model = props["model"] as? [String: Any],
-               let enums = model["enum"] as? [String] {
+               let enums = model["enum"] as? [String]
+            {
                 for id in enums {
                     if seen.insert(id).inserted {
                         result.append(OpenAIModelInfo(id: id, name: id))
@@ -429,7 +443,8 @@ extension AgentViewModel {
             if let schema = schemas[name] as? [String: Any],
                let props = schema["properties"] as? [String: Any],
                let model = props["model"] as? [String: Any],
-               let enums = model["enum"] as? [String] {
+               let enums = model["enum"] as? [String]
+            {
                 for id in enums {
                     let vid = "\(id):v"
                     if seen.insert(vid).inserted {
@@ -483,8 +498,19 @@ extension AgentViewModel {
                         // Filter to chat/reasoning models (skip embedding, tts, asr, etc.)
                         let chatModels = models.filter { id in
                             let lower = id.id.lowercased()
-                            let skip = ["embed", "tts", "asr", "rerank", "paraformer", "sambert",
-                                        "cosyvoice", "sensevoice", "farui", "wanx", "flux"]
+                            let skip = [
+                                "embed",
+                                "tts",
+                                "asr",
+                                "rerank",
+                                "paraformer",
+                                "sambert",
+                                "cosyvoice",
+                                "sensevoice",
+                                "farui",
+                                "wanx",
+                                "flux"
+                            ]
                             return !skip.contains(where: { lower.contains($0) })
                         }
                         qwenModels = chatModels.isEmpty ? models : chatModels
@@ -513,7 +539,10 @@ extension AgentViewModel {
                 return
             }
             do {
-                let models = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/models")
+                let models = try await Self.fetchOpenAICompatibleModels(
+                    apiKey: key,
+                    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/models"
+                )
                 geminiModels = models.isEmpty ? Self.defaultGeminiModels : models
                 if geminiModel.isEmpty || !geminiModels.contains(where: { $0.id == geminiModel }) {
                     geminiModel = geminiModels.first?.id ?? "gemini-2.5-flash"

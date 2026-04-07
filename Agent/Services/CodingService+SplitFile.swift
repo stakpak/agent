@@ -9,7 +9,8 @@ extension CodingService {
     static func splitFile(path: String, mode: String = "declarations") -> String {
         let expanded = (path as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
-              let source = String(data: data, encoding: .utf8) else {
+              let source = String(data: data, encoding: .utf8) else
+        {
             return "Error: cannot read \(path)"
         }
 
@@ -38,9 +39,10 @@ extension CodingService {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if scanDepth == 0 && !trimmed.hasPrefix("import ") && !trimmed.hasPrefix("@preconcurrency") {
                 if trimmed.hasPrefix("private let ") || trimmed.hasPrefix("private var ") ||
-                   trimmed.hasPrefix("fileprivate let ") || trimmed.hasPrefix("fileprivate var ") ||
-                   trimmed.hasPrefix("let ") || trimmed.hasPrefix("var ") ||
-                   trimmed.hasPrefix("nonisolated(unsafe)") {
+                    trimmed.hasPrefix("fileprivate let ") || trimmed.hasPrefix("fileprivate var ") ||
+                    trimmed.hasPrefix("let ") || trimmed.hasPrefix("var ") ||
+                    trimmed.hasPrefix("nonisolated(unsafe)")
+                {
                     // File-level variable — needs to be in every split file
                     // Change private to internal for cross-file access
                     let fixed = line.replacingOccurrences(of: "private let ", with: "let ")
@@ -71,11 +73,15 @@ extension CodingService {
             }
 
             // Skip file-level vars (already collected)
-            if braceDepth == 0 && (trimmed.hasPrefix("private let ") || trimmed.hasPrefix("private var ") ||
-               trimmed.hasPrefix("fileprivate let ") || trimmed.hasPrefix("fileprivate var ") ||
-               trimmed.hasPrefix("nonisolated(unsafe)")) {
+            if braceDepth == 0 && (
+                trimmed.hasPrefix("private let ") || trimmed.hasPrefix("private var ") ||
+                    trimmed.hasPrefix("fileprivate let ") || trimmed.hasPrefix("fileprivate var ") ||
+                    trimmed.hasPrefix("nonisolated(unsafe)")
+            )
+            {
                 if !trimmed.hasPrefix("extension ") && !trimmed.hasPrefix("class ") &&
-                   !trimmed.hasPrefix("struct ") && !trimmed.hasPrefix("enum ") {
+                    !trimmed.hasPrefix("struct ") && !trimmed.hasPrefix("enum ")
+                {
                     continue
                 }
             }
@@ -90,9 +96,21 @@ extension CodingService {
             // Detect top-level declaration start (brace depth == 0)
             if braceDepth == 0 {
                 // Actual type/extension declaration keywords
-                let declKeywords = ["extension ", "class ", "struct ", "enum ", "protocol ", "actor ",
-                                    "public extension ", "public class ", "public struct ", "public enum ",
-                                    "final class ", "private extension ", "internal extension "]
+                let declKeywords = [
+                    "extension ",
+                    "class ",
+                    "struct ",
+                    "enum ",
+                    "protocol ",
+                    "actor ",
+                    "public extension ",
+                    "public class ",
+                    "public struct ",
+                    "public enum ",
+                    "final class ",
+                    "private extension ",
+                    "internal extension "
+                ]
                 let isTypeDecl = declKeywords.contains(where: { trimmed.hasPrefix($0) })
 
                 // @ attributes (like @MainActor, @Observable) are NOT standalone declarations
@@ -189,7 +207,10 @@ extension CodingService {
             let fixedLines = decl.lines.map { line -> String in
                 let t = line.trimmingCharacters(in: .whitespaces)
                 if t.hasPrefix("private func ") { return line.replacingOccurrences(of: "private func ", with: "func ") }
-                if t.hasPrefix("private static func ") { return line.replacingOccurrences(of: "private static func ", with: "static func ") }
+                if t
+                    .hasPrefix("private static func ")
+                { return line.replacingOccurrences(of: "private static func ", with: "static func ")
+                }
                 if t.hasPrefix("private var ") { return line.replacingOccurrences(of: "private var ", with: "var ") }
                 if t.hasPrefix("private let ") { return line.replacingOccurrences(of: "private let ", with: "let ") }
                 if t.hasPrefix("private enum ") { return line.replacingOccurrences(of: "private enum ", with: "enum ") }
@@ -225,7 +246,18 @@ extension CodingService {
     private static func extractDeclName(_ line: String) -> String {
         let tokens = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         // Skip modifiers: public, private, internal, final, @MainActor, etc.
-        let skipPrefixes = ["public", "private", "internal", "final", "open", "@MainActor", "@Observable", "@objc", "@available", "@preconcurrency"]
+        let skipPrefixes = [
+            "public",
+            "private",
+            "internal",
+            "final",
+            "open",
+            "@MainActor",
+            "@Observable",
+            "@objc",
+            "@available",
+            "@preconcurrency"
+        ]
         var nameIndex = 0
         for (i, token) in tokens.enumerated() {
             if skipPrefixes.contains(where: { token.hasPrefix($0) }) {
@@ -259,7 +291,11 @@ extension CodingService {
     /// Split the children of an extension/class into separate declarations.
     /// Each child func/enum/struct/class/var block at brace depth 1 becomes its own
     /// extension file with the parent wrapper preserved.
-    private static func splitExtensionChildren(lines: [String], extensionHeader: String) -> [(name: String, startLine: Int, lines: [String])] {
+    private static func splitExtensionChildren(lines: [String], extensionHeader: String) -> [(
+        name: String,
+        startLine: Int,
+        lines: [String]
+    )] {
         // Find the extension opening line and its closing brace
         guard let firstLine = lines.first else { return [] }
 
@@ -281,13 +317,31 @@ extension CodingService {
         var braceDepth = 0
         var pendingComments: [String] = []
 
-        let memberKeywords = ["func ", "var ", "let ", "enum ", "struct ", "class ", "actor ",
-                              "protocol ", "typealias ", "static func ", "static var ", "static let ",
-                              "private func ", "private var ", "private let ",
-                              "private static func ", "private static var ",
-                              "internal func ", "public func ", "nonisolated func ",
-                              "@MainActor func ", "@MainActor static func ",
-                              "@discardableResult"]
+        let memberKeywords = [
+            "func ",
+            "var ",
+            "let ",
+            "enum ",
+            "struct ",
+            "class ",
+            "actor ",
+            "protocol ",
+            "typealias ",
+            "static func ",
+            "static var ",
+            "static let ",
+            "private func ",
+            "private var ",
+            "private let ",
+            "private static func ",
+            "private static var ",
+            "internal func ",
+            "public func ",
+            "nonisolated func ",
+            "@MainActor func ",
+            "@MainActor static func ",
+            "@discardableResult"
+        ]
 
         for (i, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -352,11 +406,31 @@ extension CodingService {
     /// Extract a member name from a line like "func executeTask(_ prompt: String) async {"
     private static func extractMemberName(_ line: String) -> String {
         let tokens = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        let skipWords: Set<String> = ["func", "var", "let", "enum", "struct", "class", "actor",
-                                       "protocol", "typealias", "static", "private", "internal",
-                                       "public", "open", "final", "nonisolated", "override",
-                                       "@MainActor", "@discardableResult", "@objc", "@available",
-                                       "@preconcurrency", "lazy"]
+        let skipWords: Set<String> = [
+            "func",
+            "var",
+            "let",
+            "enum",
+            "struct",
+            "class",
+            "actor",
+            "protocol",
+            "typealias",
+            "static",
+            "private",
+            "internal",
+            "public",
+            "open",
+            "final",
+            "nonisolated",
+            "override",
+            "@MainActor",
+            "@discardableResult",
+            "@objc",
+            "@available",
+            "@preconcurrency",
+            "lazy"
+        ]
         for token in tokens {
             if skipWords.contains(token) || token.hasPrefix("@") { continue }
             // Clean the name
@@ -385,8 +459,8 @@ extension CodingService {
         // Find all `if name == "..."` blocks with their brace-matched bodies
         struct HandlerBlock {
             let toolName: String
-            let startLine: Int    // 0-based
-            let endLine: Int      // 0-based, inclusive
+            let startLine: Int // 0-based
+            let endLine: Int // 0-based, inclusive
             let lines: [String]
         }
 

@@ -64,7 +64,13 @@ final class FoundationModelService {
     // MARK: - Session
 
     private func ensureSession() -> LanguageModelSession {
-        var instructions = SystemPromptService.shared.prompt(for: .foundationModel, userName: userName, userHome: userHome, projectFolder: projectFolder, style: .compact)
+        var instructions = SystemPromptService.shared.prompt(
+            for: .foundationModel,
+            userName: userName,
+            userHome: userHome,
+            projectFolder: projectFolder,
+            style: .compact
+        )
 
         // Note active LoRA adapter in instructions
         let lora = LoRAAdapterManager.shared
@@ -184,7 +190,9 @@ final class FoundationModelService {
         do {
             let session = LanguageModelSession(
                 model: .default,
-                instructions: Instructions("Fix spelling and grammar only. Return ONLY the corrected text. Do not add quotes, explanations, or change meaning. Keep it concise.")
+                instructions: Instructions(
+                    "Fix spelling and grammar only. Return ONLY the corrected text. Do not add quotes, explanations, or change meaning. Keep it concise."
+                )
             )
             let response: String = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {

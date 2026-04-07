@@ -62,7 +62,8 @@ extension AgentViewModel {
                 if var blocks = msg["content"] as? [[String: Any]] {
                     for j in 0..<blocks.count {
                         if blocks[j]["type"] as? String == "tool_result",
-                           let content = blocks[j]["content"] as? String, content.count > 200 {
+                           let content = blocks[j]["content"] as? String, content.count > 200
+                        {
                             let key = content.hashValue
                             if let cached = _summaryCache[key] {
                                 blocks[j]["content"] = cached
@@ -79,7 +80,8 @@ extension AgentViewModel {
                 if var blocks = msg["content"] as? [[String: Any]] {
                     for j in 0..<blocks.count {
                         if blocks[j]["type"] as? String == "text",
-                           let text = blocks[j]["text"] as? String, text.count > 150 {
+                           let text = blocks[j]["text"] as? String, text.count > 150
+                        {
                             blocks[j]["text"] = String(text.prefix(100)) + "..."
                         }
                     }
@@ -115,7 +117,10 @@ extension AgentViewModel {
         }
 
         let middleEnd = messages.count - keepRecent
-        let session = LanguageModelSession(model: .default, instructions: Instructions("Summarize in 1-2 concise sentences. Keep file paths, function names, errors, and key results."))
+        let session = LanguageModelSession(
+            model: .default,
+            instructions: Instructions("Summarize in 1-2 concise sentences. Keep file paths, function names, errors, and key results.")
+        )
 
         for i in 1..<middleEnd {
             let role = messages[i]["role"] as? String ?? ""
@@ -157,7 +162,12 @@ extension AgentViewModel {
 
     /// Two-tier compaction: try Apple AI summarization first (fast), fall back to aggressive pruning.
     /// Returns true if tokens were meaningfully reduced.
-    static func tieredCompact(_ messages: inout [[String: Any]], state: inout CompactionState, log: ((String) -> Void)? = nil) async -> Bool {
+    static func tieredCompact(
+        _ messages: inout [[String: Any]],
+        state: inout CompactionState,
+        log: ((String) -> Void)? = nil
+    ) async -> Bool
+    {
         let tokensBefore = estimateTokens(messages: messages)
         guard state.shouldCompact(estimatedTokens: tokensBefore) else { return false }
 
@@ -203,7 +213,8 @@ extension AgentViewModel {
                 for (j, block) in blocks.enumerated() {
                     if block["type"] as? String == "tool_result",
                        let content = block["content"] as? String,
-                       content.count > 100 {
+                       content.count > 100
+                    {
                         toolResultIndices.append((i, j))
                     }
                 }
@@ -244,7 +255,8 @@ extension AgentViewModel {
         for block in content {
             if let text = block["text"] as? String { chars += text.count }
             if let input = block["input"] as? [String: Any],
-               let data = try? JSONSerialization.data(withJSONObject: input) {
+               let data = try? JSONSerialization.data(withJSONObject: input)
+            {
                 chars += data.count
             }
         }

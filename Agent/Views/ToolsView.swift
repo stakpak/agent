@@ -6,7 +6,7 @@ struct ToolsView: View {
     @Bindable var viewModel: AgentViewModel
     @Bindable var prefs = ToolPreferencesService.shared
     @State private var collapsedGroups: Set<String> = []
-    
+
     // Group definitions — use actual consolidated tool names from AgentTools.Name.
     // Sub-agents (spawn_agent + tell_agent) live in their own group; previously
     // spawn was in Work and tell was in Core, which split a coherent feature
@@ -34,11 +34,11 @@ struct ToolsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Tools")
                     .font(.headline)
-                
+
                 Text("Toggle tool availability per LLM provider.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
+
                 HStack {
                     Picker("Provider", selection: $selectedProvider) {
                         ForEach(APIProvider.selectableProviders, id: \.self) { p in
@@ -59,11 +59,11 @@ struct ToolsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     let tools = AgentTools.tools(for: selectedProvider)
-                    
+
                     ForEach(Self.groupOrder, id: \.self) { groupName in
                         if let groupInfo = Self.groups[groupName] {
                             let groupTools = tools.filter { groupInfo.filter($0) }.sorted(by: { $0.name < $1.name })
-                            
+
                             if !groupTools.isEmpty {
                                 GroupRowView(
                                     groupName: groupName,
@@ -131,7 +131,7 @@ struct ToolsView: View {
         .frame(width: 460)
         .frame(maxHeight: 660)
     }
-    
+
     // MARK: - Model Picker
 
     private var modelBinding: Binding<String> {
@@ -158,7 +158,10 @@ struct ToolsView: View {
 
     /// Normalized (id, name) list for the current provider's models.
     private var modelOptions: [(id: String, name: String)] {
-        func oai(_ fetched: [AgentViewModel.OpenAIModelInfo], _ defaults: [AgentViewModel.OpenAIModelInfo]) -> [(id: String, name: String)] {
+        func oai(_ fetched: [AgentViewModel.OpenAIModelInfo], _ defaults: [AgentViewModel.OpenAIModelInfo]) -> [(
+            id: String,
+            name: String
+        )] {
             let models = fetched.isEmpty ? defaults : fetched
             return models.map { ($0.id, $0.name) }
         }
@@ -166,24 +169,24 @@ struct ToolsView: View {
         case .claude:
             let models = viewModel.availableClaudeModels.isEmpty ? AgentViewModel.defaultClaudeModels : viewModel.availableClaudeModels
             return models.map { ($0.id, $0.formattedDisplayName) }
-        case .openAI:     return oai(viewModel.openAIModels, AgentViewModel.defaultOpenAIModels)
-        case .deepSeek:   return oai(viewModel.deepSeekModels, AgentViewModel.defaultDeepSeekModels)
+        case .openAI: return oai(viewModel.openAIModels, AgentViewModel.defaultOpenAIModels)
+        case .deepSeek: return oai(viewModel.deepSeekModels, AgentViewModel.defaultDeepSeekModels)
         case .huggingFace: return oai(viewModel.huggingFaceModels, AgentViewModel.defaultHuggingFaceModels)
-        case .zAI:        return oai(viewModel.zAIModels, AgentViewModel.defaultZAIModels)
-        case .qwen:       return oai(viewModel.qwenModels, AgentViewModel.defaultQwenModels)
-        case .gemini:     return oai(viewModel.geminiModels, AgentViewModel.defaultGeminiModels)
-        case .grok:       return oai(viewModel.grokModels, AgentViewModel.defaultGrokModels)
-        case .mistral:    return oai(viewModel.mistralModels, AgentViewModel.defaultMistralModels)
-        case .codestral:  return oai(viewModel.codestralModels, AgentViewModel.defaultCodestralModels)
-        case .vibe:       return oai(viewModel.vibeModels, AgentViewModel.defaultVibeModels)
+        case .zAI: return oai(viewModel.zAIModels, AgentViewModel.defaultZAIModels)
+        case .qwen: return oai(viewModel.qwenModels, AgentViewModel.defaultQwenModels)
+        case .gemini: return oai(viewModel.geminiModels, AgentViewModel.defaultGeminiModels)
+        case .grok: return oai(viewModel.grokModels, AgentViewModel.defaultGrokModels)
+        case .mistral: return oai(viewModel.mistralModels, AgentViewModel.defaultMistralModels)
+        case .codestral: return oai(viewModel.codestralModels, AgentViewModel.defaultCodestralModels)
+        case .vibe: return oai(viewModel.vibeModels, AgentViewModel.defaultVibeModels)
         case .ollama:
             let models = viewModel.ollamaModels.isEmpty ? AgentViewModel.defaultOllamaModels : viewModel.ollamaModels
             return models.map { ($0.name, $0.name) }
         case .localOllama:
             return viewModel.localOllamaModels.map { ($0.name, $0.name) }
-        case .vLLM:       return viewModel.vLLMModels.map { ($0.id, $0.name) }
-        case .lmStudio:   return viewModel.lmStudioModels.map { ($0.id, $0.name) }
-        case .bigModel:   return []
+        case .vLLM: return viewModel.vLLMModels.map { ($0.id, $0.name) }
+        case .lmStudio: return viewModel.lmStudioModels.map { ($0.id, $0.name) }
+        case .bigModel: return []
         case .foundationModel:
             return [("Apple Intelligence", "Apple Intelligence")]
         }
