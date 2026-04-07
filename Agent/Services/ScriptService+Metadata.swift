@@ -212,9 +212,15 @@ extension ScriptService {
         let agentsPath = Self.agentsDir.path.replacingOccurrences(of: "'", with: "'\\''")
         let dylibFile = dylibPath(name: scriptName).replacingOccurrences(of: "'", with: "'\\''")
         let escapedName = scriptName.replacingOccurrences(of: "'", with: "'\\''")
+        // No `touch Package.swift` here — it had no documented reason and was
+        // failing under TCC when the User Launch Agent tried to update mtime on
+        // a file in ~/Documents/. Swift Package Manager detects source changes
+        // via the .swift file mtimes, so touching Package.swift is a no-op for
+        // build invalidation.
+        //
         // Re-sign dylib with the app's identity so macOS attributes AppleScript
-        // permission prompts to "Agent!" instead of "Xcode"
-        return "cd '\(agentsPath)' && touch Package.swift && swift build --product '\(escapedName)' 2>&1 && codesign --force --sign - --identifier \(AppConstants.bundleID) '\(dylibFile)' 2>&1"
+        // permission prompts to "Agent!" instead of "Xcode".
+        return "cd '\(agentsPath)' && swift build --product '\(escapedName)' 2>&1 && codesign --force --sign - --identifier \(AppConstants.bundleID) '\(dylibFile)' 2>&1"
     }
 
     /// Path to the compiled dylib for a script
