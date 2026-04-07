@@ -496,7 +496,9 @@ extension AgentViewModel {
                 let clickResult = AccessibilityService.shared.clickElement(role: clickRole, title: clickTitle, value: nil, appBundleId: app)
                 try? await Task.sleep(for: .seconds(1))
                 // Verify
-                let findResult = AccessibilityService.shared.findElement(role: expectRole, title: expectTitle, value: nil, appBundleId: app, timeout: 5)
+                let findResult = AccessibilityService.shared.findElement(
+                    role: expectRole, title: expectTitle,
+                    value: nil, appBundleId: app, timeout: 5)
                 let passed = findResult.contains("\"success\":true") || findResult.contains("\"success\": true")
                 return "VISUAL TEST: \(passed ? "PASS" : "FAIL")\nClick: \(clickResult.prefix(200))\nVerify: \(findResult.prefix(200))"
             case "assert_exists":
@@ -565,7 +567,11 @@ extension AgentViewModel {
             do {
                 // Use a real browser User-Agent so sites don't 403 / serve weird responses
                 var request = URLRequest(url: url)
-                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+                request.setValue(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    + "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    + "Version/17.0 Safari/605.1.15",
+                    forHTTPHeaderField: "User-Agent")
                 request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
                 request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -610,7 +616,14 @@ extension AgentViewModel {
                         .joined(separator: "\n")
                     appendLog("❌ Verify gate: build failed — sending errors back to LLM")
                     flushLog()
-                    return "CANNOT COMPLETE — build failed. Fix these errors first:\n\n\(errors)\n\nAfter fixing, call task_complete again."
+                    return """
+                        CANNOT COMPLETE — build failed. \
+                        Fix these errors first:
+
+                        \(errors)
+
+                        After fixing, call task_complete again.
+                        """
                 }
                 appendLog("✅ Verify gate: build passed")
                 flushLog()
@@ -1055,7 +1068,13 @@ extension AgentViewModel {
                 // Capture accessibility tree of launched app
                 let ax = AccessibilityService.shared
                 let windows = ax.listWindows(limit: 5)
-                let verifyReport = "BUILD SUCCEEDED\n\nAuto-verify:\n- App launched: \(runResult.prefix(200))\n- Windows: \(windows.prefix(500))"
+                let verifyReport = """
+                    BUILD SUCCEEDED
+
+                    Auto-verify:
+                    - App launched: \(runResult.prefix(200))
+                    - Windows: \(windows.prefix(500))
+                    """
                 return verifyReport
             }
             return buildResult
@@ -1097,7 +1116,10 @@ extension AgentViewModel {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.contains("force_cast") || trimmed.contains("as!") { issues.append("[Warning] Line \(i+1): Force cast (as!)") }
                 if trimmed.contains("try!") { issues.append("[Warning] Line \(i+1): Force try (try!)") }
-                if trimmed.contains("implicitly unwrapped") || (trimmed.contains("!") && trimmed.contains("var ") && trimmed.contains(": ")) { }
+                if trimmed.contains("implicitly unwrapped")
+                    || (trimmed.contains("!")
+                        && trimmed.contains("var ")
+                        && trimmed.contains(": ")) { }
                 if trimmed.count > 200 { issues.append("[Style] Line \(i+1): Line too long (\(trimmed.count) chars)") }
             }
             return issues.isEmpty ? "No issues found in \(fp) (\(lines.count) lines)" : issues.joined(separator: "\n")
@@ -1157,7 +1179,10 @@ extension AgentViewModel {
                 var lines = ["\(cls) properties:"]
                 for p in props {
                     let ro = p.readonly == true ? " (readonly)" : ""
-                    lines.append("  .\(SDEFService.toCamelCase(p.name)): \(p.type ?? "any")\(ro)\(p.description.map { " — \($0)" } ?? "")")
+                    let desc = p.description.map { " — \($0)" } ?? ""
+                    lines.append(
+                        "  .\(SDEFService.toCamelCase(p.name)): "
+                        + "\(p.type ?? "any")\(ro)\(desc)")
                 }
                 if !elems.isEmpty { lines.append("elements: \(elems.joined(separator: ", "))") }
                 return lines.isEmpty ? "No class '\(cls)' found for \(bundleID)" : lines.joined(separator: "\n")
@@ -1194,7 +1219,10 @@ extension AgentViewModel {
                 // Word-boundary replacement to avoid partial matches
                 let pattern = "\\b\(NSRegularExpression.escapedPattern(for: oldName))\\b"
                 if let regex = try? NSRegularExpression(pattern: pattern) {
-                    content = regex.stringByReplacingMatches(in: content, range: NSRange(content.startIndex..., in: content), withTemplate: newName)
+                    content = regex.stringByReplacingMatches(
+                        in: content,
+                        range: NSRange(content.startIndex..., in: content),
+                        withTemplate: newName)
                 }
                 if content != before {
                     FileBackupService.shared.backup(filePath: filePath, tabID: selectedTabId ?? Self.mainTabID)
@@ -1276,7 +1304,11 @@ extension AgentViewModel {
         // across steps. Per-step output is split out via delimiter markers so the LLM
         // sees which command produced what (and the per-command exit code).
         case "batch_commands":
-            let commands = (input["commands"] as? String ?? "").components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let commands = (input["commands"] as? String ?? "")
+                .components(separatedBy: "\n")
+                .filter {
+                    !$0.trimmingCharacters(in: .whitespaces).isEmpty
+                }
             guard !commands.isEmpty else { return "(no commands)" }
             for (idx, cmd) in commands.enumerated() {
                 appendLog("🔧 [\(idx+1)/\(commands.count)] $ \(cmd)")
