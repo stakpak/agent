@@ -48,7 +48,10 @@ final class OllamaService {
         var prompt = SystemPromptService.shared.prompt(for: provider, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {
             prompt =
-                "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" +
+                "CURRENT PROJECT FOLDER: \(projectFolder)\n"
+                    + "Always cd to this directory before running any "
+                    + "shell commands. Use it as the default for all file "
+                    + "operations. You may go outside it when needed.\n\n" +
                 prompt
         }
         if supportsVision {
@@ -467,7 +470,9 @@ final class OllamaService {
                     let funcName = function["name"] as? String ?? "unknown"
                     AuditLog.log(
                         .api,
-                        "[OllamaService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))"
+                        "[OllamaService] Failed to parse tool args for "
+                            + "\(funcName): "
+                            + "\(String(describing: function["arguments"]).prefix(200))"
                     )
                     input = [:]
                 }

@@ -46,7 +46,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Whether training data capture is active (captures user prompts, Apple AI interjections, LLM responses, and task summaries for LoRA JSONL)
+    /// Whether training data capture is active (captures user prompts,
+    /// Apple AI interjections, LLM responses, and task summaries for LoRA JSONL)
     @Published var trainingEnabled: Bool = UserDefaults.standard.bool(forKey: "appleIntelligenceTrainingEnabled") {
         didSet {
             UserDefaults.standard.set(trainingEnabled, forKey: "appleIntelligenceTrainingEnabled")
@@ -239,7 +240,10 @@ final class AppleIntelligenceMediator: ObservableObject {
 
         let session = ensureSession()
         let prompt = """
-        Fix typos only in this user request. Return the corrected version. Do NOT rephrase, clarify, add instructions, or change meaning. Do NOT ask questions. Keep tool names, file names, and identifiers exactly as written. If no typos, return the original text unchanged.
+        Fix typos only in this user request. Return the corrected version. \
+        Do NOT rephrase, clarify, add instructions, or change meaning. \
+        Do NOT ask questions. Keep tool names, file names, and identifiers \
+        exactly as written. If no typos, return the original text unchanged.
 
         User said: "\(message)"
         """
