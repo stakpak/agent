@@ -6,8 +6,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentAccess.git",
       "state": {
-        "revision": "6e6c9fd2e9843b34fb26244397b80bbb244d72f3",
-        "version": "2.9.0"
+        "revision": "a9a431166b0e6031be2bceceda5cd509e61f0d29",
+        "version": "2.9.1"
       }
     },
     {
