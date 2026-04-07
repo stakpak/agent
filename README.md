@@ -109,7 +109,7 @@ The Agent! toolbar contains **15 buttons** that provide quick access to core fun
 |---|------|------|-------------|
 | 1 | ⚙️ `gearshape.2` | **Services** | Access system services and configuration options |
 | 2 | 💬 `bubble.fill` | **Chat** | Open chat/conversation view for interacting with AI |
-| 3 | ✋ `hand.stop` | **Stop** | Cancel/halt the current running task or operation |
+| 3 | ✋ `hand.stop` | **Stop** | Enable or disabe Accessibility, also emable Apple Events automaiton per app |
 | 4 | 🖥️ `server.rack` | **Servers** | Manage MCP (Model Context Protocol) servers |
 | 5 | </> `chevron.left.forwardslash.chevron.right` | **Code** | Open code editor or coding mode |
 | 6 | 🔧 `wrench.and.screwdriver` | **Tools** | Access tool configuration and management |
