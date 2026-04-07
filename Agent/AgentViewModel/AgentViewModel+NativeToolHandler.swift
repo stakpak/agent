@@ -546,9 +546,16 @@ extension AgentViewModel {
             let createCmd: String
             switch template {
             case "swiftui":
+                let srcCode =
+                    "import SwiftUI\\n"
+                    + "@main struct \(name)App: App { "
+                    + "var body: some Scene { "
+                    + "WindowGroup { Text(\"Hello\") } } }"
                 createCmd = """
-                mkdir -p "\(path)/\(name)" && cd "\(path)/\(name)" && swift package init --type executable --name \(name) && \
-                echo 'import SwiftUI\n@main struct \(name)App: App { var body: some Scene { WindowGroup { Text(\"Hello\") } } }' > Sources/\(name).swift
+                mkdir -p "\(path)/\(name)" \
+                && cd "\(path)/\(name)" \
+                && swift package init --type executable --name \(name) \
+                && echo '\(srcCode)' > Sources/\(name).swift
                 """
             case "cli":
                 createCmd = "mkdir -p \"\(path)/\(name)\" && cd \"\(path)/\(name)\" && swift package init --type executable --name \(name)"

@@ -84,7 +84,10 @@ extension AgentViewModel {
             return result
         }
 
-        return "Sub-agent '\(name)' spawned (id: \(agent.id.uuidString.prefix(8))). You will receive a <task-notification> when it completes."
+        return
+            "Sub-agent '\(name)' spawned "
+            + "(id: \(agent.id.uuidString.prefix(8))). "
+            + "You will receive a <task-notification> when it completes."
     }
 
     /// Execute a sub-agent's task in isolation using the current provider/model.
@@ -266,7 +269,9 @@ extension AgentViewModel {
         agent.status = .completed
         agent.result = String(finalResult.prefix(2000))
         appendLog(
-            "🔀 Sub-agent '\(agent.name)' completed (\(agent.inputTokens + agent.outputTokens) tokens, \(String(format: "%.1f", agent.duration))s)"
+            "🔀 Sub-agent '\(agent.name)' completed "
+                + "(\(agent.inputTokens + agent.outputTokens) tokens, "
+                + "\(String(format: "%.1f", agent.duration))s)"
         )
         flushLog()
         return agent.notification
