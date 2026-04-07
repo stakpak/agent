@@ -393,7 +393,14 @@ final class ChatHistoryStore {
     // MARK: - Script Tab Persistence
 
     /// Save script tab data to SwiftData. Replaces any existing records.
-    func saveScriptTabs(_ tabs: [(id: UUID, scriptName: String, activityLog: String, exitCode: Int32?, llmConfigJSON: String?, parentTabIdString: String?, isMessagesTab: Bool, projectFolder: String, promptHistoryJSON: String?, taskSummariesJSON: String?, errorsJSON: String?, rawLLMOutput: String, lastElapsed: Double, thinkingExpanded: Bool, thinkingOutputExpanded: Bool, thinkingDismissed: Bool, tabInputTokens: Int, tabOutputTokens: Int)]) {
+    func saveScriptTabs(_ tabs: [
+        (id: UUID, scriptName: String, activityLog: String, exitCode: Int32?,
+         llmConfigJSON: String?, parentTabIdString: String?, isMessagesTab: Bool,
+         projectFolder: String, promptHistoryJSON: String?, taskSummariesJSON: String?,
+         errorsJSON: String?, rawLLMOutput: String, lastElapsed: Double,
+         thinkingExpanded: Bool, thinkingOutputExpanded: Bool, thinkingDismissed: Bool,
+         tabInputTokens: Int, tabOutputTokens: Int)
+    ]) {
         guard !storeDisabled, let context else { return }
         // Delete old records
         try? context.delete(model: ScriptTabRecord.self)
