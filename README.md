@@ -430,6 +430,9 @@ MIT - free and open source.
 
 ---
 
+## Agent's first poem written in Pages
+<img width="1155" height="1416" alt="image" src="https://github.com/user-attachments/assets/e71ceb3d-7ca2-4225-8138-b4b9beefdbd2" />
+
 ## Agent! vs Claude Code — Architectural Comparison
 
 Agent! is a 100% original pure Swift macOS application. It is not a port, fork, or derivative of any other project.
