@@ -754,7 +754,6 @@
 				BB10000000000000000052 /* Copy Daemon Plist */,
 				CC10000000000000000051 /* Copy User Agent */,
 				CC10000000000000000052 /* Copy Agent Plist */,
-				EA00SCRIPT000000000001 /* Copy Agent Resources */,
 			);
 			buildRules = (
 			);
@@ -891,21 +890,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		EA00SCRIPT000000000001 /* Copy Agent Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Copy Agent Resources";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Scripts and bridges are cloned from GitHub at runtime.\n# AgentScripts: https://github.com/macOS26/AgentScripts\n# AgentEventBridges: https://github.com/macOS26/AgentEventBridges\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */

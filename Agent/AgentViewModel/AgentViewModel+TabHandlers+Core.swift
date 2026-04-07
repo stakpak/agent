@@ -55,17 +55,6 @@ extension AgentViewModel {
                 isComplete: false
             )
 
-        case "mode":
-            // 'mode' tool removed — there are no modes anymore. Return a no-op so any
-            // cached LLM context that still calls it doesn't error out hard.
-            let output = "Mode switching has been removed. All user-enabled tools are always available."
-            tab.appendLog(output)
-            tab.flush()
-            return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
-                isComplete: false
-            )
-
         default:
         let output = await executeNativeTool(name, input: input)
         tab.appendLog(output); tab.flush()

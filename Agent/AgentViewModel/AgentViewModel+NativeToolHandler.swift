@@ -960,10 +960,6 @@ extension AgentViewModel {
         // project_folder
         case "project_folder":
             return handleProjectFolder(tab: nil, input: input)
-        // 'mode' tool removed — there are no modes anymore. Return a no-op so any
-        // cached LLM context that still calls it doesn't error out hard.
-        case "mode":
-            return "Mode switching has been removed. All user-enabled tools are always available."
         // MARK: - Xcode Tools
         case "xcode_build":
             let projectPath = input["project_path"] as? String ?? ""
