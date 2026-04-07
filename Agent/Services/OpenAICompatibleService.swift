@@ -83,7 +83,9 @@ final class OpenAICompatibleService {
         }
         var prompt = SystemPromptService.shared.prompt(for: provider, userName: userName, userHome: userHome, projectFolder: projectFolder)
         if !projectFolder.isEmpty {
-            prompt = "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" + prompt
+            prompt =
+                "CURRENT PROJECT FOLDER: \(projectFolder)\nAlways cd to this directory before running any shell commands. Use it as the default for all file operations. You may go outside it when needed.\n\n" +
+                prompt
         }
         if supportsVision {
             prompt += "\nYou have VISION. When images are attached, you can see and analyze them."
@@ -113,7 +115,8 @@ final class OpenAICompatibleService {
                 result[i]["content"] = prefix + text
             } else if var blocks = result[i]["content"] as? [[String: Any]],
                       let first = blocks.first, first["type"] as? String == "text",
-                      let existing = first["text"] as? String {
+                      let existing = first["text"] as? String
+            {
                 blocks[0]["text"] = prefix + existing
                 result[i]["content"] = blocks
             }
@@ -143,7 +146,16 @@ final class OpenAICompatibleService {
     var needsFullToolNames: Bool = false
 
     /// Convert Claude-format messages to OpenAI chat messages.
-    /// Always sends full system prompt — OpenAI-compatible APIs don't cache.
+    ///
+    /// We send the full system prompt every turn. There is no per-message
+    /// cache_control to set: every supported OpenAI-format provider
+    /// (OpenAI, Z.ai, Grok, Mistral, DeepSeek, Qwen, Gemini, BigModel, etc.)
+    /// does prefix caching AUTOMATICALLY when consecutive requests share
+    /// a byte-stable prefix. The lever we have is keeping the prefix
+    /// byte-stable — same system prompt, same tool order, no per-call
+    /// timestamps or UUIDs in the prefix — and the response parser will
+    /// surface cached_tokens via TokenUsageStore so the LLM Usage panel
+    /// shows whether the cache is actually hitting.
     private func convertMessages(_ messages: [[String: Any]]) -> [[String: Any]] {
         let prompt = systemPrompt
         var chatMessages: [[String: Any]] = [
@@ -179,15 +191,20 @@ final class OpenAICompatibleService {
                         // Content blocks (text + images) — use OpenAI multipart content
                         var contentParts: [[String: Any]] = []
                         let imageBlocks = blocks.filter { $0["type"] as? String == "image" }
-                        AuditLog.log(.api, "convertMessages: \(blocks.count) blocks, \(imageBlocks.count) images, supportsVision=\(supportsVision)")
+                        AuditLog.log(
+                            .api,
+                            "convertMessages: \(blocks.count) blocks, \(imageBlocks.count) images, supportsVision=\(supportsVision)"
+                        )
                         for block in blocks {
                             if block["type"] as? String == "text",
-                               let t = block["text"] as? String {
+                               let t = block["text"] as? String
+                            {
                                 contentParts.append(["type": "text", "text": t])
                             } else if supportsVision,
                                       block["type"] as? String == "image",
                                       let source = block["source"] as? [String: Any],
-                                      let base64 = source["data"] as? String {
+                                      let base64 = source["data"] as? String
+                            {
                                 let mediaType = source["media_type"] as? String ?? "image/png"
                                 AuditLog.log(.api, "convertMessages: adding image \(base64.count) chars, mediaType=\(mediaType)")
                                 contentParts.append([
@@ -226,7 +243,8 @@ final class OpenAICompatibleService {
                             // OpenAI expects arguments as a JSON string
                             let argsString: String
                             if let data = try? JSONSerialization.data(withJSONObject: input),
-                               let str = String(data: data, encoding: .utf8) {
+                               let str = String(data: data, encoding: .utf8)
+                            {
                                 argsString = str
                             } else {
                                 argsString = "{}"
@@ -381,7 +399,8 @@ final class OpenAICompatibleService {
         }
         // Enforce minimum gap between requests
         if let minGap = Self.rateLimitSeconds[provider],
-           let last = Self.lastRequestTime[provider] {
+           let last = Self.lastRequestTime[provider]
+        {
             let elapsed = CFAbsoluteTimeGetCurrent() - last
             if elapsed < minGap {
                 let wait = minGap - elapsed
@@ -396,7 +415,12 @@ final class OpenAICompatibleService {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    func send(messages: [[String: Any]], activeGroups: Set<String>? = nil) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
+    func send(
+        messages: [[String: Any]],
+        activeGroups: Set<String>? = nil
+    ) async throws
+        -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
+    {
         await enforceRateLimit()
         let payload = buildMessagesPayload(messages)
 
@@ -485,7 +509,8 @@ final class OpenAICompatibleService {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let firstChoice = choices.first,
-              let message = firstChoice["message"] as? [String: Any] else {
+              let message = firstChoice["message"] as? [String: Any] else
+        {
             throw AgentError.invalidResponse
         }
 
@@ -551,13 +576,17 @@ final class OpenAICompatibleService {
                 // OpenAI: arguments is a JSON string
                 let input: [String: Any]
                 if let argsString = function["arguments"] as? String,
-                   let parsed = try? JSONSerialization.jsonObject(with: Data(argsString.utf8)) as? [String: Any] {
+                   let parsed = try? JSONSerialization.jsonObject(with: Data(argsString.utf8)) as? [String: Any]
+                {
                     input = parsed
                 } else if let args = function["arguments"] as? [String: Any] {
                     input = args
                 } else {
                     let funcName = function["name"] as? String ?? "unknown"
-                    AuditLog.log(.api, "[OpenAIService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))")
+                    AuditLog.log(
+                        .api,
+                        "[OpenAIService] Failed to parse tool args for \(funcName): \(String(describing: function["arguments"]).prefix(200))"
+                    )
                     input = [:]
                 }
 
@@ -575,11 +604,44 @@ final class OpenAICompatibleService {
         }
 
         let hasToolCalls = (message["tool_calls"] != nil) || parsedToolFromText
-        let stopReason = hasToolCalls ? "tool_use" : (finishReason == "tool_calls" ? "tool_use" : (finishReason == "length" ? "max_tokens" : "end_turn"))
+        let stopReason = hasToolCalls ? "tool_use" :
+            (finishReason == "tool_calls" ? "tool_use" : (finishReason == "length" ? "max_tokens" : "end_turn"))
         let usage = json["usage"] as? [String: Any]
         let inTok = usage?["prompt_tokens"] as? Int ?? 0
         let outTok = usage?["completion_tokens"] as? Int ?? 0
+        recordCacheHits(from: usage)
         return (contentBlocks, stopReason, inTok, outTok)
+    }
+
+    /// Pull cached-prompt-token counts out of an OpenAI-format `usage` object
+    /// and forward them to TokenUsageStore so the LLM Usage panel shows the
+    /// hit rate for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/etc. — every
+    /// modern OpenAI-compatible provider does AUTOMATIC prefix caching now,
+    /// and the only way we know whether our byte-stable prefix is actually
+    /// hitting the cache is by reading these fields back.
+    ///
+    /// Two shapes are accepted:
+    ///   - OpenAI standard:   usage.prompt_tokens_details.cached_tokens
+    ///   - DeepSeek variant:  usage.prompt_cache_hit_tokens
+    ///
+    /// Both map to the existing recordCacheMetrics(read:creation:) sink.
+    /// "creation" stays 0 for OpenAI-format providers because they don't
+    /// distinguish a "cache write" event the way Anthropic does — they just
+    /// report how many input tokens were served from cache on this request.
+    nonisolated private static func recordCacheHits(from usage: [String: Any]?) {
+        guard let usage else { return }
+        var cached = 0
+        if let details = usage["prompt_tokens_details"] as? [String: Any],
+           let n = details["cached_tokens"] as? Int {
+            cached = n
+        } else if let n = usage["prompt_cache_hit_tokens"] as? Int {
+            // DeepSeek variant
+            cached = n
+        }
+        guard cached > 0 else { return }
+        Task { @MainActor in
+            TokenUsageStore.shared.recordCacheMetrics(read: cached, creation: 0)
+        }
     }
 
     // MARK: - Streaming Request (SSE)
@@ -632,7 +694,8 @@ final class OpenAICompatibleService {
             // Verify it actually parses as JSON with name + arguments keys
             if let data = trimmed.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               obj["name"] is String, obj["arguments"] != nil {
+               obj["name"] is String, obj["arguments"] != nil
+            {
                 return true
             }
             return false
@@ -659,10 +722,16 @@ final class OpenAICompatibleService {
             guard let data = payload.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
-            // Extract usage if present (final chunk)
+            // Extract usage if present (final chunk).
+            // Most OpenAI-format providers stream the usage block in the
+            // FINAL SSE event. We also surface cached_tokens here so the
+            // LLM Usage panel reflects automatic prefix-cache hits for
+            // OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek/etc. exactly
+            // the same way Claude's explicit cache_control hits are tracked.
             if let usage = json["usage"] as? [String: Any] {
                 streamInputTokens = usage["prompt_tokens"] as? Int ?? streamInputTokens
                 streamOutputTokens = usage["completion_tokens"] as? Int ?? streamOutputTokens
+                Self.recordCacheHits(from: usage)
             }
 
             // LM Studio Native: top-level "content" field without "choices"
@@ -685,7 +754,8 @@ final class OpenAICompatibleService {
             // Gemini thought_signature — nested under extra_content.google.thought_signature
             if let extra = delta["extra_content"] as? [String: Any],
                let google = extra["google"] as? [String: Any],
-               let sig = google["thought_signature"] as? String {
+               let sig = google["thought_signature"] as? String
+            {
                 thoughtSignature = sig
             }
             // Also check top-level (future-proofing)
@@ -716,7 +786,8 @@ final class OpenAICompatibleService {
                     // Gemini: extra_content.google.thought_signature per tool_call
                     if let extra = tc["extra_content"] as? [String: Any],
                        let google = extra["google"] as? [String: Any],
-                       let sig = google["thought_signature"] as? String {
+                       let sig = google["thought_signature"] as? String
+                    {
                         thoughtSignature = sig
                     }
                 }
@@ -841,7 +912,8 @@ final class OpenAICompatibleService {
         }
 
         let hasToolCalls = !toolCallAccum.isEmpty || parsedToolFromText
-        let stopReason = hasToolCalls ? "tool_use" : (finishReason == "tool_calls" ? "tool_use" : (finishReason == "length" ? "max_tokens" : "end_turn"))
+        let stopReason = hasToolCalls ? "tool_use" :
+            (finishReason == "tool_calls" ? "tool_use" : (finishReason == "length" ? "max_tokens" : "end_turn"))
         return (contentBlocks, stopReason, streamInputTokens, streamOutputTokens)
     }
 }
