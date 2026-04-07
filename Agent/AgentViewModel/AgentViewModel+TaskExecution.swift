@@ -352,8 +352,6 @@ extension AgentViewModel {
         _ = userName; _ = userHome  // kept for any future per-task prompt customization
         // Track unique files edited (write_file/edit_file/diff_apply/create_diff/apply_diff) for plan-mode enforcement
         var filesEditedThisTask: Set<String> = []
-        // Track if a plan exists for this task (created via plan_mode tool)
-        var planActive = false
 
         while !Task.isCancelled {
             iterations += 1
@@ -488,16 +486,11 @@ extension AgentViewModel {
                         (name, input) = Self.expandConsolidatedTool(name: name, input: input)
 
                         // Plans are encouraged but never required. Track edited files for
-                        // task summary purposes; track plan creation for future signals.
-                        // No mid-stream blocking — the LLM decides whether to plan up front.
+                        // task summary purposes. No mid-stream blocking — the LLM decides
+                        // whether to plan up front.
                         let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "diff_and_apply", "create_diff", "apply_diff"]
                         if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
                             filesEditedThisTask.insert(filePath)
-                        }
-                        if name == "plan_mode" || name == "plan" {
-                            if let act = input["action"] as? String, act == "create" || act == "update" {
-                                planActive = true
-                            }
                         }
 
                         if name == "task_complete" {

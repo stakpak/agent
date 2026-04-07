@@ -395,7 +395,6 @@ extension AgentViewModel {
         var stuckFiles: [String: Int] = [:]  // Edit failure count per file (for nudge)
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
-        var planActive = false
         // Full system prompt + full tool descriptions on every turn — no condensed
         // prompt, no compactTools, no mode auto-switching. The LLM always sees the
         // complete context and the complete tool list (filtered only by the user's
@@ -525,16 +524,11 @@ extension AgentViewModel {
                         commandsRun.append(name)
 
                         // Plans are encouraged but never required. Track edited files for
-                        // task summary purposes; track plan creation for future signals.
-                        // No mid-stream blocking — the LLM decides whether to plan up front.
+                        // task summary purposes. No mid-stream blocking — the LLM decides
+                        // whether to plan up front.
                         let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "diff_and_apply", "create_diff", "apply_diff"]
                         if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
                             filesEditedThisTask.insert(filePath)
-                        }
-                        if name == "plan_mode" || name == "plan" {
-                            if let act = input["action"] as? String, act == "create" || act == "update" {
-                                planActive = true
-                            }
                         }
 
                         // Loop detection — block only after 20 IDENTICAL read calls
