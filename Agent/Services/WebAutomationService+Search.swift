@@ -97,7 +97,8 @@ extension WebAutomationService {
                     var siblings = parent.querySelectorAll(el.tagName);
                     if (siblings.length === 1) return bestSelector(parent) + ' > ' + el.tagName.toLowerCase();
                     for (var i = 0; i < siblings.length; i++) {
-                        if (siblings[i] === el) return bestSelector(parent) + ' > ' + el.tagName.toLowerCase() + ':nth-child(' + (i+1) + ')';
+                        if (siblings[i] === el) return bestSelector(parent) + ' > ' + \
+                            el.tagName.toLowerCase() + ':nth-child(' + (i+1) + ')';
                     }
                 }
                 return el.tagName.toLowerCase();

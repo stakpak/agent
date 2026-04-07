@@ -394,14 +394,18 @@ extension WebAutomationService {
                 js = "localStorage.getItem('\(Self.escapeJS(k))') || '(not set)'"
             } else {
                 js =
-                    "(function(){var r={};for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);r[k]=localStorage.getItem(k);}return JSON.stringify(r);})()"
+                    "(function(){var r={};for(var i=0;i<localStorage.length;i++){"
+                        + "var k=localStorage.key(i);r[k]=localStorage.getItem(k);}"
+                        + "return JSON.stringify(r);})()"
             }
         case "sessionStorage":
             if let k = key {
                 js = "sessionStorage.getItem('\(Self.escapeJS(k))') || '(not set)'"
             } else {
                 js =
-                    "(function(){var r={};for(var i=0;i<sessionStorage.length;i++){var k=sessionStorage.key(i);r[k]=sessionStorage.getItem(k);}return JSON.stringify(r);})()"
+                    "(function(){var r={};for(var i=0;i<sessionStorage.length;i++){"
+                        + "var k=sessionStorage.key(i);r[k]=sessionStorage.getItem(k);}"
+                        + "return JSON.stringify(r);})()"
             }
         default: // cookies
             js = "document.cookie || '(no cookies)'"
