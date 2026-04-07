@@ -153,9 +153,23 @@ struct LLMOutputTextView: NSViewRepresentable {
         coord.isStreaming = isStreaming
         guard let tv = coord.textView, let storage = tv.textStorage else { return }
 
-        // Strip cursor char to detect content changes vs cursor blink
-        let contentText = text.hasSuffix("█") ? String(text.dropLast()) : (text.hasSuffix(" ") ? String(text.dropLast()) : text)
+        // Decompose the input into "real content" + "cursor state". Upstream
+        // (ThinkingIndicatorView) appends "█" when the blink is on, " " when
+        // the blink is off, and nothing while inside a markdown table.
+        let cursorVisible = text.hasSuffix("█")
+        let hasCursor = cursorVisible || text.hasSuffix(" ")
+        let contentText = hasCursor ? String(text.dropLast()) : text
         let contentLen = contentText.count
+
+        let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let textColor: NSColor = isDark
+            ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
+            : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
+        let font = NSFont.monospacedSystemFont(ofSize: 16.5, weight: .regular)
+        let cursorAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: cursorVisible ? textColor : NSColor.clear
+        ]
 
         if contentLen != coord.lastContentLength {
             // Text shrank → new task / reset → re-arm auto-follow
@@ -170,9 +184,12 @@ struct LLMOutputTextView: NSViewRepresentable {
             CATransaction.setDisableActions(true)
 
             if isAppend && !coord.needsTableRender {
-                // FAST PATH: incremental append. No layout reflow above the
-                // appended range, so no jitter. Strip trailing cursor first if
-                // present, then append the delta with terminal styling.
+                // FAST PATH: incremental append. Strip the previous cursor
+                // glyph from storage, append only the NEW content delta, then
+                // append a fresh "█" cursor glyph. The cursor's foreground
+                // color is set to clear when blink-off and green when blink-on
+                // — never replaced once it's there, so the next blink can use
+                // setAttributes() instead of replaceCharacters().
                 let attrLen = storage.length
                 if attrLen > 0 {
                     let lastChar = storage.string.suffix(1)
@@ -181,24 +198,29 @@ struct LLMOutputTextView: NSViewRepresentable {
                     }
                 }
                 let startIdx = storage.length
-                if startIdx < text.count {
-                    let newPart = String(text[text.index(text.startIndex, offsetBy: startIdx)...])
-                    let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    let color: NSColor = isDark
-                        ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
-                        : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
-                    let font = NSFont.monospacedSystemFont(ofSize: 16.5, weight: .regular)
-                    storage.beginEditing()
+                storage.beginEditing()
+                if startIdx < contentText.count {
+                    let newPart = String(
+                        contentText[contentText.index(contentText.startIndex, offsetBy: startIdx)...]
+                    )
                     storage.append(NSAttributedString(string: newPart, attributes: [
-                        .font: font, .foregroundColor: color
+                        .font: font, .foregroundColor: textColor
                     ]))
-                    storage.endEditing()
                 }
+                if hasCursor {
+                    storage.append(NSAttributedString(string: "█", attributes: cursorAttrs))
+                }
+                storage.endEditing()
             } else {
-                // SLOW PATH: full markdown re-render. Used for tables, shrinks
-                // (text reset), and first render. Wrapped in CATransaction so
-                // implicit animations don't fire.
-                storage.setAttributedString(TerminalNeoRenderer.render(text))
+                // SLOW PATH: full markdown re-render. Render contentText
+                // (without cursor) so the renderer doesn't try to style the
+                // cursor glyph; then append the cursor as a separate run.
+                storage.beginEditing()
+                storage.setAttributedString(TerminalNeoRenderer.render(contentText))
+                if hasCursor {
+                    storage.append(NSAttributedString(string: "█", attributes: cursorAttrs))
+                }
+                storage.endEditing()
                 tv.layoutManager?.ensureLayout(for: tv.textContainer!)
             }
 
@@ -206,7 +228,8 @@ struct LLMOutputTextView: NSViewRepresentable {
             coord.lastContentLength = contentLen
 
             // Latch table-render mode while the tail looks like a table row
-            let lastNonEmpty = contentText.components(separatedBy: "\n").last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
+            let lastNonEmpty = contentText.components(separatedBy: "\n")
+                .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
             if lastNonEmpty.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
                 coord.needsTableRender = true
             }
@@ -219,30 +242,25 @@ struct LLMOutputTextView: NSViewRepresentable {
                 coord.snapToEnd(tv)
             }
         } else {
-            // Cursor blink: swap last char only. No scroll calls. Skip during
-            // table-render mode to avoid mutating freshly rendered table layout.
-            guard !coord.needsTableRender else { return }
+            // Cursor blink — only the cursor's COLOR changes, never the
+            // character. The previous implementation called replaceCharacters
+            // to swap "█" ↔ " " every ~500ms. Even though it was a single
+            // character, NSTextView's typesetter re-glyphed and re-laid-out
+            // the entire last line on each pass; the subpixel anti-aliasing
+            // shifts were perceptible as the LAST WORD before the cursor
+            // visibly flickering along with the cursor itself.
+            //
+            // setAttributes(_:range:) on one character with just a color
+            // change does NOT trigger glyph regeneration or layout
+            // invalidation — only a foreground-color redraw — so the
+            // surrounding text stays pixel-stable while the cursor blinks.
+            guard !coord.needsTableRender, hasCursor else { return }
             let attrLen = storage.length
-            if attrLen > 0 {
-                let cursorChar = text.hasSuffix("█") ? "█" : " "
-                let lastChar = String(storage.string.suffix(1))
-                if lastChar != cursorChar {
-                    let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    let color: NSColor = isDark
-                        ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
-                        : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
-                    let font = NSFont.monospacedSystemFont(ofSize: 16.5, weight: .regular)
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
-                    storage.beginEditing()
-                    storage.replaceCharacters(in: NSRange(location: attrLen - 1, length: 1),
-                        with: NSAttributedString(string: cursorChar, attributes: [
-                            .font: font, .foregroundColor: color
-                        ]))
-                    storage.endEditing()
-                    CATransaction.commit()
-                }
-            }
+            guard attrLen > 0 else { return }
+            let lastRange = NSRange(location: attrLen - 1, length: 1)
+            let lastChar = (storage.string as NSString).substring(with: lastRange)
+            guard lastChar == "█" else { return }  // not in cursor mode
+            storage.setAttributes(cursorAttrs, range: lastRange)
         }
 
         // Report content height back to SwiftUI for box sizing
