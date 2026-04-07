@@ -287,19 +287,45 @@ extension AgentViewModel {
                 openAICompatible = nil
             case .lmStudio:
                 let key = lmStudioProtocol == .lmStudio ? "input" : "messages"
-                openAICompatible = OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelId, baseURL: lmStudioEndpoint, historyContext: tabHistoryContext, projectFolder: projectFolder, provider: provider, messagesKey: key, maxTokens: mt)
+                openAICompatible = OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelId,
+                    baseURL: lmStudioEndpoint, historyContext: tabHistoryContext,
+                    projectFolder: projectFolder, provider: provider,
+                    messagesKey: key, maxTokens: mt
+                )
             case .vLLM:
-                openAICompatible = OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelId, baseURL: vLLMEndpoint, historyContext: tabHistoryContext, projectFolder: projectFolder, provider: provider, maxTokens: mt)
+                openAICompatible = OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelId,
+                    baseURL: vLLMEndpoint, historyContext: tabHistoryContext,
+                    projectFolder: projectFolder, provider: provider,
+                    maxTokens: mt
+                )
             default:
                 let url = chatURLForProvider(provider)
                 let vision = LLMRegistry.shared.provider(provider.rawValue)?.capabilities.contains(.vision) ?? false
-                openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelId, baseURL: url, supportsVision: vision || forceVision, historyContext: tabHistoryContext, projectFolder: projectFolder, provider: provider, maxTokens: mt)
+                openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(
+                    apiKey: apiKeyForProvider(provider), model: modelId,
+                    baseURL: url, supportsVision: vision || forceVision,
+                    historyContext: tabHistoryContext, projectFolder: projectFolder,
+                    provider: provider, maxTokens: mt
+                )
             }
             switch provider {
             case .ollama:
-                ollama = OllamaService(apiKey: ollamaAPIKey, model: modelId, endpoint: ollamaEndpoint, supportsVision: selectedOllamaSupportsVision || Self.isVisionModel(modelId), historyContext: tabHistoryContext, projectFolder: projectFolder, provider: .ollama)
+                ollama = OllamaService(
+                    apiKey: ollamaAPIKey, model: modelId,
+                    endpoint: ollamaEndpoint,
+                    supportsVision: selectedOllamaSupportsVision || Self.isVisionModel(modelId),
+                    historyContext: tabHistoryContext, projectFolder: projectFolder,
+                    provider: .ollama
+                )
             case .localOllama:
-                ollama = OllamaService(apiKey: "", model: modelId, endpoint: localOllamaEndpoint, supportsVision: selectedLocalOllamaSupportsVision || Self.isVisionModel(modelId), historyContext: tabHistoryContext, projectFolder: projectFolder, provider: .localOllama, contextSize: localOllamaContextSize)
+                ollama = OllamaService(
+                    apiKey: "", model: modelId, endpoint: localOllamaEndpoint,
+                    supportsVision: selectedLocalOllamaSupportsVision || Self.isVisionModel(modelId),
+                    historyContext: tabHistoryContext, projectFolder: projectFolder,
+                    provider: .localOllama, contextSize: localOllamaContextSize
+                )
             default:
                 ollama = nil
             }
@@ -516,7 +542,10 @@ extension AgentViewModel {
                         // offset/limit on the same file does NOT count toward the limit;
                         // a write to anything resets the counter for the whole tab.
                         let isRead = name == "read_file" || (name == "file_manager" && (input["action"] as? String) == "read")
-                        let isWrite = name == "write_file" || name == "edit_file" || name == "create_diff" || name == "apply_diff" || name == "diff_and_apply" || (name == "file_manager" && ["write", "edit", "diff_apply", "create", "apply"].contains(input["action"] as? String ?? ""))
+                        let isWrite = name == "write_file" || name == "edit_file"
+                            || name == "create_diff" || name == "apply_diff"
+                            || name == "diff_and_apply"
+                            || (name == "file_manager" && ["write", "edit", "diff_apply", "create", "apply"].contains(input["action"] as? String ?? ""))
                         if isWrite { recentToolCalls.removeAll() }
                         if isRead {
                             let fp = input["file_path"] as? String ?? input["path"] as? String ?? ""
@@ -563,7 +592,11 @@ extension AgentViewModel {
                             formatter.dateFormat = "HH:mm:ss"
                             let time = formatter.string(from: Date())
                             tab.tabTaskSummaries.append("[\(time)] \(prompt) → \(completionSummary)")
-                            history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: commandsRun), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+                            history.add(
+                                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: commandsRun),
+                                maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey,
+                                model: selectedModel
+                            )
                             tab.isLLMRunning = false
                             tab.isLLMThinking = false
                             return
@@ -617,7 +650,9 @@ extension AgentViewModel {
                         // Extract summary from task_complete/done(summary: "...") or (summary="...")
                         if let match = responseText.range(of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#, options: .regularExpression) {
                             let raw = String(responseText[match])
-                            completionSummary = raw.replacingOccurrences(of: #"(?:task_complete|done)\(summary[=:]\s*""#, with: "", options: .regularExpression).replacingOccurrences(of: "\"", with: "")
+                            completionSummary = raw
+                                .replacingOccurrences(of: #"(?:task_complete|done)\(summary[=:]\s*""#, with: "", options: .regularExpression)
+                                .replacingOccurrences(of: "\"", with: "")
                         } else {
                             completionSummary = String(responseText.prefix(500))
                         }
@@ -759,7 +794,11 @@ extension AgentViewModel {
                         try? await Task.sleep(for: .seconds(retryDelay))
                         if Task.isCancelled { break }
                         continue
-                    } else if errMsg.lowercased().contains("network") || errMsg.lowercased().contains("connection") || errMsg.lowercased().contains("internet") || (error as? URLError)?.code == .networkConnectionLost || (error as? URLError)?.code == .notConnectedToInternet {
+                    } else if errMsg.lowercased().contains("network")
+                                || errMsg.lowercased().contains("connection")
+                                || errMsg.lowercased().contains("internet")
+                                || (error as? URLError)?.code == .networkConnectionLost
+                                || (error as? URLError)?.code == .notConnectedToInternet {
                         // Network lost — retry in 60 seconds
                         timeoutRetryCount += 1
                         if timeoutRetryCount <= maxTimeoutRetries {
