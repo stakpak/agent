@@ -5,23 +5,6 @@ import AgentD1F
 // MARK: - File I/O Tool Execution
 extension AgentViewModel {
 
-    /// Heuristic check for an LLM-truncated diff result. Returns true only when
-    /// the patched output is BOTH tiny in absolute terms AND tiny relative to
-    /// source — catches obvious truncation like 27741→38 chars while allowing
-    /// legitimate refactors that delete most of a section (1000→400, 5000→200).
-    ///
-    /// Tunables (if this needs adjustment in the future):
-    ///   - Source must be > 200 chars to even consider — small sections aren't
-    ///     worth guarding because the LLM can easily regenerate them.
-    ///   - Patched must be < 50 chars absolute — legitimate refactors almost
-    ///     always produce more than this even when deleting heavily.
-    ///   - Patched must be < source/20 (5%) — refactors that delete 95%+ are
-    ///     rare; truncations bottom out near 0%.
-    nonisolated static func looksTruncated(source: String, patched: String) -> Bool {
-        guard source.count > 200 else { return false }
-        return patched.count < 50 && patched.count < source.count / 20
-    }
-
     /// Handles file I/O tool calls.
     /// Returns nil if this is not a file tool call.
     @MainActor
@@ -110,6 +93,7 @@ extension AgentViewModel {
             appendLog("📝 Write: \(filePath)")
             let output = await Self.offMain { CodingService.writeFile(path: filePath, content: content) }
             FileChangeJournal.shared.log(action: "write", filePath: expandedWrite, beforeContent: beforeContent, afterContent: content, tool: "write_file")
+            Self.invalidateFileReadCache(path: expandedWrite)
             appendLog(output)
             let lang = Self.langFromPath(filePath)
             appendLog(Self.codeFence(Self.preview(content, lines: readFilePreviewLines), language: lang))
@@ -144,6 +128,7 @@ extension AgentViewModel {
 
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
+                Self.invalidateFileReadCache(path: expandedEdit)
 
                 // D1F preview from old → new (fast, no extra file read)
                 let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
@@ -224,14 +209,12 @@ extension AgentViewModel {
                 } else {
                     throw DiffError.invalidDiff
                 }
-                // Truncation guard: only fires when the result is both absolutely
-                // tiny and tiny relative to source — see Self.looksTruncated.
-                if Self.looksTruncated(source: source, patched: patched) {
-                    let err = "Error: diff rejected — would shrink file from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-read the file and try again with a smaller section using start_line/end_line."
-                    appendLog(err)
-                    toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
-                    return true
-                }
+                // No truncation guard. d1f's structural verification + the
+                // applyDiff round-trip already catch malformed diffs. Legitimate
+                // refactors that delete most of a section were getting blocked,
+                // and undo_edit is always available if the LLM produces something
+                // bad — we'd rather trust the model and give the user undo than
+                // second-guess every shrink with a length heuristic.
                 try patched.write(to: URL(fileURLWithPath: expandedPath), atomically: true, encoding: .utf8)
                 // Track the apply for UUID-based undo
                 if let uuid = UUID(uuidString: diffIdStr) {
@@ -347,18 +330,11 @@ extension AgentViewModel {
             let diff = MultiLineDiff.createDiff(source: source, destination: destination, algorithm: algorithm, includeMetadata: true, sourceStartLine: startLine.map { $0 - 1 })
             let diffId = DiffStore.shared.store(diff: diff, source: source)
 
-            // Step 3: Apply diff (same as apply_diff)
+            // Step 3: Apply diff (same as apply_diff). No truncation guard —
+            // d1f's structural verification + applyDiff already catch malformed
+            // diffs, and undo_edit is always available for recovery.
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
-
-                // Truncation guard: only fires when the result is both absolutely
-                // tiny and tiny relative to source — see Self.looksTruncated.
-                if Self.looksTruncated(source: source, patched: patched) {
-                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-send the destination text in full or narrow the line range."
-                    appendLog(err)
-                    toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
-                    return true
-                }
 
                 // Splice back into full file if line range was used
                 let finalContent: String

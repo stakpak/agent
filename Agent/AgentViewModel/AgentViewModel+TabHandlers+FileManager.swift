@@ -243,13 +243,9 @@ extension AgentViewModel {
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
-                // Truncation guard: only fires when result is both absolutely tiny
-                // and tiny relative to source — see Self.looksTruncated.
-                if Self.looksTruncated(source: source, patched: patched) {
-                    let err = "Error: diff rejected — would shrink section from \(source.count) to \(patched.count) chars. The result is suspiciously small (likely truncated mid-stream). Re-send the destination text in full or narrow the line range."
-                    tab.appendLog(err); tab.flush()
-                    return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
-                }
+                // No truncation guard — d1f's structural verification + applyDiff
+                // already catch malformed diffs, and undo_edit is always available
+                // for recovery if the LLM produces something bad.
 
                 // Splice back into full file if line range
                 let finalContent: String

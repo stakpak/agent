@@ -137,6 +137,16 @@ extension AgentViewModel {
         "\(path):\(offset ?? -1):\(limit ?? -1)"
     }
 
+    /// Drop every cache entry for the given file path (any offset/limit). Call this
+    /// after any successful write/edit/diff_apply so the next read is guaranteed to
+    /// hit disk fresh — mtime alone has 1-second filesystem resolution and can lie
+    /// when a write happens in the same second as a prior read.
+    @MainActor static func invalidateFileReadCache(path: String) {
+        let expanded = (path as NSString).expandingTildeInPath
+        let prefix = "\(expanded):"
+        taskFileReadCache = taskFileReadCache.filter { !$0.key.hasPrefix(prefix) }
+    }
+
     /// Clear tool result cache — call at start of each task.
     @MainActor static func clearToolCache() {
         toolResultCache.removeAll()

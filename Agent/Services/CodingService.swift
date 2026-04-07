@@ -181,6 +181,15 @@ enum CodingService {
             return "Error: internal — no match range computed for non-replaceAll edit"
         }
 
+        // 3a. No-op detection: if the substring replacement produced identical
+        //     content, the edit is a no-op. This catches the case where the LLM
+        //     thinks it's fixing something but old_string and new_string are
+        //     equivalent after fuzzy matching, OR the matched range already
+        //     contains the target text. Don't touch disk and tell the LLM clearly.
+        if updated == original {
+            return "Warning: edit is a no-op — applying old_string→new_string produced identical content in \(url.path). The file was NOT modified. Either the matched text already equals new_string, or old_string and new_string are equivalent after whitespace normalization. Re-read the file and verify what actually needs to change."
+        }
+
         // 4. Build a structured d1f diff with metadata (line numbers, totals)
         let algorithm = selectDiffAlgorithm(source: original, destination: updated)
         let diff = MultiLineDiff.createDiff(
