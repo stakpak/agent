@@ -32,7 +32,10 @@ extension AgentViewModel {
                cached.mtime == currentMtime
             {
                 let stub =
-                    "File unchanged since last read (\(cached.outputCharCount) chars). The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading."
+                    "File unchanged since last read (\(cached.outputCharCount) chars). "
+                    + "The content from the earlier Read tool_result in this "
+                    + "conversation is still current — refer to that instead "
+                    + "of re-reading."
                 tab.appendLog("📖 (unchanged) \(filePath)")
                 tab.flush()
                 return TabToolResult(
@@ -190,7 +193,9 @@ extension AgentViewModel {
                 tab.appendLog(verifyDiff)
                 let newLineCount = patched.components(separatedBy: "\n").count
                 let output =
-                    "Applied diff to \(filePath) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits."
+                    "Applied diff to \(filePath) [verified: \(verified)] "
+                    + "— file now has \(newLineCount) lines. "
+                    + "Re-read the file before making more edits."
                 DiffStore.shared.invalidateDiffs(for: expandedPath)
                 tab.appendLog(output)
                 tab.flush()
@@ -303,7 +308,12 @@ extension AgentViewModel {
                     toolResult: [
                         "type": "tool_result",
                         "tool_use_id": toolId,
-                        "content": "Applied diff to \(filePath)\(rangeNote) [verified: \(verified)] — file now has \(newLineCount) lines. Re-read the file before making more edits. diff_id: \(diffId.uuidString)\n\n\(display)"
+                        "content":
+                            "Applied diff to \(filePath)\(rangeNote) "
+                            + "[verified: \(verified)] — file now has "
+                            + "\(newLineCount) lines. Re-read the file "
+                            + "before making more edits. "
+                            + "diff_id: \(diffId.uuidString)\n\n\(display)"
                     ],
                     isComplete: false
                 )
@@ -317,7 +327,9 @@ extension AgentViewModel {
             let pattern = input["pattern"] as? String ?? "*.swift"
             if pattern == "*" || pattern == "*.*" {
                 let err =
-                    "Error: pattern '*' is too broad. Use a file extension like '*.swift', '*.json', '*.py'. Example: list_files(pattern: \"*.swift\")"
+                    "Error: pattern '*' is too broad. "
+                    + "Use a file extension like '*.swift', '*.json', '*.py'. "
+                    + "Example: list_files(pattern: \"*.swift\")"
                 tab.appendLog(err); tab.flush()
                 return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
             }
