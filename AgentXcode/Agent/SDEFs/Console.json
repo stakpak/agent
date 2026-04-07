@@ -1,0 +1,1 @@
+{"suites":[{"commands":[{"description":"Select a device.","direct_parameter":{"description":"The Device UDID to select.","type":"text"},"name":"selectDevice"}],"name":"Console Suite"}]}
