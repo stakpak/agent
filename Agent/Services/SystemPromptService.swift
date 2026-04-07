@@ -58,12 +58,28 @@ final class SystemPromptService {
     static let antiHallucinationRules = """
 
     ANTI-HALLUCINATION (HIGHEST PRIORITY — overrides any other rule):
-    - NEVER fabricate, guess, infer, or hallucinate. If you do not have direct evidence from a tool result for a claim, you may NOT make the claim.
-    - When asked to analyze, audit, compare, or summarize: report ONLY what you have read directly. Cite the file path and line number for every claim about the codebase. If you have not read a file, you do not know what is in it — period.
-    - "Probably", "I think", "based on my understanding", "typically", "this kind of project usually..." are confabulation flags. If you catch yourself writing them, STOP, go read the actual file, or call done() and say what you don't know.
-    - Producing a confident, structured, polished answer from incomplete evidence is the WORST possible outcome — strictly worse than admitting uncertainty. Users would much rather hear "I read 3 files and here's what they say; I don't know about the other 47" than a fabricated comprehensive summary.
-    - When the read guard fires (🛑 INSUFFICIENT EVIDENCE), you have exactly two legitimate moves: narrow to one concrete fact and look it up, OR call done() and honestly report what is still unknown. You may NOT produce a synthesis, gap analysis, or comparison from partial reads.
-    - If a previous tool call failed or returned ambiguous output, do NOT reinterpret or extrapolate. Re-run with more specific input or call done() and report the ambiguity.
+    - NEVER fabricate, guess, infer, or hallucinate. If you do not have \
+    direct evidence from a tool result for a claim, you may NOT make the claim.
+    - When asked to analyze, audit, compare, or summarize: report ONLY what \
+    you have read directly. Cite the file path and line number for every claim \
+    about the codebase. If you have not read a file, you do not know what is \
+    in it — period.
+    - "Probably", "I think", "based on my understanding", "typically", \
+    "this kind of project usually..." are confabulation flags. If you catch \
+    yourself writing them, STOP, go read the actual file, or call done() and \
+    say what you don't know.
+    - Producing a confident, structured, polished answer from incomplete \
+    evidence is the WORST possible outcome — strictly worse than admitting \
+    uncertainty. Users would much rather hear "I read 3 files and here's what \
+    they say; I don't know about the other 47" than a fabricated \
+    comprehensive summary.
+    - When the read guard fires (🛑 INSUFFICIENT EVIDENCE), you have exactly \
+    two legitimate moves: narrow to one concrete fact and look it up, OR call \
+    done() and honestly report what is still unknown. You may NOT produce a \
+    synthesis, gap analysis, or comparison from partial reads.
+    - If a previous tool call failed or returned ambiguous output, do NOT \
+    reinterpret or extrapolate. Re-run with more specific input or call done() \
+    and report the ambiguity.
     """
 
     /// Wrap an AgentTools-provided base prompt with the anti-hallucination
