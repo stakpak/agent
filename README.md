@@ -33,12 +33,13 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
 
 ---
 
-## Quick Start
+## Quick Start (Download)
 
 1. **Download** [Agent!](https://github.com/macOS26/Agent/releases/latest) and drag to Applications
 2. **Open Agent!** -- it sets up everything automatically
 3. **Pick your AI** -- Settings → choose a provider → enter API key
-## Quick Start
+
+## Quick Start (Build from Source)
 
 1. **Clone the repository:**
    ```bash
@@ -50,7 +51,9 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
 4. **Approve the Helper Tool:** When prompted, authorize the privileged daemon to allow root-level command execution.
 5. **Configure your AI Provider:** Go to Settings and enter your API key or select a local provider like Ollama.
 
-> 💡 **No API key?** Use **Ollama** with **GLM-5** -- completely free, runs offline, no account needed. Requires 32GB+ RAM.
+> 💡 **No API key?** Use **Ollama** or **Hugging Face** with **GLM-5** -- completely free, runs offline (Ollama) or in the cloud (HF), no account needed for Ollama. Requires 32GB+ RAM for local.
+>
+> 💡 **Want the latest?** **Z.ai** ships **GLM-5.1** via API -- paid, but it's the recommended starting point for cloud use.
 
 
 ## What Can It Do?

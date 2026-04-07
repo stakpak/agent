@@ -70,12 +70,13 @@ enum Tool {
         static let auto = "Auto"
         static let user = "User"
         static let root = "Root"
+        static let subAgents = "Sub-agents"
         static let exp = "Experimental"
     }
 
     // MARK: - Group Order
 
-    static let allGroups: [String] = [Group.core, Group.work, Group.code, Group.auto, Group.user, Group.root, Group.exp]
+    static let allGroups: [String] = [Group.core, Group.work, Group.code, Group.auto, Group.user, Group.root, Group.subAgents, Group.exp]
 
     // MARK: - Legacy Aliases (old name → handler name)
     // LLM sends short name, alias resolves to the handler the app uses

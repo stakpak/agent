@@ -36,14 +36,18 @@ final class ToolPreferencesService {
             Tool.chat, "conversation", Tool.msg, "send_message", Tool.sh,
             "run_shell_script", Tool.plan, "plan_mode", Tool.mem, "memory",
             Tool.skill, "invoke_skill", Tool.file, "file_manager", Tool.folder,
-            "project_folder", Tool.webFetch, "web_fetch", Tool.ask, "ask_user",
-            Tool.messageAgent, "tell_agent"
+            "project_folder", Tool.webFetch, "web_fetch", Tool.ask, "ask_user"
         ]),
-        Tool.Group.work: Set([Tool.batch, "batch_commands", Tool.multi, "batch_tools", Tool.spawn, "spawn_agent"]),
+        Tool.Group.work: Set([Tool.batch, "batch_commands", Tool.multi, "batch_tools"]),
         Tool.Group.code: Set([Tool.xc, Tool.git, Tool.agent]),
         Tool.Group.auto: Set([Tool.as, Tool.ax, Tool.js, "jxa", "lookup_sdef", Tool.web]),
         Tool.Group.user: Set([Tool.user, "execute_agent_command"]),
         Tool.Group.root: Set([Tool.root, "execute_daemon_command"]),
+        // Sub-agents group: spawn_agent and tell_agent were previously split
+        // across the Work and Core groups respectively, which made no sense —
+        // they're a coherent feature set (parent agent orchestrates isolated
+        // child tasks via mailbox messaging). One toggle now hides/shows both.
+        Tool.Group.subAgents: Set([Tool.spawn, "spawn_agent", Tool.messageAgent, "tell_agent"]),
         Tool.Group.exp: Set([Tool.sel, "selenium", "ax_screenshot"]),
     ]
 
