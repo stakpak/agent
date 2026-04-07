@@ -1,28 +1,31 @@
-# Xcode User Interface State
-*.xcuserstate
+# macOS
+.DS_Store
 
-# Xcode user-specific files (both the .xcuserdatad bundle and the
-# parent xcuserdata/ directory that contains it)
+# Xcode user-specific state (don't share between developers)
+*.xcuserstate
 *.xcuserdatad
 xcuserdata/
 
 # Editor backups
 *.bak
 *~
+*.tmp
+*.log
+.gitignore~
 
-# Build directory
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Build outputs
 build/
-AgentXcode/build/
+DerivedData/
+CompilationCache.noindex/
+ModuleCache.noindex/
+Intermediates.noindex/
+**/DWARF/
 
-# Stray .app bundle dropped by the Copy Agent Resources build phase when
-# its destination env var resolves to an integer (xcodebuild path).
-[0-9]/
-AgentXcode/[0-9]/
-
-# Export options (contains team ID)
-ExportOptions.plist
-
-# Large binary files
+# Binary distributables
 *.dmg
 *.app
 *.ipa
@@ -30,87 +33,16 @@ ExportOptions.plist
 *.dSYM
 *.dSYM/
 
-# Swift Package Manager
-.build/
-.swiftpm/
+# Stray .app bundles dropped by the Copy Agent Resources build phase when
+# its destination env var resolves to an integer (xcodebuild path quirk)
+[0-9]/
+[0-9][0-9]/
 
-# macOS
-.DS_Store
-
-# Claude
+# Claude harness state
 .claude/
 
-# Plan files
-plan*.md
+# Playwright MCP cache
+.playwright-mcp/
 
-# Swift packages (remote SPM dependencies)
-AgentAccess/
-AgentAudit/
-AgentColorSyntax/
-AgentD1F/
-AgentEventBridges/
-AgentLLM/
-AgentMCP/
-AgentSwift/
-AgentTerminalNeo/
-AgentTools/
-
-# Ignore specific files mentioned in task
-.gitignore~
-*.tmp
-*.log
-
-# ============================================================================
-# Anti-bloat list — paths that historically got committed but shouldn't be in
-# this repo. The legitimate top-level entries are:
-#   .gitattributes, .gitignore, .mailmap, .github/, Agent/, Agent.xcodeproj/,
-#   AgentHelper/, AgentTests/, AgentUser/, Shared/, docs/, LICENSE,
-#   README.md, release_notes.md, ExportOptions.plist, plan*.md
-# Anything listed below was bloat that needs to stay out forever.
-# ============================================================================
-
-# External Swift packages that historically slipped in (rest are above).
-/MultiLineDiff/
-/XcodeScriptingBridge/
-/xcf-swift/
-/LinkedInAutomation/
-/Sources/
-/Agent.xcworkspace/
-
-# Historical release-version directories that shouldn't be tracked
-/1.0.*/
-/v1.0.*/
-/Releases/
-
-# Stray loose files at repo root
-/Models.swift
-/test_backticks.swift
-/agent_scripts_list.txt
-/agent_screenshot*.jpg
-/original_image.png
-/screenshot.png
-/AgentScriptDarkLight.mp4
-
-# Old/superseded release notes (keep canonical release_notes.md)
-/README_UserFriendly.md
-/release_notes_*.md
-/RELEASE_NOTES.md
-/ReleaseNotes.md
-
-# Plan directories (plan*.md is already covered above)
-plans/
-
-# Build artifacts that have ever leaked in
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-DerivedData/
-CompilationCache.noindex/
-ModuleCache.noindex/
-Intermediates.noindex/
-build/
-.build/
-
-# dSYM symbol files (already have *.dSYM above, this catches loose DWARF)
-**/DWARF/
+# Sensitive
+ExportOptions.plist
