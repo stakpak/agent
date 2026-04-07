@@ -422,14 +422,16 @@ extension AgentViewModel {
             let name = input["name"] as? String ?? "agent-\(subAgents.count + 1)"
             let prompt = input["prompt"] as? String ?? ""
             guard !prompt.isEmpty else { return "Error: prompt is required for spawn_agent." }
-            // Configurable tool groups: "all", "coding", "automation", or comma-separated group names
+            // Configurable tool groups: "all" or comma-separated group names.
+            // The legacy 'coding' / 'automation' aliases are gone with the rest of
+            // the mode system; pass explicit group names like "Core,Code,User" if
+            // you want to narrow a sub-agent's tool list.
             var toolGroups: Set<String>? = nil
             if let mode = input["tools"] as? String {
-                switch mode {
-                case "all": toolGroups = Set(Tool.allGroups)
-                case "coding": toolGroups = Self.codingModeGroups
-                case "automation": toolGroups = Self.automationModeGroups
-                default: toolGroups = Set(mode.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+                if mode == "all" {
+                    toolGroups = Set(Tool.allGroups)
+                } else {
+                    toolGroups = Set(mode.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) })
                 }
             }
             let maxIter = input["max_iterations"] as? Int ?? 15
@@ -987,33 +989,10 @@ extension AgentViewModel {
         // project_folder
         case "project_folder":
             return handleProjectFolder(tab: nil, input: input)
-        // mode tool — switches between coding/automation/workflow/standard
+        // 'mode' tool removed — there are no modes anymore. Return a no-op so any
+        // cached LLM context that still calls it doesn't error out hard.
         case "mode":
-            let action = input["action"] as? String
-            // New: action-based switching
-            if let action {
-                switch action {
-                case "coding", "coding_mode":
-                    codingModeEnabled = true
-                    automationModeEnabled = false
-                    return "Coding mode ON — Core+Workflow+Coding+UserAgent tools active."
-                case "automation", "workflow", "workflow_mode":
-                    automationModeEnabled = true
-                    codingModeEnabled = false
-                    return "Workflow mode ON — Core+Workflow+Automation+UserAgent tools active."
-                case "standard", "standard_mode":
-                    codingModeEnabled = false
-                    automationModeEnabled = false
-                    return "Standard mode — all user-enabled tools restored."
-                default:
-                    return "Unknown mode: \(action). Use coding_mode, workflow_mode, or standard_mode."
-                }
-            }
-            // Legacy: enabled bool
-            let enabled = input["enabled"] as? Bool ?? true
-            codingModeEnabled = enabled
-            automationModeEnabled = false
-            return enabled ? "Coding mode ON — Core+Workflow+Coding+UserAgent tools active." : "Standard mode — all user-enabled tools restored."
+            return "Mode switching has been removed. All user-enabled tools are always available."
         // MARK: - Xcode Tools
         case "xcode_build":
             let projectPath = input["project_path"] as? String ?? ""

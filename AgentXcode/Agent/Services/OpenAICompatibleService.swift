@@ -86,8 +86,9 @@ final class OpenAICompatibleService {
     }
 
     func tools(activeGroups: Set<String>? = nil, compact: Bool = false) -> [[String: Any]] {
-        let groups = isLMStudio ? Tool.codingGroups : activeGroups
-        return AgentTools.ollamaTools(for: provider, activeGroups: groups, compact: compact, projectFolder: projectFolder)
+        // No mode-based narrowing — every user-enabled tool flows through.
+        // Local endpoints with tight context windows can disable groups via the UI.
+        return AgentTools.ollamaTools(for: provider, activeGroups: activeGroups, compact: compact, projectFolder: projectFolder)
     }
 
     /// Prepend project folder to the last user message (only on first message).

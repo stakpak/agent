@@ -10,7 +10,6 @@ enum Tool {
     static let tools = "list_tools"
     static let search = "search"
     static let folder = "directory"
-    static let code = "mode"
 
     // Core (also)
     static let chat = "chat"
@@ -67,10 +66,8 @@ enum Tool {
         static let exp = "Experimental"
     }
 
-    // MARK: - Mode Groups
+    // MARK: - Group Order
 
-    static let codingGroups: Set<String> = [Group.core, Group.work, Group.code, Group.user]
-    static let automationGroups: Set<String> = [Group.core, Group.work, Group.auto, Group.user]
     static let allGroups: [String] = [Group.core, Group.work, Group.code, Group.auto, Group.user, Group.root, Group.exp]
 
     // MARK: - Legacy Aliases (old name → handler name)

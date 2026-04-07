@@ -890,38 +890,6 @@ extension AgentViewModel {
             + trimmedB.joined(separator: "\n")
     }
 
-    // MARK: - Smart Tool Prediction
-
-    /// Predict which tool groups are needed based on the user's prompt.
-    /// Returns nil to use all enabled tools (default behavior).
-    static func predictToolGroups(for prompt: String) -> Set<String>? {
-        let lower = prompt.lowercased()
-
-        // Always include Core
-        var groups: Set<String> = [Tool.Group.core, Tool.Group.work]
-
-        // Detect intent from keywords
-        let codingKeywords = ["build", "compile", "edit", "fix", "refactor", "add", "remove", "create", "update",
-                              "swift", "xcode", "code", "file", "function", "class", "struct", "import",
-                              "error", "bug", "test", "commit", "push", "branch", "git", "merge"]
-        let automationKeywords = ["click", "button", "window", "photo", "booth", "accessibility", "ax",
-                                  "applescript", "osascript", "open app", "activate", "menu", "ui"]
-        let webKeywords = ["search", "google", "safari", "web", "browse", "url", "navigate", "page"]
-
-        let hasCoding = codingKeywords.contains(where: { lower.contains($0) })
-        let hasAutomation = automationKeywords.contains(where: { lower.contains($0) })
-        let hasWeb = webKeywords.contains(where: { lower.contains($0) })
-
-        if hasCoding { groups.insert(Tool.Group.code); groups.insert(Tool.Group.user) }
-        if hasAutomation { groups.insert(Tool.Group.auto); groups.insert(Tool.Group.user) }
-        if hasWeb { groups.insert(Tool.Group.auto) }
-
-        // If no specific intent detected, return nil (use all tools)
-        if !hasCoding && !hasAutomation && !hasWeb { return nil }
-
-        return groups
-    }
-
     // MARK: - Xcode Project Detection
 
     /// Check if the project folder contains an Xcode project.

@@ -51,8 +51,9 @@ extension AgentViewModel {
         SessionStore.shared.newSession()
         FallbackChainService.shared.reset()
         Self.clearToolCache()
-        // Smart tool prediction — send only tools the prompt needs (saves ~3K tokens)
-        var activeGroups: Set<String>? = codingModeEnabled ? Self.codingModeGroups : automationModeEnabled ? Self.automationModeGroups : Self.predictToolGroups(for: prompt)
+        // No mode filtering — send every user-enabled tool on every turn.
+        // The LLM picks what it needs; ToolPreferencesService is the only filter.
+        let activeGroups: Set<String>? = nil
         let isXcode = Self.isXcodeProject(projectFolder)
         appendLog(Self.newTaskMarker)
         appendLog("👤 \(prompt)")
@@ -343,8 +344,6 @@ extension AgentViewModel {
         var filesEditedThisTask: Set<String> = []
         // Track if a plan exists for this task (created via plan_mode tool)
         var planActive = false
-        // Track if iter 1 used any tool calls (including read-only) — for auto-coding-mode trigger
-        var iter1UsedTools = false
 
         while !Task.isCancelled {
             iterations += 1
@@ -362,22 +361,10 @@ extension AgentViewModel {
                 flushLog()
             }
 
-            // Auto-enable coding mode after iteration 1 if ANY tool calls were made (including reads)
-            // Skip if user is doing automation (accessibility, applescript, javascript).
-            // NOTE: compactTools is already true from before the loop — no need to flip it here.
-            // We just narrow the activeGroups so the tool LIST shrinks (which is fine for caching
-            // because activeGroups change is the LLM's intent, not a prefix mutation we can avoid).
-            // Substring keywords match every expanded variant: applescript catches run_applescript;
-            // apple_script catches list/run/save/delete_apple_script; javascript catches all 5 JS
-            // handler variants; sdef catches lookup_sdef; osascript catches run_osascript.
-            let automationKeywords: Set<String> = ["applescript", "apple_script", "osascript", "javascript", "sdef"]
-            let isAutomation = commandsRun.contains(where: { cmd in cmd.hasPrefix("ax_") || automationKeywords.contains(where: { cmd.contains($0) }) })
-            if iterations == 2 && !codingModeEnabled && iter1UsedTools {
-                codingModeEnabled = true
-                activeGroups = isAutomation ? Self.automationModeGroups : Self.codingModeGroups
-                appendLog(isAutomation ? "⚡ Automation mode auto-enabled" : "⚡ Coding mode auto-enabled")
-                flushLog()
-            }
+            // Mode auto-switching removed: tools are filtered only by the user's UI
+            // toggles in ToolPreferencesService. activeGroups stays nil so every
+            // user-enabled tool is available on every turn. The LLM picks what it
+            // needs without the harness second-guessing it mid-task.
 
             // Token-aware context compaction — replaces fixed iteration-based triggers
             if iterations > 1 {
@@ -497,7 +484,6 @@ extension AgentViewModel {
                         flushLog()
                     } else if type == "tool_use" {
                         hasToolUse = true
-                        if iterations == 1 { iter1UsedTools = true }
                         guard let toolId = block["id"] as? String,
                               var name = block["name"] as? String,
                               var input = block["input"] as? [String: Any] else { continue }

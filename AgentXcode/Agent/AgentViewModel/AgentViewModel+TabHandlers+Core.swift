@@ -56,25 +56,9 @@ extension AgentViewModel {
             )
 
         case "mode":
-            let action = input["action"] as? String
-            let output: String
-            if let action {
-                switch action {
-                case "coding", "coding_mode":
-                    codingModeEnabled = true; automationModeEnabled = false
-                    output = "Coding mode ON — Core+Workflow+Coding+UserAgent tools active."
-                case "automation", "workflow", "workflow_mode":
-                    automationModeEnabled = true; codingModeEnabled = false
-                    output = "Workflow mode ON — Core+Workflow+Automation+UserAgent tools active."
-                default:
-                    codingModeEnabled = false; automationModeEnabled = false
-                    output = "Standard mode — all user-enabled tools restored."
-                }
-            } else {
-                let enabled = input["enabled"] as? Bool ?? true
-                codingModeEnabled = enabled; automationModeEnabled = false
-                output = enabled ? "Coding mode ON — Core+Workflow+Coding+UserAgent tools active." : "Standard mode — all tools restored."
-            }
+            // 'mode' tool removed — there are no modes anymore. Return a no-op so any
+            // cached LLM context that still calls it doesn't error out hard.
+            let output = "Mode switching has been removed. All user-enabled tools are always available."
             tab.appendLog(output)
             tab.flush()
             return TabToolResult(

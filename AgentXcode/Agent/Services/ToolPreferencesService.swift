@@ -31,7 +31,7 @@ final class ToolPreferencesService {
     /// Each entry includes both the canonical short name (Tool.xxx) and the
     /// post-expansion handler name so the user-pref filter catches both.
     static let toolGroups: [String: Set<String>] = [
-        Tool.Group.core: Set([Tool.done, "task_complete", Tool.tools, Tool.search, "web_search", Tool.chat, "conversation", Tool.msg, "send_message", Tool.sh, "run_shell_script", Tool.code, Tool.plan, "plan_mode", Tool.mem, "memory", Tool.skill, "invoke_skill", Tool.file, "file_manager", Tool.folder, "project_folder", Tool.webFetch, "web_fetch", Tool.ask, "ask_user", Tool.messageAgent, "tell_agent"]),
+        Tool.Group.core: Set([Tool.done, "task_complete", Tool.tools, Tool.search, "web_search", Tool.chat, "conversation", Tool.msg, "send_message", Tool.sh, "run_shell_script", Tool.plan, "plan_mode", Tool.mem, "memory", Tool.skill, "invoke_skill", Tool.file, "file_manager", Tool.folder, "project_folder", Tool.webFetch, "web_fetch", Tool.ask, "ask_user", Tool.messageAgent, "tell_agent"]),
         Tool.Group.work: Set([Tool.batch, "batch_commands", Tool.multi, "batch_tools", Tool.spawn, "spawn_agent"]),
         Tool.Group.code: Set([Tool.xc, Tool.git, Tool.agent]),
         Tool.Group.auto: Set([Tool.as, Tool.ax, Tool.js, "jxa", "lookup_sdef", Tool.web]),

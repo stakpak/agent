@@ -108,11 +108,6 @@ final class AgentViewModel {
     var activityLog = ""
     var isRunning = false
     var isThinking = false
-    /// When true, only focused tool groups sent to LLM
-    var codingModeEnabled = false
-    var automationModeEnabled = false
-    static let codingModeGroups = Tool.codingGroups
-    static let automationModeGroups = Tool.automationGroups
 
     // MARK: - Coding Preferences (opt-in features)
 

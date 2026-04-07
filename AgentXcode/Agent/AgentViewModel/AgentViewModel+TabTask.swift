@@ -357,18 +357,18 @@ extension AgentViewModel {
             messages.append(["role": "user", "content": promptPrefix + prompt])
         }
 
-        // All tool groups available — user controls via UI toggles
-        var activeGroups: Set<String>? = codingModeEnabled ? Self.codingModeGroups : automationModeEnabled ? Self.automationModeGroups : nil
+        // No mode filtering — every user-enabled tool is sent on every turn.
+        // ToolPreferencesService is the only tool filter.
+        let activeGroups: Set<String>? = nil
 
         var iterations = 0
         var textOnlyCount = 0
         var timeoutRetryCount = 0
         let maxTimeoutRetries = maxRetries
         var recentToolCalls: [String] = []  // Track recent tool calls to detect loops
-        // Plan-mode enforcement + coding-mode auto-trigger state
+        // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
         var planActive = false
-        var iter1UsedTools = false
         // Tab tasks always use the condensed prompt — keeps the prefix byte-for-byte stable
         // across iterations so Ollama / Anthropic KV caches stay hot. No confusion-revert path
         // here (only the main task loop has that).
@@ -387,18 +387,8 @@ extension AgentViewModel {
         while !Task.isCancelled {
             iterations += 1
 
-            // Auto-enable coding mode after iteration 1 — skip if using automation tools.
-            // compactTools is already true from before the loop, so we only narrow activeGroups here.
-            // Substring keywords match every expanded variant of the AppleScript / JavaScript /
-            // osascript / sdef handlers; ax_* prefix is checked separately.
-            let automationKeywords: Set<String> = ["applescript", "apple_script", "osascript", "javascript", "sdef"]
-            let isAutomation = commandsRun.contains(where: { cmd in cmd.hasPrefix("ax_") || automationKeywords.contains(where: { cmd.contains($0) }) })
-            if iterations == 2 && !codingModeEnabled && iter1UsedTools {
-                codingModeEnabled = true
-                activeGroups = isAutomation ? Self.automationModeGroups : Self.codingModeGroups
-                tab.appendLog(isAutomation ? "⚡ Automation mode auto-enabled" : "⚡ Coding mode auto-enabled")
-                tab.flush()
-            }
+            // Mode auto-switching removed: every user-enabled tool is available on
+            // every turn. ToolPreferencesService UI toggles are the only filter.
 
             // Prune old messages every 4 iterations to save tokens
             if iterations > 1 && iterations % 4 == 0 && messages.count > 10 {
@@ -508,7 +498,6 @@ extension AgentViewModel {
                         // Text goes to LLM output only — streaming delta already shows it there
                     } else if type == "tool_use" {
                         hasToolUse = true
-                        if iterations == 1 { iter1UsedTools = true }
                         guard let toolId = block["id"] as? String,
                               let rawName = block["name"] as? String,
                               let rawInput = block["input"] as? [String: Any] else { continue }

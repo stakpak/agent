@@ -44,9 +44,8 @@ extension AgentViewModel {
         table["extract_function"] = handleExtractFunction
 
         // Plan & project tools — delegate to executeNativeTool.
-        // 'mode' is the canonical LLM-facing name; the legacy 'coding_mode' alias was removed
-        // along with 'conversation' (now 'chat' which doesn't need a top-level entry because
-        // expandConsolidatedTool routes it via the conversation case).
+        // 'mode' is kept as a no-op handler for back-compat with cached LLM context
+        // that still calls it; the actual mode-switching logic was removed.
         for name in ["plan_mode", "project_folder", "mode", "list_tools", "send_message", "memory"] {
             table[name] = handleNativeTool
         }
