@@ -60,10 +60,10 @@ extension AgentViewModel {
         switch provider {
         case .claude:
             modelName = selectedModel
-            isVision = true  // Claude Sonnet/Opus/Haiku all support vision
+            isVision = true // Claude Sonnet/Opus/Haiku all support vision
         case .openAI:
             modelName = openAIModel
-            isVision = true  // GPT-4o, GPT-4 Turbo support vision
+            isVision = true // GPT-4o, GPT-4 Turbo support vision
         case .deepSeek:
             modelName = deepSeekModel
             isVision = Self.isVisionModel(deepSeekModel)
@@ -93,7 +93,7 @@ extension AgentViewModel {
             isVision = Self.isVisionModel(qwenModel)
         case .gemini:
             modelName = geminiModel
-            isVision = true  // Gemini supports vision
+            isVision = true // Gemini supports vision
         case .grok:
             modelName = grokModel
             isVision = Self.isVisionModel(grokModel)
@@ -129,9 +129,18 @@ extension AgentViewModel {
         // and again whenever the fallback chain swaps providers mid-task.
         func buildLLMServices() {
             if provider == .claude {
-                claude = ClaudeService(apiKey: apiKey, model: modelName, historyContext: historyContext, projectFolder: projectFolder, maxTokens: mt)
+                claude = ClaudeService(
+                    apiKey: apiKey, model: modelName,
+                    historyContext: historyContext,
+                    projectFolder: projectFolder, maxTokens: mt
+                )
             } else if provider == .lmStudio && lmStudioProtocol == .anthropic {
-                claude = ClaudeService(apiKey: lmStudioAPIKey, model: lmStudioModel, historyContext: historyContext, projectFolder: projectFolder, baseURL: lmStudioEndpoint, maxTokens: mt)
+                claude = ClaudeService(
+                    apiKey: lmStudioAPIKey, model: lmStudioModel,
+                    historyContext: historyContext,
+                    projectFolder: projectFolder,
+                    baseURL: lmStudioEndpoint, maxTokens: mt
+                )
             } else {
                 claude = nil
             }
@@ -225,7 +234,7 @@ extension AgentViewModel {
         var completionSummary = ""
         var timeoutRetryCount = 0
         let maxTimeoutRetries = maxRetries
-        
+
         // Apple Intelligence mediator for contextual annotations
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
@@ -244,8 +253,11 @@ extension AgentViewModel {
                     if success {
                         completionSummary = "Ran \(agentName)"
                         history.add(
-                            TaskRecord(prompt: prompt, summary: completionSummary,
-                                       commandsRun: ["run_agent: \(agentName)"]),
+                            TaskRecord(
+                                prompt: prompt,
+                                summary: completionSummary,
+                                commandsRun: ["run_agent: \(agentName)"]
+                            ),
                             maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey,
                             model: selectedModel
                         )
@@ -273,12 +285,23 @@ extension AgentViewModel {
                 flushLog()
             }
             if cmd.name == "google_search" && output.contains("\"success\": true") {
-                messages.append(["role": "user", "content": "Format these Google search results for the user. Be concise — show the top results with titles, URLs, and brief descriptions:\n\n\(output)"])
-                break  // Fall through to LLM loop
+                messages.append(["role": "user", "content": """
+                Format these Google search results for the user. \
+                Be concise — show the top results with titles, URLs, \
+                and brief descriptions:
+
+                \(output)
+                """])
+                break // Fall through to LLM loop
             }
             if cmd.name == "safari_read" && !output.contains("Error") {
-                messages.append(["role": "user", "content": "Summarize this web page for the user. Show the title, URL, and key content:\n\n\(output)"])
-                break  // Fall through to LLM loop
+                messages.append(["role": "user", "content": """
+                Summarize this web page for the user. \
+                Show the title, URL, and key content:
+
+                \(output)
+                """])
+                break // Fall through to LLM loop
             }
             // safari_open: if user had additional instructions, read page and pass to LLM
             if cmd.name == "safari_open" {
@@ -286,7 +309,25 @@ extension AgentViewModel {
                 // Check if the original prompt has more than just "open <url>"
                 let urlArg = cmd.argument.lowercased()
                 let remaining = prompt.lowercased().replacingOccurrences(of: urlArg, with: "")
-                let noise = Set(["open", "safari", "in", "on", "to", "and", "the", "using", "webpage", "web", "page", "website", "url", "go", "navigate", "visit", "browse"])
+                let noise = Set([
+                    "open",
+                    "safari",
+                    "in",
+                    "on",
+                    "to",
+                    "and",
+                    "the",
+                    "using",
+                    "webpage",
+                    "web",
+                    "page",
+                    "website",
+                    "url",
+                    "go",
+                    "navigate",
+                    "visit",
+                    "browse"
+                ])
                 let meaningfulWords = remaining.components(separatedBy: .whitespacesAndNewlines)
                     .filter { !$0.isEmpty && !noise.contains($0) }
                 if !meaningfulWords.isEmpty {
@@ -295,13 +336,28 @@ extension AgentViewModel {
                     let pageContent = await WebAutomationService.shared.readPageContent(maxLength: 3000)
                     let pageTitle = await WebAutomationService.shared.getPageTitle()
                     let pageURL = await WebAutomationService.shared.getPageURL()
-                    messages.append(["role": "user", "content": "I opened \(pageURL) (\(pageTitle)). Here is the page content:\n\n\(pageContent)\n\nNow complete this request: \(prompt)"])
-                    break  // Fall through to LLM loop
+                    messages.append([
+                        "role": "user",
+                        "content": """
+                            I opened \(pageURL) (\(pageTitle)). \
+                            Here is the page content:
+
+                            \(pageContent)
+
+                            Now complete this request: \(prompt)
+                            """
+                    ])
+                    break // Fall through to LLM loop
                 }
             }
 
             completionSummary = "Executed \(cmd.name)"
-            history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: [cmd.name]), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: [cmd.name]),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
             ChatHistoryStore.shared.endCurrentTask(summary: completionSummary)
             stopProgressUpdates()
             if agentReplyHandle != nil { sendProgressUpdate(output) }
@@ -318,7 +374,12 @@ extension AgentViewModel {
             appendLog("✅ Completed: \(String(reply.prefix(200)))")
             flushLog()
             completionSummary = String(reply.prefix(200))
-            history.add(TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: []), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: []),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
             ChatHistoryStore.shared.endCurrentTask(summary: completionSummary)
             stopProgressUpdates()
             if agentReplyHandle != nil { sendProgressUpdate(reply) }
@@ -340,16 +401,16 @@ extension AgentViewModel {
         // Context compaction state — token-aware triggers with circuit breaker
         var compactionState = CompactionState()
         // Overnight coding guards
-        var consecutiveReadOnlyCount = 0      // read guard — force stop after 10
-        var unbuiltEditCount = 0              // build enforcement — nudge after edit without build
-        var consecutiveBuildFailures = 0      // error budget — stop after 5
-        var stuckFiles: [String: Int] = [:]   // stuck detection — skip after 5 failures per file
+        var consecutiveReadOnlyCount = 0 // read guard — force stop after 10
+        var unbuiltEditCount = 0 // build enforcement — nudge after edit without build
+        var consecutiveBuildFailures = 0 // error budget — stop after 5
+        var stuckFiles: [String: Int] = [:] // stuck detection — skip after 5 failures per file
         // Full system prompt + full tool descriptions on every turn. The earlier
         // condensed-prompt + compactTools optimization saved ~4K tokens/turn but the
         // user prefers the LLM having maximum context every iteration over the savings.
         let userName = NSFullUserName()
         let userHome = NSHomeDirectory()
-        _ = userName; _ = userHome  // kept for any future per-task prompt customization
+        _ = userName; _ = userHome // kept for any future per-task prompt customization
         // Track unique files edited (write_file/edit_file/diff_apply/create_diff/apply_diff) for plan-mode enforcement
         var filesEditedThisTask: Set<String> = []
 
@@ -387,12 +448,13 @@ extension AgentViewModel {
                     }
 
                 } else if let openAICompatible {
-                    let r = try await openAICompatible.sendStreaming(messages: sendMessages, activeGroups: activeGroups) { [weak self] delta in
-                        Task { @MainActor in
-                            self?.isThinking = false
-                            self?.appendStreamDelta(delta)
+                    let r = try await openAICompatible
+                        .sendStreaming(messages: sendMessages, activeGroups: activeGroups) { [weak self] delta in
+                            Task { @MainActor in
+                                self?.isThinking = false
+                                self?.appendStreamDelta(delta)
+                            }
                         }
-                    }
                     response = (r.content, r.stopReason, r.inputTokens, r.outputTokens)
 
                 } else if let ollama {
@@ -459,7 +521,8 @@ extension AgentViewModel {
                         // Server-side tool (web search) — executed by the API, just log it
                         hasToolUse = true
                         if let input = block["input"] as? [String: Any],
-                           let query = input["query"] as? String {
+                           let query = input["query"] as? String
+                        {
                             appendLog("Web search: \(query)")
                         }
                     } else if type == "web_search_tool_result" {
@@ -488,7 +551,14 @@ extension AgentViewModel {
                         // Plans are encouraged but never required. Track edited files for
                         // task summary purposes. No mid-stream blocking — the LLM decides
                         // whether to plan up front.
-                        let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "diff_and_apply", "create_diff", "apply_diff"]
+                        let editTools: Set<String> = [
+                            "write_file",
+                            "edit_file",
+                            "diff_apply",
+                            "diff_and_apply",
+                            "create_diff",
+                            "apply_diff"
+                        ]
                         if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
                             filesEditedThisTask.insert(filePath)
                         }
@@ -531,7 +601,12 @@ extension AgentViewModel {
 
                             appendLog("✅ Completed: \(summary)")
                             flushLog()
-                            history.add(TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+                            history.add(
+                                TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun),
+                                maxBeforeSummary: maxHistoryBeforeSummary,
+                                apiKey: apiKey,
+                                model: selectedModel
+                            )
                             // End the task in SwiftData chat history
                             ChatHistoryStore.shared.endCurrentTask(summary: summary)
                             // Finish training data capture (only when toggle is on)
@@ -568,11 +643,23 @@ extension AgentViewModel {
                     for batch in batches {
                         if batch.parallel && batch.tools.count > 1 {
                             // Parallel batch: pre-execute shell tools off MainActor
-                            let shellTools: Set<String> = ["read_file", "list_files", "search_files", "read_dir", "git_status", "git_diff", "git_log", "git_diff_patch"]
+                            let shellTools: Set<String> = [
+                                "read_file",
+                                "list_files",
+                                "search_files",
+                                "read_dir",
+                                "git_status",
+                                "git_diff",
+                                "git_log",
+                                "git_diff_patch"
+                            ]
                             let shellBatch = batch.tools.filter { shellTools.contains($0.name) }
                             if shellBatch.count > 1 {
                                 let capturedPF = projectFolder
-                                let cmds = shellBatch.map { ($0.toolId, Self.buildReadOnlyCommand(name: $0.name, input: $0.input, projectFolder: capturedPF)) }
+                                let cmds = shellBatch.map { (
+                                    $0.toolId,
+                                    Self.buildReadOnlyCommand(name: $0.name, input: $0.input, projectFolder: capturedPF)
+                                ) }
                                 var preResults: [String: String] = [:]
                                 await withTaskGroup(of: (String, String).self) { group in
                                     for (i, (id, cmd)) in cmds.enumerated() where i < maxConcurrency {
@@ -586,10 +673,14 @@ extension AgentViewModel {
                                             p.currentDirectoryURL = URL(fileURLWithPath: workDir)
                                             var env = ProcessInfo.processInfo.environment
                                             env["HOME"] = NSHomeDirectory()
-                                            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (env["PATH"] ?? "")
+                                            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" +
+                                                (env["PATH"] ?? "")
                                             p.environment = env; p.standardOutput = pipe; p.standardError = pipe
                                             try? p.run(); p.waitUntilExit()
-                                            return (cid, String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+                                            return (
+                                                cid,
+                                                String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                                            )
                                         }
                                     }
                                     for await (id, result) in group { preResults[id] = result }
@@ -597,14 +688,24 @@ extension AgentViewModel {
                                 Self.precomputedResults = preResults
                             }
                             for tool in batch.tools {
-                                let ctx = ToolContext(toolId: tool.toolId, projectFolder: projectFolder, selectedProvider: selectedProvider, tavilyAPIKey: tavilyAPIKey)
+                                let ctx = ToolContext(
+                                    toolId: tool.toolId,
+                                    projectFolder: projectFolder,
+                                    selectedProvider: selectedProvider,
+                                    tavilyAPIKey: tavilyAPIKey
+                                )
                                 _ = await dispatchTool(name: tool.name, input: tool.input, ctx: ctx, toolResults: &toolResults)
                             }
                             Self.precomputedResults = nil
                         } else {
                             // Serial batch: execute one by one
                             for tool in batch.tools {
-                                let ctx = ToolContext(toolId: tool.toolId, projectFolder: projectFolder, selectedProvider: selectedProvider, tavilyAPIKey: tavilyAPIKey)
+                                let ctx = ToolContext(
+                                    toolId: tool.toolId,
+                                    projectFolder: projectFolder,
+                                    selectedProvider: selectedProvider,
+                                    tavilyAPIKey: tavilyAPIKey
+                                )
                                 _ = await dispatchTool(name: tool.name, input: tool.input, ctx: ctx, toolResults: &toolResults)
                             }
                         }
@@ -618,10 +719,24 @@ extension AgentViewModel {
                 // and (3) the next accessibility(find_element) query usually tells the LLM
                 // what happened just as well, without the screenshot cost.
                 if visionAutoScreenshotEnabled && isVision && !pendingTools.isEmpty {
-                    let uiActions: Set<String> = ["ax_click", "ax_click_element", "ax_perform_action", "ax_type_text",
-                        "ax_type_into_element", "ax_open_app", "ax_scroll", "ax_drag",
-                        "click", "click_element", "perform_action", "type_text", "open_app",
-                        "web_click", "web_type", "web_navigate"]
+                    let uiActions: Set<String> = [
+                        "ax_click",
+                        "ax_click_element",
+                        "ax_perform_action",
+                        "ax_type_text",
+                        "ax_type_into_element",
+                        "ax_open_app",
+                        "ax_scroll",
+                        "ax_drag",
+                        "click",
+                        "click_element",
+                        "perform_action",
+                        "type_text",
+                        "open_app",
+                        "web_click",
+                        "web_type",
+                        "web_navigate"
+                    ]
                     let hadUIAction = pendingTools.contains { uiActions.contains($0.name) }
                     if hadUIAction {
                         let screenshotResult = await Self.captureVerificationScreenshot()
@@ -651,7 +766,12 @@ extension AgentViewModel {
                     toolResults.append([
                         "type": "tool_result",
                         "tool_use_id": "budget_nudge",
-                        "content": "⚠️ Approaching token budget limit (\(budgetTracker.statusDescription)). Wrap up your current work and call task_complete with a summary."
+                        "content": """
+                            ⚠️ Approaching token budget limit \
+                            (\(budgetTracker.statusDescription)). \
+                            Wrap up your current work and call \
+                            task_complete with a summary.
+                            """
                     ])
                 }
 
@@ -668,15 +788,28 @@ extension AgentViewModel {
                 if !pendingTools.isEmpty {
                     let editTools: Set<String> = ["write_file", "edit_file", "diff_apply", "apply_diff", "create_diff", "diff_and_apply"]
                     let buildTools: Set<String> = ["xcode_build", "xc_build"]
-                    let actionTools: Set<String> = editTools.union(buildTools).union(["git_commit", "run_shell_script",
-                        "execute_agent_command", "execute_daemon_command", "task_complete"])
+                    let actionTools: Set<String> = editTools.union(buildTools).union([
+                        "git_commit",
+                        "run_shell_script",
+                        "execute_agent_command",
+                        "execute_daemon_command",
+                        "task_complete"
+                    ])
                     let automationPrefixes = ["ax_", "web_", "selenium_"]
-                    let automationTools: Set<String> = ["accessibility", "run_applescript", "run_osascript",
-                        "execute_javascript", "lookup_sdef", "ax", "web", "sel"]
+                    let automationTools: Set<String> = [
+                        "accessibility",
+                        "run_applescript",
+                        "run_osascript",
+                        "execute_javascript",
+                        "lookup_sdef",
+                        "ax",
+                        "web",
+                        "sel"
+                    ]
                     let hadAction = pendingTools.contains { tool in
                         actionTools.contains(tool.name)
-                        || automationPrefixes.contains(where: { tool.name.hasPrefix($0) })
-                        || automationTools.contains(tool.name)
+                            || automationPrefixes.contains(where: { tool.name.hasPrefix($0) })
+                            || automationTools.contains(tool.name)
                     }
                     let hadEdit = pendingTools.contains { editTools.contains($0.name) }
                     let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
@@ -694,14 +827,38 @@ extension AgentViewModel {
                     // reads is explicitly worse than admitting uncertainty.
                     if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
                     if consecutiveReadOnlyCount >= 10 {
-                        toolResults.append(["type": "tool_result", "tool_use_id": "read_snap",
-                            "content": "🛑 INSUFFICIENT EVIDENCE: \(consecutiveReadOnlyCount) consecutive reads/searches with NO edits, builds, or actions. You do NOT have enough information to produce a confident answer. You have exactly TWO legitimate moves: (a) Narrow your question to ONE specific file/function/fact, look it up, then act ONLY on what you actually read. (b) Call done() and honestly report what you found AND what is still unknown. DO NOT fabricate findings, gap analyses, summaries, or comparisons from incomplete reads. DO NOT 'pick the most likely answer' — confabulating from partial evidence is worse than admitting uncertainty. If you cannot narrow further, call done() with 'I need more information about X' in the summary."])
+                        toolResults.append([
+                            "type": "tool_result",
+                            "tool_use_id": "read_snap",
+                            "content": """
+                                🛑 INSUFFICIENT EVIDENCE: \(consecutiveReadOnlyCount) \
+                                consecutive reads/searches with NO edits, builds, or actions. \
+                                You do NOT have enough information to produce a confident answer. \
+                                You have exactly TWO legitimate moves: \
+                                (a) Narrow your question to ONE specific file/function/fact, \
+                                look it up, then act ONLY on what you actually read. \
+                                (b) Call done() and honestly report what you found AND what is \
+                                still unknown. DO NOT fabricate findings, gap analyses, summaries, \
+                                or comparisons from incomplete reads. DO NOT 'pick the most likely \
+                                answer' — confabulating from partial evidence is worse than \
+                                admitting uncertainty. If you cannot narrow further, call done() \
+                                with 'I need more information about X' in the summary.
+                                """
+                        ])
                         appendLog("🛑 Snap-out: \(consecutiveReadOnlyCount) reads — narrow or call done()")
                         flushLog()
-                        consecutiveReadOnlyCount = 0  // Reset after snap so we don't loop the nudge
+                        consecutiveReadOnlyCount = 0 // Reset after snap so we don't loop the nudge
                     } else if consecutiveReadOnlyCount >= 5 {
-                        toolResults.append(["type": "tool_result", "tool_use_id": "read_guard",
-                            "content": "⚠️ \(consecutiveReadOnlyCount) consecutive reads without editing or acting. Either narrow to one specific question and act on it, or call done() with what you actually know — do NOT guess or fabricate from partial evidence."])
+                        toolResults.append([
+                            "type": "tool_result",
+                            "tool_use_id": "read_guard",
+                            "content": """
+                                ⚠️ \(consecutiveReadOnlyCount) consecutive reads without \
+                                editing or acting. Either narrow to one specific question \
+                                and act on it, or call done() with what you actually know — \
+                                do NOT guess or fabricate from partial evidence.
+                                """
+                        ])
                     }
 
                     // 2. Build enforcement — only for Xcode projects
@@ -709,8 +866,15 @@ extension AgentViewModel {
                         if hadEdit { unbuiltEditCount += 1 }
                         if hadBuild { unbuiltEditCount = 0 }
                         if unbuiltEditCount >= 3 {
-                            toolResults.append(["type": "tool_result", "tool_use_id": "build_nudge",
-                                "content": "⚠️ You've edited \(unbuiltEditCount) times without building. Run xc(action:\"build\") now to catch errors early."])
+                            toolResults.append([
+                                "type": "tool_result",
+                                "tool_use_id": "build_nudge",
+                                "content": """
+                                    ⚠️ You've edited \(unbuiltEditCount) times \
+                                    without building. Run xc(action:"build") now \
+                                    to catch errors early.
+                                    """
+                            ])
                         }
                     }
 
@@ -739,7 +903,8 @@ extension AgentViewModel {
                         guard let path = tool.input["file_path"] as? String ?? tool.input["path"] as? String else { continue }
                         let output = toolResults.last?["content"] as? String ?? ""
                         let lower = output.lowercased()
-                        let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower.contains("not found") || lower.contains("rejected")
+                        let isFailure = lower.hasPrefix("error") || lower.contains("error:") || lower.contains("failed") || lower
+                            .contains("not found") || lower.contains("rejected")
                         if isFailure {
                             stuckFiles[path, default: 0] += 1
                             let count = stuckFiles[path]!
@@ -750,19 +915,35 @@ extension AgentViewModel {
 
                                 Recovery checklist (do these in order):
                                 1. read_file(file_path:"\(path)") with NO offset/limit to get the FULL fresh content
-                                2. Find the EXACT lines you want to change in the new output. Do NOT trust the tool_result from earlier reads — the file may have been modified by your previous edits or by other code.
-                                3. For edit_file: copy old_string verbatim from the fresh read, including every space, tab, and newline. Even one wrong character causes 'old_string not found'.
-                                4. For diff_and_apply: pass start_line and end_line of the section you're editing so the section is small and unambiguous.
-                                5. If you keep failing, switch tools — write_file to overwrite the whole file is a valid last resort.
+                                2. Find the EXACT lines you want to change in the new output. \
+                                Do NOT trust the tool_result from earlier reads — the file may \
+                                have been modified by your previous edits or by other code.
+                                3. For edit_file: copy old_string verbatim from the fresh read, \
+                                including every space, tab, and newline. Even one wrong character \
+                                causes 'old_string not found'.
+                                4. For diff_and_apply: pass start_line and end_line of the section \
+                                you're editing so the section is small and unambiguous.
+                                5. If you keep failing, switch tools — write_file to overwrite \
+                                the whole file is a valid last resort.
                                 """
-                                toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_3",
-                                    "content": nudge])
+                                toolResults.append([
+                                    "type": "tool_result",
+                                    "tool_use_id": "stuck_guard_3",
+                                    "content": nudge
+                                ])
                                 appendLog("⚠️ Stuck nudge: 3 failures on \((path as NSString).lastPathComponent)")
                                 flushLog()
                             } else if count >= 6 {
                                 // Second nudge — give up on this file
-                                toolResults.append(["type": "tool_result", "tool_use_id": "stuck_guard_6",
-                                    "content": "🛑 6 failures on \(path). Stop trying to edit this file. Move on to the next part of your task or call done with what you've completed so far."])
+                                toolResults.append([
+                                    "type": "tool_result",
+                                    "tool_use_id": "stuck_guard_6",
+                                    "content": """
+                                        🛑 6 failures on \(path). Stop trying to edit \
+                                        this file. Move on to the next part of your task \
+                                        or call done with what you've completed so far.
+                                        """
+                                ])
                                 appendLog("🛑 Stuck-out: 6 failures on \((path as NSString).lastPathComponent)")
                                 flushLog()
                                 stuckFiles[path] = 0
@@ -802,9 +983,16 @@ extension AgentViewModel {
                     // Check if model wrote task_complete/done as text instead of a tool call
                     let responseText = response.content.compactMap { $0["text"] as? String }.joined()
                     if responseText.contains("task_complete") || responseText.contains("done(summary") {
-                        if let match = responseText.range(of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#, options: .regularExpression) {
+                        if let match = responseText.range(
+                            of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#,
+                            options: .regularExpression
+                        ) {
                             let raw = String(responseText[match])
-                            let summary = raw.replacingOccurrences(of: #"(?:task_complete|done)\(summary[=:]\s*""#, with: "", options: .regularExpression).replacingOccurrences(of: "\"", with: "")
+                            let summary = raw.replacingOccurrences(
+                                of: #"(?:task_complete|done)\(summary[=:]\s*""#,
+                                with: "",
+                                options: .regularExpression
+                            ).replacingOccurrences(of: "\"", with: "")
                             appendLog("✅ Completed: \(summary)")
                         }
                         flushLog()
@@ -812,8 +1000,14 @@ extension AgentViewModel {
                     }
                     // Check if model signaled completion via natural language
                     let lower = responseText.lowercased()
-                    let doneSignals = ["conclude this task", "i'll conclude", "task is complete",
-                                       "no further action", "nothing more to do", "no more content"]
+                    let doneSignals = [
+                        "conclude this task",
+                        "i'll conclude",
+                        "task is complete",
+                        "no further action",
+                        "nothing more to do",
+                        "no more content"
+                    ]
                     if doneSignals.contains(where: { lower.contains($0) }) {
                         // Ensure LLM Output shows the response
                         displayedLLMOutput = rawLLMOutput
@@ -836,9 +1030,17 @@ extension AgentViewModel {
                 } else {
                     // Check if LLM signaled it's done via text even though it made tool calls
                     let allText = response.content.compactMap { $0["text"] as? String }.joined().lowercased()
-                    let stopPhrases = ["no more content", "no further action", "task is complete",
-                                       "nothing more to do", "task_complete", "conclude this task",
-                                       "i'll conclude", "feel free to ask", "let me know if"]
+                    let stopPhrases = [
+                        "no more content",
+                        "no further action",
+                        "task is complete",
+                        "nothing more to do",
+                        "task_complete",
+                        "conclude this task",
+                        "i'll conclude",
+                        "feel free to ask",
+                        "let me know if"
+                    ]
                     if stopPhrases.contains(where: { allText.contains($0) }) {
                         break
                     }
@@ -849,7 +1051,8 @@ extension AgentViewModel {
                     let errMsg = error.localizedDescription
 
                     // Context overflow — prune messages aggressively and retry
-                    let isOverflow = errMsg.contains("max_tokens") || errMsg.contains("context_length") || errMsg.contains("too many tokens") || errMsg.contains("prompt is too long")
+                    let isOverflow = errMsg.contains("max_tokens") || errMsg.contains("context_length") || errMsg
+                        .contains("too many tokens") || errMsg.contains("prompt is too long")
                     if isOverflow {
                         appendLog("⚠️ Context overflow — pruning messages and retrying")
                         flushLog()
@@ -871,8 +1074,8 @@ extension AgentViewModel {
 
                     // Detect timeout errors
                     let isNetworkTimeout = errMsg.lowercased().contains("timeout") || errMsg.lowercased().contains("timed out")
-                    
-                    
+
+
                     // Determine error source for better logging
                     var errorSource = "Unknown"
                     if claude != nil {
@@ -884,18 +1087,18 @@ extension AgentViewModel {
                     } else if foundationModelService != nil {
                         errorSource = "Apple Intelligence"
                     }
-                    
+
                     // Handle timeout errors with retry logic
                     if isNetworkTimeout {
                         // Check if we've already retried this timeout
                         if timeoutRetryCount < maxTimeoutRetries {
                             timeoutRetryCount += 1
-                            
+
                             // Special handling for Ollama timeouts - check server health
                             if errorSource == "Ollama API" || errorSource == "Local Ollama" {
                                 appendLog("🔍 Checking Ollama server health...")
                                 flushLog()
-                                
+
                                 // Run Ollama health check in background
                                 let healthCheckResult = await Self.offMain {
                                     let healthCheckTask = Process()
@@ -906,7 +1109,7 @@ extension AgentViewModel {
                                     let pipe = Pipe()
                                     healthCheckTask.standardOutput = pipe
                                     healthCheckTask.standardError = pipe
-                                    
+
                                     do {
                                         try healthCheckTask.run()
                                         healthCheckTask.waitUntilExit()
@@ -915,25 +1118,32 @@ extension AgentViewModel {
                                         return -1
                                     }
                                 }
-                                
+
                                 if healthCheckResult != 0 {
                                     appendLog("⚠️ Ollama server not responding. Attempting to restart...")
                                     flushLog()
-                                    
+
                                     // Restart Ollama via UserService XPC
-                                    _ = await userService.execute(command: "pkill -f 'ollama serve' && sleep 2 && open /Applications/Ollama.app")
+                                    _ = await userService
+                                        .execute(command: "pkill -f 'ollama serve' && sleep 2 && open /Applications/Ollama.app")
                                     appendLog("🔄 Restart command executed")
                                     flushLog()
-                                    
+
                                     // Wait longer for Ollama startup
                                     let startupDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
-                                    let retryMessage = "\(errorSource) timeout detected (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — Ollama restart attempted, waiting \(Int(startupDelay)) seconds..."
+                                    let retryMessage =
+                                        """
+                                        \(errorSource) timeout detected \
+                                        (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                                        Ollama restart attempted, \
+                                        waiting \(Int(startupDelay)) seconds...
+                                        """
                                     appendLog(retryMessage)
                                     flushLog()
                                     if agentReplyHandle != nil {
                                         sendProgressUpdate(retryMessage)
                                     }
-                                    
+
                                     try? await Task.sleep(for: .seconds(startupDelay))
                                     if Task.isCancelled { break }
                                     continue
@@ -942,17 +1152,22 @@ extension AgentViewModel {
                                     flushLog()
                                 }
                             }
-                            
+
                             let retryDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
-                            let retryMessage = "\(errorSource) timeout detected (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — retrying in \(Int(retryDelay)) seconds..."
+                            let retryMessage =
+                                """
+                                \(errorSource) timeout detected \
+                                (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                                retrying in \(Int(retryDelay)) seconds...
+                                """
                             appendLog(retryMessage)
                             flushLog()
                             if agentReplyHandle != nil {
                                 sendProgressUpdate(retryMessage)
                             }
-                            
+
                             // Log to task log for debugging
-                            
+
                             try? await Task.sleep(for: .seconds(retryDelay))
                             if Task.isCancelled { break }
                             continue
@@ -961,14 +1176,20 @@ extension AgentViewModel {
                             if (errorSource == "Ollama API" || errorSource == "Local Ollama") && timeoutRetryCount == maxTimeoutRetries {
                                 appendLog("🔄 Max retries reached. Attempting final Ollama restart...")
                                 flushLog()
-                                
+
                                 // Restart Ollama via UserService XPC
-                                _ = await userService.execute(command: "pkill -f 'ollama serve' && sleep 3 && open /Applications/Ollama.app && sleep 10")
+                                _ = await userService
+                                    .execute(command: "pkill -f 'ollama serve' && sleep 3 && open /Applications/Ollama.app && sleep 10")
                                 appendLog("Ollama restart attempted. Please check Ollama application status.")
                                 flushLog()
                             }
-                            
-                            let timeoutMessage = "\(errorSource) timeout after \(maxTimeoutRetries) retries. Please check your network connection or try a different LLM provider."
+
+                            let timeoutMessage =
+                                """
+                                \(errorSource) timeout after \(maxTimeoutRetries) \
+                                retries. Please check your network connection \
+                                or try a different LLM provider.
+                                """
                             appendLog(timeoutMessage)
                             flushLog()
                             if agentReplyHandle != nil {
@@ -980,20 +1201,33 @@ extension AgentViewModel {
                         // Server/network error — retry every 10 seconds
                         timeoutRetryCount += 1
                         let retryDelay: TimeInterval = 10
-                        appendLog("\(errorSource) recoverable error (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — retrying in \(Int(retryDelay))s...\n\(errMsg)")
+                        appendLog(
+                            """
+                            \(errorSource) recoverable error \
+                            (attempt \(timeoutRetryCount)/\(maxTimeoutRetries)) — \
+                            retrying in \(Int(retryDelay))s...
+                            \(errMsg)
+                            """
+                        )
                         flushLog()
                         try? await Task.sleep(for: .seconds(retryDelay))
                         if Task.isCancelled { break }
                         continue
                     } else if errMsg.lowercased().contains("network")
-                                || errMsg.lowercased().contains("connection")
-                                || errMsg.lowercased().contains("internet")
-                                || (error as? URLError)?.code == .networkConnectionLost
-                                || (error as? URLError)?.code == .notConnectedToInternet {
+                        || errMsg.lowercased().contains("connection")
+                        || errMsg.lowercased().contains("internet")
+                        || (error as? URLError)?.code == .networkConnectionLost
+                        || (error as? URLError)?.code == .notConnectedToInternet
+                    {
                         timeoutRetryCount += 1
                         if timeoutRetryCount <= maxTimeoutRetries {
                             let delay = networkRetryDelay
-                            appendLog("🌐 Network connection lost — retrying in \(delay)s (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))...")
+                            appendLog(
+                                """
+                                🌐 Network connection lost — retrying in \(delay)s \
+                                (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))...
+                                """
+                            )
                             flushLog()
                             try? await Task.sleep(for: .seconds(Double(delay)))
                             if Task.isCancelled { break }
@@ -1055,15 +1289,20 @@ extension AgentViewModel {
         // Always save history if task didn't call task_complete
         if completionSummary.isEmpty {
             let summary = Task.isCancelled ? "(cancelled)" : commandsRun.isEmpty ? "(no actions)" : "(incomplete)"
-            history.add(TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun), maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey, model: selectedModel)
+            history.add(
+                TaskRecord(prompt: prompt, summary: summary, commandsRun: commandsRun),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
         }
 
         // End the task in SwiftData chat history
         ChatHistoryStore.shared.endCurrentTask(summary: completionSummary.isEmpty ? nil : completionSummary, cancelled: Task.isCancelled)
-        
+
         // Stop progress updates
         stopProgressUpdates()
-        
+
         flushLog()
         persistLogNow()
         isRunning = false
