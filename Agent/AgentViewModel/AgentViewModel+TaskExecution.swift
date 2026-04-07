@@ -234,8 +234,20 @@ extension AgentViewModel {
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
 
-        // Triage: direct commands, Apple AI conversation, or pass through to LLM
-        let triageResult = await mediator.triagePrompt(prompt)
+        // Triage: direct commands, Apple AI conversation, accessibility agent,
+        // or pass through to LLM. The axDispatch closure is what Apple AI's
+        // Tool calls invoke when it decides to fire the accessibility tool —
+        // we route it through the same executeNativeTool path the cloud LLM
+        // uses, so the AX action goes through every existing safety check.
+        let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
+            guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
+            var input: [String: Any] = ["action": args.action]
+            if let role = args.role { input["role"] = role }
+            if let title = args.title { input["title"] = title }
+            if let app = args.appBundleId { input["appBundleId"] = app }
+            if let text = args.text { input["text"] = text }
+            return await self.executeNativeTool("accessibility", input: input)
+        }
         switch triageResult {
         case .directCommand(let cmd):
             if cmd.name == "run_agent" {
@@ -383,48 +395,32 @@ extension AgentViewModel {
             isRunning = false
             isThinking = false
             return
-        case .accessibilityIntent(let intent):
-            // Apple AI parsed the user's request as a UI automation intent.
-            // Synthesize an accessibility tool call locally and dispatch
-            // directly — no cloud LLM round-trip. If the AX call itself
-            // fails (element not found, app not running, permission denied),
-            // fall through to the LLM so it can recover with screenshots /
-            // additional context.
-            var axInput: [String: Any] = ["action": intent.action]
-            if let role = intent.role { axInput["role"] = role }
-            if let title = intent.title { axInput["title"] = title }
-            if let app = intent.appBundleId { axInput["appBundleId"] = app }
-            if let text = intent.text { axInput["text"] = text }
-            appendLog("🍎 AX intent: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")")
+        case .accessibilityHandled(let summary):
+            // Apple AI ran the accessibility tool itself (one or more times)
+            // and produced a final summary. The tool calls already happened
+            // through the axDispatch closure above — they went through the
+            // same executeNativeTool path the cloud LLM uses, so they're
+            // already logged in the activity log. The summary string is
+            // what Apple AI said it accomplished after the tool calls.
+            //
+            // If Apple AI never called the tool, or any tool call failed,
+            // runAccessibilityAgent returns nil and we never reach this
+            // case (we fall through to .passThrough → cloud LLM).
+            rawLLMOutput = summary
+            displayedLLMOutput = summary
+            dripDisplayIndex = summary.count
+            appendLog("🍎 \(summary)")
             flushLog()
-            let axOutput = await executeNativeTool("accessibility", input: axInput)
-            let axFailed = axOutput.lowercased().contains("error") || axOutput.lowercased().contains("not found")
-            if axFailed {
-                // Hand off to the LLM with the failure context so it can recover
-                appendLog("⚠️ AX intent failed — passing to LLM with context")
-                flushLog()
-                messages.append(["role": "user", "content": """
-                I tried to handle this request locally as an accessibility action but it failed:
-
-                Request: \(prompt)
-                Action attempted: \(intent.action) on \(intent.role ?? "?") "\(intent.title ?? "?")" in \(intent.appBundleId ?? "?")
-                Result: \(axOutput)
-
-                Please complete the original request.
-                """])
-                break
-            }
-            completionSummary = "AX: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")"
-            appendLog("✅ \(completionSummary)")
+            completionSummary = String(summary.prefix(200))
             history.add(
-                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: ["accessibility: \(intent.action)"]),
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: ["accessibility (Apple AI)"]),
                 maxBeforeSummary: maxHistoryBeforeSummary,
                 apiKey: apiKey,
                 model: selectedModel
             )
             ChatHistoryStore.shared.endCurrentTask(summary: completionSummary)
             stopProgressUpdates()
-            if agentReplyHandle != nil { sendProgressUpdate(axOutput) }
+            if agentReplyHandle != nil { sendProgressUpdate(summary) }
             flushLog()
             persistLogNow()
             isRunning = false

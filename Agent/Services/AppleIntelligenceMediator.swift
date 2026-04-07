@@ -322,7 +322,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     enum TriageResult {
         case answered(String) // Apple AI handled it — show this text and skip LLM
         case directCommand(DirectCommand) // Matched command — execute locally, skip LLM
-        case accessibilityIntent(AccessibilityIntent) // Apple AI parsed an AX request — dispatch directly, skip LLM
+        case accessibilityHandled(String) // Apple AI ran the accessibility tool — show its summary, skip LLM
         case passThrough // Needs tools/LLM — proceed normally
     }
 
@@ -330,24 +330,6 @@ final class AppleIntelligenceMediator: ObservableObject {
     struct DirectCommand {
         let name: String
         let argument: String
-    }
-
-    /// Parsed accessibility intent — enough to dispatch directly to the
-    /// `accessibility` tool without going through the cloud LLM.
-    struct AccessibilityIntent {
-        /// Maps to the `action` parameter on the accessibility tool
-        /// (click_element, type_into_element, scroll_to_element, open_app, etc.)
-        let action: String
-        /// AX role (AXButton, AXTextField, AXLink, AXMenuItem, …). Optional
-        /// for actions like open_app where role doesn't apply.
-        let role: String?
-        /// Element title to match — partial, case-insensitive on the AX side.
-        let title: String?
-        /// Bundle ID of the target app. Required for almost every action;
-        /// the only exception is when the frontmost app is implied.
-        let appBundleId: String?
-        /// Text to type — only meaningful for type_into_element.
-        let text: String?
     }
 
     /// Known direct commands that can be executed without the LLM.
@@ -570,96 +552,163 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// Cheap pre-filter: does this prompt LOOK like a UI automation request?
     /// We don't want to spend an Apple AI round-trip on every user message —
-    /// only on prompts that are short and contain a UI action verb.
-    /// Conservative on purpose: false negatives just fall through to the LLM
-    /// (no harm done), false positives waste one cheap on-device call.
+    /// only on prompts that contain a UI action verb. Conservative on purpose:
+    /// false negatives just fall through to the cloud LLM (no harm done),
+    /// false positives waste one cheap on-device call.
+    ///
+    /// The verb list grew after observing that "take a photo using Photo Booth"
+    /// was being routed to the cloud LLM because none of the original verbs
+    /// (click/tap/press/type/select/scroll/open/find/...) matched. Real Mac
+    /// users say things like "take a photo", "launch Safari", "play the next
+    /// song", "send a message" — so the list now covers the verbs people
+    /// actually use, not just the AX action names.
     static func looksLikeAccessibilityRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        // Long prompts are almost never single AX commands
-        guard lower.count > 4, lower.count < 200 else { return false }
-        // Must contain at least one UI action verb
+        // Long prompts are rarely single-shot UI commands; typical AX
+        // requests are short imperatives. The cap is generous to allow for
+        // multi-step phrasings like "open Safari and search for X".
+        guard lower.count > 3, lower.count < 240 else { return false }
+        // Each verb has a trailing space so we don't false-match prefixes
+        // (e.g. "take" matches "take a photo" but not "taken").
         let verbs = [
+            // Original AX-named verbs
             "click ", "tap ", "press ", "type ", "select ", "scroll ",
             "open ", "find ", "show me ", "hide ", "activate ", "minimize ",
-            "close ", "switch to ", "focus ", "save", "quit "
+            "close ", "switch to ", "focus ", "save ", "quit ",
+            // Mac-natural verbs people actually say
+            "take ", "launch ", "start ", "stop ", "record ", "play ",
+            "pause ", "send ", "visit ", "go to ", "navigate ", "search ",
+            "check ", "toggle ", "enable ", "disable ", "choose ", "pick ",
+            "use ", "using ", "run ", "drag ", "jump ", "delete ", "edit "
         ]
         return verbs.contains { lower.contains($0) }
     }
 
-    /// Ask Apple AI to parse a natural-language accessibility request into a
-    /// structured AccessibilityIntent. Returns nil if Apple AI can't parse it
-    /// (then we fall through to the cloud LLM).
+    /// Run Apple AI as a small tool-calling agent over the user's request,
+    /// giving it ONE tool: the consolidated accessibility tool. Apple AI
+    /// decides whether to call it (possibly multiple times for multi-step
+    /// requests like "take a photo using Photo Booth") and the framework
+    /// dispatches each call through the injected `dispatch` closure.
     ///
-    /// We use a line-prefixed key:value format instead of JSON because Apple
-    /// AI tends to add prose around JSON, making strict parsing brittle. The
-    /// format is robust to extra whitespace and surrounding chatter — we just
-    /// scan for the lines we care about.
-    func parseAccessibilityIntent(_ message: String) async -> AccessibilityIntent? {
+    /// This replaces the previous manual line-prefixed parser. The big wins:
+    ///   1. Apple AI can chain multiple tool calls in one shot (open_app
+    ///      then click_element, etc.) — the manual parser only returned
+    ///      one intent.
+    ///   2. The schema is enforced by FoundationModels via @Generable, so
+    ///      we get type-safe arguments instead of grepping line:value.
+    ///   3. No more prompt-engineering brittleness around output format.
+    ///
+    /// Returns the agent's final text response on success, or nil if Apple
+    /// AI didn't call the tool, the call failed, or the session timed out.
+    /// On nil, the caller falls through to the cloud LLM.
+    ///
+    /// `dispatch` is injected by the caller (AgentViewModel) because the
+    /// mediator deliberately doesn't import AgentAccess or hold a reference
+    /// to the view model. Each call to `dispatch` is what actually fires
+    /// `executeNativeTool("accessibility", input:)` on the view model.
+    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
-        let session = ensureSession()
-        let prompt = """
-        Parse this Mac UI automation request. Reply with EXACTLY these lines (omit any line you can't determine, do NOT guess):
 
-        action: <one of: click_element, type_into_element, scroll_to_element, open_app, find_element>
-        role: <AXButton | AXTextField | AXLink | AXMenuItem | AXCheckBox | AXImage | AXWindow>
-        title: <element title or label>
-        appBundleId: <app bundle id like com.apple.TextEdit, com.apple.Safari, com.apple.PhotoBooth>
-        text: <only for type_into_element: the text to type>
+        // Track whether the tool was actually called and whether any call
+        // returned an error string. The agent loop runs inside a Sendable
+        // closure on FoundationModels' executor, so we need a thread-safe
+        // box to communicate back to this actor.
+        final class CallTracker: @unchecked Sendable {
+            private let lock = NSLock()
+            private var _called = false
+            private var _failed = false
+            var called: Bool { lock.lock(); defer { lock.unlock() }; return _called }
+            var failed: Bool { lock.lock(); defer { lock.unlock() }; return _failed }
+            func markCalled() { lock.lock(); _called = true; lock.unlock() }
+            func markFailed() { lock.lock(); _failed = true; lock.unlock() }
+        }
+        let tracker = CallTracker()
 
-        If the request is NOT about clicking, typing, opening, or interacting with a Mac UI element, reply with exactly: NONE
-
-        User: "\(message)"
-        """
-        guard let content = await respondWithTimeout(session, prompt: prompt, label: "axIntent") else { return nil }
-        let trimmed = sanitize(content)
-        if trimmed.isEmpty || trimmed.uppercased().contains("NONE") { return nil }
-        // Line-by-line scan — order-independent, tolerates surrounding prose
-        var action: String?
-        var role: String?
-        var title: String?
-        var appBundleId: String?
-        var text: String?
-        for rawLine in trimmed.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard let colonIdx = line.firstIndex(of: ":") else { continue }
-            let key = line[..<colonIdx].lowercased().trimmingCharacters(in: .whitespaces)
-            let value = String(line[line.index(after: colonIdx)...]).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\"")))
-            guard !value.isEmpty else { continue }
-            switch key {
-            case "action": action = value
-            case "role": role = value
-            case "title": title = value
-            case "appbundleid", "app", "bundleid", "bundle_id": appBundleId = value
-            case "text": text = value
-            default: break
+        let tool = AccessibilityAppleTool { args in
+            tracker.markCalled()
+            let result = await dispatch(args)
+            let lower = result.lowercased()
+            if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false") {
+                tracker.markFailed()
             }
+            return result
         }
-        guard let action else { return nil }
-        // open_app is the only action that doesn't need a role/title
-        if action == "open_app" {
-            guard appBundleId != nil else { return nil }
-            return AccessibilityIntent(action: action, role: nil, title: title, appBundleId: appBundleId, text: nil)
+
+        // Apple AI's on-device model has a ~4096-token context window.
+        // The framework also injects the Tool description and the schema
+        // generated from @Generable AccessibilityArgs on every turn, plus
+        // the user prompt and any tool results from prior iterations. The
+        // instructions below are deliberately TERSE to leave headroom for
+        // multi-step tool result accumulation. Examples beat rules for
+        // small models, so we lead with one canonical example.
+        let instructions = Instructions("""
+        You automate Mac UI via the accessibility tool. After tool calls succeed, reply with 1 sentence.
+
+        Bundle IDs: com.apple.PhotoBooth, com.apple.Safari, com.apple.TextEdit, com.apple.finder, com.apple.mail, com.apple.Music, com.apple.Notes, com.apple.systempreferences
+        Roles: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWebArea
+
+        Multi-step example — "take a photo using Photo Booth":
+          1. open_app(appBundleId="com.apple.PhotoBooth")
+          2. click_element(role="AXButton", title="Take Photo", appBundleId="com.apple.PhotoBooth")
+          Reply: "Opened Photo Booth and took a photo."
+
+        If the request isn't Mac UI automation, reply briefly without calling the tool.
+        """)
+
+        let session = LanguageModelSession(model: .default, tools: [tool], instructions: instructions)
+
+        // Wrap respond(to:) in the same task-group timeout pattern used by
+        // respondWithTimeout. The agent loop runs internally inside respond(to:),
+        // so we need a generous timeout to allow for multiple tool calls.
+        let timeoutSeconds: TimeInterval = 15
+        do {
+            let content: String = try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    let response = try await session.respond(to: message)
+                    return response.content
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeoutSeconds))
+                    throw CancellationError()
+                }
+                guard let result = try await group.next() else { throw CancellationError() }
+                group.cancelAll()
+                return result
+            }
+
+            // If Apple AI didn't actually call the tool, it just chatted at
+            // the user — that means it didn't recognize the request as UI
+            // automation. Fall through to the cloud LLM.
+            guard tracker.called else { return nil }
+            // If any tool call failed, fall through to the cloud LLM with
+            // the failure context (caller handles the partial-success case).
+            if tracker.failed { return nil }
+            return sanitize(content)
+        } catch {
+            return nil
         }
-        // Every other action needs at least a title to find the element
-        guard title != nil else { return nil }
-        return AccessibilityIntent(action: action, role: role, title: title, appBundleId: appBundleId, text: text)
     }
 
     /// Triage a user prompt. Checks direct commands first, then accessibility
-    /// intent (Apple AI), then conversational patterns. Falls back to
+    /// agent (Apple AI), then conversational patterns. Falls back to
     /// .passThrough for anything that needs the cloud LLM.
-    func triagePrompt(_ message: String) async -> TriageResult {
+    ///
+    /// `axDispatch` is the injected callback that routes an AccessibilityArgs
+    /// to the AgentViewModel's tool dispatcher (executeNativeTool). It must
+    /// be passed in by the caller because the mediator deliberately doesn't
+    /// hold a reference to the view model.
+    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
             return .directCommand(cmd) // Caller executes the tool
         }
         guard isEnabled && Self.isAvailable else { return .passThrough }
-        // Accessibility intent — try Apple AI to parse UI automation requests
-        // locally before burning cloud LLM tokens. Pre-filter on action verbs
-        // so we don't spend an AI call on every user message.
+        // Accessibility agent — let Apple AI try to handle UI automation
+        // requests locally with full tool-calling support. Pre-filter on
+        // action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
-            if let intent = await parseAccessibilityIntent(message) {
-                return .accessibilityIntent(intent)
+            if let result = await runAccessibilityAgent(message, dispatch: axDispatch) {
+                return .accessibilityHandled(result)
             }
         }
         // Local classification — no AI needed
@@ -736,5 +785,58 @@ final class AppleIntelligenceMediator: ObservableObject {
         if let llm = lastLLMResponse { parts.append("Last LLM: \(String(llm.prefix(100)))...") }
         if let summary = conversationSummary { parts.append("Summary: \(summary)") }
         return parts.isEmpty ? "No context stored" : parts.joined(separator: "\n")
+    }
+}
+
+// MARK: - Accessibility Tool for Apple Intelligence
+//
+// FoundationModels-native tool definition that lets Apple AI call the Mac
+// accessibility API directly. The framework handles schema validation,
+// argument coercion, and the agent loop — we just provide the dispatch
+// closure that routes args to the AgentViewModel's executeNativeTool path.
+
+/// Generable arguments for the accessibility tool. The @Generable macro
+/// derives ConvertibleFromGeneratedContent + the GenerationSchema that
+/// FoundationModels uses to constrain Apple AI's tool call output.
+@Generable
+struct AccessibilityArgs: Sendable {
+    @Guide(description: "The accessibility action: click_element (click a button/link), type_into_element (type text into a field), scroll_to_element (scroll until visible), open_app (launch/activate an app), or find_element (locate without clicking)")
+    let action: String
+
+    @Guide(description: "AX role: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWindow. Optional for open_app.")
+    let role: String?
+
+    @Guide(description: "Element title or label to match — partial, case-insensitive. Optional for open_app.")
+    let title: String?
+
+    @Guide(description: "App bundle ID like com.apple.PhotoBooth, com.apple.Safari, com.apple.TextEdit. Required for almost every action.")
+    let appBundleId: String?
+
+    @Guide(description: "Text to type — only used when action is type_into_element.")
+    let text: String?
+}
+
+/// FoundationModels Tool conformance. Apple AI's session uses this to
+/// decide whether and how to call the accessibility action. The dispatch
+/// closure is captured so the actual tool execution stays on the
+/// AgentViewModel side (which holds the executeNativeTool routing).
+///
+/// Fully qualified as `FoundationModels.Tool` because the local
+/// `Agent/Models/ToolNames.swift` defines an enum named `Tool` that would
+/// otherwise win in this scope and produce "inheritance from non-protocol
+/// type 'Tool'" at this declaration.
+struct AccessibilityAppleTool: FoundationModels.Tool {
+    typealias Output = String
+
+    let name = "accessibility"
+    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. Every action takes role+title+appBundleId, never coordinates. For multi-step requests like 'take a photo using Photo Booth', call this tool multiple times in order: first open_app, then click_element."
+
+    /// Closure that actually performs the accessibility action. Injected by
+    /// the caller (AppleIntelligenceMediator.runAccessibilityAgent) so the
+    /// tool itself doesn't need to know about AgentViewModel or AgentAccess.
+    let dispatch: @Sendable (AccessibilityArgs) async -> String
+
+    func call(arguments: AccessibilityArgs) async throws -> String {
+        return await dispatch(arguments)
     }
 }
