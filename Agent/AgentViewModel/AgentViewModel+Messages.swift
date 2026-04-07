@@ -86,18 +86,12 @@ extension AgentViewModel {
         guard let handle = agentReplyHandle else { return }
         agentReplyHandle = nil
 
-        // Strip "Agent!" prefix from outgoing replies to avoid triggering another command
-        var reply = summary
-        if reply.hasPrefix("Agent!") {
-            reply = String(reply.dropFirst(6)) // Drop "Agent!" (5 chars + potential space)
-            if reply.hasPrefix(" ") {
-                reply = String(reply.dropFirst())
-            }
-        }
-
+        // Strip leading "Agent!" / "Agent " from outgoing replies so the
+        // receiving Mac doesn't loop on its own command. Use the same
+        // case-insensitive prefix logic as inbound parsing.
         // iMessage supports up to ~65KB, but we cap at 4000 chars for reliability
-        // (this is the practical limit before carriers may split messages)
-        reply = String(reply.prefix(4000))
+        // (this is the practical limit before carriers may split messages).
+        let reply = String(Self.stripAgentPrefix(from: summary).prefix(4000))
         // Escape for AppleScript
         let escaped = reply
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -230,6 +224,47 @@ extension AgentViewModel {
         let imp = method_getImplementation(method)
         let f = unsafeBitCast(imp, to: Fn.self)
         return f(cls, sel, data as NSData) as? NSAttributedString
+    }
+
+    // MARK: - "Agent!" Prefix Detection
+    //
+    // Both inbound (incoming iMessages) and outbound (replies we send back)
+    // need to recognize and strip the "Agent!" wake word. We accept it
+    // case-insensitively, with or without the trailing "!", because:
+    //   - iPhone autocorrect routinely strips "!" or recapitalizes
+    //   - older Macs/contacts use lowercase "agent "
+    //   - the brand name is "Agent!" but a user typing on a tiny keyboard
+    //     should not have to fight their keyboard to invoke the agent
+    // The "agent" portion must be a complete word — the next character must
+    // be either end-of-string, "!", or whitespace. That keeps random sentences
+    // starting with "agency" or "agentic" from triggering.
+
+    /// True iff `text` starts with "agent" / "agent!" as a complete leading
+    /// word (case-insensitive). Followed by end-of-string, "!", or whitespace.
+    nonisolated static func hasAgentPrefix(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        guard lower.hasPrefix("agent") else { return false }
+        let after = lower.index(lower.startIndex, offsetBy: 5)  // 5 = len("agent")
+        guard after < lower.endIndex else { return true }       // bare "agent"
+        let nextChar = lower[after]
+        return nextChar == "!" || nextChar == " " || nextChar == "\t" || nextChar == "\n"
+    }
+
+    /// Strip the leading "agent" / "agent!" prefix and any following
+    /// whitespace. Returns `text` unchanged if no prefix is present.
+    nonisolated static func stripAgentPrefix(from text: String) -> String {
+        guard hasAgentPrefix(text) else { return text }
+        // Skip "agent"
+        var idx = text.index(text.startIndex, offsetBy: 5)
+        // Skip an optional "!"
+        if idx < text.endIndex, text[idx] == "!" {
+            idx = text.index(after: idx)
+        }
+        // Skip any whitespace
+        while idx < text.endIndex, text[idx].isWhitespace {
+            idx = text.index(after: idx)
+        }
+        return String(text[idx...])
     }
 
     /// Read new messages directly from chat.db using SQLite3 C API.
@@ -385,14 +420,9 @@ extension AgentViewModel {
 
     /// Send an iMessage reply from the Messages tab after its task completes.
     func sendMessagesTabReply(_ summary: String, handle: String) {
-        // Strip "Agent!" prefix from outgoing replies to avoid triggering another command
-        var reply = summary
-        if reply.hasPrefix("Agent!") {
-            reply = String(reply.dropFirst(6))
-            if reply.hasPrefix(" ") {
-                reply = String(reply.dropFirst())
-            }
-        }
+        // Strip leading "Agent!" / "Agent " (case-insensitive, ! optional) so
+        // the receiving Mac doesn't loop on its own command.
+        let reply = Self.stripAgentPrefix(from: summary)
         let escaped = reply.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let script = """
@@ -464,8 +494,13 @@ extension AgentViewModel {
 
             guard !row.text.isEmpty else { continue }
 
-            // Only process messages that start with "Agent!"
-            guard row.text.hasPrefix("Agent!") else { continue }
+            // Only process messages that start with the wake prefix.
+            // Case-insensitive, exclamation mark optional (iPhone autocorrect
+            // strips "!" routinely; older Macs/contacts use lowercase "agent ").
+            // hasAgentPrefix returns true for "Agent!", "agent!", "AGENT!",
+            // "Agent ", "agent ", "AGENT " — anything where the first word is
+            // "agent" (with or without trailing punctuation).
+            guard Self.hasAgentPrefix(row.text) else { continue }
 
             // Auto-discover this sender
             autoAddRecipient(from: row)
@@ -483,10 +518,7 @@ extension AgentViewModel {
 
             guard approved else { continue }
 
-            let stripped = row.text.dropFirst(6) // drop "Agent!"
-            let prompt = stripped.hasPrefix(" ")
-                ? String(stripped.dropFirst()).trimmingCharacters(in: .whitespaces)
-                : String(stripped).trimmingCharacters(in: .whitespaces)
+            let prompt = Self.stripAgentPrefix(from: row.text).trimmingCharacters(in: .whitespaces)
             guard !prompt.isEmpty else { continue }
 
             // Route to dedicated Messages tab

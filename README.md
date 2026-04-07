@@ -101,115 +101,27 @@ Control any Mac app through the Accessibility API. Click buttons, type into fiel
 | **Mistral** | AI Studio | High-performance open models |
 | **Mistral Vibe** | Le Chat | High-performance open models |
 
-## Toolbar Features (Work in Progress)
+## Toolbar Buttons
 
-The Agent! toolbar contains **15 buttons** that provide quick access to core functionality. Each button is represented by a SF Symbol icon:
+The Agent! header contains **15 buttons** for quick access to settings, monitors, and tools. Each button opens a popover when clicked. Source of truth: `Agent/Views/HeaderSectionView.swift`.
 
-| # | Icon | Name | Description |
-|---|------|------|-------------|
-| 1 | ⚙️ `gearshape.2` | **Services** | Access system services and configuration options |
-| 2 | 💬 `bubble.fill` | **Chat** | Open chat/conversation view for interacting with AI |
-| 3 | ✋ `hand.stop` | **Stop** | Cancel running task or operation immediately |
-| 4 | 🖥️ `server.rack` | **Servers** | Manage MCP (Model Context Protocol) servers |
-| 5 | </> `chevron.left.forwardslash.chevron.right` | **Code** | Open code editor or coding mode |
-| 6 | 🔧 `wrench.and.screwdriver` | **Tools** | Access tool configuration and management |
-| 7 | 🖥️ `cpu` | **Settings** | LLM settings — configure AI provider, model, API keys |
-| 8 | 🧠 `brain.head.profile` | **Brain** | AI brain/configuration settings for agent behavior |
-| 9 | 🎚️ `slider.horizontal.3` | **Sliders** | Adjust parameters, thresholds, or preferences |
-| 10 | 🔄 `arrow.clockwise` | **Refresh** | Refresh/reload current state, data, or connection |
-| 11 | ⛶ `arrow.up.left.and.arrow.down.right` | **Fullscreen** | Toggle fullscreen mode for the Agent! window |
-| 12 | 📊 `chart.bar` | **Chart** | View statistics, metrics, or analytics dashboard |
-| 13 | ↩️ `arrow.uturn.backward` | **Undo** | Undo the last action or revert recent changes |
-| 14 | 🕐 `clock.arrow.circlepath` | **History** | View activity history, past tasks, or conversation log |
-| 15 | 🗑️ `trash` | **Trash** | Delete/clear History / Activity LogView / Prompts |
-
----
-
-### Detailed Button Descriptions
-
-#### 1. Services (`gearshape.2`)
-- **Purpose**: System services hub
-- **Behavior**: Toggles services panel or menu
-- **Details**: Provides access to background services and system-level configurations
-
-#### 2. Chat (`bubble.fill`)
-- **Purpose**: Main conversation interface
-- **Behavior**: Switches to chat view
-- **Details**: Primary interaction point for communicating with the AI agent
-
-#### 3. Stop (`hand.stop`)
-- **Purpose**: Emergency stop / cancel
-- **Behavior**: Immediately halts any running task
-- **Details**: Critical control for stopping long-running or unwanted operations
-
-#### 4. Servers (`server.rack`)
-- **Purpose**: MCP Server management
-- **Behavior**: Opens MCP server configuration popover
-- **Details**:
-  - Displays connected/available MCP servers
-  - Shows "No servers configured" when empty
-  - MCP servers extend capabilities with `mcp_*` prefixed tools
-  - Add, remove, and configure server connections
-
-#### 5. Code (`chevron.left.forwardslash.chevron.right`)
-- **Purpose**: Code editing mode
-- **Behavior**: Activates coding-focused workspace
-- **Details**: Switches context to development tools — file editing, Xcode builds, git operations
-
-#### 6. Tools (`wrench.and.screwdriver`)
-- **Purpose**: Tool configuration
-- **Behavior**: Opens tool management panel
-- **Details**: Configure which tools are available, set up integrations, manage tool groups
-
-#### 7. Settings (`cpu`) ⭐ *Most Used*
-- **Purpose**: LLM Configuration
-- **Behavior**: Opens LLM settings sheet/popover
-- **Details**:
-  - Select AI provider (Claude, Ollama, OpenAI, etc.)
-  - Choose model within provider
-  - Enter API keys
-  - Configure provider-specific parameters
-  - This is the primary setup step for new users
-
-#### 8. Brain (`brain.head.profile`)
-- **Purpose**: Agent intelligence settings
-- **Behavior**: Opens agent behavior configuration
-- **Details**: Adjust how the AI reasons, plans, and makes decisions
-
-#### 9. Sliders (`slider.horizontal.3`)
-- **Purpose**: Parameter adjustment
-- **Behavior**: Opens controls for tuning values
-- **Details**: Adjust temperature, token limits, timeouts, and other configurable thresholds
-
-#### 10. Refresh (`arrow.clockwise`)
-- **Purpose**: Reload/refresh
-- **Behavior**: Refreshes current state
-- **Details**: Reloads data, reconnects to services, or refreshes the active view
-
-#### 11. Fullscreen (`arrow.up.left.and.arrow.down.right`)
-- **Purpose**: Toggle fullscreen
-- **Behavior**: Expands Agent! to fill the screen
-- **Details**: Maximizes workspace for focused task execution; click again to restore
-
-#### 12. Chart (`chart.bar`)
-- **Purpose**: Analytics/Metrics
-- **Behavior**: Opens statistics dashboard
-- **Details**: View usage stats, performance metrics, task history charts
-
-#### 13. Undo (`arrow.uturn.backward`)
-- **Purpose**: Revert last action
-- **Behavior**: Undoes the most recent change
-- **Details**: Works across file edits, configuration changes, and some UI actions
-
-#### 14. History (`clock.arrow.circlepath`)
-- **Purpose**: Activity timeline
-- **Behavior**: Opens history/log view
-- **Details**: Browse past conversations, completed tasks, and previous actions with timestamps
-
-#### 15. Trash (`trash`)
-- **Purpose**: Delete/Clear
-- **Behavior**: Removes selected item or clears data
-- **Details**: Delete conversations, clear cache, remove files, or reset current session
+| # | Icon | Name | What it does |
+|---|------|------|--------------|
+| 1 | `gearshape.2` | **Services** | Toggle the Launch Agent / Launch Daemon, manage project folder, scan command output |
+| 2 | `message.fill` | **Messages Monitor** | Toggle iMessage monitoring on/off — green when active. Opens the recipients list and approval UI |
+| 3 | `hand.raised` | **Accessibility** | Open the Accessibility settings sheet (permission status, axorcist diagnostics) |
+| 4 | `server.rack` | **MCP Servers** | Add/remove/configure MCP (Model Context Protocol) servers — extends Agent! with `mcp_*` tools |
+| 5 | `chevron.left.forwardslash.chevron.right` | **Coding Preferences** | Toggle auto-verify, visual tests, auto-PR, auto-scaffold. Green when any are on |
+| 6 | `wrench.and.screwdriver` | **Tools** | Per-provider tool toggles. Enable/disable individual built-in and MCP tools |
+| 7 | `cpu` | **LLM Settings** | Pick AI provider, model, API key, base URL. Pulses when a task is running |
+| 8 | `brain.fill` / `brain` | **Apple Intelligence** | Configure FoundationModels (on-device Apple AI). Filled when available |
+| 9 | `slider.horizontal.3` | **Agent Options** | Temperature, max iterations, vision auto-screenshot, plan-mode encouragement, etc. |
+| 10 | `arrow.triangle.2.circlepath` | **Fallback Chain** | Configure provider fallback order — Agent! retries with the next provider when one fails |
+| 11 | `viewfinder` | **HUD** | Toggle the green-CRT scanline overlay on the LLM Output view |
+| 12 | `chart.bar.fill` | **LLM Usage** | Per-model token usage and cost tracking. Green when there's recorded usage |
+| 13 | `arrow.uturn.backward.circle` | **Rollback** | Time-Machine-style file backup browser. Restore any previous version of any file Agent! edited |
+| 14 | `clock.arrow.circlepath` | **History** | Past prompts, errors, and task summaries for the active tab. Re-run a previous prompt with one click |
+| 15 | `trash` | **Clear Log** | Delete the activity log for the active tab (or all task history when no tab is selected). Confirms first |
 
 ---
 
@@ -283,114 +195,68 @@ Go to Settings → MCP Servers → Add Server, paste this JSON:
 
 Toggle ON and Playwright tools appear automatically. The AI can now control browsers directly.
 
-### Project & Configuration Tools
+### Tools — what `list_tools` actually returns
 
-These tools manage project settings and coding mode:
+These are the canonical tool names defined in `AgentTools.Name.*` and exposed to every LLM provider via `AgentTools.tools(for:)`. Source of truth: `~/Documents/GitHub/AgentTools/Sources/AgentTools/AgentTools.swift`. The Agent app's user-pref toggles can hide individual tools per-provider, but the list below is the full set the LLM ever sees.
 
-| Tool | What It Does |
-|---|---|
-| **project_folder** | Get or change the working directory for this tab — use `set`, `home`, `documents`, `library`, or `none` |
-| **coding_mode** | Toggle coding mode on/off — when ON, only Core+Workflow+Coding+UserAgent tools are available for faster responses |
-| **plan_mode** | Create, update, read, list, or delete step-by-step plans with status tracking — ideal for complex tasks |
-| **memory** | Read/write persistent user preferences — use `append` to remember things across sessions |
+#### Core / discovery
 
-> 💡 **Pro Tip:** Use `coding_mode(true)` when working on code — it removes unnecessary tools and speeds up responses.
+| Tool | Actions / args | What it does |
+|---|---|---|
+| **done** | `summary` | Signal task complete. Required at end of every task |
+| **list_tools** | — | Returns the live tool list for the current provider (built-in + MCP) |
+| **search** | `query` | Web search via Tavily |
+| **chat** | `write` / `transform` / `fix` / `about` | Write prose, transform/fix text, describe Agent capabilities |
+| **memory** | `read` / `write` / `append` / `clear` | Persistent user preferences. "remember X" → `append` |
+| **plan** | `create` / `update` / `read` / `list` / `delete` | Multi-plan CRUD with per-step status tracking |
+| **directory** | `get` / `set` / `home` / `documents` / `library` / `none` / `cd` | Project folder for the current tab |
+| **fetch** | `url` | Fetch URL, strip HTML, cap 8K chars |
+| **skill** | `list` / `invoke` / `save` / `delete` | Reusable prompt templates |
+| **ask_user** | `question` | Mid-task user dialog (waits up to 5 min) |
 
-These tools interact with macOS UI and web pages:
+#### Code / files / build
 
-| Tool | What It Does |
-|---|---|
-| **accessibility** | Control any app — click buttons, type text, read elements, manage windows, navigate menus, capture screenshots |
-| **web** | Automate Safari — open URLs, click elements, type text, execute JS, search, navigate tabs |
-| **mcp_playwright_browser_*** | Advanced browser automation via Playwright — snapshot, click, hover, drag, fill forms, upload files, etc. |
-| **web_search** | Search the web for current information — returns relevant page titles, URLs, and content snippets |
+| Tool | Actions / args | What it does |
+|---|---|---|
+| **file** | `read` / `write` / `edit` / `create` / `apply` / `undo` / `diff_apply` / `list` / `search` / `read_dir` / `mkdir` / `cd` / `if_to_switch` / `extract_function` | All file operations. `edit` = single-string replace. `diff_apply` = preferred for multi-line code edits |
+| **git** | `status` / `diff` / `log` / `commit` / `diff_patch` / `branch` / `worktree` | Git operations — use this instead of shell git |
+| **xcode** | `build` / `run` / `list_projects` / `select_project` / `add_file` / `remove_file` / `grant_permission` / `analyze` / `snippet` / `code_review` / `get_version` / `bump_version` / `bump_build` | Native Xcode integration. Errors in the activity log are clickable |
+| **agent_script** | `list` / `read` / `create` / `update` / `run` / `delete` / `combine` | Swift dylib scripts in `~/Documents/AgentScript/agents/` with full TCC |
 
-> 💡 **Pro Tip:** Use `accessibility` for macOS UI automation — it’s faster and more reliable than screenshots.
+#### Shell / privilege tiers
 
-These tools manage Swift and AppleScript automation scripts:
+| Tool | Args | What it does |
+|---|---|---|
+| **user_shell** | `command` | Shell as current user via Launch Agent. Primary shell tool |
+| **root_shell** | `command` | Shell as ROOT via Launch Daemon. Admin tasks only — no sudo |
+| **shell** | `command` | Fallback in-process shell (when Launch Agent is off) |
+| **batch** | `commands` | Multiple shell commands in one call (newline-separated) |
+| **multi** | `description`, `tasks` | Multiple tool calls in one batch |
 
-| Tool | What It Does |
-|---|---|
-| **agent** | Create, read, update, run, delete, or combine Swift automation scripts with TCC permissions |
-| **applescript_tool** | Execute, save, delete, or list AppleScript scripts — use `lookup_sdef` to inspect app dictionaries |
-| **javascript_tool** | Run JXA (JavaScript for Automation) scripts — ideal for lightweight automation tasks |
-| **batch_tools** | Run multiple tool calls in one batch with progress tracking — no round-trips, ideal for complex workflows |
+#### macOS automation
 
-> 💡 **Pro Tip:** Use `agent` for Swift scripts that need TCC permissions — it’s the most powerful scripting tool.
+| Tool | Actions / args | What it does |
+|---|---|---|
+| **accessibility** | `open_app` / `find_element` / `click_element` / `type_into_element` / `scroll_to_element` / `list_windows` / `inspect_element` / `get_properties` / `perform_action` / `set_properties` / `get_focused_element` / `get_children` / `read_focused` / `wait_for_element` / `wait_adaptive` / `highlight_element` / `manage_app` / `show_menu` / `click_menu_item` / `set_window_frame` / `get_window_frame` / `screenshot` / `check_permission` / `request_permission` / `get_audit_log` | Element-based AXorcist automation. Every action takes `role`+`title`+`appBundleId` — no coordinates |
+| **applescript** | `execute` / `lookup_sdef` / `list` / `run` / `save` / `delete` | NSAppleScript in-process with TCC |
+| **javascript** | `execute` / `list` / `run` / `save` / `delete` | JXA (JavaScript for Automation) |
 
-These tools execute shell commands and system-level operations:
+#### Web automation
 
-| Tool | What It Does |
-|---|---|
-| **execute_agent_command** | Run shell commands as current user — use for git, ls, grep, find, homebrew, scripts |
-| **execute_daemon_command** | Run shell commands as ROOT via Launch Daemon — no sudo needed, use for system logs, disk ops, network debug |
-| **run_shell_script** | Execute shell scripts with automatic fallback to in-process when User Agent is off |
-| **batch_commands** | Run multiple shell commands in one call — no round-trips, ideal for setup scripts |
+| Tool | Actions / args | What it does |
+|---|---|---|
+| **safari** | `open` / `find` / `click` / `type` / `execute_js` / `get_url` / `get_title` / `read_content` / `google_search` / `scroll_to` / `select` / `submit` / `navigate` / `list_tabs` / `switch_tab` / `list_windows` / `scan` / `search` | Safari automation via JavaScript + AppleScript |
+| **selenium** | `start` / `stop` / `navigate` / `find` / `click` / `type` / `execute` / `screenshot` / `wait` | Selenium WebDriver session — use `safari` for normal Safari |
+| **mcp_playwright_browser_\*** | (see Playwright MCP) | Optional. Cross-browser automation via Playwright MCP |
 
-> 💡 **Pro Tip:** Use `execute_daemon_command` instead of `sudo` — it’s safer and doesn’t require password prompts.
+#### Sub-agents
 
-These tools handle file operations and version control:
+| Tool | Args | What it does |
+|---|---|---|
+| **spawn_agent** | `name`, `prompt`, `tools`, `max_iterations` | Spawn isolated sub-agent. Max 3 concurrent. Independent message history + mailbox |
+| **tell_agent** | `to`, `message` | Send a message to a running sub-agent's mailbox |
 
-| Tool | What It Does |
-|---|---|
-| **file_manager** | Read/write/edit/list/search files — use `diff_apply` for code changes, `edit` for single-line fixes |
-| **git** | Git operations: status, diff, log, commit, branch — always use this instead of shell git commands |
-| **xcode** | Build/run Xcode projects, analyze/snippet Swift code, add/remove files, grant permissions |
-
-> 💡 **Pro Tip:** Always use `file_manager` for file operations — it’s safer and more reliable than shell commands.
-
-These tools help manage the agent's workflow and state:
-
-| Tool | What It Does |
-|---|---|
-| **plan_mode** | Create, update, read, list, or delete step-by-step plans with status tracking |
-| **memory** | Read/write persistent user preferences — store notes, settings, or context across sessions |
-| **coding_mode** | Toggle coding mode on/off to restrict available tools for focused development |
-| **project_folder** | Get or change the working directory for this tab — set to home, documents, library, or custom path |
-
-> 💡 **Pro Tip:** Use `plan_mode` to break complex tasks into manageable steps and track progress.
-
-These are the foundational tools that every agent needs:
-
-| Tool | What It Does |
-|---|---|
-| **task_complete** | Signal when a task is finished — always call this at the end of any task |
-| **list_tools** | List all available tools and their descriptions |
-| **web_search** | Search the web for current information or facts you're unsure about |
-
-> 💡 **Pro Tip:** Always call `task_complete` at the end of every task to signal completion and avoid hanging.
-
-These tools enable system automation and UI interaction:
-
-| Tool | What It Does |
-|---|---|
-| **applescript_tool** | Execute AppleScript, list scripts, save/delete, or lookup SDEFs for apps |
-| **accessibility** | Control any macOS app via AX API — click buttons, type text, read elements, manage windows |
-| **javascript_tool** | Run JXA (JavaScript for Automation) scripts, list/save/delete scripts |
-| **lookup_sdef** | Inspect AppleScript dictionary definitions for any app (e.g., Music, Safari) |
-
-> 💡 **Pro Tip:** Use `accessibility` to automate UI interactions across all macOS apps — it’s the most powerful tool for GUI automation.
-
-These tools provide code editing, file management, and Xcode integration capabilities:
-
-| Tool | What It Does |
-|---|---|
-| **read_file** | Read the contents of any file in the project |
-| **write_file** | Write content to a file (creates if doesn't exist) |
-| **edit_file** | Replace exact string matches in a file |
-| **create_diff** | Preview changes before applying them to a file |
-| **apply_diff** | Apply previously previewed changes to a file |
-| **diff_and_apply** | Create and apply changes to a file in one step |
-| **undo_edit** | Revert the last edit made to a file |
-| **list_files** | List files in a directory with optional pattern matching |
-| **search_files** | Search for files containing specific text patterns |
-| **read_dir** | Get detailed information about files in a directory |
-| **file_manager** | Comprehensive file operations including read, write, edit, list, search |
-| **xcode** | Build, run, analyze, and manage Xcode projects |
-| **project_folder** | Set or get the current project directory |
-| **mode** | Toggle coding mode on/off for optimized tool selection |
-
-> 💡 **Pro Tip:** Use `create_diff` to preview changes before applying them with `apply_diff` to avoid accidental edits.
+> 💡 **Note:** The on-device app filters this list per-provider — toggle individual tools in the **Tools** popover (button #6 in the toolbar above). Apple Intelligence has its own minimal default set because of its small context window. MCP tools are appended at runtime as `mcp_<server>_<tool>` and listed under "--- MCP Tools ---" by `list_tools`.
 
 ## Privacy & Safety
 
@@ -403,23 +269,29 @@ These tools provide code editing, file management, and Xcode integration capabil
 
 ## Keyboard Shortcuts
 
+Source of truth: the inline `NSEvent.addLocalMonitorForEvents` block in `Agent/Views/ContentView.swift`.
+
 | Shortcut | Action |
 |---|---|
-| `Enter` | Run task |
-| `⌘ R` | Run current task |
-| `⌘ .` | Stop task |
-| `Escape` | Cancel active task |
-| `⌘ D` | Toggle LLM output panel |
+| `⌘ Return` | Run current task |
+| `⌘ .` / `Escape` | Cancel running task |
+| `⌘ B` | Toggle LLM Output overlay (show/hide) |
+| `⌘ D` | Toggle both LLM chevrons on the current tab (expand/collapse) |
 | `⌘ T` | New tab |
-| `⌘ W` | Close tab |
-| `⌘ 1-9` | Switch to tab |
-| `⌘ [` / `⌘ ]` | Previous / next tab |
-| `⌘ F` | Search activity log |
-| `⌘ L` | Clear conversation |
-| `⌘ H` | Task history |
-| `⌘ ,` | Settings |
-| `⌘ V` | Paste image |
-| `↑` / `↓` | Prompt history |
+| `⌘ W` | Close current tab (or quit if no tabs) |
+| `⌘ 1`–`⌘ 9` | Switch tab. `⌘1` is the main tab; `⌘2`–`⌘9` are script tabs |
+| `⌘ Shift ←` / `⌘ Shift →` | Previous / next tab |
+| `⌘ F` | Toggle activity-log search bar |
+| `⌘ L` | Clear log for the active tab |
+| `⌘ V` | Paste image from clipboard |
+| `↑` / `↓` | Prompt history (in the input field) |
+| `⌘ Shift M` | Toggle Messages Monitor on/off |
+| `⌘ Shift P` | Open Settings (system prompt editor lives here) |
+| `⌘ Shift K` | Clear all (full reset) |
+| `⌘ Shift L` | Clear LLM output panel only |
+| `⌘ Shift H` | Clear prompt history |
+| `⌘ Shift J` | Clear task history |
+| `⌘ Shift U` | Clear token counters |
 
 ---
 
@@ -469,56 +341,46 @@ The AI automatically uses these when you ask it to build, fix errors, or work wi
 
 <img width="1349" height="1438" alt="Screenshot 2026-04-02 at 12 00 03 PM" src="https://github.com/user-attachments/assets/b0d9346e-f807-4089-bab3-29c7058868d8" />
 
-## Messages App Integration
+## Two ways to talk to Agent! — voice and iMessage
 
-Agent! can be controlled via voice command "Agent!" using the Messages app. This feature allows users to send commands to Agent! through text messages, enabling remote control and automation of tasks on their macOS device.
+Both features use the same wake word: **"Agent!"** (case-insensitive — `Agent!`, `agent!`, `AGENT!`, even just `Agent ` or `agent ` all work).
 
-### How It Works
+### 🎤 Voice (dictation hotword)
 
-1. **Voice Command Setup**: Users can set up a voice command in macOS that triggers sending a message to a predefined contact or group chat.
-2. **Message Reception**: Agent! monitors incoming messages for specific keywords or phrases (e.g., "Agent!").
-3. **Command Execution**: Upon detecting the keyword, Agent! parses the message content and executes the corresponding task or command.
-4. **Response**: Agent! sends a reply message back to the sender with the results or status of the executed command.
+Click the microphone in the input bar and start the hotword session, then speak. Agent! transcribes in real time using `SFSpeechRecognizer` and listens for the word "agent" as a complete word (not as a substring of "intelligent" or "management"). Anything you say after "agent" becomes the task. After ~2.5 seconds of silence, the task auto-runs.
 
-### Example Use Cases
+Examples:
+- *"Agent, what song is playing?"*
+- *"Agent take a screenshot of Safari"*
+- *"Agent build the Xcode project"*
 
-- **Remote Task Execution**: Send a message like "Agent! open Finder" to remotely open the Finder application.
-- **System Commands**: Execute system commands such as "Agent! restart" to restart the computer.
-- **File Operations**: Perform file operations like "Agent! copy /path/to/file" to copy files to a specified location.
+The hotword session loops automatically — after one task completes, it goes back to listening. Click the mic again to stop.
 
-### Configuration
+### 📱 iMessage (remote control)
 
-To enable this feature, users need to configure the Messages app to allow Agent! to access and monitor incoming messages. This can be done through the system preferences under Security & Privacy → Privacy → Accessibility.
+Text your Mac from your iPhone. Agent! polls `~/Library/Messages/chat.db` every 5 seconds for new messages and reacts to anything starting with **`Agent!`** (case-insensitive, exclamation mark optional).
 
-> **Note**: Ensure that the Messages app is running and that the user has granted the necessary permissions for Agent! to interact with it.
-### Services Popover Button
+Examples:
+```
+Agent! What song is playing?
+agent! check my email
+AGENT! next song
+Agent  open Safari
+```
 
-The Services button (gear icon) provides quick access to project folder management and task configuration options:
+Agent! sends an immediate "Working on it..." acknowledgment, runs the task on a dedicated Messages tab using your main tab's LLM config, and then texts the result back to you.
 
-- **Move/Go Down**: Navigate to a different project folder location
-- **New Folder**: Create a new folder for your project
-- **Home**: Quickly return to your home directory
-- **Close**: Clear the current project folder selection
-- **Project Folder Input**: Enter or paste a custom project folder path
-- **Folder Size Display**: Shows the current folder size (e.g., "20.0M")
-- **User Prompt**: Configure user prompts for tasks
-- **Cancel**: Cancel the current operation
-- **Thinking Indicator**: Shows when Agent! is processing a task
-- **Task Progress**: Displays progress information during task execution
-- **Context Usage**: Shows how much context is being used for the current task
-- **More Options**: Additional configuration settings
-- **Dismiss**: Close the popover (currently disabled when active)
-- **Steps**: View the steps of the current task (7 steps shown)
-- **Screenshot**: Take a screenshot to attach to your task
-- **Paste Image**: Paste an image from clipboard into the task
-- **Cancel Task**: Cancel a running task
-- **Dictation**: Start voice dictation for entering tasks
-- **Hotword**: Activate voice command with "Agent!"
-- **Run Task**: Execute the current task (currently disabled when not ready)
-- **Task Input Field**: Enter your task description here
+**Setup (one-time):**
 
-This popover provides comprehensive control over your project environment and task execution workflow.
+1. **Grant Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → enable Agent! (required to read `chat.db` directly via SQLite)
+2. **Open the Messages Monitor** — toolbar button #2 (chat bubble icon, turns green when on)
+3. **Approve a sender** — once a message arrives from a new contact, that contact appears in the recipients list. Toggle them on to approve.
 
+Only approved senders can run tasks. Unapproved messages are logged but ignored. Your reply is sent back via AppleScript to the same handle that sent the command, capped at 4000 characters.
+
+Outgoing replies have any leading "Agent!" stripped so the receiving Mac doesn't trigger its own command loop.
+
+---
 
 Agent! supports [MCP](https://modelcontextprotocol.io) servers for extended capabilities. Configure in Settings → MCP Servers.
 

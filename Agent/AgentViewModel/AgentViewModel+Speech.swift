@@ -152,16 +152,52 @@ extension AgentViewModel {
 
     // MARK: - Hotword Processing
 
-    private func handleHotwordTranscription(_ transcription: String) {
+    /// Find the LAST word-boundary occurrence of "agent" (or "agent!") in the
+    /// lowercased transcription and return the index AFTER it. Word-boundary
+    /// means the character before "agent" must be non-letter (or start of
+    /// string) AND the character after the trailing "t" or "!" must be non-
+    /// letter (or end of string). Without this we trigger on "intelligent",
+    /// "management", "agentic", etc. — every word containing the substring
+    /// "agent" — which is wildly wrong.
+    ///
+    /// We anchor on the LAST occurrence so multi-utterance recognition like
+    /// "agent open agent script" treats the second "agent" as the wake word
+    /// and "script" as the command, which matches user expectation.
+    private static func wakeWordAnchor(in transcription: String) -> String.Index? {
         let lower = transcription.lowercased()
+        let wakes = ["agent!", "agent"]  // try the punctuated form first
+        var bestEnd: String.Index?
+        for wake in wakes {
+            var searchStart = lower.startIndex
+            while let range = lower.range(of: wake, range: searchStart..<lower.endIndex) {
+                let beforeOK: Bool = {
+                    guard range.lowerBound > lower.startIndex else { return true }
+                    let prev = lower[lower.index(before: range.lowerBound)]
+                    return !prev.isLetter
+                }()
+                let afterOK: Bool = {
+                    guard range.upperBound < lower.endIndex else { return true }
+                    let next = lower[range.upperBound]
+                    return !next.isLetter
+                }()
+                if beforeOK && afterOK {
+                    bestEnd = range.upperBound  // keep walking — we want the LAST hit
+                }
+                searchStart = lower.index(after: range.lowerBound)
+            }
+            if bestEnd != nil { break }  // prefer "agent!" over "agent" if both matched
+        }
+        return bestEnd
+    }
 
+    private func handleHotwordTranscription(_ transcription: String) {
         if !isHotwordCapturing {
-            // Look for the wake word "agent"
-            guard let range = lower.range(of: "agent") else { return }
+            // Look for the wake word "agent" / "agent!" — must be a complete word
+            guard let anchor = Self.wakeWordAnchor(in: transcription) else { return }
 
             // Wake word detected — start capturing the command after it
             isHotwordCapturing = true
-            let afterAgent = String(transcription[range.upperBound...])
+            let afterAgent = String(transcription[anchor...])
                 .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "!.,")))
 
             let command = afterAgent.isEmpty ? "" : afterAgent
@@ -171,9 +207,10 @@ extension AgentViewModel {
             return
         }
 
-        // Already capturing — extract command text after the wake word
-        if let range = lower.range(of: "agent") {
-            let afterAgent = String(transcription[range.upperBound...])
+        // Already capturing — re-anchor on the LAST wake-word hit so the
+        // captured command stays in sync with the latest transcription.
+        if let anchor = Self.wakeWordAnchor(in: transcription) {
+            let afterAgent = String(transcription[anchor...])
                 .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "!.,")))
             setInputText(afterAgent)
 
