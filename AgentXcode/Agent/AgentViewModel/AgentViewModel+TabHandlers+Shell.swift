@@ -12,39 +12,109 @@ extension AgentViewModel {
 
         switch name {
         case "batch_commands":
+            // batch_commands runs every step inside the SAME bash process so env vars,
+            // cwd changes, exported functions, and aliases all persist across steps.
+            // Without this the LLM has to manually && everything together because
+            // STAGING="..." in step 1 wouldn't survive into step 2.
+            //
+            // How it works: build a single shell script with all commands separated by
+            // a unique delimiter line that captures each command's exit code, run it as
+            // ONE bash invocation, then split the aggregated output on the delimiter to
+            // attribute per-step output and rc back to each command for the UI display.
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
             let rawCommands = input["commands"] as? String ?? ""
             let commands = rawCommands.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            var batchOutput = ""
-            for (idx, rawCmd) in commands.enumerated() {
-                guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
-                let cmd = Self.prependWorkingDirectory(rawCmd, projectFolder: tabFolder)
-                if let suggestion = Self.suggestTool(cmd) {
-                    batchOutput += "[\(idx + 1)] $ \(rawCmd)\n\(suggestion)\n\n"
-                    continue
-                }
-                if let pathErr = Self.preflightCommand(cmd) {
-                    batchOutput += "[\(idx + 1)] $ \(rawCmd)\n\(pathErr)\n\n"
-                    continue
-                }
-                tab.appendLog("🔧 [\(idx + 1)/\(commands.count)] $ \(Self.collapseHeredocs(cmd))")
-                tab.flush()
-
-                // Route through same logic as execute_agent_command
-                let result: (status: Int32, output: String)
-                if Self.needsTCCPermissions(cmd) {
-                    result = await Self.executeTCC(command: cmd)
-                } else if userService.userReady {
-                    result = await executeForTab(command: cmd, projectFolder: tabFolder)
-                } else {
-                    result = await Self.executeTCC(command: cmd)
-                }
-
-                let output = result.output.isEmpty ? "(no output)" : result.output
-                batchOutput += "[\(idx + 1)] $ \(rawCmd)\n"
-                if result.status > 0 { batchOutput += "exit code: \(result.status)\n" }
-                batchOutput += output + "\n\n"
+            guard !commands.isEmpty else {
+                return TabToolResult(
+                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "(no commands)"],
+                    isComplete: false
+                )
             }
+
+            // Pre-flight: check every command for tool suggestions / unsafe patterns
+            // BEFORE running anything. If any are blocked, return all the blocks at once
+            // so the LLM can fix them in a single retry instead of half-running the batch.
+            var blocks = ""
+            for (idx, rawCmd) in commands.enumerated() {
+                let prefixed = Self.prependWorkingDirectory(rawCmd, projectFolder: tabFolder)
+                if let suggestion = Self.suggestTool(prefixed) {
+                    blocks += "[\(idx + 1)] $ \(rawCmd)\n\(suggestion)\n\n"
+                } else if let pathErr = Self.preflightCommand(prefixed) {
+                    blocks += "[\(idx + 1)] $ \(rawCmd)\n\(pathErr)\n\n"
+                }
+            }
+            if !blocks.isEmpty {
+                tab.appendLog("⚠️ Batch blocked by preflight checks")
+                tab.flush()
+                return TabToolResult(
+                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": blocks + "(batch aborted — fix errors and retry)"],
+                    isComplete: false
+                )
+            }
+
+            // Log each step before running so the user sees the plan
+            for (idx, cmd) in commands.enumerated() {
+                tab.appendLog("🔧 [\(idx + 1)/\(commands.count)] $ \(Self.collapseHeredocs(cmd))")
+            }
+            tab.flush()
+
+            // Build the single-process script. After each command, print a unique
+            // delimiter line followed by the exit code so the parser can split per-step.
+            // Using printf (not echo) to guarantee the format isn't mangled by aliases.
+            let delim = "===AGENT_BATCH_STEP_\(UUID().uuidString.prefix(8))==="
+            var script = ""
+            for cmd in commands {
+                script += "\(cmd)\n"
+                script += "printf '\\n%s:%d\\n' '\(delim)' $?\n"
+            }
+
+            guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
+
+            // executeForTab handles the cd-prepend + TCC routing internally; passing
+            // the full multi-line script lets every step run in the same shell process.
+            let needsTCC = Self.needsTCCPermissions(script)
+            let result: (status: Int32, output: String)
+            if needsTCC {
+                let prefixed = Self.prependWorkingDirectory(script, projectFolder: tabFolder)
+                result = await Self.executeTCC(command: prefixed)
+            } else if userService.userReady {
+                result = await executeForTab(command: script, projectFolder: tabFolder)
+            } else {
+                let prefixed = Self.prependWorkingDirectory(script, projectFolder: tabFolder)
+                result = await Self.executeTCC(command: prefixed)
+            }
+
+            // Split the aggregated output on the delimiter and attribute per-step.
+            var batchOutput = ""
+            var remaining = result.output
+            for (idx, cmd) in commands.enumerated() {
+                if let range = remaining.range(of: "\(delim):") {
+                    let stepOutput = String(remaining[remaining.startIndex..<range.lowerBound])
+                    let afterDelim = remaining[range.upperBound...]
+                    let nlIdx = afterDelim.firstIndex(of: "\n") ?? afterDelim.endIndex
+                    let rc = Int(afterDelim[afterDelim.startIndex..<nlIdx]) ?? 0
+
+                    let trimmed = stepOutput.trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
+                    if rc != 0 { batchOutput += "exit code: \(rc)\n" }
+                    batchOutput += (trimmed.isEmpty ? "(no output)" : trimmed) + "\n\n"
+
+                    remaining = nlIdx < afterDelim.endIndex
+                        ? String(afterDelim[afterDelim.index(after: nlIdx)...])
+                        : ""
+                } else {
+                    // Bash bailed out before this step printed its delimiter (syntax
+                    // error in an earlier command, exit, etc.). Show whatever's left.
+                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
+                    if remaining.isEmpty {
+                        batchOutput += "(no output — batch aborted before this step ran)\n\n"
+                    } else {
+                        batchOutput += "(batch aborted, trailing output below)\n\(remaining)\n\n"
+                        remaining = ""
+                    }
+                }
+            }
+
             // Truncate if batch output is too large
             let truncated = batchOutput.count > 50_000
                 ? String(batchOutput.prefix(50_000)) + "\n...(batch output truncated)"

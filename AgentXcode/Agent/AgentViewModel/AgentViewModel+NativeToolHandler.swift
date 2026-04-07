@@ -1273,7 +1273,9 @@ extension AgentViewModel {
             let cmd = CodingService.buildGitDiffCommand(path: pf.isEmpty ? nil : pf, staged: false, target: target)
             let result = await executeViaUserAgent(command: cmd, workingDirectory: dir)
             return result.output.isEmpty ? "(no changes)" : result.output
-        // Batch commands
+        // Batch commands — single bash process so env vars / cwd / functions persist
+        // across steps. Per-step output is split out via delimiter markers so the LLM
+        // sees which command produced what (and the per-command exit code).
         case "batch_commands":
             let commands = (input["commands"] as? String ?? "").components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             guard !commands.isEmpty else { return "(no commands)" }
@@ -1281,11 +1283,42 @@ extension AgentViewModel {
                 appendLog("🔧 [\(idx+1)/\(commands.count)] $ \(cmd)")
             }
             flushLog()
-            // Run all commands in a single shell session so variables persist
-            let joined = commands.joined(separator: " && ")
-            let fullCmd = Self.prependWorkingDirectory(joined, projectFolder: pf)
+            let delim = "===AGENT_BATCH_STEP_\(UUID().uuidString.prefix(8))==="
+            var script = ""
+            for cmd in commands {
+                script += "\(cmd)\n"
+                script += "printf '\\n%s:%d\\n' '\(delim)' $?\n"
+            }
+            let fullCmd = Self.prependWorkingDirectory(script, projectFolder: pf)
             let result = await executeViaUserAgent(command: fullCmd)
-            return result.output.isEmpty ? "(no output)" : result.output
+
+            // Split per-step using the delimiter
+            var batchOutput = ""
+            var remaining = result.output
+            for (idx, cmd) in commands.enumerated() {
+                if let range = remaining.range(of: "\(delim):") {
+                    let stepOutput = String(remaining[remaining.startIndex..<range.lowerBound])
+                    let afterDelim = remaining[range.upperBound...]
+                    let nlIdx = afterDelim.firstIndex(of: "\n") ?? afterDelim.endIndex
+                    let rc = Int(afterDelim[afterDelim.startIndex..<nlIdx]) ?? 0
+                    let trimmed = stepOutput.trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
+                    if rc != 0 { batchOutput += "exit code: \(rc)\n" }
+                    batchOutput += (trimmed.isEmpty ? "(no output)" : trimmed) + "\n\n"
+                    remaining = nlIdx < afterDelim.endIndex
+                        ? String(afterDelim[afterDelim.index(after: nlIdx)...])
+                        : ""
+                } else {
+                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
+                    if remaining.isEmpty {
+                        batchOutput += "(no output — batch aborted before this step ran)\n\n"
+                    } else {
+                        batchOutput += "(batch aborted, trailing output below)\n\(remaining)\n\n"
+                        remaining = ""
+                    }
+                }
+            }
+            return batchOutput.isEmpty ? "(no output)" : batchOutput
         // Wait/pause for accessibility automation
         case "wait", "sleep", "pause":
             let seconds = input["seconds"] as? Double ?? input["duration"] as? Double ?? 3

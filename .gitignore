@@ -66,14 +66,16 @@ AgentTools/
 # Anything else listed below was bloat that needs to stay out forever.
 # ============================================================================
 
-# External Swift packages that historically slipped in (rest are above)
-AgentHelper/
-MultiLineDiff/
-XcodeScriptingBridge/
-xcf-swift/
-LinkedInAutomation/
-Sources/
-Agent/
+# External Swift packages that historically slipped in (rest are above).
+# Leading / anchors them to repo root so they don't accidentally match
+# nested directories like AgentXcode/Agent/.
+/AgentHelper/
+/MultiLineDiff/
+/XcodeScriptingBridge/
+/xcf-swift/
+/LinkedInAutomation/
+/Sources/
+/Agent/
 
 # Old project layout — Xcode project lives under AgentXcode/ now
 /Agent.xcodeproj/
