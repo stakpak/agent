@@ -147,6 +147,12 @@ final class AgentViewModel {
     var thinkingOutputExpanded: Bool = UserDefaults.standard.object(forKey: "thinkingOutputExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(thinkingOutputExpanded, forKey: "thinkingOutputExpanded") }
     }
+    /// Expanded state of the Steps (tool calls) disclosure inside the LLM
+    /// Output HUD on the main tab. Persisted across launches and across
+    /// Cmd+B hide/show cycles so newly arriving steps don't collapse the list.
+    var toolStepsExpanded: Bool = UserDefaults.standard.object(forKey: "toolStepsExpanded") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(toolStepsExpanded, forKey: "toolStepsExpanded") }
+    }
     /// User's drag-resized height for the LLM Output HUD on the main tab. Persisted across launches.
     var llmOutputHeight: Double = UserDefaults.standard.object(forKey: "llmOutputHeight") as? Double ?? 80 {
         didSet { UserDefaults.standard.set(llmOutputHeight, forKey: "llmOutputHeight") }

@@ -315,7 +315,16 @@ struct ThinkingIndicatorView: View {
 
                     // Tool steps list
                     if !toolSteps.isEmpty {
-                        ToolStepsView(steps: toolSteps)
+                        ToolStepsView(
+                            steps: toolSteps,
+                            isExpanded: Binding(
+                                get: { tab?.toolStepsExpanded ?? viewModel.toolStepsExpanded },
+                                set: { newValue in
+                                    if let tab { tab.toolStepsExpanded = newValue }
+                                    else { viewModel.toolStepsExpanded = newValue }
+                                }
+                            )
+                        )
                     }
                 }
                 .padding(.horizontal, 20)
@@ -697,10 +706,16 @@ private struct ContentHeightKey: PreferenceKey {
 
 // MARK: - Tool Steps View
 
-/// Collapsible list of tool invocations for the current task
+/// Collapsible list of tool invocations for the current task.
+///
+/// `isExpanded` is a Binding (not local @State) so the disclosure state
+/// survives the view being torn down and rebuilt — which happens whenever
+/// the user toggles the LLM HUD with Cmd+B, switches tabs, or when steps
+/// transition from empty → non-empty between LLM iterations. Without this,
+/// every newly arriving step would collapse the list.
 struct ToolStepsView: View {
     let steps: [AgentViewModel.ToolStep]
-    @State private var isExpanded = false
+    @Binding var isExpanded: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
