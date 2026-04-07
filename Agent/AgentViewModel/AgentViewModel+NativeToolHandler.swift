@@ -62,10 +62,22 @@ extension AgentViewModel {
             if result.status != 0 && result.output.contains("command not found") {
                 let tool = command.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
                 if !tool.isEmpty {
-                    let lookup = await executeViaUserAgent(command: "/usr/bin/whereis \(tool) 2>/dev/null; which \(tool) 2>/dev/null; ls /opt/homebrew/bin/\(tool) /usr/local/bin/\(tool) 2>/dev/null")
-                    let paths = lookup.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    appendLog("🔍 whereis \(tool): \(paths.isEmpty ? "not found" : paths)")
-                    return "command not found: \(tool)\nwhereis results:\n\(paths.isEmpty ? "Not installed on this system." : paths)\nUse the full path to run it, or ask the user to install it."
+                    let cmd = "/usr/bin/whereis \(tool) 2>/dev/null; "
+                        + "which \(tool) 2>/dev/null; "
+                        + "ls /opt/homebrew/bin/\(tool) "
+                        + "/usr/local/bin/\(tool) 2>/dev/null"
+                    let lookup = await executeViaUserAgent(command: cmd)
+                    let paths = lookup.output
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    appendLog(
+                        "🔍 whereis \(tool): "
+                        + "\(paths.isEmpty ? "not found" : paths)")
+                    return """
+                        command not found: \(tool)
+                        whereis results:
+                        \(paths.isEmpty ? "Not installed on this system." : paths)
+                        Use the full path to run it, or ask the user to install it.
+                        """
                 }
             }
             return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
@@ -152,8 +164,12 @@ extension AgentViewModel {
             let sourceA = input["source_a"] as? String ?? ""
             let sourceB = input["source_b"] as? String ?? ""
             let target = input["target"] as? String ?? ""
-            guard let contentA = await Self.offMain({ [ss = scriptService] in ss.readScript(name: sourceA) }) else { return "Error: script '\(sourceA)' not found." }
-            guard let contentB = await Self.offMain({ [ss = scriptService] in ss.readScript(name: sourceB) }) else { return "Error: script '\(sourceB)' not found." }
+            guard let contentA = await Self.offMain(
+                { [ss = scriptService] in ss.readScript(name: sourceA) }
+            ) else { return "Error: script '\(sourceA)' not found." }
+            guard let contentB = await Self.offMain(
+                { [ss = scriptService] in ss.readScript(name: sourceB) }
+            ) else { return "Error: script '\(sourceB)' not found." }
             let merged = Self.combineScriptSources(contentA: contentA, contentB: contentB, sourceA: sourceA, sourceB: sourceB)
             if await Self.offMain({ [ss = scriptService] in ss.readScript(name: target) }) != nil {
                 return await Self.offMain { [ss = scriptService] in ss.updateScript(name: target, content: merged) }
@@ -164,7 +180,12 @@ extension AgentViewModel {
         case "read_file":
             let path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else {
-                return "Error: file_path is required for read_file. Pass an absolute path like file_path:\"/Users/...\". Use file_manager(action:\"list\", path:...) to see what files exist if you don't know the path."
+                return """
+                    Error: file_path is required for read_file. \
+                    Pass an absolute path like file_path:"/Users/...". \
+                    Use file_manager(action:"list", path:...) to see \
+                    what files exist if you don't know the path.
+                    """
             }
             // Delegate to CodingService.readFile which returns line-numbered output
             // and gives a clear 'file not found' error with a list-files suggestion
