@@ -14,10 +14,17 @@ extension AgentViewModel {
         // Block accessibility when Safari is frontmost — use web tool instead
         if let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, bid == "com.apple.Safari" {
             let msg =
-                "Error: Safari is active. Use the web tool: web(action: \"scan\"), web(action: \"open\", url: \"...\"), web(action: \"type\", selector: \"...\", text: \"...\"), web(action: \"click\", selector: \"...\"), web(action: \"read_content\")."
+                "Error: Safari is active. Use the web tool: "
+                + "web(action: \"scan\"), web(action: \"open\", url: \"...\"), "
+                + "web(action: \"type\", selector: \"...\", text: \"...\"), "
+                + "web(action: \"click\", selector: \"...\"), "
+                + "web(action: \"read_content\")."
             tab.appendLog(msg)
             tab.flush()
-            return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": msg], isComplete: false)
+            return TabToolResult(
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": msg],
+                isComplete: false
+            )
         }
 
         switch name {
@@ -191,12 +198,16 @@ extension AgentViewModel {
             // press_key removed — AXorcist doesn't drive raw key events. Use
             // ax_click_element on the relevant button or ax_click_menu_item for
             // keyboard-shortcut menu commands.
-            let err =
-                "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). Use accessibility(action:\"click_element\", role:\"AXButton\", title:..., appBundleId:...) for buttons, or accessibility(action:\"click_menu_item\", appBundleId:..., menuPath:\"File > Save\") for keyboard-shortcut menu commands."
-            tab.appendLog(err)
+            let msg =
+                "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). "
+                + "Use accessibility(action:\"click_element\", "
+                + "role:\"AXButton\", title:..., appBundleId:...) for buttons, "
+                + "or accessibility(action:\"click_menu_item\", appBundleId:..., "
+                + "menuPath:\"File > Save\") for keyboard-shortcut menu commands."
+            tab.appendLog(msg)
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": msg],
                 isComplete: false
             )
 
@@ -341,12 +352,16 @@ extension AgentViewModel {
             //   - Window move/resize → set_window_frame
             //   - Slider value       → set_properties on AXSlider with new AXValue
             //   - List reorder       → typically driven by menu items / buttons
-            let err =
-                "Error: ax_drag is removed. Use accessibility(action:\"set_window_frame\", appBundleId:..., x:, y:, width:, height:) for window move/resize, or accessibility(action:\"set_properties\", role:\"AXSlider\", value:..., appBundleId:...) for slider drags."
-            tab.appendLog(err)
+            let msg =
+                "Error: ax_drag is removed. "
+                + "Use accessibility(action:\"set_window_frame\", "
+                + "appBundleId:..., x:, y:, width:, height:) for window move/resize, "
+                + "or accessibility(action:\"set_properties\", "
+                + "role:\"AXSlider\", value:..., appBundleId:...) for slider drags."
+            tab.appendLog(msg)
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": msg],
                 isComplete: false
             )
 
