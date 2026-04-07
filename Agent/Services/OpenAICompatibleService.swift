@@ -443,7 +443,15 @@ final class OpenAICompatibleService {
             }
         }
 
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // .sortedKeys produces byte-stable JSON regardless of Swift dictionary
+        // iteration order. Required for the automatic prefix cache on every
+        // OpenAI-format provider (OpenAI, Z.ai, Grok, Mistral, DeepSeek, Qwen,
+        // Gemini, BigModel, Hugging Face) to actually hit. sanitizeSchema and
+        // compactProperties build new dictionaries on every call, and Swift's
+        // dict iteration order isn't guaranteed stable across rebuilds.
+        // Without sortedKeys, two semantically-identical requests can produce
+        // different byte streams and silently miss the cache.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL)
     }
 
@@ -475,7 +483,8 @@ final class OpenAICompatibleService {
             }
         }
 
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,
             apiKey: apiKey,

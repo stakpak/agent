@@ -211,7 +211,11 @@ final class OllamaService {
             body["options"] = opts
         }
 
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // .sortedKeys for byte-stable JSON. Even on local Ollama (where the
+        // KV cache hits via slot reuse rather than prefix matching), keeping
+        // the bytes deterministic costs nothing and makes request bodies
+        // diffable for debugging cache issues.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
             apiKey: apiKey,
@@ -333,7 +337,8 @@ final class OllamaService {
             body["options"] = opts
         }
 
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,
             apiKey: apiKey,

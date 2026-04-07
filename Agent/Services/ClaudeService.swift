@@ -135,8 +135,14 @@ final class ClaudeService {
             body["tools"] = toolDefs
         }
 
-        // Serialize on main actor, then offload network I/O + response parsing
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // Serialize on main actor, then offload network I/O + response parsing.
+        // .sortedKeys produces byte-stable JSON regardless of Swift dictionary
+        // iteration order. Required for prefix caching to actually hit:
+        // sanitizeSchema/compactProperties build new dictionaries on every
+        // call, and Swift's dict iteration order isn't guaranteed stable
+        // across rebuilds. Without sortedKeys, two semantically-identical
+        // requests can produce different byte streams and miss the cache.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
             apiKey: apiKey,
@@ -211,7 +217,8 @@ final class ClaudeService {
             body["tools"] = toolDefs
         }
 
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
+        let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,
             apiKey: apiKey,
