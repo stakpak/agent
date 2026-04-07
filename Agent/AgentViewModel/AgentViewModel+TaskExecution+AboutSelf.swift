@@ -203,7 +203,12 @@ extension AgentViewModel {
             aboutText = """
             \(detailPrefix) Agent! for macOS 26
 
-            I'm Agent! — an open-source autonomous AI that lives on your Mac. I act autonomously under least privilege. I use my User Space Launch Agent for shell commands, Accessibility API for UI automation, AppleScript and ScriptingBridge for app control, and Swift AgentScripts for complex workflows. Root access via the privileged Launch Daemon is a last resort — only for operations that truly require it.
+            I'm Agent! — an open-source autonomous AI that lives on your Mac.
+            I act autonomously under least privilege. I use my User Space Launch Agent
+            for shell commands, Accessibility API for UI automation, AppleScript and
+            ScriptingBridge for app control, and Swift AgentScripts for complex workflows.
+            Root access via the privileged Launch Daemon is a last resort — only for
+            operations that truly require it.
 
             USER SPACE LAUNCH AGENT (primary):
             - Shell commands (find, grep, git, build tools) run as the current user
