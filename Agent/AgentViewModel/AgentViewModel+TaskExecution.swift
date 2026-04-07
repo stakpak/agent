@@ -388,6 +388,53 @@ extension AgentViewModel {
             isRunning = false
             isThinking = false
             return
+        case .accessibilityIntent(let intent):
+            // Apple AI parsed the user's request as a UI automation intent.
+            // Synthesize an accessibility tool call locally and dispatch
+            // directly — no cloud LLM round-trip. If the AX call itself
+            // fails (element not found, app not running, permission denied),
+            // fall through to the LLM so it can recover with screenshots /
+            // additional context.
+            var axInput: [String: Any] = ["action": intent.action]
+            if let role = intent.role { axInput["role"] = role }
+            if let title = intent.title { axInput["title"] = title }
+            if let app = intent.appBundleId { axInput["appBundleId"] = app }
+            if let text = intent.text { axInput["text"] = text }
+            appendLog("🍎 AX intent: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")")
+            flushLog()
+            let axOutput = await executeNativeTool("accessibility", input: axInput)
+            let axFailed = axOutput.lowercased().contains("error") || axOutput.lowercased().contains("not found")
+            if axFailed {
+                // Hand off to the LLM with the failure context so it can recover
+                appendLog("⚠️ AX intent failed — passing to LLM with context")
+                flushLog()
+                messages.append(["role": "user", "content": """
+                I tried to handle this request locally as an accessibility action but it failed:
+
+                Request: \(prompt)
+                Action attempted: \(intent.action) on \(intent.role ?? "?") "\(intent.title ?? "?")" in \(intent.appBundleId ?? "?")
+                Result: \(axOutput)
+
+                Please complete the original request.
+                """])
+                break
+            }
+            completionSummary = "AX: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")"
+            appendLog("✅ \(completionSummary)")
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: ["accessibility: \(intent.action)"]),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
+            ChatHistoryStore.shared.endCurrentTask(summary: completionSummary)
+            stopProgressUpdates()
+            if agentReplyHandle != nil { sendProgressUpdate(axOutput) }
+            flushLog()
+            persistLogNow()
+            isRunning = false
+            isThinking = false
+            return
         case .passThrough:
             break
         }

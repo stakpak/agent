@@ -179,8 +179,11 @@ extension AgentViewModel {
         // Strip images — they're huge and won't summarize well
         stripOldImages(&messages)
 
-        // Tier 1: Apple AI summarization (fast, on-device)
-        if FoundationModelService.isAvailable {
+        // Tier 1: Apple AI summarization (fast, on-device). Gated on
+        // tokenCompressionEnabled so users can opt out if it's slow on
+        // their device or if the summaries are dropping detail they care
+        // about. When off, fall straight through to Tier 2 pruning.
+        if FoundationModelService.isAvailable && AppleIntelligenceMediator.shared.tokenCompressionEnabled {
             await summarizeOldMessages(&messages)
             let tokensAfterT1 = estimateTokens(messages: messages)
             if state.recordAttempt(tokensBefore: tokensBefore, tokensAfter: tokensAfterT1) {

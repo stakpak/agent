@@ -229,6 +229,51 @@ extension AgentViewModel {
             tab.isLLMRunning = false
             tab.isLLMThinking = false
             return
+        case .accessibilityIntent(let intent):
+            // Apple AI parsed the user's request as a UI automation intent.
+            // Synthesize an accessibility tool call locally and dispatch
+            // directly. On AX failure, fall through to the LLM with the
+            // failure context so it can recover. See AgentViewModel+
+            // TaskExecution.swift for the matching main-tab handler.
+            var axInput: [String: Any] = ["action": intent.action]
+            if let role = intent.role { axInput["role"] = role }
+            if let title = intent.title { axInput["title"] = title }
+            if let app = intent.appBundleId { axInput["appBundleId"] = app }
+            if let text = intent.text { axInput["text"] = text }
+            tab.appendLog("🍎 AX intent: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")")
+            tab.flush()
+            let axOutput = await executeNativeTool("accessibility", input: axInput)
+            let axFailed = axOutput.lowercased().contains("error") || axOutput.lowercased().contains("not found")
+            if axFailed {
+                tab.appendLog("⚠️ AX intent failed — passing to LLM with context")
+                tab.flush()
+                directCommandContext = """
+                I tried to handle this request locally as an accessibility action but it failed:
+
+                Request: \(prompt)
+                Action attempted: \(intent.action) on \(intent.role ?? "?") "\(intent.title ?? "?")" in \(intent.appBundleId ?? "?")
+                Result: \(axOutput)
+
+                Please complete the original request.
+                """
+                break
+            }
+            completionSummary = "AX: \(intent.action) \(intent.title ?? intent.appBundleId ?? "")"
+            tab.appendLog("✅ \(completionSummary)")
+            history.add(
+                TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: ["accessibility: \(intent.action)"]),
+                maxBeforeSummary: maxHistoryBeforeSummary,
+                apiKey: apiKey,
+                model: selectedModel
+            )
+            tab.flush()
+            if tab.isMessagesTab, let handle = tab.replyHandle {
+                tab.replyHandle = nil
+                sendMessagesTabReply(completionSummary, handle: handle)
+            }
+            tab.isLLMRunning = false
+            tab.isLLMThinking = false
+            return
         case .passThrough:
             break
         }

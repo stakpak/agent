@@ -38,7 +38,7 @@ struct AppleIntelligencePopover: View {
                     VStack(alignment: .leading) {
                         Text("Enable Mediator")
                             .font(.caption)
-                        Text("Chat code completions using Apple AI")
+                        Text("Triage greetings, summarize tasks, explain errors via on-device Apple AI")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -53,7 +53,7 @@ struct AppleIntelligencePopover: View {
                         VStack(alignment: .leading) {
                             Text("Show annotations to user")
                                 .font(.caption)
-                            Text("Display [\u{F8FF}AI → ...] flow tags in activity log")
+                            Text("Display task summaries and error explanations in the activity log")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -65,13 +65,27 @@ struct AppleIntelligencePopover: View {
 
                     GridRow {
                         VStack(alignment: .leading) {
-                            Text("Inject context into LLM prompts")
+                            Text("Token compression")
                                 .font(.caption)
-                            Text("Adds rephrased context to LLM prompts")
+                            Text("Tier 1 of context compaction — Apple AI summarizes old messages on-device when context exceeds 30K tokens. Free, private, no API tokens consumed")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        Toggle("", isOn: $aiMediator.injectContextToLLM)
+                        Toggle("", isOn: $aiMediator.tokenCompressionEnabled)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .labelsHidden()
+                    }
+
+                    GridRow {
+                        VStack(alignment: .leading) {
+                            Text("Accessibility intent parsing")
+                                .font(.caption)
+                            Text("Parse \"click the Save button in TextEdit\" locally and dispatch directly to the accessibility tool — skips the cloud LLM round-trip")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Toggle("", isOn: $aiMediator.accessibilityIntentEnabled)
                             .toggleStyle(.switch)
                             .controlSize(.mini)
                             .labelsHidden()

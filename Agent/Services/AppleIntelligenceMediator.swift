@@ -39,10 +39,23 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Whether to inject context into LLM prompts
-    @Published var injectContextToLLM: Bool = UserDefaults.standard.bool(forKey: "appleIntelligenceInjectToLLM") {
+    /// Whether Apple AI does on-device summarization for context compaction
+    /// (Tier 1 of AgentViewModel+Compression.tieredCompact). When off, context
+    /// compaction falls straight through to Tier 2 aggressive pruning.
+    @Published var tokenCompressionEnabled: Bool = UserDefaults.standard.object(forKey: "appleIntelligenceTokenCompression") as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(injectContextToLLM, forKey: "appleIntelligenceInjectToLLM")
+            UserDefaults.standard.set(tokenCompressionEnabled, forKey: "appleIntelligenceTokenCompression")
+        }
+    }
+
+    /// Whether Apple AI tries to parse accessibility commands locally before
+    /// passing them to the cloud LLM. When on, prompts that look like UI
+    /// automation requests ("click the Save button in TextEdit") are parsed
+    /// on-device into a structured accessibility tool call and dispatched
+    /// directly — zero cloud tokens.
+    @Published var accessibilityIntentEnabled: Bool = UserDefaults.standard.object(forKey: "appleIntelligenceAccessibilityIntent") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(accessibilityIntentEnabled, forKey: "appleIntelligenceAccessibilityIntent")
         }
     }
 
@@ -59,7 +72,9 @@ final class AppleIntelligenceMediator: ObservableObject {
         if !isEnabled { return .red }
         if LoRAAdapterManager.shared.isLoaded { return .blue }
         if trainingEnabled { return .orange }
-        if !showAnnotationsToUser || !injectContextToLLM { return .yellow }
+        // Yellow when ANY sub-feature is disabled — at-a-glance signal that
+        // the mediator is on but partially configured.
+        if !showAnnotationsToUser || !tokenCompressionEnabled || !accessibilityIntentEnabled { return .yellow }
         return .green
     }
 
@@ -111,7 +126,6 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Initialize with defaults
         if !UserDefaults.standard.bool(forKey: "appleIntelligenceMediatorConfigured") {
             showAnnotationsToUser = true
-            injectContextToLLM = true
             UserDefaults.standard.set(true, forKey: "appleIntelligenceMediatorConfigured")
         }
     }
@@ -225,43 +239,6 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Generate context to inject into the LLM prompt based on user message
-    /// Also updates conversation context for future Apple AI calls
-    func contextualizeUserMessage(_ message: String) async -> Annotation? {
-        guard isEnabled && injectContextToLLM && Self.isAvailable else {
-            return nil
-        }
-
-        // Short, clear prompts don't need rephrasing — skip to avoid confusing the LLM
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count < 60 {
-            return nil
-        }
-
-        let session = ensureSession()
-        let prompt = """
-        Fix typos only in this user request. Return the corrected version. \
-        Do NOT rephrase, clarify, add instructions, or change meaning. \
-        Do NOT ask questions. Keep tool names, file names, and identifiers \
-        exactly as written. If no typos, return the original text unchanged.
-
-        User said: "\(message)"
-        """
-
-        guard let content = await respondWithTimeout(session, prompt: prompt, label: "contextualize") else {
-            return nil
-        }
-        let result = sanitize(content)
-        if result.isEmpty || result == trimmed {
-            return nil
-        }
-        // Reject if Apple AI added too much (>50% longer = it rewrote instead of fixing typos)
-        if result.count > trimmed.count * 3 / 2 {
-            return nil
-        }
-        return Annotation(target: .llm, content: result, timestamp: Date())
-    }
-
     /// Generate a summary annotation after the LLM completes a task
     /// Updates conversation context for future Apple AI calls
     /// When there are no tool calls (just conversation), paraphrases or summarizes the LLM's response
@@ -356,6 +333,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     enum TriageResult {
         case answered(String) // Apple AI handled it — show this text and skip LLM
         case directCommand(DirectCommand) // Matched command — execute locally, skip LLM
+        case accessibilityIntent(AccessibilityIntent) // Apple AI parsed an AX request — dispatch directly, skip LLM
         case passThrough // Needs tools/LLM — proceed normally
     }
 
@@ -363,6 +341,24 @@ final class AppleIntelligenceMediator: ObservableObject {
     struct DirectCommand {
         let name: String
         let argument: String
+    }
+
+    /// Parsed accessibility intent — enough to dispatch directly to the
+    /// `accessibility` tool without going through the cloud LLM.
+    struct AccessibilityIntent {
+        /// Maps to the `action` parameter on the accessibility tool
+        /// (click_element, type_into_element, scroll_to_element, open_app, etc.)
+        let action: String
+        /// AX role (AXButton, AXTextField, AXLink, AXMenuItem, …). Optional
+        /// for actions like open_app where role doesn't apply.
+        let role: String?
+        /// Element title to match — partial, case-insensitive on the AX side.
+        let title: String?
+        /// Bundle ID of the target app. Required for almost every action;
+        /// the only exception is when the frontmost app is implied.
+        let appBundleId: String?
+        /// Text to type — only meaningful for type_into_element.
+        let text: String?
     }
 
     /// Known direct commands that can be executed without the LLM.
@@ -581,14 +577,102 @@ final class AppleIntelligenceMediator: ObservableObject {
         return false
     }
 
-    /// Triage a user prompt. Checks direct commands first, then social patterns.
-    /// Falls back to .passThrough for anything that needs the LLM.
+    // MARK: - Accessibility Intent
+
+    /// Cheap pre-filter: does this prompt LOOK like a UI automation request?
+    /// We don't want to spend an Apple AI round-trip on every user message —
+    /// only on prompts that are short and contain a UI action verb.
+    /// Conservative on purpose: false negatives just fall through to the LLM
+    /// (no harm done), false positives waste one cheap on-device call.
+    static func looksLikeAccessibilityRequest(_ message: String) -> Bool {
+        let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Long prompts are almost never single AX commands
+        guard lower.count > 4, lower.count < 200 else { return false }
+        // Must contain at least one UI action verb
+        let verbs = [
+            "click ", "tap ", "press ", "type ", "select ", "scroll ",
+            "open ", "find ", "show me ", "hide ", "activate ", "minimize ",
+            "close ", "switch to ", "focus ", "save", "quit "
+        ]
+        return verbs.contains { lower.contains($0) }
+    }
+
+    /// Ask Apple AI to parse a natural-language accessibility request into a
+    /// structured AccessibilityIntent. Returns nil if Apple AI can't parse it
+    /// (then we fall through to the cloud LLM).
+    ///
+    /// We use a line-prefixed key:value format instead of JSON because Apple
+    /// AI tends to add prose around JSON, making strict parsing brittle. The
+    /// format is robust to extra whitespace and surrounding chatter — we just
+    /// scan for the lines we care about.
+    func parseAccessibilityIntent(_ message: String) async -> AccessibilityIntent? {
+        guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
+        let session = ensureSession()
+        let prompt = """
+        Parse this Mac UI automation request. Reply with EXACTLY these lines (omit any line you can't determine, do NOT guess):
+
+        action: <one of: click_element, type_into_element, scroll_to_element, open_app, find_element>
+        role: <AXButton | AXTextField | AXLink | AXMenuItem | AXCheckBox | AXImage | AXWindow>
+        title: <element title or label>
+        appBundleId: <app bundle id like com.apple.TextEdit, com.apple.Safari, com.apple.PhotoBooth>
+        text: <only for type_into_element: the text to type>
+
+        If the request is NOT about clicking, typing, opening, or interacting with a Mac UI element, reply with exactly: NONE
+
+        User: "\(message)"
+        """
+        guard let content = await respondWithTimeout(session, prompt: prompt, label: "axIntent") else { return nil }
+        let trimmed = sanitize(content)
+        if trimmed.isEmpty || trimmed.uppercased().contains("NONE") { return nil }
+        // Line-by-line scan — order-independent, tolerates surrounding prose
+        var action: String?
+        var role: String?
+        var title: String?
+        var appBundleId: String?
+        var text: String?
+        for rawLine in trimmed.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard let colonIdx = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colonIdx].lowercased().trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colonIdx)...]).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\"")))
+            guard !value.isEmpty else { continue }
+            switch key {
+            case "action": action = value
+            case "role": role = value
+            case "title": title = value
+            case "appbundleid", "app", "bundleid", "bundle_id": appBundleId = value
+            case "text": text = value
+            default: break
+            }
+        }
+        guard let action else { return nil }
+        // open_app is the only action that doesn't need a role/title
+        if action == "open_app" {
+            guard appBundleId != nil else { return nil }
+            return AccessibilityIntent(action: action, role: nil, title: title, appBundleId: appBundleId, text: nil)
+        }
+        // Every other action needs at least a title to find the element
+        guard title != nil else { return nil }
+        return AccessibilityIntent(action: action, role: role, title: title, appBundleId: appBundleId, text: text)
+    }
+
+    /// Triage a user prompt. Checks direct commands first, then accessibility
+    /// intent (Apple AI), then conversational patterns. Falls back to
+    /// .passThrough for anything that needs the cloud LLM.
     func triagePrompt(_ message: String) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
             return .directCommand(cmd) // Caller executes the tool
         }
         guard isEnabled && Self.isAvailable else { return .passThrough }
+        // Accessibility intent — try Apple AI to parse UI automation requests
+        // locally before burning cloud LLM tokens. Pre-filter on action verbs
+        // so we don't spend an AI call on every user message.
+        if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
+            if let intent = await parseAccessibilityIntent(message) {
+                return .accessibilityIntent(intent)
+            }
+        }
         // Local classification — no AI needed
         guard Self.isConversationalPrompt(message) else { return .passThrough }
         // Ask Apple AI to answer (not classify)
