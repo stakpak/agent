@@ -71,6 +71,11 @@ final class FollowScrollView: NSScrollView {
 /// - Cursor-blink path mutates only the trailing char with no scroll calls.
 struct LLMOutputTextView: NSViewRepresentable {
     let text: String
+    /// True while the LLM is actively streaming or the operation is otherwise in
+    /// progress. When false, the mouse-exit handler will NOT force a snap to the
+    /// bottom — the view stays where the user parked it. We only catch the user
+    /// up to the tail mid-stream, never after the run is finished.
+    var isStreaming: Bool = false
     var onContentHeight: ((CGFloat) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -119,20 +124,24 @@ struct LLMOutputTextView: NSViewRepresentable {
         scrollView.onUserScroll = { [weak coord] in
             coord?.autoFollowDisabled = true
         }
-        // Hover over the scroll view disables auto-follow. On mouse-exit,
-        // unconditionally re-enable AND force a snap to the bottom so the
-        // view catches up to whatever streamed in while the user was hovering.
+        // Hover over the scroll view disables auto-follow. On mouse-exit while
+        // streaming, re-enable auto-follow AND force a snap to the bottom so
+        // the view catches up to whatever streamed in while the user was
+        // hovering. When the operation is done, leave the view exactly where
+        // the user parked it — don't yank them back to the bottom.
         scrollView.onHoverChange = { [weak coord] hovering in
             guard let coord else { return }
             coord.isHovering = hovering
             if hovering {
                 coord.autoFollowDisabled = true
-            } else {
+            } else if coord.isStreaming {
                 coord.autoFollowDisabled = false
                 if let tv = coord.textView {
                     coord.snapToEnd(tv, force: true)
                 }
             }
+            // else: operation is done — leave autoFollowDisabled as-is and
+            // don't snap. The user's scroll position is preserved.
         }
 
         return scrollView
@@ -141,6 +150,7 @@ struct LLMOutputTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coord = context.coordinator
         coord.onContentHeight = onContentHeight
+        coord.isStreaming = isStreaming
         guard let tv = coord.textView, let storage = tv.textStorage else { return }
 
         // Strip cursor char to detect content changes vs cursor blink
@@ -261,6 +271,11 @@ struct LLMOutputTextView: NSViewRepresentable {
         var autoFollowDisabled: Bool = false
         /// Mouse currently hovering over the scroll view.
         var isHovering: Bool = false
+        /// Mirror of LLMOutputTextView.isStreaming, refreshed on every
+        /// updateNSView. The mouse-exit handler reads this to decide whether
+        /// to force-snap to the bottom (only while streaming) or leave the
+        /// view exactly where the user parked it (after the run is done).
+        var isStreaming: Bool = false
         /// Suppresses bounds-tracking during our own programmatic scrolls.
         var isProgrammaticScroll: Bool = false
         private var scrollThrottled: Bool = false

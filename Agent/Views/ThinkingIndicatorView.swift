@@ -569,7 +569,7 @@ private struct LLMOutputBox: View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottomTrailing) {
                 if !displayText.isEmpty {
-                    LLMOutputTextView(text: displayText) { h in
+                    LLMOutputTextView(text: displayText, isStreaming: isStreaming) { h in
                         guard dragStartHeight == 0 else { return }
                         // Pre-size from raw stream (ahead of drip) to prevent stutter
                         let lineCount = CGFloat(rawText.components(separatedBy: "\n").count)
