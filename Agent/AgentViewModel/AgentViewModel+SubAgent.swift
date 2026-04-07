@@ -110,17 +110,36 @@ extension AgentViewModel {
         case .lmStudio where lmStudioProtocol == .anthropic:
             openAICompatible = nil
         case .vLLM:
-            openAICompatible = OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelName, baseURL: vLLMEndpoint, historyContext: historyContext, projectFolder: agent.projectFolder, provider: provider, maxTokens: mt)
+            openAICompatible = OpenAICompatibleService(
+                apiKey: apiKeyForProvider(provider), model: modelName,
+                baseURL: vLLMEndpoint, historyContext: historyContext,
+                projectFolder: agent.projectFolder, provider: provider,
+                maxTokens: mt
+            )
         default:
             let url = chatURLForProvider(provider)
-            openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(apiKey: apiKeyForProvider(provider), model: modelName, baseURL: url, historyContext: historyContext, projectFolder: agent.projectFolder, provider: provider, maxTokens: mt)
+            openAICompatible = url.isEmpty ? nil : OpenAICompatibleService(
+                apiKey: apiKeyForProvider(provider), model: modelName,
+                baseURL: url, historyContext: historyContext,
+                projectFolder: agent.projectFolder, provider: provider,
+                maxTokens: mt
+            )
         }
         let ollama: OllamaService?
         switch provider {
         case .ollama:
-            ollama = OllamaService(apiKey: ollamaAPIKey, model: ollamaModel, endpoint: ollamaEndpoint, historyContext: historyContext, projectFolder: agent.projectFolder, provider: .ollama)
+            ollama = OllamaService(
+                apiKey: ollamaAPIKey, model: ollamaModel,
+                endpoint: ollamaEndpoint, historyContext: historyContext,
+                projectFolder: agent.projectFolder, provider: .ollama
+            )
         case .localOllama:
-            ollama = OllamaService(apiKey: "", model: localOllamaModel, endpoint: localOllamaEndpoint, historyContext: historyContext, projectFolder: agent.projectFolder, provider: .localOllama, contextSize: localOllamaContextSize)
+            ollama = OllamaService(
+                apiKey: "", model: localOllamaModel,
+                endpoint: localOllamaEndpoint, historyContext: historyContext,
+                projectFolder: agent.projectFolder, provider: .localOllama,
+                contextSize: localOllamaContextSize
+            )
         default:
             ollama = nil
         }
