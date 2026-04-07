@@ -162,7 +162,11 @@ final class WebAutomationService: @unchecked Sendable {
         switch strategy {
         case .auto:
             let browserId = appBundleId ?? detectActiveBrowser()
-            let isBrowser = browserId != nil && ["com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac"].contains(browserId!)
+            let browserIDs: Set<String> = [
+                "com.apple.Safari", "com.google.Chrome",
+                "org.mozilla.firefox", "com.microsoft.edgemac",
+            ]
+            let isBrowser = browserId != nil && browserIDs.contains(browserId!)
 
             if isBrowser {
                 // Web page: JS only (fast), skip accessibility (too slow on browser AX trees)
@@ -217,7 +221,11 @@ final class WebAutomationService: @unchecked Sendable {
     /// Click an element using the best available strategy
     func click(selector: String, strategy: SelectorStrategy = .auto, appBundleId: String? = nil) async throws -> String {
         let browserId = appBundleId ?? detectActiveBrowser()
-        let isBrowser = browserId != nil && ["com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac"].contains(browserId!)
+        let browserIDs: Set<String> = [
+            "com.apple.Safari", "com.google.Chrome",
+            "org.mozilla.firefox", "com.microsoft.edgemac",
+        ]
+        let isBrowser = browserId != nil && browserIDs.contains(browserId!)
 
         // For browsers, skip findElement and click directly via JS (much faster)
         if isBrowser && (strategy == .auto || strategy == .javascript) {
@@ -261,9 +269,19 @@ final class WebAutomationService: @unchecked Sendable {
     }
     
     /// Type text into an element using the best available strategy
-    func type(text: String, selector: String, strategy: SelectorStrategy = .auto, verify: Bool = true, appBundleId: String? = nil) async throws -> String {
+    func type(
+        text: String,
+        selector: String,
+        strategy: SelectorStrategy = .auto,
+        verify: Bool = true,
+        appBundleId: String? = nil
+    ) async throws -> String {
         let browserId = appBundleId ?? detectActiveBrowser()
-        let isBrowser = browserId != nil && ["com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac"].contains(browserId!)
+        let browserIDs: Set<String> = [
+            "com.apple.Safari", "com.google.Chrome",
+            "org.mozilla.firefox", "com.microsoft.edgemac",
+        ]
+        let isBrowser = browserId != nil && browserIDs.contains(browserId!)
 
         // For browsers, skip findElement and type directly via JS (much faster)
         if isBrowser && (strategy == .auto || strategy == .javascript) {
@@ -581,7 +599,12 @@ final class WebAutomationService: @unchecked Sendable {
         // element, the LLM should switch to accessibility(action:"click_element")
         // against the browser's AXWebArea — Safari and Chrome both expose page
         // links/buttons as AXLink/AXButton inside the web area.
-        return "Error: could not click element via JavaScript: \(selector). The page may block synthetic events. Try accessibility(action:\"click_element\", role:\"AXLink\" or \"AXButton\", title:..., appBundleId:\"com.apple.Safari\") to click via AXorcist instead."
+        return
+            "Error: could not click element via JavaScript: \(selector). "
+            + "The page may block synthetic events. "
+            + "Try accessibility(action:\"click_element\", "
+            + "role:\"AXLink\" or \"AXButton\", title:..., "
+            + "appBundleId:\"com.apple.Safari\") to click via AXorcist instead."
     }
     
     private func executeJavaScriptType(selector: String, text: String, browser: String) async throws -> String {

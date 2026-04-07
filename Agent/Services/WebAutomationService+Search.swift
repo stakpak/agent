@@ -22,7 +22,9 @@ extension WebAutomationService {
         for _ in 0..<20 {
             try? await Task.sleep(for: .milliseconds(500))
             let found = await runAppleScript("""
-            tell application "Safari" to do JavaScript "document.querySelector('textarea[name=q],input[name=q]') ? 'ready' : 'waiting'" in front document
+            tell application "Safari" to do JavaScript \
+                "document.querySelector('textarea[name=q],input[name=q]') \
+                ? 'ready' : 'waiting'" in front document
             """)
             if found == "ready" { break }
         }
@@ -30,9 +32,13 @@ extension WebAutomationService {
         // 3. Type query and submit — use AppleScript string quoting (backslash-escape double quotes)
         let safeQuery = query.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let submitResult = await runAppleScript("""
-        tell application "Safari" to do JavaScript "var el=document.querySelector('textarea[name=q],input[name=q]');if(el){el.focus();el.value=\\"\(
+        tell application "Safari" to do JavaScript \
+            "var el=document.querySelector('textarea[name=q],input[name=q]');\
+            if(el){el.focus();el.value=\\"\(
             safeQuery
-        )\\";el.dispatchEvent(new Event('input',{bubbles:true}));var f=el.closest('form');if(f){f.submit();'submitted'}else{'no form'}}else{'not found'}" in front document
+        )\\";el.dispatchEvent(new Event('input',{bubbles:true}));\
+            var f=el.closest('form');if(f){f.submit();'submitted'}\
+            else{'no form'}}else{'not found'}" in front document
         """)
         guard submitResult == "submitted" else {
             return "{\"success\": false, \"error\": \"Search submit failed: \(submitResult)\"}"
