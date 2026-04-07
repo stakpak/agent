@@ -257,7 +257,9 @@ struct LoRASettingsView: View {
             }
 
             Text(
-                "1. Click a Setup script \u{2192} run it in Terminal\n2. Download toolkit from developer.apple.com\n3. Export JSONL \u{2192} train \u{2192} install .fmadapter"
+                "1. Click a Setup script \u{2192} run it in Terminal\n"
+                    + "2. Download toolkit from developer.apple.com\n"
+                    + "3. Export JSONL \u{2192} train \u{2192} install .fmadapter"
             )
             .font(.caption2)
             .foregroundStyle(.secondary)

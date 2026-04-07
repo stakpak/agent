@@ -86,7 +86,10 @@ final class XcodeService: @unchecked Sendable {
         // Always auto-detect from open Xcode projects — ignore model's guessed path
         let resolvedPath = autoSelectProject() ?? projectPath
         guard isValidProjectPath(resolvedPath) else {
-            return "Error: Invalid project path '\(resolvedPath)'. Use xcode (action: list_projects) to find the correct project. Must be .xcodeproj or .xcworkspace."
+            return
+                "Error: Invalid project path '\(resolvedPath)'. "
+                + "Use xcode (action: list_projects) to find the correct "
+                + "project. Must be .xcodeproj or .xcworkspace."
         }
 
         guard let xcode = xcodeApp() else {
@@ -374,7 +377,9 @@ final class XcodeService: @unchecked Sendable {
 
         // 1. Add PBXFileReference before end marker
         let fileRef =
-            "\t\t\(fileRefID) /* \(fileName) */ = {isa = PBXFileReference; lastKnownFileType = \(fileType); path = \"\(fileName)\"; sourceTree = \"<group>\"; };\n"
+            "\t\t\(fileRefID) /* \(fileName) */ = {isa = PBXFileReference; "
+            + "lastKnownFileType = \(fileType); path = \"\(fileName)\"; "
+            + "sourceTree = \"<group>\"; };\n"
         guard let refEnd = content.range(of: "/* End PBXFileReference section */") else {
             return "Error: Cannot find PBXFileReference section"
         }
