@@ -134,7 +134,15 @@ extension AgentViewModel {
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            if let app = args.appBundleId { input["appBundleId"] = app }
+            // SDEF catalog is the canonical source — see TaskExecution.swift
+            // for the full rationale. Falls through to the runtime
+            // NSRunningApplications scan in handleAccessibilityAction for
+            // apps not in the SDEF list (Photo Booth, etc.).
+            if let rawApp = args.app {
+                let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
+                input["appBundleId"] = resolved
+                input["app"] = resolved
+            }
             if let text = args.text { input["text"] = text }
             return await self.executeNativeTool("accessibility", input: input)
         }

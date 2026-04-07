@@ -111,8 +111,13 @@ extension AgentViewModel {
             isVision = false // Apple Intelligence doesn't support image input
         }
         if forceVision { isVision = true }
-        appendLog("🧠 \(provider.displayName) / \(modelName)\(isVision ? " (vision)" : "")")
-        flushLog()
+        // Defer the "🧠 provider/model" log line until AFTER triage has run
+        // and we know we're actually going to the cloud LLM. Logging it
+        // up-front (the previous behavior) made the activity log misleading
+        // when Apple AI handled the request locally — users saw both
+        // "🧠 Z.ai/glm-5.1" and "🍎 Opened Photo Booth and took a photo"
+        // for the same task even though the cloud LLM never ran.
+        let cloudModelLogLine = "🧠 \(provider.displayName) / \(modelName)\(isVision ? " (vision)" : "")"
 
         let mt = maxTokens
         var claude: ClaudeService?
@@ -244,7 +249,19 @@ extension AgentViewModel {
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            if let app = args.appBundleId { input["appBundleId"] = app }
+            // Resolve the app name via the SDEF catalog (the canonical
+            // "apps Agent knows about" list driven by Agent/SDEFs/*.json).
+            // If SDEF doesn't have it, the existing handleAccessibilityAction
+            // → AccessibilityService.resolveBundleId pipeline will try its
+            // NSRunningApplications fallback. So Apple AI can pass any of:
+            //   "Safari" → SDEF resolves → com.apple.Safari
+            //   "Photo Booth" → no SDEF → falls back, NSWorkspace finds it
+            //   "com.apple.Safari" → already a bundle ID, passthrough
+            if let rawApp = args.app {
+                let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
+                input["appBundleId"] = resolved
+                input["app"] = resolved
+            }
             if let text = args.text { input["text"] = text }
             return await self.executeNativeTool("accessibility", input: input)
         }
@@ -427,7 +444,11 @@ extension AgentViewModel {
             isThinking = false
             return
         case .passThrough:
-            break
+            // Apple AI didn't handle the request — log the cloud LLM
+            // model now so the user sees which provider is actually
+            // doing the work.
+            appendLog(cloudModelLogLine)
+            flushLog()
         }
 
         // Apple Intelligence context injection removed — was confusing LLMs at task start

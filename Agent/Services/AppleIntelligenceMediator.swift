@@ -635,21 +635,30 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
 
         // Apple AI's on-device model has a ~4096-token context window.
-        // The framework also injects the Tool description and the schema
-        // generated from @Generable AccessibilityArgs on every turn, plus
-        // the user prompt and any tool results from prior iterations. The
-        // instructions below are deliberately TERSE to leave headroom for
-        // multi-step tool result accumulation. Examples beat rules for
-        // small models, so we lead with one canonical example.
+        // The framework injects the Tool description, the @Generable
+        // schema, the user prompt, and any tool results on every turn,
+        // so instructions must be TERSE.
+        //
+        // The "Known apps" list is built dynamically from the SDEF catalog
+        // (Agent/SDEFs/*.json) via SDEFService.availableAppNames(). Adding
+        // a new SDEF JSON automatically extends what Apple AI knows about
+        // — no hardcoding in this prompt. Apps not in the catalog (Photo
+        // Booth, etc.) still work because the dispatch closure falls back
+        // to AccessibilityService's NSRunningApplications scan, and Apple
+        // AI is told to just use the natural name in that case.
+        let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You automate Mac UI via the accessibility tool. After tool calls succeed, reply with 1 sentence.
+        You automate Mac UI via the accessibility tool. Use the natural app name like "Photo Booth", "Safari", or "TextEdit" — bundle ID resolution happens automatically. After tool calls succeed, reply with 1 sentence.
 
-        Bundle IDs: com.apple.PhotoBooth, com.apple.Safari, com.apple.TextEdit, com.apple.finder, com.apple.mail, com.apple.Music, com.apple.Notes, com.apple.systempreferences
         Roles: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWebArea
 
+        Apps Agent knows about (use these names exactly when applicable): \(knownApps)
+
+        For apps not in that list, just use whatever name the user gave you.
+
         Multi-step example — "take a photo using Photo Booth":
-          1. open_app(appBundleId="com.apple.PhotoBooth")
-          2. click_element(role="AXButton", title="Take Photo", appBundleId="com.apple.PhotoBooth")
+          1. open_app(app="Photo Booth")
+          2. click_element(role="AXButton", title="Take Photo", app="Photo Booth")
           Reply: "Opened Photo Booth and took a photo."
 
         If the request isn't Mac UI automation, reply briefly without calling the tool.
@@ -798,21 +807,29 @@ final class AppleIntelligenceMediator: ObservableObject {
 /// Generable arguments for the accessibility tool. The @Generable macro
 /// derives ConvertibleFromGeneratedContent + the GenerationSchema that
 /// FoundationModels uses to constrain Apple AI's tool call output.
+///
+/// Field-naming note: `app` (not `appBundleId`) so the small on-device
+/// model is encouraged to use natural app names like "Photo Booth" or
+/// "photobooth". The dispatch closure routes the value through
+/// AccessibilityService.resolveBundleId() which knows how to map names,
+/// no-space variants, and bundle IDs to a real bundle ID. This is the
+/// "stop hardcoding, let Apple AI infer" fix — we trust the OS resolver
+/// to do the work instead of forcing Apple AI to memorize bundle IDs.
 @Generable
 struct AccessibilityArgs: Sendable {
-    @Guide(description: "The accessibility action: click_element (click a button/link), type_into_element (type text into a field), scroll_to_element (scroll until visible), open_app (launch/activate an app), or find_element (locate without clicking)")
+    @Guide(description: "The accessibility action: click_element, type_into_element, scroll_to_element, open_app, or find_element")
     let action: String
 
-    @Guide(description: "AX role: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWindow. Optional for open_app.")
+    @Guide(description: "AX role like AXButton, AXTextField, AXLink. Optional for open_app.")
     let role: String?
 
-    @Guide(description: "Element title or label to match — partial, case-insensitive. Optional for open_app.")
+    @Guide(description: "Element title or label to match (partial, case-insensitive). Optional for open_app.")
     let title: String?
 
-    @Guide(description: "App bundle ID like com.apple.PhotoBooth, com.apple.Safari, com.apple.TextEdit. Required for almost every action.")
-    let appBundleId: String?
+    @Guide(description: "App name like 'Photo Booth', 'Safari', 'TextEdit', or 'Mail'. Use the natural name — bundle ID resolution happens automatically.")
+    let app: String?
 
-    @Guide(description: "Text to type — only used when action is type_into_element.")
+    @Guide(description: "Text to type — only for type_into_element.")
     let text: String?
 }
 
@@ -829,7 +846,7 @@ struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
 
     let name = "accessibility"
-    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. Every action takes role+title+appBundleId, never coordinates. For multi-step requests like 'take a photo using Photo Booth', call this tool multiple times in order: first open_app, then click_element."
+    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. Every action takes role+title+app (use natural app names like 'Photo Booth'), never coordinates. For multi-step requests, call this tool multiple times in order — first open_app, then click_element."
 
     /// Closure that actually performs the accessibility action. Injected by
     /// the caller (AppleIntelligenceMediator.runAccessibilityAgent) so the

@@ -157,6 +157,122 @@ final class SDEFService: @unchecked Sendable {
         return load(name)
     }
 
+    // MARK: - Name → Bundle ID Lookup
+    //
+    // The SDEF directory IS the canonical "apps Agent knows about" list. We
+    // build a name→bundleID inverse map at first access so callers can pass
+    // a natural name like "Photo Booth", "safari", or "system settings" and
+    // get back the real bundle identifier without hardcoding it anywhere
+    // outside this file. Anything not in the SDEF catalog falls through to
+    // the caller's existing fallback (e.g. AccessibilityService.
+    // resolveBundleId's NSRunningApplications scan).
+
+    private static let nameToBundleID: [String: String] = {
+        var map: [String: String] = [:]
+        // Inverse of the SDEF bundleIDMap, keyed by lowercased canonical
+        // name AND lowercased no-space variant ("photobooth" → "photo booth").
+        // The same SDEFService instance owns the source map; we duplicate it
+        // here as a static so the lookup is O(1) and lock-free.
+        let source: [String: String] = [
+            "com.apple.AppleScriptUtility": "AppleScriptUtility",
+            "com.apple.Automator": "Automator",
+            "com.apple.Automator.Automator-Application-Stub": "AutomatorApplicationStub",
+            "com.apple.BluetoothFileExchange": "BluetoothFileExchange",
+            "com.apple.iCal": "Calendar",
+            "com.apple.Console": "Console",
+            "com.apple.AddressBook": "Contacts",
+            "com.apple.databaseevents": "DatabaseEvents",
+            "developer.apple.wwdc-Release": "Developer",
+            "com.apple.FinalCutApp": "FinalCutProCreatorStudio",
+            "com.apple.finder": "Finder",
+            "org.mozilla.firefox": "Firefox",
+            "com.apple.FolderActionsDispatcher": "FolderActionsDispatcher",
+            "com.apple.FolderActionsSetup": "FolderActionsSetup",
+            "com.google.Chrome": "GoogleChrome",
+            "com.apple.imageevents": "ImageEvents",
+            "com.apple.dt.Instruments": "Instruments",
+            "com.apple.Keynote": "Keynote",
+            "com.apple.mobilelogic": "LogicProCreatorStudio",
+            "com.apple.mail": "Mail",
+            "com.apple.MobileSMS": "Messages",
+            "com.microsoft.edgemac": "MicrosoftEdge",
+            "com.apple.Music": "Music",
+            "com.apple.Notes": "Notes",
+            "com.apple.iWork.Numbers": "Numbers",
+            "com.apple.Numbers": "NumbersCreatorStudio",
+            "com.apple.iWork.Pages": "Pages",
+            "com.apple.Pages": "PagesCreatorStudio",
+            "com.apple.Photos": "Photos",
+            "com.apple.pixelmator": "PixelmatorPro",
+            "com.apple.Preview": "Preview",
+            "com.apple.QuickTimePlayerX": "QuickTimePlayer",
+            "com.apple.reminders": "Reminders",
+            "com.apple.Safari": "Safari",
+            "com.apple.ScreenSharing": "ScreenSharing",
+            "com.apple.ScriptEditor2": "ScriptEditor",
+            "com.apple.shortcuts": "Shortcuts",
+            "com.apple.shortcuts.events": "ShortcutsEvents",
+            "com.apple.iphonesimulator": "Simulator",
+            "com.apple.systemevents": "SystemEvents",
+            "com.apple.SystemProfiler": "SystemInformation",
+            "com.apple.systempreferences": "SystemSettings",
+            "com.apple.Terminal": "Terminal",
+            "com.apple.TextEdit": "TextEdit",
+            "com.apple.TV": "TV",
+            "com.utmapp.UTM": "UTM",
+            "com.apple.VoiceOver": "VoiceOver",
+            "com.tcltk.wish": "Wish",
+            "com.apple.dt.Xcode": "Xcode",
+        ]
+        for (bundleID, name) in source {
+            // "SystemSettings" → "system settings", "systemsettings"
+            // also accept the camelCased form Apple AI sometimes emits
+            let lower = name.lowercased()
+            map[lower] = bundleID
+            // Insert spaces before capitals: "SystemSettings" → "system settings"
+            var spaced = ""
+            for (i, ch) in name.enumerated() {
+                if i > 0, ch.isUppercase { spaced.append(" ") }
+                spaced.append(ch)
+            }
+            map[spaced.lowercased()] = bundleID
+            // Also accept the no-spaces lowercase form ("systemsettings")
+            map[lower.replacingOccurrences(of: " ", with: "")] = bundleID
+        }
+        return map
+    }()
+
+    /// Resolve a natural app name (or bundle ID) to a canonical bundle ID
+    /// using the SDEF directory as the source of truth. Returns nil if the
+    /// app isn't in the SDEF catalog — caller should fall back to
+    /// AccessibilityService.resolveBundleId or similar runtime discovery.
+    ///
+    /// Accepted forms:
+    ///   - "Safari" / "safari" / "SAFARI"        → com.apple.Safari
+    ///   - "System Settings" / "systemsettings"  → com.apple.systempreferences
+    ///   - "TextEdit" / "text edit" / "textedit" → com.apple.TextEdit
+    ///   - "com.apple.Safari"                    → com.apple.Safari (passthrough)
+    func resolveBundleId(name: String?) -> String? {
+        guard let raw = name else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        // Already a bundle ID — pass through
+        if trimmed.contains(".") { return trimmed }
+        let lower = trimmed.lowercased()
+        if let bid = Self.nameToBundleID[lower] { return bid }
+        let noSpaces = lower.replacingOccurrences(of: " ", with: "")
+        if let bid = Self.nameToBundleID[noSpaces] { return bid }
+        return nil
+    }
+
+    /// Sorted list of canonical app names from the SDEF catalog. Used to
+    /// dynamically build the "apps Agent knows about" hint we inject into
+    /// the Apple AI accessibility agent's instructions — no hardcoded list
+    /// in the prompt, the source of truth is the SDEF directory itself.
+    func availableAppNames() -> [String] {
+        bundleIDMap.values.sorted()
+    }
+
     // MARK: - Queries
 
     /// List all available SDEF names.
