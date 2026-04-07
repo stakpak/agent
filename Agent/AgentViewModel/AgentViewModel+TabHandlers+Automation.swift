@@ -53,7 +53,11 @@ extension AgentViewModel {
                 var lines = ["\(cls) properties:"]
                 for p in props {
                     let ro = p.readonly == true ? " (readonly)" : ""
-                    lines.append("  .\(SDEFService.toCamelCase(p.name)): \(p.type ?? "any")\(ro)\(p.description.map { " — \($0)" } ?? "")")
+                    let desc = p.description.map { " — \($0)" } ?? ""
+                    lines.append(
+                        "  .\(SDEFService.toCamelCase(p.name)): "
+                            + "\(p.type ?? "any")\(ro)\(desc)"
+                    )
                 }
                 if !elems.isEmpty { lines.append("elements: \(elems.joined(separator: ", "))") }
                 output = lines.isEmpty ? "No class '\(cls)' found for \(bundleID)" : lines.joined(separator: "\n")

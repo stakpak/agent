@@ -247,7 +247,9 @@ extension AgentViewModel {
             - NEVER loop endlessly. If stuck after 3 attempts, stop and ask.
 
             MULTI-PROVIDER AI:
-            Claude, OpenAI, Gemini, Grok, Mistral, Codestral, Mistral Vibe, DeepSeek, Hugging Face, Z.ai, BigModel, Qwen, Ollama, LM Studio, and Apple Intelligence — all with tool calling, streaming, and vision.
+            Claude, OpenAI, Gemini, Grok, Mistral, Codestral, Mistral Vibe, \
+            DeepSeek, Hugging Face, Z.ai, BigModel, Qwen, Ollama, LM Studio, \
+            and Apple Intelligence — all with tool calling, streaming, and vision.
 
             RIGHT NOW:
             - Project: \(projectFolder.isEmpty ? "(none)" : projectFolder)
@@ -268,7 +270,9 @@ extension AgentViewModel {
         do {
             let session = LanguageModelSession()
             let prompt =
-                "In one sentence, what's something creative or useful a Mac automation agent could do for the user right now? Be specific and practical. No filler."
+                "In one sentence, what's something creative or useful "
+                    + "a Mac automation agent could do for the user right now? "
+                    + "Be specific and practical. No filler."
             let response = try await session.respond(to: prompt)
             return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {

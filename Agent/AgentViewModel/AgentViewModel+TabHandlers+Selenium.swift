@@ -80,7 +80,9 @@ extension AgentViewModel {
             let escapedText = WebAutomationService.escapeJSON(text)
             let escapedValue = WebAutomationService.escapeJSON(value)
             let args =
-                "{\"action\":\"type\",\"strategy\":\"\(strategy)\",\"value\":\"\(escapedValue)\",\"text\":\"\(escapedText)\",\"port\":\(port)}"
+                "{\"action\":\"type\",\"strategy\":\"\(strategy)\","
+                + "\"value\":\"\(escapedValue)\",\"text\":\"\(escapedText)\","
+                + "\"port\":\(port)}"
             return await runSeleniumHelper(
                 tab: tab,
                 toolId: toolId,
