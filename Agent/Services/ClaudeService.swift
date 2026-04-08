@@ -212,6 +212,19 @@ final class ClaudeService {
         }
 
         guard httpResponse.statusCode == 200 else {
+            // 429 = standard HTTP rate limit. 529 = Anthropic's "Overloaded"
+            // status. Both ship with a Retry-After header (integer seconds);
+            // record it so the next call's enforceRateLimit pads the wait
+            // beyond the loop's exponential backoff. Defaults to 30s if the
+            // header is missing or unparseable.
+            if httpResponse.statusCode == 429 || httpResponse.statusCode == 529 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = Self.parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds)
+                }
+            }
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw AgentError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
         }
@@ -290,6 +303,15 @@ final class ClaudeService {
         }
 
         guard httpResponse.statusCode == 200 else {
+            // 429/529 Retry-After capture — see performRequest for rationale.
+            if httpResponse.statusCode == 429 || httpResponse.statusCode == 529 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = Self.parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds)
+                }
+            }
             var errorData = Data()
             for try await byte in bytes {
                 errorData.append(byte)

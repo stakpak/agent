@@ -15,6 +15,39 @@ final class OllamaService {
     /// Context window size for local Ollama. 0 = let model decide.
     let contextSize: Int
 
+    // MARK: - Rate Limit Tracking
+    //
+    // Local Ollama daemon doesn't rate-limit, but Ollama Cloud / Pro / Max
+    // can return 429. When that happens we capture Retry-After and pad the
+    // next request to avoid immediately re-triggering. Per-provider dict so
+    // Ollama and Local Ollama track independently. Mirrors the pattern in
+    // OpenAICompatibleService and ClaudeService.
+    private static var retryAfterUntil: [APIProvider: CFAbsoluteTime] = [:]
+
+    /// Wait if needed to respect Retry-After backoff from a previous 429.
+    private func enforceRateLimit() async {
+        let now = CFAbsoluteTimeGetCurrent()
+        if let until = Self.retryAfterUntil[provider], until > now {
+            let wait = until - now
+            try? await Task.sleep(for: .seconds(wait))
+        }
+    }
+
+    /// Record a Retry-After value from a 429 response.
+    static func recordRetryAfter(_ seconds: Double, for provider: APIProvider) {
+        retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
+    }
+
+    /// Parse a Retry-After header. Integer seconds per RFC 7231 §7.1.3.
+    /// Returns 0 if missing/unparseable; caller falls back to a default.
+    /// Capped at 5 minutes against absurdly large values.
+    nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
+        guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
+              !v.isEmpty,
+              let seconds = Double(v) else { return 0 }
+        return min(seconds, 300)
+    }
+
     var onStreamText: (@MainActor @Sendable (String) -> Void)?
 
     let historyContext: String
@@ -103,6 +136,7 @@ final class OllamaService {
     ) async throws
         -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
     {
+        await enforceRateLimit()
         // Convert Claude-format messages to OpenAI-format
         var chatMessages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt]
@@ -222,7 +256,8 @@ final class OllamaService {
         return try await Self.performRequest(
             bodyData: bodyData,
             apiKey: apiKey,
-            url: baseURL
+            url: baseURL,
+            provider: provider
         )
     }
 
@@ -234,6 +269,7 @@ final class OllamaService {
         activeGroups: Set<String>? = nil,
         onTextDelta: @escaping @Sendable (String) -> Void
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
+        await enforceRateLimit()
         // Convert Claude-format messages to OpenAI-format (same as send())
         var chatMessages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt]
@@ -346,13 +382,14 @@ final class OllamaService {
             bodyData: bodyData,
             apiKey: apiKey,
             url: baseURL,
+            provider: provider,
             onTextDelta: onTextDelta
         )
     }
 
     /// Network I/O off main thread. Parses Ollama native response into Claude-compatible format.
     nonisolated private static func performRequest(
-        bodyData: Data, apiKey: String, url: URL
+        bodyData: Data, apiKey: String, url: URL, provider: APIProvider
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -370,6 +407,17 @@ final class OllamaService {
         }
 
         guard httpResponse.statusCode == 200 else {
+            // Ollama Cloud / Pro / Max can return 429 under heavy load.
+            // Local Ollama doesn't rate-limit but if it ever does, the
+            // same path handles it. Default to 30s if Retry-After is missing.
+            if httpResponse.statusCode == 429 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds, for: provider)
+                }
+            }
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw AgentError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
         }
@@ -498,7 +546,7 @@ final class OllamaService {
     }
 
     nonisolated private static func performStreamingRequest(
-        bodyData: Data, apiKey: String, url: URL,
+        bodyData: Data, apiKey: String, url: URL, provider: APIProvider,
         onTextDelta: @escaping @Sendable (String) -> Void
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
         var request = URLRequest(url: url)
@@ -517,6 +565,15 @@ final class OllamaService {
         }
 
         guard httpResponse.statusCode == 200 else {
+            // 429 Retry-After capture — see performRequest for rationale.
+            if httpResponse.statusCode == 429 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds, for: provider)
+                }
+            }
             var errorData = Data()
             for try await byte in bytes {
                 errorData.append(byte)
