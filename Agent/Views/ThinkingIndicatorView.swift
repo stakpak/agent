@@ -622,7 +622,7 @@ private struct LLMOutputBox: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .frame(height: min(max(height, 40), maxHeight))
-                    .onAppear { if height < 40 { height = max(40, minHeight) } }
+                    .onAppear { height = minHeight }
                 }
 
                 // Dismiss button — overlaid bottom right, no extra space
