@@ -71,8 +71,8 @@ struct InputSectionView: View {
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                // Match Terminal Neo's 16.5pt — same visual size as the LLM output buffer
-                .font(.system(size: 16.5))
+                // Match Terminal Neo's 16pt — same visual size as the LLM output buffer
+                .font(.system(size: 16))
                 .padding(.vertical, 5)
                 .padding(.horizontal, 7)
                 .background(Color(nsColor: .controlBackgroundColor))
@@ -169,8 +169,8 @@ struct InputSectionView: View {
                 TextField("Enter task...", text: $viewModel.taskInput, axis: .vertical)
                     .focused($isTaskFieldFocused)
                     .textFieldStyle(.plain)
-                    // Match Terminal Neo's 16.5pt — same visual size as the LLM output buffer
-                    .font(.system(size: 16.5))
+                    // Match Terminal Neo's 16pt — same visual size as the LLM output buffer
+                    .font(.system(size: 16))
                     .padding(.vertical, 5)
                     .padding(.horizontal, 7)
                     .background(Color(nsColor: .controlBackgroundColor))
