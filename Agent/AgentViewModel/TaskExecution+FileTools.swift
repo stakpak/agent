@@ -161,6 +161,12 @@ extension AgentViewModel {
                     d1f = "❌ " + oldString + "\n" + "✅ " + newString
                 }
                 appendLog(d1f)
+            } else {
+                // Edit failed — invalidate the read cache so the next read goes to disk
+                // fresh. The error message itself includes a snippet of current content,
+                // so the model can self-correct without an extra round-trip, but we still
+                // wipe the cache in case the model does call read_file again.
+                Self.invalidateFileReadCache(path: expandedEdit)
             }
             appendLog(output)
             // Log edit to journal

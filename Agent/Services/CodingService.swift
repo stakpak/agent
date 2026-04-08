@@ -153,21 +153,51 @@ enum CodingService {
                 matchRange = range
                 matchNote = " (fuzzy whitespace match)"
             } else {
+                // Build a recovery message that INCLUDES the current file content
+                // around where the model probably tried to edit. The model now has
+                // fresh content in the same response and can self-correct without
+                // an extra read round-trip.
                 let trimmed = needle.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty && original.contains(trimmed) {
-                    return
-                        "Error: old_string not found (exact match). "
-                        + "A similar string exists in \(path) "
-                        + "— check whitespace/indentation. "
-                        + "Re-read the file to verify content."
-                }
                 let firstLine = needle.components(separatedBy: "\n")
                     .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
                     .trimmingCharacters(in: .whitespaces)
-                if let firstLine, !firstLine.isEmpty, original.contains(firstLine) {
-                    return "Error: old_string not found in \(path). Content may have changed — re-read the file before retrying."
+
+                let contextSnippet = Self.findEditFailureContext(
+                    in: original,
+                    firstLine: firstLine,
+                    trimmedNeedle: trimmed
+                )
+
+                if !trimmed.isEmpty && original.contains(trimmed) {
+                    return """
+                        Error: old_string not found (exact whitespace match) in \(path). \
+                        A similar string exists — your old_string has the wrong indentation, \
+                        leading/trailing spaces, or tab-vs-space differences. \
+                        Current content at the suspected location:
+                        \(contextSnippet)
+                        Recovery: copy the exact bytes (including whitespace) from the snippet \
+                        above into your next edit_file call. The read cache for this file has \
+                        been invalidated so any subsequent read_file will fetch fresh.
+                        """
                 }
-                return "Error: old_string not found in \(path). Re-read the file to verify the exact content."
+                if let firstLine, !firstLine.isEmpty, original.contains(firstLine) {
+                    return """
+                        Error: old_string not found in \(path) — the first line was found but the \
+                        full block doesn't match. The file likely changed since your last read. \
+                        Current content around the matching line:
+                        \(contextSnippet)
+                        Recovery: use the snippet above as the source of truth. The read cache for \
+                        this file has been invalidated; any subsequent read_file will fetch fresh.
+                        """
+                }
+                return """
+                    Error: old_string not found in \(path). The file may have changed entirely. \
+                    Current file head:
+                    \(contextSnippet)
+                    Recovery: the read cache for this file has been invalidated. Call \
+                    read_file(file_path:"\(path)") to get the full current content, then retry \
+                    with the exact bytes you want to replace.
+                    """
             }
         } else if occurrences > 1 && !replaceAll {
             if let context = context, !context.isEmpty,
@@ -262,6 +292,45 @@ enum CodingService {
     /// Pass 1: tabs→spaces + strip trailing whitespace.
     /// Pass 2: trim all leading/trailing whitespace per line (catches indentation mismatches).
     /// Also strips leading/trailing blank lines from target before matching.
+    /// Build a snippet of the current file content for an edit_file failure recovery
+    /// message. Tries to anchor on the firstLine of the model's old_string; falls back
+    /// to a trimmed match; falls back to the file head. Returns ~10 lines max in a
+    /// fenced code block with line numbers so the model can directly copy the bytes.
+    static func findEditFailureContext(in content: String, firstLine: String?, trimmedNeedle: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        let contextLines = 10
+        var anchorIdx: Int?
+
+        if let firstLine, !firstLine.isEmpty {
+            anchorIdx = lines.firstIndex(where: { $0.contains(firstLine) })
+        }
+        if anchorIdx == nil, !trimmedNeedle.isEmpty {
+            // Try the first non-empty line of the trimmed needle
+            let needleFirst = trimmedNeedle.components(separatedBy: "\n")
+                .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
+                .trimmingCharacters(in: .whitespaces) ?? ""
+            if !needleFirst.isEmpty {
+                anchorIdx = lines.firstIndex(where: { $0.contains(needleFirst) })
+            }
+        }
+
+        let startLine: Int
+        let endLine: Int
+        if let anchor = anchorIdx {
+            startLine = max(0, anchor - 3)
+            endLine = min(lines.count, anchor + contextLines)
+        } else {
+            // No anchor — fall back to file head
+            startLine = 0
+            endLine = min(lines.count, contextLines + 5)
+        }
+
+        let snippet = (startLine..<endLine).map { i in
+            String(format: "%4d  %@", i + 1, lines[i])
+        }.joined(separator: "\n")
+        return "```\n\(snippet)\n```"
+    }
+
     private static func fuzzyFindRange(in content: String, target: String) -> Range<String.Index>? {
         let contentLines = content.components(separatedBy: "\n")
         var targetLines = target.components(separatedBy: "\n")

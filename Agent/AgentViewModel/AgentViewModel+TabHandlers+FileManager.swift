@@ -107,9 +107,11 @@ extension AgentViewModel {
                 replaceAll: replaceAll,
                 context: context
             ) }
-            if !output.hasPrefix("Error") {
-                Self.invalidateFileReadCache(path: expandedPath)
-            }
+            // Always invalidate the read cache after edit_file — on success the file
+            // changed; on failure we want the next read_file to fetch fresh in case
+            // the model's context has stale content (which is usually why the edit
+            // failed in the first place).
+            Self.invalidateFileReadCache(path: expandedPath)
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
             }

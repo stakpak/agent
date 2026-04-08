@@ -182,6 +182,16 @@ final class HelperService {
     }
 
     func execute(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
+        // Defense-in-depth: if a caller passed a file path as workingDirectory,
+        // strip the filename so the daemon doesn't crash with "Not a directory".
+        var workingDirectory = workingDirectory
+        if !workingDirectory.isEmpty {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: workingDirectory, isDirectory: &isDir),
+               !isDir.boolValue {
+                workingDirectory = (workingDirectory as NSString).deletingLastPathComponent
+            }
+        }
         AuditLog.log(.launchDaemon, "execute: \(command.prefix(100))")
         // Hard local guardrail — refuse catastrophic commands before they
         // cross the XPC boundary into the privileged daemon. The daemon runs

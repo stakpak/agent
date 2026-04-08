@@ -121,9 +121,23 @@ extension AgentViewModel {
         return protected.contains { expanded.hasPrefix(home + $0) }
     }
 
+    /// Normalize a workingDirectory to an actual directory path. If the caller
+    /// accidentally passed a file path (e.g. project_folder set to a `.swift`
+    /// file by mistake), strip the filename so Process() / XPC don't crash with
+    /// "Not a directory" when they try to chdir into it. Empty stays empty.
+    nonisolated static func normalizeWorkingDirectory(_ path: String) -> String {
+        guard !path.isEmpty else { return "" }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
+            return isDir.boolValue ? path : (path as NSString).deletingLastPathComponent
+        }
+        return path
+    }
+
     /// Runs a command in the Agent app process to inherit TCC permissions
     /// (Automation, Accessibility, ScreenRecording).
     nonisolated static func executeTCC(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
+        let workingDirectory = normalizeWorkingDirectory(workingDirectory)
         // Hard local guardrail — refuses catastrophic commands like
         // `rm -rf /` BEFORE the Process is even constructed. The verdict
         // string is shaped to be informative to the LLM, so it understands
@@ -193,6 +207,7 @@ extension AgentViewModel {
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> (status: Int32, output: String)
     {
+        let workingDirectory = normalizeWorkingDirectory(workingDirectory)
         // Same guardrail as executeTCC — refuse catastrophic commands before
         // the Process is constructed.
         let verdict = ShellSafetyService.check(command)
