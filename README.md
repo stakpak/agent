@@ -47,11 +47,11 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
 4. **Approve the Helper Tool:** When prompted, authorize the privileged daemon to allow root-level command execution.
 5. **Configure your AI Provider:** Go to Settings and enter your API key or select a local provider like Ollama.
 
-> 💡 **Cheapest cloud path?** **GLM-5** is inexpensive via several cloud providers — **Ollama** (cloud or self-hosted), **Hugging Face**, **Z.ai**, and **BigModel**. Pennies per million tokens vs Claude/GPT pricing.
+> 💡 **Cheapest cloud path?** **GLM-5.1** (the latest) is now available on **all four** of the cheap cloud providers — **Ollama**, **Hugging Face**, **Z.ai**, and **BigModel**. Pennies per million tokens vs Claude/GPT pricing. Pick whichever you already have an account with; pricing is competitive across all of them.
 >
-> 💡 **Want the latest?** **Z.ai** ships **GLM-5.1** via API — still cheap, recommended starting point for cloud use.
+> 💡 **Z.ai is still the recommended starting point** if you don't have an account anywhere yet — fastest signup, GLM-5.1 is the default model, no infrastructure to provision.
 >
-> ⚠️ **Running GLM locally is "free" only if you already own the hardware.** GLM-5 is a 32B model — to run it well you need an M2/M3 Ultra Mac Studio with 64-128GB unified memory, or a Linux box with 24GB+ VRAM. If you're buying that hardware just to run a local LLM, the cloud APIs are dramatically cheaper.
+> ⚠️ **Running GLM locally is "free" only if you already own the hardware.** GLM-5/5.1 are 32B+ models — to run one well you need an M2/M3/M4 Ultra Mac Studio with 64-128GB unified memory, or a Linux box with 24GB+ VRAM. If you're buying that hardware just to run a local LLM, the cloud APIs above are dramatically cheaper.
 
 
 ## What Can It Do?

@@ -91,7 +91,14 @@ enum AgentError: Error, LocalizedError {
     }
 
     var isRateLimited: Bool {
-        if case .apiError(429, _) = self { return true }
+        // 429 = standard HTTP rate limit (OpenAI, Z.ai, Mistral, Grok, etc.)
+        // 529 = Anthropic's "Overloaded" status — same intent as 429, used
+        //       when Claude is at capacity. Treat both as rate-limited so the
+        //       loop's exponential-backoff branch fires instead of the
+        //       generic 10-second recoverable retry.
+        if case .apiError(let code, _) = self, code == 429 || code == 529 {
+            return true
+        }
         return false
     }
 

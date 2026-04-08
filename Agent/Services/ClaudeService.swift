@@ -13,6 +13,43 @@ final class ClaudeService {
     private static let apiVersion = "2023-06-01"
     private let isLocalEndpoint: Bool
 
+    // MARK: - Rate Limit Tracking
+    //
+    // When Anthropic returns 429 (rate limit) or 529 (overloaded), we capture
+    // the Retry-After header and pad the next request's wait so we don't
+    // immediately re-trigger the same response. Mirrors the pattern in
+    // OpenAICompatibleService — same shape, separate dict because the two
+    // services don't share state and Anthropic's rate limit window is its own.
+    private static var retryAfterUntil: CFAbsoluteTime = 0
+
+    /// Wait if needed to respect Retry-After backoff from a previous 429/529.
+    private static func enforceRateLimit() async {
+        let now = CFAbsoluteTimeGetCurrent()
+        if retryAfterUntil > now {
+            let wait = retryAfterUntil - now
+            try? await Task.sleep(for: .seconds(wait))
+        }
+    }
+
+    /// Record a Retry-After value from a 429/529 response. @MainActor because
+    /// the static var is owned by this @MainActor class; called from the
+    /// nonisolated request methods via `await MainActor.run { ... }`.
+    static func recordRetryAfter(_ seconds: Double) {
+        retryAfterUntil = CFAbsoluteTimeGetCurrent() + seconds
+    }
+
+    /// Parse a Retry-After header value. Header is either an integer
+    /// (seconds to wait) per RFC 7231 §7.1.3, or an HTTP-date — we only
+    /// honor the integer form. Returns 0 if missing/unparseable; caller
+    /// falls back to a sensible default. Capped at 5 minutes to defend
+    /// against absurdly large values.
+    nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
+        guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
+              !v.isEmpty,
+              let seconds = Double(v) else { return 0 }
+        return min(seconds, 300)
+    }
+
     let historyContext: String
     let userHome: String
     let userName: String
@@ -115,6 +152,7 @@ final class ClaudeService {
         -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
     {
         guard isLocalEndpoint || !apiKey.isEmpty else { throw AgentError.noAPIKey }
+        await Self.enforceRateLimit()
 
         // Use structured system prompt with cache_control for prompt caching
         let systemBlock: Any = isLocalEndpoint ? systemPrompt : [
@@ -200,6 +238,7 @@ final class ClaudeService {
         onTextDelta: @escaping @Sendable (String) -> Void
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
         guard isLocalEndpoint || !apiKey.isEmpty else { throw AgentError.noAPIKey }
+        await Self.enforceRateLimit()
 
         let systemBlock: Any = isLocalEndpoint ? systemPrompt : [
             ["type": "text", "text": systemPrompt, "cache_control": ["type": "ephemeral"]]

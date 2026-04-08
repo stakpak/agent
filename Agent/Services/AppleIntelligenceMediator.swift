@@ -848,7 +848,9 @@ struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
 
     let name = "accessibility"
-    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. Every action takes role+title+app (use natural app names like Photo Booth), never coordinates. For multi-step requests, call this tool multiple times in order — first open_app, then click_element."
+    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. " +
+        "Every action takes role+title+app (use natural app names like Photo Booth), never coordinates. " +
+        "For multi-step requests, call this tool multiple times in order — first open_app, then click_element."
 
     /// Closure that actually performs the accessibility action. Injected by
     /// the caller (AppleIntelligenceMediator.runAccessibilityAgent) so the
