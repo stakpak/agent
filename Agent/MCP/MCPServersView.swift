@@ -12,7 +12,6 @@ struct MCPServersView: View {
     @State private var renderKey = false
     @State private var addError: String?
     @State private var presetSeed: MCPServerConfig?
-    @State private var showingPresetSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -48,7 +47,6 @@ struct MCPServersView: View {
                     ForEach(MCPPresets.all) { preset in
                         Button(preset.menuLabel) {
                             presetSeed = preset.makeConfig()
-                            showingPresetSheet = true
                         }
                     }
                 } label: {
@@ -125,12 +123,14 @@ struct MCPServersView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingPresetSheet) {
-            MCPServerEditView(server: presetSeed) { newServer in
+        .sheet(item: $presetSeed) { seed in
+            // .sheet(item:) re-evaluates the body each time `presetSeed`
+            // becomes non-nil, so the seed config we just built is the one
+            // the editor reads — no SwiftUI timing race.
+            MCPServerEditView(server: seed) { newServer in
                 if let err = registry.add(newServer) {
                     addError = err
                 } else {
-                    showingPresetSheet = false
                     presetSeed = nil
                     let config = newServer
                     Task {
