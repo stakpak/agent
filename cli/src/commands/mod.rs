@@ -15,7 +15,6 @@ pub mod auto_update;
 pub mod autopilot;
 pub mod board;
 pub mod browser;
-pub mod completion;
 pub mod mcp;
 pub mod warden;
 pub mod watch;

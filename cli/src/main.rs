@@ -239,7 +239,9 @@ async fn main() {
 
     // Handle `stakpak completion <shell>` before loading config — no auth required.
     if let Some(Commands::Completion { shell }) = cli.command {
-        commands::completion::print_completions(shell, &mut Cli::command());
+        let mut cmd = Cli::command();
+        let name = cmd.get_name().to_string();
+        clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
         return;
     }
 
