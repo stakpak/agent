@@ -1224,6 +1224,9 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Agent! needs calendar access for scripts that read or create events.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Agent! needs camera access for scripts that capture photos.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Agent! needs contacts access for scripts that query your address book.";
+				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Agent! reads and writes files in your Desktop folder for screenshots, downloads, and scripts that operate on Desktop items.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Agent! reads and writes files in your Documents folder to manage agent scripts, system prompts, AppleScripts, journal entries, and the SDEF catalog under ~/Documents/AgentScript.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Agent! reads and writes files in your Downloads folder for scripts that process downloaded files.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Agent! needs biometric authentication for scripts that use Touch ID or Face ID.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "\U0003© 2026 agent@macos26.app";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Agent! needs local network access for scripts that discover devices on your network.";
@@ -1292,6 +1295,9 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Agent! needs calendar access for scripts that read or create events.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Agent! needs camera access for scripts that capture photos.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Agent! needs contacts access for scripts that query your address book.";
+				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Agent! reads and writes files in your Desktop folder for screenshots, downloads, and scripts that operate on Desktop items.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Agent! reads and writes files in your Documents folder to manage agent scripts, system prompts, AppleScripts, journal entries, and the SDEF catalog under ~/Documents/AgentScript.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Agent! reads and writes files in your Downloads folder for scripts that process downloaded files.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Agent! needs biometric authentication for scripts that use Touch ID or Face ID.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "\U0003© 2026 agent@macos26.app";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Agent! needs local network access for scripts that discover devices on your network.";
