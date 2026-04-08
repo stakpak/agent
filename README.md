@@ -135,8 +135,8 @@ The Agent! header contains **15 buttons** for quick access to settings, monitors
 
 ---
 
-### 🎙 Voice Control
-Click the microphone and speak. Agent! transcribes in real time and executes your request.
+### 🎙 Voice Control — "Agent!" Hotword
+**Hotword-anchored dictation via `SFSpeechRecognizer`.** Click the microphone in the input bar to start the hotword session, then say **"Agent!"** followed by your task. Transcription is on-device, runs in real time, and listens for `agent` as a complete word (not as a substring of "intelligent" or "management"). Anything you say after the wake word becomes the task — after ~2.5 seconds of silence, it auto-runs. The session loops automatically: when one task completes, it starts listening again. Click the mic to stop.
 
 ### 📱 Remote Control via iMessage
 Text your Mac from your iPhone:
