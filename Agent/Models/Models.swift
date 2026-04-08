@@ -79,7 +79,11 @@ enum AgentError: Error, LocalizedError {
             return true
         case .serviceUnavailable, .xpcError:
             return true
-        case .apiError(let code, _) where code >= 500:
+        case .apiError(let code, _) where code >= 500 || code == 429:
+            // 5xx = server error (Anthropic 529 overloaded, OpenAI 502/503)
+            // 429 = rate limit / overloaded — Z.ai returns this with code 1305
+            //       "service may be temporarily overloaded, please try again later"
+            // Both are transient and retryable with backoff.
             return true
         default:
             return false

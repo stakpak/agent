@@ -1248,6 +1248,29 @@ extension AgentViewModel {
                             }
                             break
                         }
+                    } else if let agentErr = error as? AgentError, agentErr.isRateLimited, timeoutRetryCount < maxTimeoutRetries {
+                        // 429 rate-limit / "service overloaded" — exponential
+                        // backoff up to 60s. Z.ai returns this with body code
+                        // 1305 ("service may be temporarily overloaded"); OpenAI
+                        // returns 429 with a Retry-After header. Either way the
+                        // server is asking for a longer wait than the generic
+                        // 10-second recoverable retry below — bumping each
+                        // attempt by 15s up to a 60s ceiling.
+                        timeoutRetryCount += 1
+                        let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
+                        appendLog(
+                            """
+                            ⏳ \(errorSource) rate limited (429) — retrying in \(Int(retryDelay))s \
+                            (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))
+                            """
+                        )
+                        flushLog()
+                        if agentReplyHandle != nil {
+                            sendProgressUpdate("\(errorSource) rate limited — waiting \(Int(retryDelay))s")
+                        }
+                        try? await Task.sleep(for: .seconds(retryDelay))
+                        if Task.isCancelled { break }
+                        continue
                     } else if let agentErr = error as? AgentError, agentErr.isRecoverable, timeoutRetryCount < maxTimeoutRetries {
                         // Server/network error — retry every 10 seconds
                         timeoutRetryCount += 1

@@ -648,7 +648,9 @@ final class AppleIntelligenceMediator: ObservableObject {
         // AI is told to just use the natural name in that case.
         let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You automate Mac UI via the accessibility tool. Use the natural app name like "Photo Booth", "Safari", or "TextEdit" — bundle ID resolution happens automatically. After tool calls succeed, reply with 1 sentence.
+        You automate Mac UI via the accessibility tool. Use the natural app name \
+        like "Photo Booth", "Safari", or "TextEdit" — bundle ID resolution happens \
+        automatically. After tool calls succeed, reply with 1 sentence.
 
         Roles: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWebArea
 

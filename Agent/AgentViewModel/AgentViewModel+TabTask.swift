@@ -920,20 +920,25 @@ extension AgentViewModel {
                             tab.appendLog(timeoutMessage)
                             break
                         }
-                    } else if let agentErr = error as? AgentError, agentErr.isRateLimited {
-                        // Rate limit — retry once after 30s, then stop
-                        if timeoutRetryCount < 1 {
-                            timeoutRetryCount += 1
-                            tab.appendLog("\(errorSource) rate limited — waiting 30s before retry...")
-                            tab.flush()
-                            try? await Task.sleep(for: .seconds(30))
-                            if Task.isCancelled { break }
-                            continue
-                        } else {
-                            tab.appendLog("\(errorSource) rate limited. Wait a minute and try again.")
-                            tab.flush()
-                            break
-                        }
+                    } else if let agentErr = error as? AgentError, agentErr.isRateLimited, timeoutRetryCount < maxTimeoutRetries {
+                        // 429 rate-limit / "service overloaded" — exponential
+                        // backoff up to 60s, matching the main task loop in
+                        // AgentViewModel+TaskExecution.swift. Z.ai returns this
+                        // with body code 1305 ("service may be temporarily
+                        // overloaded"); the previous one-shot 30s retry gave
+                        // up too quickly when the service stayed congested.
+                        timeoutRetryCount += 1
+                        let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
+                        tab.appendLog(
+                            """
+                            ⏳ \(errorSource) rate limited (429) — retrying in \(Int(retryDelay))s \
+                            (attempt \(timeoutRetryCount)/\(maxTimeoutRetries))
+                            """
+                        )
+                        tab.flush()
+                        try? await Task.sleep(for: .seconds(retryDelay))
+                        if Task.isCancelled { break }
+                        continue
                     } else if let agentErr = error as? AgentError, agentErr.isRecoverable, timeoutRetryCount < maxTimeoutRetries {
                         // Server/network error — retry every 10 seconds
                         timeoutRetryCount += 1
