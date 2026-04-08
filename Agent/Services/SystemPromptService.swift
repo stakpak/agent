@@ -46,7 +46,7 @@ final class SystemPromptService {
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
     /// Bump this when system prompt content changes to force re-sync of saved prompts.
-    private static let promptRevision = "83"
+    private static let promptRevision = "84"
 
     /// Anti-hallucination rule appended to every system prompt (full + compact).
     /// Triggered by an observed real-world failure: the in-app Agent produced a
@@ -176,10 +176,15 @@ final class SystemPromptService {
         }
         let content = Self.stripVersionLine(template)
         let folder = projectFolder.isEmpty ? userHome : projectFolder
+        // Live shell name from the user's toggle (zsh/bash) — re-reads on every
+        // prompt fetch so flipping the toggle in Options updates the LLM context
+        // on the next iteration without rewriting the template file.
+        let shellName = (AppConstants.shellPath as NSString).lastPathComponent
         return content
             .replacingOccurrences(of: "{userName}", with: userName)
             .replacingOccurrences(of: "{userHome}", with: userHome)
             .replacingOccurrences(of: "{projectFolder}", with: folder)
+            .replacingOccurrences(of: "{shell}", with: shellName)
     }
 
     /// Remove the version/custom/readonly comment line from prompt content.
@@ -259,7 +264,12 @@ final class SystemPromptService {
 
     /// The built-in default system prompt.
     private static func defaultPrompt() -> String {
-        let base = AgentTools.systemPrompt(userName: "{userName}", userHome: "{userHome}", projectFolder: "{projectFolder}")
+        let base = AgentTools.systemPrompt(
+            userName: "{userName}",
+            userHome: "{userHome}",
+            projectFolder: "{projectFolder}",
+            shell: "{shell}"
+        )
         return wrapWithRules(base)
     }
 

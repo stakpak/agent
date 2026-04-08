@@ -163,7 +163,12 @@ struct AgentOptionsView: View {
             }
 
             row {
-                Text("Shell").font(.subheadline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Shell").font(.subheadline)
+                    Text("In-process + Launch Agent + Launch Daemon")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Picker("", selection: Binding(
                     get: { AppConstants.shellPath },

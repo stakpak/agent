@@ -212,7 +212,22 @@ final class UserService {
         } else {
             fullCommand = command
         }
-        return await executeViaXPC(script: fullCommand, workingDirectory: dir, outputHandler: handler)
+        // Honor the user's zsh/bash toggle. The Launch Agent always invokes
+        // /bin/zsh (XPC protocol stays unchanged) but if the user picked a
+        // different shell, we wrap the command with `exec <shell> -c '...'`
+        // so the outer zsh process is replaced by the chosen shell. Defaults
+        // to no wrapping when /bin/zsh is selected.
+        let wrapped = Self.wrapForShell(fullCommand, shellPath: AppConstants.shellPath)
+        return await executeViaXPC(script: wrapped, workingDirectory: dir, outputHandler: handler)
+    }
+
+    /// Wrap a command with `exec <shell> -c '...'` when the user has chosen a
+    /// shell other than /bin/zsh. Single-quote escape pattern survives `!`
+    /// and every shell metacharacter.
+    private static func wrapForShell(_ command: String, shellPath: String) -> String {
+        guard shellPath != "/bin/zsh", !shellPath.isEmpty else { return command }
+        let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
+        return "exec \(shellPath) -c '\(escaped)'"
     }
 
     /// Quick connectivity test with 5-second timeout. Returns true if XPC responds.
