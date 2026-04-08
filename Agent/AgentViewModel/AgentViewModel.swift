@@ -11,47 +11,6 @@ import Speech
 import AVFoundation
 import FoundationModels
 
-/// Per-tab LLM configuration for multi-main-tab support
-struct LLMConfig: Codable {
-    var provider: APIProvider
-    var model: String
-    var displayName: String
-}
-
-enum LMStudioProtocol: String, CaseIterable, Codable {
-    case openAI = "openAI"
-    case anthropic = "anthropic"
-    case lmStudio = "lmStudio"
-
-    var displayName: String {
-        switch self {
-        case .openAI: "OpenAI Compatible"
-        case .anthropic: "Anthropic Compatible"
-        case .lmStudio: "LM Studio Native"
-        }
-    }
-
-    var defaultEndpoint: String {
-        switch self {
-        case .openAI: "http://localhost:1234/v1/chat/completions"
-        case .anthropic: "http://localhost:1234/v1/messages"
-        case .lmStudio: "http://localhost:1234/api/v1/chat"
-        }
-    }
-}
-
-enum PromptStyle: String, CaseIterable, Codable {
-    case full
-    case compact
-
-    var displayName: String {
-        switch self {
-        case .full: "Full"
-        case .compact: "Compact"
-        }
-    }
-}
-
 @MainActor @Observable
 final class AgentViewModel {
     /// Stable UUID for the main tab — persisted across launches
@@ -69,40 +28,8 @@ final class AgentViewModel {
     /// Width of the task input field, updated by InputSectionView via GeometryReader
     var inputFieldWidth: CGFloat = 0
 
-    // MARK: - Tool Steps (structured tool call tracking)
-
-    /// A single tool invocation step for structured display
-    struct ToolStep: Identifiable {
-        let id = UUID()
-        let name: String
-        let detail: String
-        let startTime: Date
-        var duration: TimeInterval?
-        var status: Status = .running
-
-        enum Status {
-            case running, success, error
-        }
-    }
-
-    /// Tool steps for the current task (main tab)
+    /// Tool steps for the current task (main tab) — ToolStep type is declared in AgentViewModel+Types.swift
     var toolSteps: [ToolStep] = []
-
-    /// Record a tool step starting. Returns the step ID for later completion.
-    @discardableResult
-    func recordToolStep(name: String, detail: String) -> UUID {
-        let step = ToolStep(name: name, detail: detail, startTime: Date())
-        toolSteps.append(step)
-        return step.id
-    }
-
-    /// Mark a tool step as completed.
-    func completeToolStep(id: UUID, status: ToolStep.Status = .success) {
-        if let idx = toolSteps.firstIndex(where: { $0.id == id }) {
-            toolSteps[idx].duration = Date().timeIntervalSince(toolSteps[idx].startTime)
-            toolSteps[idx].status = status
-        }
-    }
 
     // Stored property drives live UI; ChatHistoryStore persists across launches via SwiftData
     var activityLog = ""
@@ -175,18 +102,6 @@ final class AgentViewModel {
     var failedAgentName = ""
     var failedAgentId: UUID?
 
-    /// Call when an agent fails — triggers the remove-from-menu alert.
-    /// Finds the most recent matching entry by name and stores its UUID for exact removal.
-    func notifyAgentFailed(name: String, arguments: String) {
-        if let entry = RecentAgentsService.shared.entries.first(where: { $0.agentName == name && $0.arguments == arguments })
-            ?? RecentAgentsService.shared.entries.first(where: { $0.agentName == name })
-        {
-            failedAgentName = name
-            failedAgentId = entry.id
-            showFailedAgentAlert = true
-        }
-    }
-
     // Token tracking
     var taskInputTokens: Int = 0
     var taskOutputTokens: Int = 0
@@ -231,120 +146,6 @@ final class AgentViewModel {
         }
     }
 
-    /// Keep service tool groups and individual tools in sync with userEnabled/rootEnabled.
-    private func syncServicesGroup() {
-        let prefs = ToolPreferencesService.shared
-        // Sync User Agent group
-        let agentGroupOn = prefs.isGroupEnabled(Tool.Group.user)
-        if userEnabled != agentGroupOn { prefs.toggleGroup(Tool.Group.user) }
-        // Sync individual tool — re-enable if service turned on
-        if userEnabled && !prefs.isEnabled(selectedProvider, "execute_agent_command") {
-            prefs.toggle(selectedProvider, "execute_agent_command")
-        }
-        // Sync Launch Daemon group
-        let daemonGroupOn = prefs.isGroupEnabled(Tool.Group.root)
-        if rootEnabled != daemonGroupOn { prefs.toggleGroup(Tool.Group.root) }
-        // Sync individual tool — re-enable if service turned on
-        if rootEnabled && !prefs.isEnabled(selectedProvider, "execute_daemon_command") {
-            prefs.toggle(selectedProvider, "execute_daemon_command")
-        }
-    }
-
-    /// CPU icon color: green = running, blue = configured, red = not configured
-    var llmStatusColor: Color {
-        let needsKey: Set<APIProvider> = [.claude, .openAI, .deepSeek, .huggingFace]
-        if needsKey.contains(selectedProvider) && apiKey.isEmpty { return .red }
-        // When running, use the active tab's color
-        if isRunning || isThinking {
-            if let selId = selectedTabId {
-                return ContentView.tabColor(for: selId, in: scriptTabs)
-            }
-            return .blue
-        }
-        // Check if any tab is running
-        if let runningTab = scriptTabs.first(where: { $0.isLLMRunning || $0.isLLMThinking }) {
-            return ContentView.tabColor(for: runningTab.id, in: scriptTabs)
-        }
-        return .green
-    }
-
-    /// Gear icon color reflecting overall service health
-    var servicesGearColor: Color {
-        if !userEnabled && !rootEnabled { return .gray }
-        if userEnabled && rootEnabled { return .green }
-        return .yellow
-    }
-
-    /// Tool icon color reflecting tool accessibility
-    var toolsIconColor: Color {
-        let prefs = ToolPreferencesService.shared
-        let all = AgentTools.tools(for: selectedProvider)
-        let enabledCount = all.filter { prefs.isEnabled(selectedProvider, $0.name) }.count
-        if enabledCount == 0 { return .red }
-        if !userEnabled { return .yellow }
-        if !rootEnabled { return .orange }
-        return .green
-    }
-
-    /// Hand icon color reflecting accessibility status
-    var accessibilityIconColor: Color {
-        if !AccessibilityEnabled.shared.accessibilityGlobalEnabled { return .gray }
-        if !AccessibilityService.hasAccessibilityPermission() { return .red }
-        return .green
-    }
-
-    /// History icon color reflecting history state
-    var historyIconColor: Color {
-        let hasPrompts = !currentTabPromptHistory.isEmpty
-        let hasTasks = !taskSummaries.isEmpty
-        let hasErrors = !errorHistory.isEmpty
-        if !hasPrompts && !hasTasks && !hasErrors { return Color.gray }
-        if hasErrors { return .red }
-        return .green
-    }
-
-    /// Options slider icon color based on temperature
-    var optionsIconColor: Color {
-        temperatureColor(temperatureForProvider(selectedProvider))
-    }
-
-    /// Color for temperature value: 0–0.3 green, 0.3–1.0 yellow, 1.0–1.5 orange, 1.5–2.0 red
-    func temperatureColor(_ temp: Double) -> Color {
-        if temp >= 1.5 { return .pink }
-        if temp >= 1.0 { return .orange }
-        if temp >= 0.5 { return .yellow }
-        return .green
-    }
-
-    /// MCP server icon color based on connection and tool state
-    var mcpIconColor: Color {
-        let mcp = MCPService.shared
-        let config = MCPServerRegistry.shared
-        let servers = config.servers
-        // No servers configured
-        guard !servers.isEmpty else { return .gray }
-        let connectedIds = mcp.connectedServerIds
-        let tools = mcp.discoveredTools
-        // No servers connected
-        guard !connectedIds.isEmpty else { return .gray }
-        // Check if all tools are disabled
-        let enabledTools = tools.filter { mcp.isToolEnabled(serverName: $0.serverName, toolName: $0.name) }
-        if enabledTools.isEmpty && !tools.isEmpty { return .red }
-        // Check if some servers have errors or some tools disabled
-        let hasErrors = !mcp.connectionErrors.isEmpty
-        let someDisabled = enabledTools.count < tools.count
-        if hasErrors || someDisabled { return .orange }
-        // All good
-        return .green
-    }
-
-    /// Tooltip for the gear icon
-    var servicesGearHelp: String {
-        let userStatus = userPingOK ? "connected" : (userEnabled ? "not responding" : "disabled")
-        let rootStatus = daemonPingOK ? "connected" : (rootEnabled ? "not responding" : "disabled")
-        return "Background Agents — Agent: \(userStatus), Daemon: \(rootStatus)"
-    }
-
     var selectedProvider: APIProvider = {
         let rawValue = UserDefaults.standard.string(forKey: "agentProvider") ?? "ollama"
         let provider = APIProvider(rawValue: rawValue) ?? .ollama
@@ -361,39 +162,7 @@ final class AgentViewModel {
                 return
             }
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: "agentProvider")
-            if selectedProvider == .ollama && ollamaModels.isEmpty {
-                fetchOllamaModels()
-            }
-            if selectedProvider == .localOllama && localOllamaModels.isEmpty {
-                fetchLocalOllamaModels()
-            }
-            if selectedProvider == .claude && availableClaudeModels.isEmpty {
-                Task { await fetchClaudeModels() }
-            }
-            if selectedProvider == .openAI && openAIModels.isEmpty {
-                fetchOpenAIModels()
-            }
-            if selectedProvider == .deepSeek && deepSeekModels.isEmpty {
-                fetchDeepSeekModels()
-            }
-            if selectedProvider == .huggingFace && huggingFaceModels.isEmpty {
-                fetchHuggingFaceModels()
-            }
-            if selectedProvider == .vLLM && vLLMModels.isEmpty {
-                fetchVLLMModels()
-            }
-            if selectedProvider == .lmStudio && lmStudioModels.isEmpty {
-                fetchLMStudioModels()
-            }
-            if selectedProvider == .zAI && zAIModels.isEmpty {
-                fetchZAIModels()
-            }
-            if selectedProvider == .gemini && geminiModels.isEmpty {
-                fetchGeminiModels()
-            }
-            if selectedProvider == .grok && grokModels.isEmpty {
-                fetchGrokModels()
-            }
+            fetchModelsForSelectedProviderIfNeeded()
         }
     }
 
@@ -427,24 +196,8 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(openAIModel, forKey: "openAIModel") }
     }
 
-    struct OpenAIModelInfo: Identifiable {
-        let id: String
-        let name: String
-    }
-
     var openAIModels: [OpenAIModelInfo] = []
     var isFetchingOpenAIModels = false
-
-    nonisolated static let defaultOpenAIModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "gpt-4.1-nano", name: "GPT-4.1 Nano"),
-        OpenAIModelInfo(id: "gpt-4.1-mini", name: "GPT-4.1 Mini"),
-        OpenAIModelInfo(id: "gpt-4.1", name: "GPT-4.1"),
-        OpenAIModelInfo(id: "gpt-4o-mini", name: "GPT-4o Mini"),
-        OpenAIModelInfo(id: "gpt-4o", name: "GPT-4o"),
-        OpenAIModelInfo(id: "o4-mini", name: "o4-mini"),
-        OpenAIModelInfo(id: "o3-mini", name: "o3-mini"),
-        OpenAIModelInfo(id: "o3", name: "o3"),
-    ]
 
     // DeepSeek settings
     var deepSeekAPIKey: String = KeychainService.shared.getDeepSeekAPIKey() ?? "" {
@@ -454,11 +207,6 @@ final class AgentViewModel {
     var deepSeekModel: String = UserDefaults.standard.string(forKey: "deepSeekModel") ?? "deepseek-chat" {
         didSet { UserDefaults.standard.set(deepSeekModel, forKey: "deepSeekModel") }
     }
-
-    nonisolated static let defaultDeepSeekModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "deepseek-chat", name: "DeepSeek Chat (V3)"),
-        OpenAIModelInfo(id: "deepseek-reasoner", name: "DeepSeek Reasoner (R1)"),
-    ]
 
     var deepSeekModels: [OpenAIModelInfo] = []
     var isFetchingDeepSeekModels = false
@@ -526,40 +274,6 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(zAIModel, forKey: "zAIModel") }
     }
 
-    nonisolated static let defaultZAIModels: [OpenAIModelInfo] = [
-        // Coding models (use /api/coding/paas/ endpoint)
-        OpenAIModelInfo(id: "glm-5.1", name: "GLM-5.1"),
-        OpenAIModelInfo(id: "glm-5", name: "GLM-5"),
-        OpenAIModelInfo(id: "glm-5-turbo", name: "GLM-5 Turbo"),
-        OpenAIModelInfo(id: "glm-4.7", name: "GLM-4.7"),
-        OpenAIModelInfo(id: "glm-4.7-flash", name: "GLM-4.7 Flash"),
-        OpenAIModelInfo(id: "glm-4.6", name: "GLM-4.6"),
-        OpenAIModelInfo(id: "glm-4.5", name: "GLM-4.5"),
-        OpenAIModelInfo(id: "glm-4.5-air", name: "GLM-4.5 Air"),
-        OpenAIModelInfo(id: "glm-4.5-flash", name: "GLM-4.5 Flash"),
-        OpenAIModelInfo(id: "glm-4-32b-0414-128k", name: "GLM-4-32B-128K"),
-        // Non-coding / general models (use /api/paas/ endpoint)
-        // Tagged with :v suffix — stripped before sending to API
-        OpenAIModelInfo(id: "glm-5.1:v", name: "GLM-5.1"),
-        OpenAIModelInfo(id: "glm-5:v", name: "GLM-5"),
-        OpenAIModelInfo(id: "glm-5-turbo:v", name: "GLM-5 Turbo"),
-        OpenAIModelInfo(id: "glm-4.7:v", name: "GLM-4.7"),
-        OpenAIModelInfo(id: "glm-4.7-flash:v", name: "GLM-4.7 Flash"),
-        OpenAIModelInfo(id: "glm-4.6:v", name: "GLM-4.6"),
-        OpenAIModelInfo(id: "glm-4.5:v", name: "GLM-4.5"),
-        OpenAIModelInfo(id: "glm-4.5-air:v", name: "GLM-4.5 Air"),
-        OpenAIModelInfo(id: "glm-4.5-flash:v", name: "GLM-4.5 Flash"),
-        // Vision models (use /api/paas/ endpoint, vision-capable)
-        OpenAIModelInfo(id: "glm-5v-turbo:v", name: "GLM-5V-Turbo (Vision)"),
-        OpenAIModelInfo(id: "glm-4.6v:v", name: "GLM-4.6V (Vision)"),
-        OpenAIModelInfo(id: "glm-4.5v:v", name: "GLM-4.5V (Vision)"),
-        OpenAIModelInfo(id: "glm-ocr:v", name: "GLM-OCR"),
-        // Image/Video/Voice models
-        OpenAIModelInfo(id: "glm-image:v", name: "GLM-Image"),
-        OpenAIModelInfo(id: "cogvideox-3:v", name: "CogVideoX-3"),
-        OpenAIModelInfo(id: "glm-asr-2512:v", name: "GLM-ASR-2512 (Voice)"),
-    ]
-
     var zAIModels: [OpenAIModelInfo] = []
     var isFetchingZAIModels = false
 
@@ -583,16 +297,6 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(qwenModel, forKey: "qwenModel") }
     }
 
-    nonisolated static let defaultQwenModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "qwen-plus", name: "Qwen Plus"),
-        OpenAIModelInfo(id: "qwen-max", name: "Qwen Max"),
-        OpenAIModelInfo(id: "qwen-turbo", name: "Qwen Turbo"),
-        OpenAIModelInfo(id: "qwen-long", name: "Qwen Long"),
-        OpenAIModelInfo(id: "qwen-vl-plus", name: "Qwen VL Plus"),
-        OpenAIModelInfo(id: "qwen-vl-max", name: "Qwen VL Max"),
-        OpenAIModelInfo(id: "qwen-coder-plus", name: "Qwen Coder Plus"),
-    ]
-
     var qwenModels: [OpenAIModelInfo] = []
     var isFetchingQwenModels = false
 
@@ -605,13 +309,6 @@ final class AgentViewModel {
     var geminiModel: String = UserDefaults.standard.string(forKey: "geminiModel") ?? "gemini-2.5-flash" {
         didSet { UserDefaults.standard.set(geminiModel, forKey: "geminiModel") }
     }
-
-    nonisolated static let defaultGeminiModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "gemini-2.5-pro-preview-05-06", name: "Gemini 2.5 Pro"),
-        OpenAIModelInfo(id: "gemini-2.5-flash-preview-05-20", name: "Gemini 2.5 Flash"),
-        OpenAIModelInfo(id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Stable)"),
-        OpenAIModelInfo(id: "gemini-2.0-flash", name: "Gemini 2.0 Flash"),
-    ]
 
     var geminiModels: [OpenAIModelInfo] = []
     var isFetchingGeminiModels = false
@@ -626,13 +323,6 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(grokModel, forKey: "grokModel") }
     }
 
-    nonisolated static let defaultGrokModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "grok-3", name: "Grok 3"),
-        OpenAIModelInfo(id: "grok-3-fast", name: "Grok 3 Fast"),
-        OpenAIModelInfo(id: "grok-3-mini", name: "Grok 3 Mini"),
-        OpenAIModelInfo(id: "grok-3-mini-fast", name: "Grok 3 Mini Fast"),
-    ]
-
     var grokModels: [OpenAIModelInfo] = []
     var isFetchingGrokModels = false
 
@@ -645,13 +335,6 @@ final class AgentViewModel {
     var mistralModel: String = UserDefaults.standard.string(forKey: "mistralModel") ?? "mistral-large-latest" {
         didSet { UserDefaults.standard.set(mistralModel, forKey: "mistralModel") }
     }
-
-    nonisolated static let defaultMistralModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "mistral-large-latest", name: "Mistral Large"),
-        OpenAIModelInfo(id: "mistral-small-latest", name: "Mistral Small"),
-        OpenAIModelInfo(id: "codestral-latest", name: "Codestral"),
-        OpenAIModelInfo(id: "mistral-medium-latest", name: "Mistral Medium"),
-    ]
 
     var mistralModels: [OpenAIModelInfo] = []
     var isFetchingMistralModels = false
@@ -672,11 +355,6 @@ final class AgentViewModel {
     ]
     var isFetchingCodestralModels = false
 
-    nonisolated static let defaultCodestralModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "codestral-latest", name: "Codestral Latest"),
-        OpenAIModelInfo(id: "codestral-2508", name: "Codestral 25.08"),
-    ]
-
     // MARK: - Mistral Vibe (api.mistral.ai with Vibe key, Devstral models)
 
     var vibeAPIKey: String = KeychainService.shared.getVibeAPIKey() ?? "" {
@@ -693,43 +371,6 @@ final class AgentViewModel {
     ]
     var isFetchingVibeModels = false
 
-    nonisolated static let defaultVibeModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "devstral-latest", name: "Devstral Latest"),
-        OpenAIModelInfo(id: "devstral-medium-latest", name: "Devstral Medium Latest"),
-    ]
-
-    nonisolated static let defaultHuggingFaceModels: [OpenAIModelInfo] = [
-        OpenAIModelInfo(id: "deepseek-ai/DeepSeek-V3-0324", name: "DeepSeek V3"),
-        OpenAIModelInfo(id: "deepseek-ai/DeepSeek-R1", name: "DeepSeek R1"),
-        OpenAIModelInfo(id: "Qwen/Qwen2.5-Coder-32B-Instruct", name: "Qwen 2.5 Coder 32B"),
-        OpenAIModelInfo(id: "meta-llama/Llama-3.3-70B-Instruct", name: "Llama 3.3 70B"),
-        OpenAIModelInfo(id: "mistralai/Mistral-Small-24B-Instruct-2501", name: "Mistral Small 24B"),
-    ]
-
-    /// Detect vision-capable models by name patterns
-    /// Auto-detect vision-capable models by name keywords.
-    /// Sources: ollama.com/search?c=vision, OpenAI docs, Anthropic docs
-    nonisolated static func isVisionModel(_ model: String) -> Bool {
-        let lower = model.lowercased()
-        let visionKeywords = [
-            // Ollama vision models (from ollama.com/search?c=vision)
-            "llava", "llava-llama3", "bakllava", "minicpm-v",
-            "gemma3", "gemma4", "gemma-3", "gemma-4",
-            "qwen-vl", "qwen2.5vl", "qwen2.5-vl", "qwen3-vl", "qwen3.5",
-            "llama3.2-vision", "llama-3.2-vision", "llama4",
-            "mistral-small3.1", "mistral-small3.2", "mistral-large-3",
-            "kimi-k2.5", "gemini-3-flash", "glm-ocr", "deepseek-ocr",
-            "ministral-3", "devstral-small-2",
-            // General vision keywords
-            "vision", "-vl", "cogvlm", "internvl", "pixtral", "molmo",
-            "phi-3-vision", "phi-3.5-vision", "phi-4", "idefics", "fuyu",
-            // Cloud API vision models
-            "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "claude",
-            "glm-4v", "glm-4.5v", "glm-4.6v", "glm-5v", "deepseek-vl",
-        ]
-        return visionKeywords.contains { lower.contains($0) }
-    }
-
     var maxHistoryBeforeSummary: Int = UserDefaults.standard.object(forKey: "agentMaxHistory") as? Int ?? 10 {
         didSet { UserDefaults.standard.set(maxHistoryBeforeSummary, forKey: "agentMaxHistory") }
     }
@@ -738,13 +379,9 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(visibleTaskCount, forKey: "agentVisibleTasks") }
     }
 
-    static let iterationOptions = [25, 50, 100, 200, 400, 800, 1600]
-
     var maxIterations: Int = UserDefaults.standard.object(forKey: "agentMaxIterations") as? Int ?? 50 {
         didSet { UserDefaults.standard.set(maxIterations, forKey: "agentMaxIterations") }
     }
-
-    static let retryOptions = [1, 2, 3, 5, 10, 15, 20]
 
     var maxRetries: Int = UserDefaults.standard.object(forKey: "agentMaxRetries") as? Int ?? 10 {
         didSet { UserDefaults.standard.set(maxRetries, forKey: "agentMaxRetries") }
@@ -792,32 +429,6 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(grokTemperature, forKey: "grokTemperature") }
     }
 
-    /// Current provider's temperature value.
-    var currentTemperature: Double { temperatureForProvider(selectedProvider) }
-
-    /// Get temperature for the current provider.
-    func temperatureForProvider(_ provider: APIProvider) -> Double {
-        switch provider {
-        case .claude: return claudeTemperature
-        case .ollama: return ollamaTemperature
-        case .openAI: return openAITemperature
-        case .deepSeek: return deepSeekTemperature
-        case .huggingFace: return huggingFaceTemperature
-        case .localOllama: return localOllamaTemperature
-        case .vLLM: return vLLMTemperature
-        case .lmStudio: return lmStudioTemperature
-        case .zAI: return zAITemperature
-        case .bigModel: return zAITemperature
-        case .qwen: return openAITemperature
-        case .gemini: return geminiTemperature
-        case .grok: return grokTemperature
-        case .mistral: return openAITemperature
-        case .codestral: return openAITemperature
-        case .vibe: return openAITemperature
-        case .foundationModel: return claudeTemperature
-        }
-    }
-
     /// Max output tokens per provider. 0 = let provider decide (omit from request).
     /// Claude API requires max_tokens so 0 defaults to 16384 at the service level.
     var maxTokens: Int = UserDefaults.standard.object(forKey: "maxTokens") as? Int ?? 0 {
@@ -841,137 +452,10 @@ final class AgentViewModel {
         }
     }
 
-    struct OllamaModelInfo: Identifiable {
-        let id: String // same as name
-        let name: String
-        let supportsVision: Bool
-    }
-
-    nonisolated static let defaultOllamaModels: [OllamaModelInfo] = [
-        OllamaModelInfo(id: "nemotron-3-super", name: "nemotron-3-super", supportsVision: false),
-        OllamaModelInfo(id: "qwen3.5:397b", name: "qwen3.5:397b", supportsVision: false),
-        OllamaModelInfo(id: "minimax-m2.5", name: "minimax-m2.5", supportsVision: false),
-        OllamaModelInfo(id: "glm-5", name: "glm-5", supportsVision: false),
-        OllamaModelInfo(id: "kimi-k2.5", name: "kimi-k2.5", supportsVision: true),
-        OllamaModelInfo(id: "glm-4.7", name: "glm-4.7", supportsVision: false),
-        OllamaModelInfo(id: "minimax-m2.1", name: "minimax-m2.1", supportsVision: false),
-        OllamaModelInfo(id: "gemini-3-flash-preview", name: "gemini-3-flash-preview", supportsVision: true),
-        OllamaModelInfo(id: "nemotron-3-nano:30b", name: "nemotron-3-nano:30b", supportsVision: false),
-        OllamaModelInfo(id: "devstral-small-2:24b", name: "devstral-small-2:24b", supportsVision: false),
-        OllamaModelInfo(id: "devstral-2:123b", name: "devstral-2:123b", supportsVision: false),
-        OllamaModelInfo(id: "ministral-3:8b", name: "ministral-3:8b", supportsVision: false),
-        OllamaModelInfo(id: "ministral-3:14b", name: "ministral-3:14b", supportsVision: false),
-        OllamaModelInfo(id: "deepseek-v3.2", name: "deepseek-v3.2", supportsVision: false),
-        OllamaModelInfo(id: "mistral-large-3:675b", name: "mistral-large-3:675b", supportsVision: false),
-        OllamaModelInfo(id: "deepseek-v3.1:671b", name: "deepseek-v3.1:671b", supportsVision: false),
-        OllamaModelInfo(id: "cogito-2.1:671b", name: "cogito-2.1:671b", supportsVision: false),
-        OllamaModelInfo(id: "minimax-m2", name: "minimax-m2", supportsVision: false),
-        OllamaModelInfo(id: "glm-4.6", name: "glm-4.6", supportsVision: false),
-        OllamaModelInfo(id: "qwen3-vl:235b-instruct", name: "qwen3-vl:235b-instruct", supportsVision: true),
-        OllamaModelInfo(id: "qwen3-vl:235b", name: "qwen3-vl:235b", supportsVision: true),
-        OllamaModelInfo(id: "qwen3-next:80b", name: "qwen3-next:80b", supportsVision: false),
-        OllamaModelInfo(id: "kimi-k2:1t", name: "kimi-k2:1t", supportsVision: false),
-        OllamaModelInfo(id: "gpt-oss:120b", name: "gpt-oss:120b", supportsVision: false),
-        OllamaModelInfo(id: "qwen3-coder:480b", name: "qwen3-coder:480b", supportsVision: false),
-        OllamaModelInfo(id: "gemma3:27b", name: "gemma3:27b", supportsVision: true),
-        OllamaModelInfo(id: "gemma3:12b", name: "gemma3:12b", supportsVision: true),
-        OllamaModelInfo(id: "gemma3:4b", name: "gemma3:4b", supportsVision: true),
-        OllamaModelInfo(id: "qwen3-coder-next", name: "qwen3-coder-next", supportsVision: false),
-        OllamaModelInfo(id: "gpt-oss:20b", name: "gpt-oss:20b", supportsVision: false)
-
-    ]
-    // MARK: - Claude Models
-
-    struct ClaudeModelInfo: Identifiable, Codable {
-        let id: String
-        let name: String
-        let displayName: String
-        let createdAt: String?
-        let description: String?
-
-        var formattedDisplayName: String {
-            if let created = createdAt {
-                let dateStr = String(created.prefix(10))
-                return "\(displayName) (\(dateStr))"
-            }
-            return displayName
-        }
-    }
-
     var availableClaudeModels: [ClaudeModelInfo] = []
-
-    nonisolated static let defaultClaudeModels: [ClaudeModelInfo] = [
-        ClaudeModelInfo(
-            id: "claude-sonnet-4-6",
-            name: "claude-sonnet-4-6",
-            displayName: "Claude Sonnet 4.6",
-            createdAt: "2026-02-17",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-opus-4-6",
-            name: "claude-opus-4-6",
-            displayName: "Claude Opus 4.6",
-            createdAt: "2026-02-04",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-opus-4-5-20251101",
-            name: "claude-opus-4-5-20251101",
-            displayName: "Claude Opus 4.5",
-            createdAt: "2025-11-24",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-haiku-4-5-20251001",
-            name: "claude-haiku-4-5-20251001",
-            displayName: "Claude Haiku 4.5",
-            createdAt: "2025-10-15",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-sonnet-4-5-20250929",
-            name: "claude-sonnet-4-5-20250929",
-            displayName: "Claude Sonnet 4.5",
-            createdAt: "2025-09-29",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-opus-4-1-20250805",
-            name: "claude-opus-4-1-20250805",
-            displayName: "Claude Opus 4.1",
-            createdAt: "2025-08-05",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-opus-4-20250514",
-            name: "claude-opus-4-20250514",
-            displayName: "Claude Opus 4",
-            createdAt: "2025-05-22",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-sonnet-4-20250514",
-            name: "claude-sonnet-4-20250514",
-            displayName: "Claude Sonnet 4",
-            createdAt: "2025-05-22",
-            description: nil
-        ),
-        ClaudeModelInfo(
-            id: "claude-3-haiku-20240307",
-            name: "claude-3-haiku-20240307",
-            displayName: "Claude Haiku 3",
-            createdAt: "2024-03-07",
-            description: nil
-        )
-    ]
 
     var ollamaModels: [OllamaModelInfo] = []
     var isFetchingModels = false
-
-    var selectedOllamaSupportsVision: Bool {
-        ollamaModels.first(where: { $0.name == ollamaModel })?.supportsVision ?? false
-    }
 
     // Local Ollama settings
     var localOllamaEndpoint: String = UserDefaults.standard.string(forKey: "localOllamaEndpoint") ?? "http://localhost:11434/api/chat" {
@@ -992,10 +476,6 @@ final class AgentViewModel {
     var localOllamaModels: [OllamaModelInfo] = []
     var isFetchingLocalModels = false
 
-    var selectedLocalOllamaSupportsVision: Bool {
-        localOllamaModels.first(where: { $0.name == localOllamaModel })?.supportsVision ?? false
-    }
-
     var projectFolder: String = UserDefaults.standard.string(forKey: "agentProjectFolder") ?? "" {
         didSet { UserDefaults.standard.set(projectFolder, forKey: "agentProjectFolder") }
     }
@@ -1011,107 +491,6 @@ final class AgentViewModel {
     var promptHistory: [String] = UserDefaults.standard.stringArray(forKey: "agentPromptHistory") ?? []
     var historyIndex = -1
     var savedInput = ""
-
-    /// Prompt history for whichever tab is currently selected.
-    var currentTabPromptHistory: [String] {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId)
-        {
-            return tab.promptHistory
-        }
-        return promptHistory
-    }
-
-    /// Display name for the currently selected tab.
-    var currentTabName: String {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId)
-        {
-            return tab.displayTitle
-        }
-        return "Main"
-    }
-
-    /// Error history for UI display — per-tab when a tab is selected, global for main
-    var errorHistory: [String] {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId),
-           !tab.isMainTab
-        {
-            return tab.tabErrors
-        }
-        return ErrorHistory.shared.recentErrors(limit: 50).map { error in
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss"
-            let time = formatter.string(from: error.timestamp)
-            let message = error.message.truncate(to: 100)
-            return "[\(time)] \(error.errorType): \(message)"
-        }
-    }
-
-    /// Task summaries for UI display — per-tab when a tab is selected, global for main
-    var taskSummaries: [String] {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId),
-           !tab.isMainTab
-        {
-            return tab.tabTaskSummaries
-        }
-        return history.records.suffix(50).map { record in
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss"
-            let time = formatter.string(from: record.date)
-            return "[\(time)] \(record.prompt) → \(record.summary)"
-        }
-    }
-
-    /// Clear prompt history for whichever tab is currently selected.
-    func clearCurrentTabPromptHistory() {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId)
-        {
-            tab.promptHistory.removeAll()
-            tab.historyIndex = -1
-            tab.savedInput = ""
-        } else {
-            promptHistory.removeAll()
-            historyIndex = -1
-            savedInput = ""
-            UserDefaults.standard.removeObject(forKey: "agentPromptHistory")
-        }
-    }
-
-    /// Clear history by type: "Prompts", "Error History", or "Task Summaries".
-    func clearHistory(type: String) {
-        if let selectedId = selectedTabId,
-           let tab = tab(for: selectedId),
-           !tab.isMainTab
-        {
-            switch type {
-            case "Prompts":
-                tab.promptHistory.removeAll()
-                tab.historyIndex = -1
-                tab.savedInput = ""
-            case "Error History":
-                tab.tabErrors.removeAll()
-            case "Task Summaries":
-                tab.tabTaskSummaries.removeAll()
-            default:
-                break
-            }
-        } else {
-            switch type {
-            case "Prompts":
-                clearCurrentTabPromptHistory()
-            case "Error History":
-                ErrorHistory.shared.clear()
-            case "Task Summaries":
-                history.clearAll()
-            default:
-                break
-            }
-        }
-    }
 
     let helperService = HelperService()
     let userService = UserService()
@@ -1205,12 +584,10 @@ final class AgentViewModel {
     var logPersistTask: Task<Void, Never>?
     var streamLineCount = 0
     var streamTruncated = false
-    static let outputLineOptions = [10, 50, 75, 100, 150, 200, 250, 500, 750, 1000, 1500]
     var maxOutputLines: Int = UserDefaults.standard.object(forKey: "agentMaxOutputLines") as? Int ?? 1000 {
         didSet { UserDefaults.standard.set(maxOutputLines, forKey: "agentMaxOutputLines") }
     }
 
-    static let readPreviewOptions = [3, 10, 50, 100, 250, 500, 750, 1000]
     var readFilePreviewLines: Int = UserDefaults.standard.object(forKey: "agentReadFilePreviewLines") as? Int ?? 3 {
         didSet { UserDefaults.standard.set(readFilePreviewLines, forKey: "agentReadFilePreviewLines") }
     }
@@ -1225,26 +602,6 @@ final class AgentViewModel {
 
     var deletionLimit: Int = UserDefaults.standard.object(forKey: "agentDeletionLimit") as? Int ?? 10 {
         didSet { UserDefaults.standard.set(deletionLimit, forKey: "agentDeletionLimit") }
-    }
-
-    // MARK: - Terminal Speed
-
-    enum TerminalSpeed: Int, CaseIterable {
-        case current = 22
-        case fast = 15
-        case faster = 10
-        case blazing = 5
-        case ludicrous = 1
-
-        var label: String {
-            switch self {
-            case .current: "Normal"
-            case .fast: "Fast"
-            case .faster: "Faster"
-            case .blazing: "Blazing"
-            case .ludicrous: "Ludicrous"
-            }
-        }
     }
 
     var terminalSpeed: TerminalSpeed = TerminalSpeed(rawValue: UserDefaults.standard.integer(forKey: "terminalSpeed")) ?? .current {
@@ -1266,7 +623,6 @@ final class AgentViewModel {
     var dripTask: Task<Void, Never>?
     var streamFlushTask: Task<Void, Never>?
     var streamingTextStarted = false
-    static let maxLogSize = 60_000
     var recentOutputHashes: Set<Int> = []
 
     // MARK: - Image snapshot cache (persists across launches)
@@ -1288,26 +644,7 @@ final class AgentViewModel {
         options: .caseInsensitive
     )
 
-    // MARK: - Off-Main-Thread Helper
-
-    /// Run synchronous work off the main thread to avoid blocking the UI.
-    static func offMain<T: Sendable>(_ work: @Sendable @escaping () -> T) async -> T {
-        await Task.detached { work() }.value
-    }
-
-
-    // MARK: - Computed Properties
-
-    var daemonReady: Bool { helperService.helperReady }
-    var agentReady: Bool { userService.userReady }
-    var hasAttachments: Bool { !attachedImages.isEmpty }
-
     // MARK: - Voice Input
-
-    /// Check if speech recognition is authorized
-    var isSpeechRecognitionAuthorized: Bool {
-        SFSpeechRecognizer.authorizationStatus() == .authorized
-    }
 
     var speechAudioEngine: AVAudioEngine?
     var speechRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -1431,38 +768,6 @@ final class AgentViewModel {
 
             // Pre-warm Ollama model to avoid cold-start delay on first task
             await self.preWarmOllama()
-        }
-    }
-
-    /// Send a tiny request to Ollama to load the model into memory.
-    /// This eliminates the 5-15s cold-start delay on the first task.
-    private func preWarmOllama() async {
-        let provider = selectedProvider
-        guard provider == .ollama || provider == .localOllama else { return }
-        let endpoint = provider == .ollama ? ollamaEndpoint : localOllamaEndpoint
-        let model = provider == .ollama ? ollamaModel : localOllamaModel
-        guard !model.isEmpty else { return }
-
-        let chatURL = endpoint.isEmpty ? "http://localhost:11434/api/chat" : endpoint
-        guard let url = URL(string: chatURL) else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30
-        let body: [String: Any] = [
-            "model": model,
-            "messages": [["role": "user", "content": "hi"]],
-            "stream": false,
-            "options": ["num_predict": 1] // Generate just 1 token — enough to load model
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        do {
-            let _ = try await URLSession.shared.data(for: request)
-            appendLog("⚙️ Ollama: \(model) pre-warmed")
-        } catch {
-            // Silent fail — model will load on first task instead
         }
     }
 }

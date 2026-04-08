@@ -30,6 +30,19 @@ enum LogLimits {
     /// `web_fetch` cleaned HTML cap.
     static let webFetchChars = 8_000
 
+    /// Short summary/excerpt cap — used for sub-agent result snapshots and
+    /// per-message compression input. Small enough that an LLM can summarize
+    /// it cheaply, large enough to preserve meaningful context.
+    static let summaryChars = 2_000
+
+    /// Outbound iMessage reply cap. iMessage tolerates ~65 KB but carriers
+    /// may split anything bigger than ~4 KB unpredictably.
+    static let messageReplyChars = 4_000
+
+    /// Aggregate cap for merged config text (CLAUDE.md / agent.md / @include
+    /// resolution). Keeps the merged-config block from blowing up the prompt.
+    static let configMergeChars = 4_000
+
     // MARK: - Shared trim helper
 
     /// Trim `text` to `cap` chars, appending a consistent truncation banner.

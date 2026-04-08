@@ -89,9 +89,9 @@ extension AgentViewModel {
         // Strip leading "Agent!" / "Agent " from outgoing replies so the
         // receiving Mac doesn't loop on its own command. Use the same
         // case-insensitive prefix logic as inbound parsing.
-        // iMessage supports up to ~65KB, but we cap at 4000 chars for reliability
-        // (this is the practical limit before carriers may split messages).
-        let reply = String(Self.stripAgentPrefix(from: summary).prefix(4000))
+        // Cap via LogLimits.messageReplyChars (4K) — iMessage tolerates more
+        // but carriers split unpredictably above that.
+        let reply = LogLimits.trim(Self.stripAgentPrefix(from: summary), cap: LogLimits.messageReplyChars)
         // Escape for AppleScript
         let escaped = reply
             .replacingOccurrences(of: "\\", with: "\\\\")

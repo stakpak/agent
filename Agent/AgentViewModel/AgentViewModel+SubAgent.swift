@@ -43,7 +43,7 @@ final class SubAgent: Identifiable {
           <task-id>\(id.uuidString.prefix(8))</task-id>
           <name>\(name)</name>
           <status>\(status.rawValue)</status>
-          <result>\(result.prefix(2000))</result>
+          <result>\(LogLimits.trim(result, cap: LogLimits.summaryChars))</result>
           <usage>
             <input_tokens>\(inputTokens)</input_tokens>
             <output_tokens>\(outputTokens)</output_tokens>
@@ -267,7 +267,7 @@ extension AgentViewModel {
         }
 
         agent.status = .completed
-        agent.result = String(finalResult.prefix(2000))
+        agent.result = LogLimits.trim(finalResult, cap: LogLimits.summaryChars)
         appendLog(
             "🔀 Sub-agent '\(agent.name)' completed "
                 + "(\(agent.inputTokens + agent.outputTokens) tokens, "

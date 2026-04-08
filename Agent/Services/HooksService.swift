@@ -139,6 +139,10 @@ final class HooksService {
             env["HOOK_INPUT"] = inputJSON
             env["HOOK_OUTPUT"] = output
             env["HOOK_EVENT"] = hook.event.rawValue
+            // Hooks run from $HOME with no project context — export AGENT_PROJECT_FOLDER
+            // pointing at home so hook scripts can rely on the same env contract as
+            // every other shell-execution path in Agent!.
+            env["AGENT_PROJECT_FOLDER"] = NSHomeDirectory()
             process.environment = env
 
             let pipe = Pipe()

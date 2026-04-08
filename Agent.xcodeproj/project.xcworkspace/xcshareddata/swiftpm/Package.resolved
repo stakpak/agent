@@ -78,8 +78,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentTerminalNeo.git",
       "state": {
-        "revision": "d60cc76ba8bccae63b0dd67ce8cab257336ce81d",
-        "version": "1.37.0"
+        "revision": "39cd40955d235445fdb9a9f8281678c2ae93271a",
+        "version": "1.37.1"
       }
     },
     {
@@ -87,8 +87,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentTools.git",
       "state": {
-        "revision": "cfabdd38cf5f511cbaa99b78d6267d0c2d11a23e",
-        "version": "2.50.2"
+        "revision": "6ddea843627b3d2c5079f25d2b923b2b54af66e3",
+        "version": "2.50.3"
       }
     },
     {

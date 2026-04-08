@@ -127,6 +127,30 @@ extension AgentViewModel {
                 isComplete: false
             )
 
+        case "execute_javascript":
+            let script = input["source"] as? String ?? input["script"] as? String ?? ""
+            tab.appendLog("⚡️ JXA:\n\(script)")
+            tab.isRunning = true
+            tab.flush()
+            let escaped = script.replacingOccurrences(of: "'", with: "'\\''")
+            let command = "osascript -l JavaScript -e '\(escaped)'"
+            let result = await Self.executeTCCStreaming(command: command) { [weak tab] chunk in
+                Task { @MainActor in tab?.appendOutput(chunk) }
+            }
+            tab.isRunning = false
+            let toolContent: String
+            if result.status == 0 {
+                toolContent = result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+            } else {
+                let jxaOutput = result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+                toolContent = Self.enrichJXAFailure(source: script, output: jxaOutput)
+            }
+            tab.flush()
+            return TabToolResult(
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": toolContent],
+                isComplete: false
+            )
+
         default:
             let output = await executeNativeTool(name, input: input)
             tab.appendLog(output); tab.flush()

@@ -47,9 +47,21 @@ final class ScriptService: @unchecked Sendable {
 
     private static let scriptsRepoURL = "https://github.com/macOS26/AgentScripts.git"
     private static let bridgesRepoURL = "https://github.com/macOS26/AgentEventBridges.git"
+
+    /// Pinned AgentScripts release tag. Bump when a new AgentScripts release ships
+    /// (e.g. when adding new bundled scripts or fixing bugs in existing ones).
+    /// Pull/sync URLs derive from this — every user fetches the same immutable
+    /// snapshot, NOT main HEAD which can drift.
+    static let scriptsRelease = "1.0.5"
+
+    /// Pinned AgentEventBridges release tag. Same rationale as scriptsRelease — every
+    /// user clones the same immutable bridges snapshot rather than main HEAD.
+    static let bridgesRelease = "1.1.0"
+
     /// Raw GitHub URL prefix for pulling individual script files (single-file recovery
     /// without a full clone). Path inside the repo: Agent/agents/Sources/Scripts/<name>.swift
-    static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/AgentScripts/main/Agent/agents/Sources/Scripts"
+    /// Uses the pinned release tag so the URL is immutable across users.
+    static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/AgentScripts/refs/tags/\(scriptsRelease)/Agent/agents/Sources/Scripts"
 
     /// Installed location: ~/Documents/AgentScript/bridges/
     static let installedBridgesPath: URL = {
@@ -251,7 +263,7 @@ final class ScriptService: @unchecked Sendable {
         try? fm.removeItem(at: tmpDir)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["clone", "--depth", "1", Self.scriptsRepoURL, tmpDir.path]
+        process.arguments = ["clone", "--depth", "1", "--branch", Self.scriptsRelease, Self.scriptsRepoURL, tmpDir.path]
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         var env = ProcessInfo.processInfo.environment
         env["HOME"] = NSHomeDirectory()
@@ -271,7 +283,8 @@ final class ScriptService: @unchecked Sendable {
         cloneBridgesRepo()
     }
 
-    /// Clone AgentEventBridges repo to ~/Documents/AgentScript/bridges/
+    /// Clone AgentEventBridges repo to ~/Documents/AgentScript/bridges/.
+    /// Pinned to `bridgesRelease` so every user clones the same immutable snapshot.
     private func cloneBridgesRepo() {
         let dest = Self.installedBridgesPath
         let fm = FileManager.default
@@ -279,7 +292,7 @@ final class ScriptService: @unchecked Sendable {
         try? fm.removeItem(at: dest)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["clone", "--depth", "1", Self.bridgesRepoURL, dest.path]
+        process.arguments = ["clone", "--depth", "1", "--branch", Self.bridgesRelease, Self.bridgesRepoURL, dest.path]
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         var cloneEnv = ProcessInfo.processInfo.environment
         cloneEnv["HOME"] = NSHomeDirectory()

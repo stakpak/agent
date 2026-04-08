@@ -213,7 +213,7 @@ extension ScriptService {
 
         // Don't clobber a live script
         if fm.fileExists(atPath: scriptFile.path) {
-            return "Error: '\(scriptName)' already exists. Delete it first (the delete will create a fresh backup)."
+            return "Error: '\(scriptName)' already exists. Recovery: call agent_script(action:\"delete\", name:\"\(scriptName)\") first (delete creates a backup automatically), then retry restore."
         }
 
         // Locate the backup
@@ -221,13 +221,13 @@ extension ScriptService {
         if let explicit = backupFilename {
             let candidate = scriptsTrashDir.appendingPathComponent(explicit)
             guard fm.fileExists(atPath: candidate.path) else {
-                return "Error: backup '\(explicit)' not found in .Trash."
+                return "Error: backup '\(explicit)' not found in .Trash. Recovery: call agent_script(action:\"list_backups\", name:\"\(scriptName)\") to see available backup filenames, then retry."
             }
             backupURL = candidate
         } else {
             let backups = listScriptBackups(name: scriptName)
             guard let latest = backups.first else {
-                return "Error: no backups found for '\(scriptName)'."
+                return "Error: no backups found for '\(scriptName)'. Recovery: call agent_script(action:\"pull\", name:\"\(scriptName)\") to fetch the upstream version from AgentScripts instead."
             }
             backupURL = latest
         }
@@ -294,10 +294,16 @@ extension ScriptService {
     ///    we don't auto-resurrect it. They can `pull` it explicitly.
     func syncBundledScriptsFromRemote() async {
         AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: start")
-        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        // Include both short version and build number so a TestFlight build bump
+        // (same X.Y.Z, new build) re-syncs. Resilient to UserDefaults sync across
+        // machines too — different machines with different builds re-sync.
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
+        let currentVersion = "\(shortVersion)+\(buildNumber)"
         let lastSynced = UserDefaults.standard.string(forKey: Self.lastSyncedAgentVersionKey) ?? ""
         if lastSynced == currentVersion {
-            AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: skip (version \(currentVersion) already synced)")
+            AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: skip (\(currentVersion) already synced)")
             return
         }
 
@@ -404,43 +410,83 @@ extension ScriptService {
     /// no full clone). Recovery path for when the model deleted a script the user wants
     /// the upstream version of (rather than a `.Trash` backup that might be a local edit).
     ///
-    /// Refuses to overwrite an existing live script — caller must delete it first
-    /// (which itself creates a fresh backup), so the operation is always reversible.
+    /// Refuses to overwrite a live script that has DIVERGED from upstream — caller
+    /// must delete it first (which creates a fresh backup), so the operation is
+    /// always reversible. If the local file is byte-identical to upstream, returns
+    /// a no-op success message instead of an error.
     func pullScriptFromRemote(name: String) async -> String {
         AuditLog.log(.agentScript, "pullScriptFromRemote: \(name)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let scriptFile = scriptsDir.appendingPathComponent("\(scriptName).swift")
         let fm = FileManager.default
 
-        // Don't clobber a live script
-        if fm.fileExists(atPath: scriptFile.path) {
-            return "Error: '\(scriptName)' already exists locally. Delete it first (delete creates a backup) before pulling from remote."
-        }
-
-        let urlString = "\(Self.scriptsRawURLPrefix)/\(scriptName).swift"
-        guard let url = URL(string: urlString) else {
-            return "Error: could not build URL for '\(scriptName)'"
-        }
-
+        // Try `main` first, fall back to `master` for older repos. Both URLs come
+        // from the raw.githubusercontent.com host so the failure mode is just an
+        // HTTP 404 — no DNS or auth differences to worry about.
         let fetchedContent: String
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse else {
-                return "Error: invalid response pulling '\(scriptName)'"
+        switch await fetchUpstreamScript(scriptName: scriptName, branch: "main") {
+        case .success(let content):
+            fetchedContent = content
+        case .notFound:
+            switch await fetchUpstreamScript(scriptName: scriptName, branch: "master") {
+            case .success(let content):
+                fetchedContent = content
+            case .notFound:
+                return "Error: '\(scriptName)' not found in AgentScripts remote on either main or master branch. Recovery: call agent_script(action:\"list\") to see local scripts, or agent_script(action:\"create\", name:\"\(scriptName)\", content:\"...\") to create it from scratch. Catalog: \(Self.scriptsRawURLPrefix.replacingOccurrences(of: "raw.githubusercontent.com", with: "github.com").replacingOccurrences(of: "/main/", with: "/tree/main/"))"
+            case .failure(let err):
+                return "Error pulling '\(scriptName)' from remote (master fallback): \(err). Recovery: try again in a moment, or use agent_script(action:\"restore\", name:\"\(scriptName)\") to recover from .Trash backup."
             }
-            guard http.statusCode == 200 else {
-                return "Error: '\(scriptName)' not found in AgentScripts remote (HTTP \(http.statusCode)). Browse \(Self.scriptsRawURLPrefix.replacingOccurrences(of: "raw.githubusercontent.com", with: "github.com").replacingOccurrences(of: "/main/", with: "/tree/main/")) for available script names."
+        case .failure(let err):
+            return "Error pulling '\(scriptName)' from remote: \(err). Recovery: try again in a moment, or use agent_script(action:\"restore\", name:\"\(scriptName)\") to recover from .Trash backup."
+        }
+
+        // If the live file is byte-identical to upstream, treat as a no-op success
+        // rather than an error. Lets the model call `pull` defensively without
+        // having to delete first when nothing actually needs to change.
+        if fm.fileExists(atPath: scriptFile.path) {
+            if let local = try? String(contentsOf: scriptFile, encoding: .utf8), local == fetchedContent {
+                return "'\(scriptName)' already matches AgentScripts upstream (no-op, \(fetchedContent.count) bytes)."
             }
-            guard let decoded = String(data: data, encoding: .utf8) else {
-                return "Error: could not decode '\(scriptName)' content from remote"
-            }
-            fetchedContent = decoded
-        } catch {
-            return "Error pulling '\(scriptName)' from remote: \(error.localizedDescription)"
+            return "Error: '\(scriptName)' has local edits that differ from upstream. Recovery: call agent_script(action:\"delete\", name:\"\(scriptName)\") first (delete creates a backup automatically), then retry pull. Or use agent_script(action:\"restore\", name:\"\(scriptName)\") if you want to recover the previous local version instead."
         }
 
         // Synchronous: write file, lock package, regen — no await between lock and unlock
         return installPulledScript(scriptName: scriptName, scriptFile: scriptFile, content: fetchedContent)
+    }
+
+    /// Result of a single-branch upstream fetch.
+    private enum UpstreamFetchResult {
+        case success(String)
+        case notFound
+        case failure(String)
+    }
+
+    /// Fetch a script's raw content from the AgentScripts repo on a specific branch.
+    /// Returns `.notFound` for HTTP 404 (so the caller can try a fallback branch),
+    /// `.failure` for any other error, `.success` with the content otherwise.
+    private func fetchUpstreamScript(scriptName: String, branch: String) async -> UpstreamFetchResult {
+        let prefix = Self.scriptsRawURLPrefix.replacingOccurrences(of: "/main/", with: "/\(branch)/")
+        guard let url = URL(string: "\(prefix)/\(scriptName).swift") else {
+            return .failure("could not build URL")
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure("invalid response")
+            }
+            if http.statusCode == 404 {
+                return .notFound
+            }
+            guard http.statusCode == 200 else {
+                return .failure("HTTP \(http.statusCode)")
+            }
+            guard let decoded = String(data: data, encoding: .utf8) else {
+                return .failure("could not decode content")
+            }
+            return .success(decoded)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
     }
 
     /// Synchronous installer for `pullScriptFromRemote` — write the file, regenerate

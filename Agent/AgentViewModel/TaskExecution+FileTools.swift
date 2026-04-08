@@ -359,7 +359,12 @@ extension AgentViewModel {
             let destination = input["destination"] as? String ?? ""
             let startLine = input["start_line"] as? Int
             let endLine = input["end_line"] as? Int
-            let rangeNote = (startLine != nil && endLine != nil) ? " (lines \(startLine!)-\(endLine!))" : ""
+            let rangeNote: String
+            if let s = startLine, let e = endLine {
+                rangeNote = " (lines \(s)-\(e))"
+            } else {
+                rangeNote = ""
+            }
 
             let expanded = (filePath as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expanded),

@@ -132,7 +132,7 @@ extension AgentViewModel {
                         if let content = blocks[j]["content"] as? String, content.count > 300 {
                             let key = content.hashValue
                             if _summaryCache[key] == nil {
-                                let input = String(content.prefix(2000))
+                                let input = LogLimits.trim(content, cap: LogLimits.summaryChars)
                                 if let resp = try? await session.respond(to: input) {
                                     _summaryCache[key] = "[summary] " + resp.content
                                 }
@@ -147,7 +147,7 @@ extension AgentViewModel {
                 } else if let text = messages[i]["content"] as? String, text.count > 300 {
                     let key = text.hashValue
                     if _summaryCache[key] == nil {
-                        let input = String(text.prefix(2000))
+                        let input = LogLimits.trim(text, cap: LogLimits.summaryChars)
                         if let resp = try? await session.respond(to: input) {
                             _summaryCache[key] = "[summary] " + resp.content
                         }

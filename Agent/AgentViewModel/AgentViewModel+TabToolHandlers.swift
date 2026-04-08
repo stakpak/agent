@@ -25,7 +25,8 @@ extension AgentViewModel {
             return await handleTabCoreTool(tab: tab, name: name, input: input, toolId: toolId)
         // File Manager
         case "read_file", "write_file", "edit_file", "create_diff", "apply_diff", "undo_edit", "diff_and_apply", "list_files",
-             "search_files", "read_dir", "mkdir":
+             "search_files", "read_dir", "mkdir",
+             "restore_file", "list_file_backups":
             return await handleTabFileManagerTool(tab: tab, name: name, input: input, toolId: toolId)
         // Git
         case "git_status", "git_diff", "git_log", "git_commit", "git_diff_patch", "git_branch":
@@ -39,7 +40,7 @@ extension AgentViewModel {
         case "execute_agent_command", "execute_daemon_command", "run_shell_script", "batch_commands", "batch_tools":
             return await handleTabShellTool(tab: tab, name: name, input: input, toolId: toolId)
         // Automation
-        case "run_applescript", "run_osascript", "lookup_sdef":
+        case "run_applescript", "run_osascript", "lookup_sdef", "execute_javascript":
             return await handleTabAutomationTool(tab: tab, name: name, input: input, toolId: toolId)
         // Accessibility (prefix match via default + where)
         case let n where n.hasPrefix("ax_"):

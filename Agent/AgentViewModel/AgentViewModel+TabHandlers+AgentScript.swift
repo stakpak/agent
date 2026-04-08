@@ -149,7 +149,7 @@ extension AgentViewModel {
             let scriptName = await Self.offMain { [ss = scriptService] in ss.resolveScriptName(rawRunName) }
             let arguments = input["arguments"] as? String ?? ""
             guard let compileCmd = await Self.offMain({ [ss = scriptService] in ss.compileCommand(name: scriptName) }) else {
-                let err = "Error: script '\(scriptName)' not found."
+                let err = "Error: script '\(scriptName)' not found. Recovery: call agent_script(action:\"list\") to see available scripts, or agent_script(action:\"pull\", name:\"\(scriptName)\") if you expected an upstream script."
                 tab.appendLog(err)
                 tab.flush()
                 return TabToolResult(
@@ -158,6 +158,14 @@ extension AgentViewModel {
                 )
             }
 
+            // Dedup: close any existing background tab for this script before
+            // spawning a fresh one. Matches the user-direct runAgentDirect
+            // behavior — repeated runs replace rather than pile up duplicate
+            // tabs with the same scriptName. Skip main tabs (those have their
+            // own LLM config and shouldn't be auto-closed).
+            if let existing = scriptTabs.first(where: { $0.scriptName == scriptName && !$0.isMainTab && $0.id != tab.id }) {
+                closeScriptTab(id: existing.id)
+            }
             // Spawn a fresh ScriptTab for the run so the calling LLM tab is
             // not blocked. The script runs in a detached Task and streams
             // output to the spawned tab; the calling tool returns immediately.

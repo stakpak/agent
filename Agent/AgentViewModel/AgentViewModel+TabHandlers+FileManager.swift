@@ -407,6 +407,60 @@ extension AgentViewModel {
             tab.appendLog(output); tab.flush()
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
 
+        case "restore_file":
+            // Recover the most recent backup of a file (or a specific backup) from
+            // ~/Documents/AgentScript/backups/<tabUUID>/. Mirrors agent_script(action:"restore").
+            let filePath = input["file_path"] as? String ?? ""
+            let backupName = input["backup"] as? String
+            let expanded = (filePath as NSString).expandingTildeInPath
+            let fileName = (expanded as NSString).lastPathComponent
+            tab.appendLog("↩️ Restore: \(filePath)")
+            tab.flush()
+            let backups = FileBackupService.shared.listBackups(tabID: tab.id)
+                .filter { $0.original == fileName }
+            let output: String
+            if let explicit = backupName {
+                if let match = backups.first(where: { ($0.backup as NSString).lastPathComponent == explicit }) {
+                    if FileBackupService.shared.restore(backupPath: match.backup, to: expanded) {
+                        Self.invalidateFileReadCache(path: expanded)
+                        output = "Restored \(fileName) from \(explicit)."
+                    } else {
+                        output = "Error: failed to restore from \(explicit). Recovery: call file(action:\"list_backups\", file_path:\"\(filePath)\") to verify the backup still exists."
+                    }
+                } else {
+                    output = "Error: backup '\(explicit)' not found for \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(filePath)\") to see available backups."
+                }
+            } else if let latest = backups.first {
+                if FileBackupService.shared.restore(backupPath: latest.backup, to: expanded) {
+                    Self.invalidateFileReadCache(path: expanded)
+                    output = "Restored \(fileName) from latest backup (\(latest.date))."
+                } else {
+                    output = "Error: failed to restore latest backup of \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(filePath)\") to inspect backups, or use undo_edit if recent."
+                }
+            } else {
+                output = "Error: no backups found for \(fileName). Recovery: file backups are tab-scoped and 1-week TTL — try undo_edit if the change was recent, or git checkout if the file is in a repo."
+            }
+            tab.appendLog(output); tab.flush()
+            return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
+
+        case "list_file_backups":
+            let filePath = input["file_path"] as? String ?? ""
+            let expanded = (filePath as NSString).expandingTildeInPath
+            let fileName = (expanded as NSString).lastPathComponent
+            let backups = FileBackupService.shared.listBackups(tabID: tab.id)
+                .filter { fileName.isEmpty || $0.original == fileName }
+            let output: String
+            if backups.isEmpty {
+                output = fileName.isEmpty
+                    ? "No file backups in this tab."
+                    : "No backups found for \(fileName)."
+            } else {
+                output = backups.map { "\(($0.backup as NSString).lastPathComponent)  (\($0.date))" }.joined(separator: "\n")
+            }
+            tab.appendLog("🗂️ Backups: \(backups.count)")
+            tab.flush()
+            return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
+
         default:
             let output = await executeNativeTool(name, input: input)
             tab.appendLog(output); tab.flush()
