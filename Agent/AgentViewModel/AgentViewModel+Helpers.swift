@@ -333,6 +333,63 @@ extension AgentViewModel {
         return .string(String(describing: value))
     }
 
+    /// Auto-inject SDEF dictionary into a failed AppleScript tool result.
+    ///
+    /// When `applescript(action:"execute", source:"tell application \"Pages\" to ...")`
+    /// fails, the LLM almost always failed because it guessed at command/property
+    /// names that don't exist in that app's scripting dictionary. Rather than
+    /// throwing the bare error back at the model and hoping it retries with
+    /// better syntax, we extract the `tell application "X"` clause from the
+    /// source, look up X's SDEF via SDEFService, and prepend the dictionary
+    /// summary to the error message. The next attempt then has the canonical
+    /// commands+classes+properties in context — turning blind retries into
+    /// informed corrections.
+    ///
+    /// Belt-and-suspenders companion to the system-prompt rule that tells the
+    /// LLM to call `lookup_sdef` BEFORE writing AppleScript. The rule covers
+    /// the compliant case; this helper covers the model that just dives in.
+    ///
+    /// Skips silently when:
+    ///   - The source has no `tell application "X"` clause
+    ///   - X isn't in the SDEF catalog (no JSON file for it)
+    ///   - SDEFService returns "No SDEF found"
+    /// Output is capped to keep the total tool result under ~10K chars.
+    static func enrichAppleScriptFailure(source: String, output: String) -> String {
+        // Match: tell application "X" / tell application id "com.apple.X"
+        // Use NSRegularExpression for capture group support.
+        let pattern = #"tell\s+application\s+(?:id\s+)?"([^"]+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: source)
+        else {
+            return output
+        }
+        let appName = String(source[captureRange]).trimmingCharacters(in: .whitespaces)
+        guard !appName.isEmpty else { return output }
+
+        // Resolve to bundle ID via SDEF catalog. Skip if not in catalog —
+        // injecting "No SDEF found" wouldn't help the LLM.
+        guard let bundleID = SDEFService.shared.resolveBundleId(name: appName) else {
+            return output
+        }
+        let summary = SDEFService.shared.summary(for: bundleID)
+        if summary.hasPrefix("No SDEF found") { return output }
+
+        // Cap the SDEF summary to leave headroom for the original error and
+        // any subsequent tool result accumulation. Most SDEFs are 2-5 KB
+        // already; the cap is a defense against oversized ones (Adobe, etc.)
+        let cappedSummary = String(summary.prefix(7000))
+
+        return """
+        \(output)
+
+        📖 SDEF auto-injected for "\(appName)" (bundle: \(bundleID)) — these are the canonical commands/classes/properties for the app. Use ONLY documented terms in your retry; everything else will fail the same way:
+
+        \(cappedSummary)
+        """
+    }
+
     /// Generate a short name for auto-saving an AppleScript from its source.
     /// Uses the first meaningful words from the script, capped at 40 chars.
     static func autoScriptName(from source: String) -> String {

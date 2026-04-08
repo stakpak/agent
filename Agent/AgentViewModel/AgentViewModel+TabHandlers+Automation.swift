@@ -84,14 +84,17 @@ extension AgentViewModel {
                 NSAppleScriptService.shared.execute(source: source)
             }
             tab.isRunning = false
+            let toolContent: String
             if !result.success {
                 tab.appendLog(result.output)
+                toolContent = Self.enrichAppleScriptFailure(source: source, output: result.output)
             } else {
                 tab.appendOutput(result.output)
+                toolContent = result.output
             }
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": result.output],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": toolContent],
                 isComplete: false
             )
 

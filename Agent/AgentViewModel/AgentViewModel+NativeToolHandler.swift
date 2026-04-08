@@ -102,8 +102,9 @@ extension AgentViewModel {
             if result.1 {
                 let autoName = Self.autoScriptName(from: source)
                 let _ = await Self.offMain { [ss = scriptService] in ss.saveAppleScript(name: autoName, source: source) }
+                return result.0
             }
-            return result.0
+            return Self.enrichAppleScriptFailure(source: source, output: result.0)
         // osascript (runs osascript CLI in-process with TCC)
         case "run_osascript":
             let script = input["script"] as? String ?? input["command"] as? String ?? ""
