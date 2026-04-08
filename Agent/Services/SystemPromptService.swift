@@ -46,7 +46,7 @@ final class SystemPromptService {
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
     /// Bump this when system prompt content changes to force re-sync of saved prompts.
-    private static let promptRevision = "82"
+    private static let promptRevision = "83"
 
     /// Anti-hallucination rule appended to every system prompt (full + compact).
     /// Triggered by an observed real-world failure: the in-app Agent produced a
