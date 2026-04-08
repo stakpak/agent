@@ -19,29 +19,30 @@ struct MCPPreset: Identifiable {
 
 @MainActor
 enum MCPPresets {
-    /// Sentinel string the user is expected to replace with their API key
-    /// when no key is on file. We surface it in the URL so it's visually
-    /// obvious in the edit sheet.
-    static let placeholderKey = "YOUR_ZAI_API_KEY"
-
-    static let all: [MCPPreset] = [
-        MCPPreset(
-            id: "zai.web_search",
-            menuLabel: "Z.AI Web Search"
-        ) {
-            // Z.AI's MCP server passes the API key as an Authorization query
-            // parameter (not a header). If the user already saved a Z.AI key
-            // in Settings, paste it directly into the URL so the preset is
-            // ready to connect with no further editing.
-            let key = KeychainService.shared.getZAIAPIKey()?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let token = (key?.isEmpty == false) ? key! : placeholderKey
-            return MCPServerConfig(
-                name: "Z.AI Web Search",
-                url: "https://api.z.ai/api/mcp/web_search/sse?Authorization=\(token)",
-                headers: [:],
-                enabled: true,
-                autoStart: true
-            )
-        },
-    ]
+    /// Curated MCP server presets. Currently empty — see history for the
+    /// removed Z.AI Web Search preset and why it doesn't work.
+    ///
+    /// REMOVED 2026-04-08:
+    /// - "Z.AI Web Search" (https://api.z.ai/api/mcp/web_search/sse?...)
+    ///   AgentMCP 1.6.1 implements the legacy HTTP+SSE transport
+    ///   (LegacyHTTPSSEConnection) end-to-end correctly — bytes are
+    ///   pulled via URLSessionDataDelegate, the parser handles partial
+    ///   chunks, and the endpoint discovery race is fixed.
+    ///
+    ///   But Z.AI's MCP server itself returns a TRUNCATED tools/list
+    ///   response: ~1914 bytes of JSON with 16 unbalanced opening
+    ///   braces and only 10 closing braces, ending mid-Chinese-character
+    ///   with no terminator. Confirmed by raw curl over HTTP/2 after
+    ///   3 minutes of waiting — same truncated stream every time.
+    ///   The bytes are unparseable as JSON because the JSON itself is
+    ///   incomplete. There's nothing the client can do.
+    ///
+    ///   Z.AI users wanting web search should set their Z.AI API key
+    ///   in Settings — the LLM's `web_search` tool routes through
+    ///   POST https://api.z.ai/api/paas/v4/web_search natively, using
+    ///   the same key, returning the same `search-prime` results. See
+    ///   AgentViewModel+TaskUtilities.performZAIWebSearchInternal.
+    ///
+    ///   Re-enable this preset only after Z.AI fixes their MCP server.
+    static let all: [MCPPreset] = []
 }

@@ -54,19 +54,21 @@ struct MCPServersView: View {
                 .controlSize(.small)
                 .help("Import server configuration")
 
-                Menu {
-                    ForEach(MCPPresets.all) { preset in
-                        Button(preset.menuLabel) {
-                            addSheetItem = AddSheetItem(seed: preset.makeConfig())
+                if !MCPPresets.all.isEmpty {
+                    Menu {
+                        ForEach(MCPPresets.all) { preset in
+                            Button(preset.menuLabel) {
+                                addSheetItem = AddSheetItem(seed: preset.makeConfig())
+                            }
                         }
+                    } label: {
+                        Image(systemName: "sparkles")
                     }
-                } label: {
-                    Image(systemName: "sparkles")
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 28, height: 22)
+                    .help("Add a preset MCP server")
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 28, height: 22)
-                .help("Add a preset MCP server (Z.AI Web Search, etc.)")
 
                 Button {
                     addSheetItem = AddSheetItem(seed: nil)
