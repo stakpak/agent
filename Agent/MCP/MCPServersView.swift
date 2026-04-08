@@ -11,6 +11,8 @@ struct MCPServersView: View {
     @State private var connectingIds: Set<UUID> = []
     @State private var renderKey = false
     @State private var addError: String?
+    @State private var presetSeed: MCPServerConfig?
+    @State private var showingPresetSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -41,6 +43,21 @@ struct MCPServersView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .help("Import server configuration")
+
+                Menu {
+                    ForEach(MCPPresets.all) { preset in
+                        Button(preset.menuLabel) {
+                            presetSeed = preset.makeConfig()
+                            showingPresetSheet = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 28, height: 22)
+                .help("Add a preset MCP server (Z.AI Web Search, etc.)")
 
                 Button {
                     showingAddServer = true
@@ -99,6 +116,22 @@ struct MCPServersView: View {
                 } else {
                     showingAddServer = false
                     // Auto-connect the new server
+                    let config = newServer
+                    Task {
+                        connectingIds.insert(config.id)
+                        try? await mcpService.connect(to: config)
+                        connectingIds.remove(config.id)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingPresetSheet) {
+            MCPServerEditView(server: presetSeed) { newServer in
+                if let err = registry.add(newServer) {
+                    addError = err
+                } else {
+                    showingPresetSheet = false
+                    presetSeed = nil
                     let config = newServer
                     Task {
                         connectingIds.insert(config.id)
