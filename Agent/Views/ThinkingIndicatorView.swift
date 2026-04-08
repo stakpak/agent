@@ -591,9 +591,7 @@ private struct LLMOutputBox: View {
                         // Use the larger of: line-count estimate (pre-size), or actual rendered
                         // height from the package (which accounts for word-wrap and tables).
                         let proposed = min(max(minHeight, max(lineEstimate, h + 4)), maxHeight)
-                        if proposed > height {
-                            height = proposed
-                        }
+                        height = proposed
                     }
                     .overlay {
                         if showScanlines {
