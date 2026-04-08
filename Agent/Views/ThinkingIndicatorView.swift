@@ -606,10 +606,10 @@ private struct LLMOutputBox: View {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
                             Text("AGENT! > ")
-                                .font(.system(size: 14, design: .monospaced))
+                                .font(.system(size: 16.5, design: .monospaced))
                                 .foregroundColor(termText)
                             Text(cursorVisible ? "█" : " ")
-                                .font(.system(size: 14, design: .monospaced))
+                                .font(.system(size: 16.5, design: .monospaced))
                                 .foregroundColor(termText)
                             Spacer()
                         }
