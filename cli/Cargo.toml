@@ -40,6 +40,8 @@ uuid = { workspace = true }
 futures-util = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
+reqwest-middleware = { version = "0.4.2", features = ["json"] }
+reqwest-retry = "0.8.0"
 walkdir = { workspace = true }
 rpassword = "7.3"
 names = "0.14.0"

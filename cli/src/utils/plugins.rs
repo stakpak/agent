@@ -1,4 +1,6 @@
 use flate2::read::GzDecoder;
+use reqwest_middleware::ClientBuilder;
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::fs;
 use std::io::Cursor;
@@ -230,8 +232,12 @@ pub fn is_plugin_available(plugin_name: &str) -> bool {
 async fn get_latest_version(config: &PluginConfig) -> Result<String, String> {
     let version_url = format!("{}/latest_version.txt", config.base_url);
 
-    // Download the version file
-    let client = create_tls_client(TlsClientConfig::default())?;
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+    let base_client = create_tls_client(TlsClientConfig::default())?;
+    let client = ClientBuilder::new(base_client)
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
+
     let response = client
         .get(&version_url)
         .send()
@@ -256,7 +262,11 @@ async fn get_latest_version(config: &PluginConfig) -> Result<String, String> {
 
 /// Fetch the latest version from GitHub releases
 pub async fn get_latest_github_release_version(owner: &str, repo: &str) -> Result<String, String> {
-    let client = create_tls_client(TlsClientConfig::default())?;
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+    let base_client = create_tls_client(TlsClientConfig::default())?;
+    let client = ClientBuilder::new(base_client)
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
     let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
 
     let response = client
@@ -295,6 +305,11 @@ fn normalize_version(version: &str) -> Result<String, String> {
         .strip_prefix('v')
         .or_else(|| v.strip_prefix('V'))
         .unwrap_or(v);
+
+    if bare.is_empty() {
+        return Err("Version string is just \'v'".to_string());
+    }
+
     Ok(format!("v{bare}"))
 }
 
@@ -730,6 +745,13 @@ mod tests {
     fn normalize_version_rejects_empty_string() {
         assert!(normalize_version("").is_err());
         assert!(normalize_version("   ").is_err());
+    }
+
+    #[test]
+    fn test_normalize_version_rejects_bare_v() {
+        assert!(normalize_version("v").is_err());
+        assert!(normalize_version("V").is_err());
+        assert!(normalize_version(" v ").is_err());
     }
 
     #[test]
