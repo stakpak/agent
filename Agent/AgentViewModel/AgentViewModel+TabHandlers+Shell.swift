@@ -201,17 +201,34 @@ extension AgentViewModel {
                     isComplete: false
                 )
             }
-            let isPrivileged = (name == "execute_daemon_command") && rootEnabled
-            tab.appendLog("\(isPrivileged ? "🔴 #" : "🔧 $") \(Self.collapseHeredocs(command))")
+            // TCC commands MUST run in-process where Agent! holds the
+            // user's TCC grants. This check has to come BEFORE the
+            // privileged-daemon branch — otherwise an
+            // `execute_daemon_command(command:"osascript ...")` would go to
+            // the root daemon (which has zero TCC) and fail with a
+            // confusing permission error.
+            let needsTCC = Self.needsTCCPermissions(command)
+            let isPrivileged = (name == "execute_daemon_command") && rootEnabled && !needsTCC
+            let routePrefix: String
+            if needsTCC {
+                routePrefix = "🔧 $ (in-process for TCC)"
+            } else if isPrivileged {
+                routePrefix = "🔴 #"
+            } else {
+                routePrefix = "🔧 $"
+            }
+            tab.appendLog("\(routePrefix) \(Self.collapseHeredocs(command))")
             tab.flush()
 
             let result: (status: Int32, output: String)
-            if isPrivileged {
+            if needsTCC {
+                // TCC commands → Agent process (inherits TCC permissions).
+                // Wins over the privileged check by design — TCC grants
+                // belong to the GUI app, not to the root daemon.
+                result = await Self.executeTCC(command: command)
+            } else if isPrivileged {
                 // Root commands → LaunchDaemon via XPC
                 result = await helperService.execute(command: command, workingDirectory: tabFolder)
-            } else if Self.needsTCCPermissions(command) {
-                // TCC commands → Agent process (inherits TCC permissions)
-                result = await Self.executeTCC(command: command)
             } else if userService.userReady {
                 // User LaunchAgent via XPC
                 result = await executeForTab(command: command, projectFolder: tabFolder)
