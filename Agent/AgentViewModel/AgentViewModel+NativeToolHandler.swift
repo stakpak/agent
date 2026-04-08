@@ -113,8 +113,10 @@ extension AgentViewModel {
             let result = await Self.executeTCCStreaming(command: command) { _ in }
             if result.status == 0 {
                 let _ = scriptService.saveAppleScript(name: Self.autoScriptName(from: script), source: script)
+                return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
             }
-            return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+            let osaOutput = result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+            return Self.enrichAppleScriptFailure(source: script, output: osaOutput)
         // JavaScript for Automation (JXA via osascript -l JavaScript)
         case "execute_javascript":
             let script = input["source"] as? String ?? input["script"] as? String ?? ""
@@ -123,8 +125,10 @@ extension AgentViewModel {
             let result = await Self.executeTCCStreaming(command: command) { _ in }
             if result.status == 0 {
                 let _ = scriptService.saveJavaScript(name: Self.autoScriptName(from: script), source: script)
+                return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
             }
-            return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+            let jxaOutput = result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+            return Self.enrichJXAFailure(source: script, output: jxaOutput)
         // Script management
         case "list_agents":
             let scripts = await Self.offMain { [ss = scriptService] in ss.listScripts() }
@@ -1174,29 +1178,66 @@ extension AgentViewModel {
             let query = input["query"] as? String ?? ""
             guard !query.isEmpty else { return "Error: query is required" }
             return await Self.performWebSearchForTask(query: query, apiKey: tavilyAPIKey, provider: selectedProvider)
-        // lookup_sdef
+        // lookup_sdef — supports single bundle ID, "list", or comma-separated
+        // / array of bundle IDs for batch lookup (e.g. Safari + System Events
+        // in one call when scripting a multi-app workflow).
         case "lookup_sdef":
-            let bundleID = input["bundle_id"] as? String ?? ""
+            let bundleIDInput = input["bundle_id"] as? String ?? ""
+            let bundleIDArray = input["bundle_id"] as? [String]
             let className = input["class_name"] as? String
-            if bundleID == "list" {
+
+            // Resolve into a list of bundle IDs.
+            let bundleIDs: [String] = {
+                if let arr = bundleIDArray {
+                    return arr.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                }
+                return bundleIDInput
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }()
+
+            if bundleIDs.contains("list") || bundleIDInput == "list" {
                 let names = SDEFService.shared.availableSDEFs()
                 return "Available SDEFs (\(names.count)):\n" + names.joined(separator: "\n")
-            } else if let cls = className {
-                let props = SDEFService.shared.properties(for: bundleID, className: cls)
-                let elems = SDEFService.shared.elements(for: bundleID, className: cls)
-                var lines = ["\(cls) properties:"]
-                for p in props {
-                    let ro = p.readonly == true ? " (readonly)" : ""
-                    let desc = p.description.map { " — \($0)" } ?? ""
-                    lines.append(
-                        "  .\(SDEFService.toCamelCase(p.name)): "
-                        + "\(p.type ?? "any")\(ro)\(desc)")
+            }
+
+            // Single bundle ID — preserve the original drill-in behavior.
+            if bundleIDs.count == 1 {
+                let bundleID = bundleIDs[0]
+                if let cls = className {
+                    let props = SDEFService.shared.properties(for: bundleID, className: cls)
+                    let elems = SDEFService.shared.elements(for: bundleID, className: cls)
+                    var lines = ["\(cls) properties:"]
+                    for p in props {
+                        let ro = p.readonly == true ? " (readonly)" : ""
+                        let desc = p.description.map { " — \($0)" } ?? ""
+                        lines.append(
+                            "  .\(SDEFService.toCamelCase(p.name)): "
+                            + "\(p.type ?? "any")\(ro)\(desc)")
+                    }
+                    if !elems.isEmpty { lines.append("elements: \(elems.joined(separator: ", "))") }
+                    return lines.isEmpty ? "No class '\(cls)' found for \(bundleID)" : lines.joined(separator: "\n")
                 }
-                if !elems.isEmpty { lines.append("elements: \(elems.joined(separator: ", "))") }
-                return lines.isEmpty ? "No class '\(cls)' found for \(bundleID)" : lines.joined(separator: "\n")
-            } else {
                 return SDEFService.shared.summary(for: bundleID)
             }
+
+            // Multiple bundle IDs — concatenate summaries with clear headers.
+            // class_name doesn't make sense across multiple apps, so it's
+            // ignored in batch mode (warn the LLM in the output so the next
+            // call narrows correctly).
+            if bundleIDs.isEmpty {
+                return "Error: bundle_id required (single ID, comma-separated list, array, or 'list' to enumerate the catalog)"
+            }
+            var blocks: [String] = []
+            if className != nil {
+                blocks.append("⚠️ class_name is ignored when multiple bundle_ids are provided. Drill into a class with a single bundle_id call.")
+            }
+            for bundleID in bundleIDs {
+                let summary = SDEFService.shared.summary(for: bundleID)
+                blocks.append("=== \(bundleID) ===\n\(summary)")
+            }
+            return blocks.joined(separator: "\n\n")
         case "symbol_search":
             let query = input["query"] as? String ?? ""
             let path = input["path"] as? String ?? pf

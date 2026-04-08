@@ -30,9 +30,12 @@ extension AgentViewModel {
                 tab.appendLog("exit code: \(result.status)")
             }
 
-            let toolOutput = result.output.isEmpty
+            let rawOutput = result.output.isEmpty
                 ? "(no output, exit code: \(result.status))"
                 : result.output
+            let toolOutput = result.status == 0
+                ? rawOutput
+                : Self.enrichAppleScriptFailure(source: script, output: rawOutput)
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": toolOutput],
@@ -40,14 +43,26 @@ extension AgentViewModel {
             )
 
         case "lookup_sdef":
-            let bundleID = input["bundle_id"] as? String ?? ""
+            let bundleIDInput = input["bundle_id"] as? String ?? ""
+            let bundleIDArray = input["bundle_id"] as? [String]
             let className = input["class_name"] as? String
 
+            let bundleIDs: [String] = {
+                if let arr = bundleIDArray {
+                    return arr.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                }
+                return bundleIDInput
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }()
+
             let output: String
-            if bundleID == "list" {
+            if bundleIDs.contains("list") || bundleIDInput == "list" {
                 let names = SDEFService.shared.availableSDEFs()
                 output = "Available SDEFs (\(names.count)):\n" + names.joined(separator: "\n")
-            } else if let cls = className {
+            } else if bundleIDs.count == 1, let cls = className {
+                let bundleID = bundleIDs[0]
                 let props = SDEFService.shared.properties(for: bundleID, className: cls)
                 let elems = SDEFService.shared.elements(for: bundleID, className: cls)
                 var lines = ["\(cls) properties:"]
@@ -61,10 +76,24 @@ extension AgentViewModel {
                 }
                 if !elems.isEmpty { lines.append("elements: \(elems.joined(separator: ", "))") }
                 output = lines.isEmpty ? "No class '\(cls)' found for \(bundleID)" : lines.joined(separator: "\n")
+            } else if bundleIDs.count == 1 {
+                output = SDEFService.shared.summary(for: bundleIDs[0])
+            } else if bundleIDs.isEmpty {
+                output = "Error: bundle_id required (single ID, comma-separated list, array, or 'list')"
             } else {
-                output = SDEFService.shared.summary(for: bundleID)
+                // Multi-bundle batch lookup.
+                var blocks: [String] = []
+                if className != nil {
+                    blocks.append("⚠️ class_name is ignored when multiple bundle_ids are provided.")
+                }
+                for bundleID in bundleIDs {
+                    let summary = SDEFService.shared.summary(for: bundleID)
+                    blocks.append("=== \(bundleID) ===\n\(summary)")
+                }
+                output = blocks.joined(separator: "\n\n")
             }
-            tab.appendLog("📖 SDEF: \(bundleID)\(className.map { " → \($0)" } ?? "")")
+            let logLabel = bundleIDs.count > 1 ? bundleIDs.joined(separator: ", ") : (bundleIDs.first ?? bundleIDInput)
+            tab.appendLog("📖 SDEF: \(logLabel)\(className.map { " → \($0)" } ?? "")")
             let preview = output.components(separatedBy: "\n").prefix(20).joined(separator: "\n")
             let truncated = output.components(separatedBy: "\n")
                 .count > 20 ? "\n... (\(output.components(separatedBy: "\n").count) lines total)" : ""

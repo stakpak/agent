@@ -356,38 +356,106 @@ extension AgentViewModel {
     /// Output is capped to keep the total tool result under ~10K chars.
     static func enrichAppleScriptFailure(source: String, output: String) -> String {
         // Match: tell application "X" / tell application id "com.apple.X"
-        // Use NSRegularExpression for capture group support.
+        // Multi-app scripts are common (Safari + System Events, Pages + Image
+        // Events + Finder, etc.) so collect ALL distinct references and inject
+        // every one we have an SDEF for.
         let pattern = #"tell\s+application\s+(?:id\s+)?"([^"]+)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-              let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
-              match.numberOfRanges > 1,
-              let captureRange = Range(match.range(at: 1), in: source)
-        else {
-            return output
+        let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: true)
+        return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "AppleScript")
+    }
+
+    /// Auto-inject SDEF dictionary into a failed JXA (JavaScript for Automation) tool result.
+    ///
+    /// JXA talks to ScriptingBridge through the same scripting dictionaries
+    /// that AppleScript uses, but with a JavaScript surface:
+    ///   `Application("Music").play()`
+    ///   `var safari = Application('com.apple.Safari')`
+    /// When a JXA call fails, the LLM almost always failed for the same
+    /// reason an AppleScript call would fail — it guessed at command names
+    /// that don't exist in the app's dictionary. This helper extracts the
+    /// `Application("X")` argument, resolves it through SDEFService (which
+    /// accepts both natural names and bundle IDs), and prepends the
+    /// dictionary so the next attempt has canonical terms.
+    ///
+    /// Skips silently when:
+    ///   - The source has no `Application("...")` call
+    ///   - The captured name isn't in the SDEF catalog
+    ///   - SDEFService returns "No SDEF found"
+    static func enrichJXAFailure(source: String, output: String) -> String {
+        // Match: Application("X") | Application('X')
+        // Multi-app JXA scripts are common (e.g. Application("Safari") +
+        // Application("System Events") for keystroke automation) — collect
+        // ALL distinct references and inject every SDEF we have.
+        // We skip Application.currentApplication() since there's no quoted name.
+        let pattern = #"Application\s*\(\s*['"]([^'"]+)['"]\s*\)"#
+        let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: false)
+        return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "JXA")
+    }
+
+    /// Extract every distinct app reference matching `pattern` from `source`,
+    /// preserving order of first appearance and trimming whitespace.
+    private static func collectAppReferences(source: String, pattern: String, caseInsensitive: Bool) -> [String] {
+        let options: NSRegularExpression.Options = caseInsensitive ? .caseInsensitive : []
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return []
         }
-        let appName = String(source[captureRange]).trimmingCharacters(in: .whitespaces)
-        guard !appName.isEmpty else { return output }
-
-        // Resolve to bundle ID via SDEF catalog. Skip if not in catalog —
-        // injecting "No SDEF found" wouldn't help the LLM.
-        guard let bundleID = SDEFService.shared.resolveBundleId(name: appName) else {
-            return output
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for match in matches where match.numberOfRanges > 1 {
+            guard let range = Range(match.range(at: 1), in: source) else { continue }
+            let name = String(source[range]).trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { continue }
+            if seen.insert(name.lowercased()).inserted {
+                ordered.append(name)
+            }
         }
-        let summary = SDEFService.shared.summary(for: bundleID)
-        if summary.hasPrefix("No SDEF found") { return output }
+        return ordered
+    }
 
-        // Cap the SDEF summary to leave headroom for the original error and
-        // any subsequent tool result accumulation. Most SDEFs are 2-5 KB
-        // already; the cap is a defense against oversized ones (Adobe, etc.)
-        let cappedSummary = String(summary.prefix(7000))
+    /// Resolve each app name to a bundle ID via SDEFService and append every
+    /// available SDEF summary to the original tool output. Splits the 9KB
+    /// total budget evenly across resolved apps so a 4-app script doesn't
+    /// blow past the tool-result size guardrails.
+    ///
+    /// Apps that don't resolve (no JSON in the catalog, "No SDEF found")
+    /// are skipped silently — there's nothing useful to inject.
+    private static func injectMultipleSDEFs(appNames: [String], output: String, syntaxHint: String) -> String {
+        if appNames.isEmpty { return output }
 
-        return """
-        \(output)
+        // (originalName, bundleID, summary) — pre-resolve everything so we
+        // can divide the budget across only the apps that actually have data.
+        var resolved: [(name: String, bundleID: String, summary: String)] = []
+        for name in appNames {
+            guard let bundleID = SDEFService.shared.resolveBundleId(name: name) else { continue }
+            let summary = SDEFService.shared.summary(for: bundleID)
+            if summary.hasPrefix("No SDEF found") { continue }
+            resolved.append((name, bundleID, summary))
+        }
+        if resolved.isEmpty { return output }
 
-        📖 SDEF auto-injected for "\(appName)" (bundle: \(bundleID)) — these are the canonical commands/classes/properties for the app. Use ONLY documented terms in your retry; everything else will fail the same way:
+        // ~9KB total budget. Per-app cap = budget / count, floored at 1500
+        // chars (so even 6 apps each get something usable). The original
+        // single-app cap was 7000 — single-app result still gets that.
+        let totalBudget = 9000
+        let perAppCap = max(1500, totalBudget / resolved.count)
 
-        \(cappedSummary)
-        """
+        var blocks: [String] = []
+        for entry in resolved {
+            let cappedSummary = String(entry.summary.prefix(perAppCap))
+            blocks.append("""
+            📖 SDEF auto-injected for "\(entry.name)" (bundle: \(entry.bundleID)):
+
+            \(cappedSummary)
+            """)
+        }
+
+        let appList = resolved.map { "\"\($0.name)\"" }.joined(separator: ", ")
+        let header = resolved.count == 1
+            ? "📖 \(syntaxHint) failure — SDEF auto-injected. Use ONLY documented terms in your retry; everything else will fail the same way."
+            : "📖 \(syntaxHint) failure — \(resolved.count) SDEFs auto-injected for \(appList). Use ONLY documented terms from each app's dictionary; everything else will fail the same way."
+
+        return ([output, "", header, ""] + blocks).joined(separator: "\n\n")
     }
 
     /// Generate a short name for auto-saving an AppleScript from its source.
