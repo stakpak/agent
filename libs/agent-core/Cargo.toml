@@ -17,7 +17,7 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-shell-tool-approvals = { workspace = true }
+stakpak-shell-tool-approvals = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]

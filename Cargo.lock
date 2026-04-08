@@ -5888,17 +5888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shell-tool-approvals"
-version = "0.3.72"
-dependencies = [
- "globset",
- "log",
- "regex",
- "tree-sitter",
- "tree-sitter-bash",
-]
-
-[[package]]
 name = "shell-words"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6179,8 +6168,8 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "shell-tool-approvals",
  "stakai",
+ "stakpak-shell-tool-approvals",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
@@ -6389,6 +6378,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-shell-tool-approvals"
+version = "0.3.72"
+dependencies = [
+ "globset",
+ "log",
+ "regex",
+ "tree-sitter",
+ "tree-sitter-bash",
+]
+
+[[package]]
 name = "stakpak-tui"
 version = "0.3.72"
 dependencies = [
@@ -6412,12 +6412,12 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "shell-tool-approvals",
  "shlex",
  "similar",
  "stakai",
  "stakpak-api",
  "stakpak-shared",
+ "stakpak-shell-tool-approvals",
  "syntect",
  "tempfile",
  "textwrap",

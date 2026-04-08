@@ -4,7 +4,7 @@ on:
   push:
     # Branches trigger builds only (no release)
     # - main: production builds
-    # - beta: beta channel builds  
+    # - beta: beta channel builds
     branches: [main, beta]
     # Tags trigger full release workflow
     # - v1.2.3: stable release
@@ -218,11 +218,11 @@ jobs:
           VERSION=${VERSION#v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Tag version: $VERSION"
-          
+
           # Verify version matches Cargo.toml
           CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
           echo "Cargo.toml version: $CARGO_VERSION"
-          
+
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
             echo "Warning: Tag version ($VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
             echo "Updating Cargo.toml to match tag version"
@@ -238,9 +238,9 @@ jobs:
         run: |
           set -e
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          
+
           echo "Publishing workspace members to crates.io version $VERSION"
-          
+
           # Function to publish a package, skip if already published
           publish_package() {
             local pkg=$1
@@ -263,7 +263,7 @@ jobs:
               exit 1
             fi
           }
-          
+
           # Publish dependencies first, then the main crate
           # Order matters: publish dependencies before dependents
           publish_package stakai
@@ -272,13 +272,14 @@ jobs:
           publish_package stakpak-mcp-client
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy
+          publish_package stakpak-shell-tool-approvals
           publish_package stakpak-agent-core
           publish_package stakpak-gateway
           publish_package stakpak-server
           publish_package stakpak-tui
           # Finally publish the main CLI crate
           publish_package stakpak
-          
+
           echo "All packages published successfully!"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
@@ -317,7 +318,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need full history for git-cliff
+          fetch-depth: 0 # Need full history for git-cliff
 
       - name: Install git-cliff
         run: cargo install git-cliff
@@ -327,15 +328,15 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           # Get the previous tag to generate notes between tags
           PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
-          
+
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found, skipping release notes generation"
             exit 0
           fi
-          
+
           # Generate notes between previous and current tag
           git-cliff "$PREV_TAG..$VERSION" --strip all > release_notes.md
-          
+
           # Check if release notes are empty
           if [ ! -s release_notes.md ]; then
             echo "No commits found between $PREV_TAG and $VERSION"
@@ -347,19 +348,19 @@ jobs:
       - name: Update GitHub Release
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          
+
           # Check if release notes file exists and has content
           if [ ! -f release_notes.md ]; then
             echo "Release notes file not found, skipping update"
             exit 0
           fi
-          
+
           # Check if file is empty or only contains whitespace
           if [ ! -s release_notes.md ] || ! grep -q '[^[:space:]]' release_notes.md; then
             echo "Release notes file is empty, skipping update"
             exit 0
           fi
-          
+
           echo "Updating release notes for $VERSION"
           gh release edit "$VERSION" --notes-file release_notes.md || echo "Failed to update release notes, continuing anyway"
         env:
@@ -381,7 +382,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           VERSION: ${{ needs.setup.outputs.version }}
         run: |
-          
+
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-x86_64.tar.gz" -o stakpak-darwin-x86_64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz" -o stakpak-darwin-aarch64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz" -o stakpak-linux-x86_64.tar.gz
@@ -397,7 +398,7 @@ jobs:
             desc "Stakpak CLI tool"
             homepage "https://github.com/stakpak/stakpak"
             version "${VERSION}"
-            
+
             on_macos do
               if Hardware::CPU.arm?
                 url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz"
@@ -407,7 +408,7 @@ jobs:
                 sha256 "${SHA256_DARWIN_X64}"
               end
             end
-            
+
             on_linux do
               if Hardware::CPU.arm?
                 url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-aarch64.tar.gz"
@@ -417,7 +418,7 @@ jobs:
                 sha256 "${SHA256_LINUX_X64}"
               end
             end
-            
+
             def install
               bin.install "stakpak"
             end
