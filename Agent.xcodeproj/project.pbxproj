@@ -127,6 +127,7 @@
 		EA6EA3862F6E35CF003FDB6C /* send_image_input.json in Resources */ = {isa = PBXBuildFile; fileRef = EA6EA3802F6E35CF003FDB6C /* send_image_input.json */; };
 		EA6EA3872F6E35CF003FDB6C /* send_message_input.json in Resources */ = {isa = PBXBuildFile; fileRef = EA6EA3822F6E35CF003FDB6C /* send_message_input.json */; };
 		EA70000000000000000001 /* SDEFService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA70000000000000000002 /* SDEFService.swift */; };
+		EASS000000000000000001 /* ShellSafetyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EASS000000000000000002 /* ShellSafetyService.swift */; };
 		EA80000000000000000001 /* NSAppleScriptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA80000000000000000002 /* NSAppleScriptService.swift */; };
 		EAA08AAC2F7D549300D5998A /* AgentLLM in Frameworks */ = {isa = PBXBuildFile; productRef = EAA08AAB2F7D549300D5998A /* AgentLLM */; };
 		EAAI000000000000000001 /* AppleIntelligenceMediator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAI000000000000000002 /* AppleIntelligenceMediator.swift */; };
@@ -353,6 +354,7 @@
 		EA6EA3822F6E35CF003FDB6C /* send_message_input.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = send_message_input.json; sourceTree = "<group>"; };
 		EA6EA3832F6E35CF003FDB6C /* send_message_output.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = send_message_output.json; sourceTree = "<group>"; };
 		EA70000000000000000002 /* SDEFService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDEFService.swift; sourceTree = "<group>"; };
+		EASS000000000000000002 /* ShellSafetyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellSafetyService.swift; sourceTree = "<group>"; };
 		EA80000000000000000002 /* NSAppleScriptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSAppleScriptService.swift; sourceTree = "<group>"; };
 		EAAI000000000000000002 /* AppleIntelligenceMediator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceMediator.swift; sourceTree = "<group>"; };
 		EABA0FBC2F7B78DA005CCD6E /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
@@ -563,6 +565,7 @@
 				WEB1000000000000000008 /* WebAutomationService+Search.swift */,
 				EA80000000000000000002 /* NSAppleScriptService.swift */,
 				EA70000000000000000002 /* SDEFService.swift */,
+				EASS000000000000000002 /* ShellSafetyService.swift */,
 				EAFA000000000000000002 /* FoundationModelService.swift */,
 				EAE1E7232F7C01000079432C /* LLMProviderSetup.swift */,
 				A3804F32B8914764A3690CB5 /* TokenUsageStore.swift */,
@@ -913,6 +916,7 @@
 				WEB1000000000000000007 /* WebAutomationService+Search.swift in Sources */,
 				EA80000000000000000001 /* NSAppleScriptService.swift in Sources */,
 				EA70000000000000000001 /* SDEFService.swift in Sources */,
+				EASS000000000000000001 /* ShellSafetyService.swift in Sources */,
 				EAFA000000000000000001 /* FoundationModelService.swift in Sources */,
 				EAE1E7242F7C01000079432C /* LLMProviderSetup.swift in Sources */,
 				23D4A25EAF30497598063A0D /* TokenUsageStore.swift in Sources */,

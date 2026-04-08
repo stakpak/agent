@@ -182,6 +182,13 @@ final class UserService {
 
     func execute(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
         AuditLog.log(.launchAgent, "execute: \(command.prefix(100))")
+        // Hard local guardrail — refuse catastrophic commands before they
+        // cross the XPC boundary into the user-context daemon.
+        let verdict = ShellSafetyService.check(command)
+        if !verdict.allowed {
+            AuditLog.log(.launchAgent, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
+            return (-1, verdict.reason ?? "Refused: command blocked by Agent! shell safety guardrail.")
+        }
         if !userReady {
             let msg = restartAgent()
             if !userReady {

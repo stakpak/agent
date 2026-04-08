@@ -1,4 +1,5 @@
 @preconcurrency import Foundation
+import AgentAudit
 import CoreGraphics
 import ImageIO
 
@@ -123,7 +124,17 @@ extension AgentViewModel {
     /// Runs a command in the Agent app process to inherit TCC permissions
     /// (Automation, Accessibility, ScreenRecording).
     nonisolated static func executeTCC(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
-        await withCheckedContinuation { continuation in
+        // Hard local guardrail — refuses catastrophic commands like
+        // `rm -rf /` BEFORE the Process is even constructed. The verdict
+        // string is shaped to be informative to the LLM, so it understands
+        // why the command was rejected and can pick a narrower target on
+        // the retry instead of looping the same broken request.
+        let verdict = ShellSafetyService.check(command)
+        if !verdict.allowed {
+            AuditLog.log(.shell, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
+            return (-1, verdict.reason ?? "Refused: command blocked by Agent! shell safety guardrail.")
+        }
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: AppConstants.shellPath)
@@ -176,7 +187,16 @@ extension AgentViewModel {
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> (status: Int32, output: String)
     {
-        await withCheckedContinuation { continuation in
+        // Same guardrail as executeTCC — refuse catastrophic commands before
+        // the Process is constructed.
+        let verdict = ShellSafetyService.check(command)
+        if !verdict.allowed {
+            AuditLog.log(.shell, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
+            let msg = verdict.reason ?? "Refused: command blocked by Agent! shell safety guardrail."
+            onOutput(msg)
+            return (-1, msg)
+        }
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: AppConstants.shellPath)

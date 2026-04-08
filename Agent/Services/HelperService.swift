@@ -183,6 +183,15 @@ final class HelperService {
 
     func execute(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
         AuditLog.log(.launchDaemon, "execute: \(command.prefix(100))")
+        // Hard local guardrail — refuse catastrophic commands before they
+        // cross the XPC boundary into the privileged daemon. The daemon runs
+        // as root, so this is the LAST place we can stop a destructive
+        // command from doing maximum damage.
+        let verdict = ShellSafetyService.check(command)
+        if !verdict.allowed {
+            AuditLog.log(.launchDaemon, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
+            return (-1, verdict.reason ?? "Refused: command blocked by Agent! shell safety guardrail.")
+        }
         if !helperReady {
             let msg = restartDaemon()
             if !helperReady {
