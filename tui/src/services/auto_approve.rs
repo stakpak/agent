@@ -412,7 +412,7 @@ fn resolve_shell_scope(
         Vec::new()
     };
 
-    match shell_tool_approvals::resolve_hierarchical_policy(
+    match stakpak_shell_tool_approvals::resolve_hierarchical_policy(
         command_str,
         tool_name,
         &fallback_scopes,
@@ -726,17 +726,21 @@ mod tests {
 
     #[test]
     fn matches_pattern_exact() {
-        assert!(shell_tool_approvals::matches_pattern("push", "push"));
-        assert!(!shell_tool_approvals::matches_pattern("push", "pull"));
+        assert!(stakpak_shell_tool_approvals::matches_pattern(
+            "push", "push"
+        ));
+        assert!(!stakpak_shell_tool_approvals::matches_pattern(
+            "push", "pull"
+        ));
     }
 
     #[test]
     fn matches_pattern_glob() {
-        assert!(shell_tool_approvals::matches_pattern(
+        assert!(stakpak_shell_tool_approvals::matches_pattern(
             "*.prod.*",
             "api.prod.example.com"
         ));
-        assert!(!shell_tool_approvals::matches_pattern(
+        assert!(!stakpak_shell_tool_approvals::matches_pattern(
             "*.prod.*",
             "api.staging.example.com"
         ));
@@ -744,8 +748,11 @@ mod tests {
 
     #[test]
     fn matches_pattern_regex() {
-        assert!(shell_tool_approvals::matches_pattern("re:^push$", "push"));
-        assert!(!shell_tool_approvals::matches_pattern(
+        assert!(stakpak_shell_tool_approvals::matches_pattern(
+            "re:^push$",
+            "push"
+        ));
+        assert!(!stakpak_shell_tool_approvals::matches_pattern(
             "re:^push$",
             "push-force"
         ));
@@ -753,7 +760,7 @@ mod tests {
 
     #[test]
     fn matches_pattern_invalid_regex_returns_false() {
-        assert!(!shell_tool_approvals::matches_pattern(
+        assert!(!stakpak_shell_tool_approvals::matches_pattern(
             "re:[invalid",
             "anything"
         ));
