@@ -211,11 +211,15 @@ final class UserService {
         } else {
             dir = (workingDirectory as NSString).expandingTildeInPath
         }
-        // Prepend cd so the shell runs in the right directory regardless of daemon cwd
+        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the
+        // command runs in the right directory AND has the project folder env
+        // var available the same way agent scripts do. The export is sent
+        // through the XPC boundary as part of the command string — no XPC
+        // protocol change required.
         let fullCommand: String
         if !dir.isEmpty && !command.hasPrefix("cd ") {
             let escaped = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
-            fullCommand = "cd \(escaped) && \(command)"
+            fullCommand = "export AGENT_PROJECT_FOLDER=\(escaped); cd \(escaped) && \(command)"
         } else {
             fullCommand = command
         }

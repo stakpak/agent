@@ -146,6 +146,12 @@ extension AgentViewModel {
 
                 var env = ProcessInfo.processInfo.environment
                 env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+                // Export the project folder so shell commands can read $AGENT_PROJECT_FOLDER
+                // the same way agent scripts do. Falls back to $HOME when no working dir
+                // is provided so the var is ALWAYS defined.
+                env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
+                    ? FileManager.default.homeDirectoryForCurrentUser.path
+                    : workingDirectory
                 let extraPaths = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
                 env["PATH"] = extraPaths + ":" + (env["PATH"] ?? "")
                 process.environment = env
@@ -208,6 +214,11 @@ extension AgentViewModel {
 
                 var env = ProcessInfo.processInfo.environment
                 env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+                // Export AGENT_PROJECT_FOLDER for streamed shell commands (same contract
+                // as the non-streaming executeTCC and as agent scripts).
+                env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
+                    ? FileManager.default.homeDirectoryForCurrentUser.path
+                    : workingDirectory
                 // Ensure common tool paths are in PATH
                 let extraPaths = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
                 env["PATH"] = extraPaths + ":" + (env["PATH"] ?? "")
