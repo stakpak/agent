@@ -75,16 +75,17 @@ extension AgentViewModel {
                 Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
 
-            // Token optimization: cap file output at 8K chars for LLM context
-            let maxChars = 8_000
-            let capped: String
-            let lineCount = output.components(separatedBy: "\n").count
-            if output.count > maxChars {
-                capped = String(output.prefix(maxChars)) +
-                    "\n\n... [truncated — \(output.count) chars total, \(lineCount) lines. Use offset/limit to read specific sections.]"
-            } else {
-                capped = output
-            }
+            // Cap file output at 50K chars for LLM context. 50K covers ~95% of Swift
+            // source files in one read — eliminates the chunked re-read storm where
+            // the LLM repeatedly calls read_file with offset/limit just to see the
+            // whole file. Each chunked read is a different cache key, so the dedup
+            // cache can't help; raising the cap is what actually reduces redundant reads.
+            let capped = LogLimits.trim(
+                output,
+                cap: LogLimits.readFileChars,
+                lineCount: output.components(separatedBy: "\n").count,
+                suffix: "Use offset/limit to read specific sections."
+            )
             let lang = Self.langFromPath(filePath)
             appendLog(Self.codeFence(Self.preview(output, lines: readFilePreviewLines), language: lang))
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": capped])

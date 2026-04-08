@@ -11,11 +11,6 @@ import Cocoa
 
 // MARK: - Task Utilities
 
-/// Max chars per individual tool result. Head+tail kept, middle truncated.
-private let maxToolResultChars = 8_000
-/// Max total chars across all tool results in one user message.
-private let maxToolResultsPerMessage = 50_000
-
 extension AgentViewModel {
 
     /// Read project-specific instructions from config files in the project folder.
@@ -186,11 +181,11 @@ extension AgentViewModel {
         // Step 1: truncate individual results
         var truncated = results.map { result -> [String: Any] in
             guard var content = result["content"] as? String,
-                  content.count > maxToolResultChars else { return result }
-            let keepChars = maxToolResultChars / 2
+                  content.count > LogLimits.toolResultChars else { return result }
+            let keepChars = LogLimits.toolResultChars / 2
             let head = String(content.prefix(keepChars))
             let tail = String(content.suffix(keepChars))
-            let trimmed = content.count - maxToolResultChars
+            let trimmed = content.count - LogLimits.toolResultChars
             content = head + "\n\n... (\(trimmed) chars truncated) ...\n\n" + tail
             var updated = result
             updated["content"] = content
@@ -198,13 +193,17 @@ extension AgentViewModel {
         }
         // Step 2: enforce per-message budget — drop largest results first
         var totalChars = truncated.reduce(0) { $0 + ((($1["content"] as? String)?.count) ?? 0) }
-        while totalChars > maxToolResultsPerMessage && truncated.count > 1 {
+        while totalChars > LogLimits.toolResultsPerMessageChars && truncated.count > 1 {
             // Find largest result and truncate it further
             if let maxIdx = truncated.enumerated()
                 .max(by: { (($0.element["content"] as? String)?.count ?? 0) < (($1.element["content"] as? String)?.count ?? 0) })?.offset
             {
                 let content = truncated[maxIdx]["content"] as? String ?? ""
-                truncated[maxIdx]["content"] = String(content.prefix(2000)) + "\n\n... [budget-truncated from \(content.count) chars]"
+                truncated[maxIdx]["content"] = LogLimits.trim(
+                    content,
+                    cap: 2000,
+                    suffix: "Budget-truncated from \(content.count) chars."
+                )
                 totalChars = truncated.reduce(0) { $0 + ((($1["content"] as? String)?.count) ?? 0) }
             } else {
                 break
@@ -671,6 +670,7 @@ extension AgentViewModel {
             RecentAgentsService.shared.recordRun(agentName: name, arguments: "", prompt: "run \(name)")
             let runResult = await scriptService.loadAndRunScriptViaProcess(
                 name: name,
+                projectFolder: tab?.projectFolder ?? projectFolder,
                 onOutput: { [weak self] chunk in
                     Task { @MainActor in
                         if let tab {
@@ -1060,6 +1060,7 @@ extension AgentViewModel {
         let runResult = await scriptService.loadAndRunScriptViaProcess(
             name: name,
             arguments: arguments,
+            projectFolder: tab.projectFolder,
             isCancelled: { cancelFlag.value }
         ) { [weak tab] chunk in
             Task { @MainActor in

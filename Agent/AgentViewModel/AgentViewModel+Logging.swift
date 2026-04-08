@@ -477,7 +477,7 @@ extension AgentViewModel {
             if !self.streamBuffer.isEmpty {
                 let collapsed = Self.collapseNewlines(self.streamBuffer)
                 ChatHistoryStore.shared.appendStreamingContent(collapsed)
-                self.activityLog += collapsed
+                self.activityLog = ScriptTab.trimLog(self.activityLog + collapsed)
                 self.streamBuffer = ""
             }
         }
@@ -490,14 +490,14 @@ extension AgentViewModel {
         if !streamBuffer.isEmpty {
             let collapsed = Self.collapseNewlines(streamBuffer)
             ChatHistoryStore.shared.appendStreamingContent(collapsed)
-            activityLog += collapsed
+            activityLog = ScriptTab.trimLog(activityLog + collapsed)
             streamBuffer = ""
             didFlush = true
         }
         if streamingTextStarted {
             if didFlush {
                 ChatHistoryStore.shared.appendStreamingContent("\n")
-                activityLog += "\n"
+                activityLog = ScriptTab.trimLog(activityLog + "\n")
             }
             streamingTextStarted = false
             // Let drip task finish naturally — no instant dump
@@ -540,10 +540,9 @@ extension AgentViewModel {
         }
         // Single mutation of activityLog instead of multiple
         if !combined.isEmpty {
-            activityLog += combined
+            activityLog = ScriptTab.trimLog(activityLog + combined)
             NotificationCenter.default.post(name: .activityLogDidChange, object: nil)
         }
-        // Truncation handled by ActivityLogView at render time (50K cap)
     }
 
     private func schedulePersist() {

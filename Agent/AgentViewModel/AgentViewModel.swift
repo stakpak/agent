@@ -1341,14 +1341,18 @@ final class AgentViewModel {
         LLMProviderSetup.registerAllProviders()
 
         activityLog = ChatHistoryStore.shared.buildActivityLogText(maxTasks: 3)
-        // Trim main tab log on relaunch only
-        activityLog = ScriptTab.trimForRelaunch(activityLog)
+        // Trim main tab log on relaunch
+        activityLog = ScriptTab.trimLog(activityLog)
         CodeBlockTheme.updateAppearance()
         TerminalNeoTheme.updateAppearance()
         // Restore ~/Documents/AgentScript/ folder and bundled resources if missing (off main thread)
         Task.detached { [scriptService = self.scriptService] in
             scriptService.ensurePackage()
             scriptService.rebuildAllMetadata()
+            // After ensurePackage, refresh upstream-bundled scripts when Agent! has been
+            // upgraded since the last sync. User-authored scripts are never touched, and
+            // any modified bundled script is backed up to .Trash before replacement.
+            await scriptService.syncBundledScriptsFromRemote()
             let names = Set(scriptService.listScripts().map { $0.name.lowercased() })
             await MainActor.run { AppleIntelligenceMediator.knownAgentNames = names }
         }

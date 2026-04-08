@@ -177,6 +177,22 @@ extension AgentViewModel {
             case "run": return ("run_agent", newInput)
             case "delete": return ("delete_agent", newInput)
             case "combine": return ("combine_agents", newInput)
+            case "restore": return ("restore_agent", newInput)
+            case "list_backups", "backups": return ("list_agent_backups", newInput)
+            case "pull", "pull_remote", "fetch": return ("pull_agent", newInput)
+            case "edit":
+                // Resolve agent script name → file_path so the model never has to know
+                // ~/Documents/AgentScript/agents/Sources/Scripts/<name>.swift exists.
+                // Dispatch to the existing edit_file handler with the resolved path.
+                var mapped = newInput
+                if let scriptName = (newInput["name"] as? String), !scriptName.isEmpty {
+                    let clean = scriptName.replacingOccurrences(of: ".swift", with: "")
+                    let resolvedPath = ScriptService.scriptsDirURL
+                        .appendingPathComponent("\(clean).swift").path
+                    mapped["file_path"] = resolvedPath
+                    mapped.removeValue(forKey: "name")
+                }
+                return ("edit_file", mapped)
             default: return ("list_agents", newInput)
             }
 
@@ -188,6 +204,27 @@ extension AgentViewModel {
             case "run": return ("run_apple_script", newInput)
             case "save": return ("save_apple_script", newInput)
             case "delete": return ("delete_apple_script", newInput)
+            case "quit_app", "quit",
+                 "launch_app", "launch",
+                 "open_app", "open",
+                 "activate_app", "activate":
+                // App lifecycle: synthesize `tell application "X" to <verb>` and route to execute.
+                // open/launch both map to AppleScript `launch` (which opens the app without
+                // bringing it forward). Use `activate` to also raise it.
+                let verb: String = {
+                    switch action {
+                    case "launch_app", "launch", "open_app", "open": return "launch"
+                    case "activate_app", "activate": return "activate"
+                    default: return "quit"
+                    }
+                }()
+                let appName = (newInput["name"] as? String)
+                    ?? (newInput["app"] as? String)
+                    ?? (newInput["bundleId"] as? String) ?? ""
+                guard !appName.isEmpty else { return ("run_applescript", newInput) }
+                var mapped = newInput
+                mapped["source"] = "tell application \"\(appName)\" to \(verb)"
+                return ("run_applescript", mapped)
             default: return ("list_apple_scripts", newInput)
             }
 
@@ -198,6 +235,25 @@ extension AgentViewModel {
             case "run": return ("run_javascript", newInput)
             case "save": return ("save_javascript", newInput)
             case "delete": return ("delete_javascript", newInput)
+            case "quit_app", "quit",
+                 "launch_app", "launch",
+                 "open_app", "open",
+                 "activate_app", "activate":
+                // App lifecycle: synthesize JXA `Application("X").<verb>()` and route to execute.
+                let verb: String = {
+                    switch action {
+                    case "launch_app", "launch", "open_app", "open": return "launch"
+                    case "activate_app", "activate": return "activate"
+                    default: return "quit"
+                    }
+                }()
+                let appName = (newInput["name"] as? String)
+                    ?? (newInput["app"] as? String)
+                    ?? (newInput["bundleId"] as? String) ?? ""
+                guard !appName.isEmpty else { return ("execute_javascript", newInput) }
+                var mapped = newInput
+                mapped["source"] = "Application(\"\(appName)\").\(verb)()"
+                return ("execute_javascript", mapped)
             default: return ("list_javascript", newInput)
             }
 
@@ -276,10 +332,37 @@ extension AgentViewModel {
             }
 
         case "accessibility", "ax":
-            // Remap "action" for perform_action to avoid collision with the dispatch "action"
+            // Remap "action" for perform_action and manage_app to avoid colliding with the
+            // dispatch "action". Callers pass `ax_action` (perform_action) or `sub_action`
+            // (manage_app) and the handler reads `action` — we forward that here.
             var mapped = newInput
             if let axAction = mapped["ax_action"] as? String {
                 mapped["action"] = axAction
+            } else if let subAction = mapped["sub_action"] as? String {
+                mapped["action"] = subAction
+            }
+            // Convenience verbs: accessibility(action:"quit_app",name:"X") routes to manage_app.
+            // open/launch are aliases — both call NSWorkspace.openApplication via manageApp.launch.
+            switch action {
+            case "quit_app", "quit":
+                mapped["action"] = "quit"
+                return ("ax_manage_app", mapped)
+            case "open_app", "open", "launch_app", "launch":
+                mapped["action"] = "launch"
+                return ("ax_manage_app", mapped)
+            case "activate_app", "activate":
+                mapped["action"] = "activate"
+                return ("ax_manage_app", mapped)
+            case "hide_app", "hide":
+                mapped["action"] = "hide"
+                return ("ax_manage_app", mapped)
+            case "unhide_app", "unhide":
+                mapped["action"] = "unhide"
+                return ("ax_manage_app", mapped)
+            case "list_apps":
+                mapped["action"] = "list"
+                return ("ax_manage_app", mapped)
+            default: break
             }
             switch action {
             case "list_windows": return ("ax_list_windows", mapped)

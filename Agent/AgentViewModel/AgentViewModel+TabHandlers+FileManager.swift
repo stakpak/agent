@@ -52,20 +52,30 @@ extension AgentViewModel {
             {
                 Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
+            // Cap file output at 50K chars for LLM context — matches main task path.
+            // Eliminates chunked re-read storms on Swift source files.
+            let capped = LogLimits.trim(
+                output,
+                cap: LogLimits.readFileChars,
+                lineCount: output.components(separatedBy: "\n").count,
+                suffix: "Use offset/limit to read specific sections."
+            )
             let lang = Self.langFromPath(filePath)
             tab.appendLog(Self.codeFence(Self.preview(output, lines: readFilePreviewLines), language: lang))
             tab.flush()
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": capped],
                 isComplete: false
             )
 
         case "write_file":
             let filePath = input["file_path"] as? String ?? ""
             let content = input["content"] as? String ?? ""
-            FileBackupService.shared.backup(filePath: (filePath as NSString).expandingTildeInPath, tabID: tab.id)
+            let expandedWrite = (filePath as NSString).expandingTildeInPath
+            FileBackupService.shared.backup(filePath: expandedWrite, tabID: tab.id)
             tab.appendLog("📝 Write: \(filePath)")
             let output = await Self.offMain { CodingService.writeFile(path: filePath, content: content) }
+            Self.invalidateFileReadCache(path: expandedWrite)
             tab.appendLog(output)
             let lang = Self.langFromPath(filePath)
             tab.appendLog(Self.codeFence(Self.preview(content, lines: readFilePreviewLines), language: lang))
@@ -97,6 +107,9 @@ extension AgentViewModel {
                 replaceAll: replaceAll,
                 context: context
             ) }
+            if !output.hasPrefix("Error") {
+                Self.invalidateFileReadCache(path: expandedPath)
+            }
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
             }
@@ -186,6 +199,7 @@ extension AgentViewModel {
                     throw DiffError.invalidDiff
                 }
                 try patched.write(to: URL(fileURLWithPath: expandedPath), atomically: true, encoding: .utf8)
+                Self.invalidateFileReadCache(path: expandedPath)
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: source)
                 let verifyResult = MultiLineDiff.createDiff(source: source, destination: patched, includeMetadata: true)
                 let verified = MultiLineDiff.verifyDiff(verifyResult)

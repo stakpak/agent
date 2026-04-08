@@ -32,7 +32,8 @@ extension AgentViewModel {
             return await handleTabGitTool(tab: tab, name: name, input: input, toolId: toolId)
         // Agent Scripts
         case "list_agents", "read_agent", "create_agent", "update_agent",
-             "delete_agent", "combine_agents", "run_agent":
+             "delete_agent", "combine_agents", "run_agent",
+             "restore_agent", "list_agent_backups", "pull_agent":
             return await handleTabAgentScriptTool(tab: tab, name: name, input: input, toolId: toolId)
         // Shell
         case "execute_agent_command", "execute_daemon_command", "run_shell_script", "batch_commands", "batch_tools":

@@ -199,7 +199,7 @@ final class ScriptTab: Identifiable {
         self.tabInputTokens = record.tabInputTokens
         self.tabOutputTokens = record.tabOutputTokens
         // Trim main/script tab logs on relaunch (skip Messages/automation tabs)
-        if !isMessagesTab { activityLog = Self.trimForRelaunch(activityLog) }
+        if !isMessagesTab { activityLog = Self.trimLog(activityLog) }
     }
 
     // MARK: - Logging
@@ -228,27 +228,32 @@ final class ScriptTab: Identifiable {
         }
     }
 
-    /// Max chars to keep in activityLog — trimmed only on app relaunch (50K).
-    /// During session, full history is preserved; render cap handles display performance.
-    static let maxLogChars = 50_000
+    /// Hard cap for activityLog — applied at every mutation site.
+    /// 50K is small enough that ActivityLogView can render it without beach-balling.
+    nonisolated static let logCap = 50_000
 
-    /// Trim a log string to the relaunch cap, snapping to the next newline.
-    static func trimForRelaunch(_ log: String) -> String {
-        guard log.count > maxLogChars else { return log }
-        var trimmed = String(log.dropFirst(log.count - maxLogChars))
+    /// Banner inserted at the front whenever the log is trimmed. ActivityLogView
+    /// styles this literal with a yellow background at render time.
+    nonisolated static let trimBanner = "··· earlier output trimmed ···\n\n"
+
+    /// THE ONE log trim function. Hard 50K cap, snaps to next newline, prepends banner.
+    /// Used everywhere `activityLog` grows. Idempotent — calling on already-trimmed text is a no-op.
+    nonisolated static func trimLog(_ log: String) -> String {
+        guard log.count > logCap else { return log }
+        let target = max(0, logCap - trimBanner.count)
+        var trimmed = String(log.dropFirst(log.count - target))
         if let nl = trimmed.firstIndex(of: "\n") {
             trimmed = String(trimmed[trimmed.index(after: nl)...])
         }
-        return trimmed
+        return trimBanner + trimmed
     }
 
     func flush() {
         logFlushTask?.cancel()
         logFlushTask = nil
         if !logBuffer.isEmpty {
-            activityLog += logBuffer
+            activityLog = Self.trimLog(activityLog + logBuffer)
             logBuffer = ""
-            // Trimming handled by ActivityLogView at render time (50K cap with yellow banner)
             NotificationCenter.default.post(name: .activityLogDidChange, object: id)
         }
     }

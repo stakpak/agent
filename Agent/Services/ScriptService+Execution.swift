@@ -77,12 +77,19 @@ extension ScriptService {
 
     /// Run a compiled script dylib out-of-process via a small runner executable.
     /// Each invocation gets its own process with its own stdout — fully concurrent.
+    ///
+    /// `projectFolder` is the active tab/main project directory. It's exported as
+    /// `AGENT_PROJECT_FOLDER` (always set, separate from `AGENT_SCRIPT_ARGS`) and
+    /// used as the process cwd. Scripts read it directly when they need a default
+    /// working directory; `AGENT_SCRIPT_ARGS` carries only what the LLM explicitly
+    /// passed.
     func loadAndRunScriptViaProcess(
-        name: String, arguments: String = "", captureStderr: Bool = false,
+        name: String, arguments: String = "", projectFolder: String = "",
+        captureStderr: Bool = false,
         isCancelled: (@Sendable () -> Bool)? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async -> (output: String, status: Int32) {
-        AuditLog.log(.agentScript, "run: \(name) args: \(arguments.prefix(80))")
+        AuditLog.log(.agentScript, "run: \(name) args: \(arguments.prefix(80)) cwd: \(projectFolder)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let dylib = dylibPath(name: scriptName)
 
@@ -90,14 +97,29 @@ extension ScriptService {
             return ("Failed to compile ScriptRunner helper", 1)
         }
 
+        // Resolve cwd: project folder if set + exists, else home
+        let fm = FileManager.default
+        let cwdPath: String = {
+            let expanded = (projectFolder as NSString).expandingTildeInPath
+            var isDir: ObjCBool = false
+            if !expanded.isEmpty, fm.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
+                return expanded
+            }
+            return NSHomeDirectory()
+        }()
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.runnerPath)
         process.arguments = [dylib]
-        process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        process.currentDirectoryURL = URL(fileURLWithPath: cwdPath)
 
         // Inherit current environment and add script args
         var env = ProcessInfo.processInfo.environment
         env["HOME"] = NSHomeDirectory()
+        // AGENT_PROJECT_FOLDER is always set so scripts have a stable default
+        // for cwd-style operations (e.g. file paths) regardless of what the LLM
+        // passed in arguments. AGENT_SCRIPT_ARGS only carries explicit arguments.
+        env["AGENT_PROJECT_FOLDER"] = cwdPath
         let runnerPaths = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = runnerPaths + ":" + (env["PATH"] ?? "")
         if !arguments.isEmpty {

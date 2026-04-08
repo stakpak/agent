@@ -250,18 +250,36 @@ extension AgentViewModel {
     }
 
     /// Returns true if the command needs TCC permissions (run in Agent process).
-    /// TCC commands: automation, agentscript, applescript, osascript, appleevent, accessibility
+    ///
+    /// THE HARD RULE — anything that touches macOS TCC MUST run in-process.
+    /// The Launch Agent and Launch Daemon are SEPARATE processes with
+    /// SEPARATE bundle IDs and SEPARATE TCC grants (typically NONE). The
+    /// user's "allow Agent! to send keystrokes" / "allow Agent! to control
+    /// Music" / etc. lives on the main app's bundle ID and DOES NOT
+    /// propagate to subprocesses with different bundle IDs.
+    ///
+    /// Add new keywords here whenever the LLM finds a way to invoke a
+    /// TCC-touching binary the existing list doesn't catch. Better to
+    /// over-route (a few extra in-process executions) than to send
+    /// AppleScript through the root daemon and confuse the LLM with a
+    /// "not authorized" failure.
     nonisolated static func needsTCCPermissions(_ command: String) -> Bool {
         let lower = command.lowercased()
-        // TCC-requiring commands must run in Agent process to inherit permissions
-        return lower.contains("osascript")
-            || lower.contains("applescript")
-            || lower.contains("screencapture")
-            || lower.contains("accessibility")
-            || lower.contains("automation")
-            || lower.contains("agentscript")
-            || lower.contains("appleevent")
-            || lower.contains("automator")
+        return lower.contains("osascript")           // AppleScript / JXA CLI
+            || lower.contains("applescript")         // any literal mention
+            || lower.contains("nsapplescript")       // Foundation API name
+            || lower.contains("jxa")                 // JavaScript for Automation alias
+            || lower.contains("scriptingbridge")     // SBApplication-using binaries
+            || lower.contains("tell application")    // literal AppleScript embedded in heredoc
+            || lower.contains("do shell script")     // AppleScript that wraps shell
+            || lower.contains("screencapture")       // Screen Recording TCC
+            || lower.contains("accessibility")       // AX TCC
+            || lower.contains("axorcist")            // AX library binary
+            || lower.contains("automation")          // Automation TCC
+            || lower.contains("agentscript")         // agent script dylibs (use ScriptingBridge)
+            || lower.contains("appleevent")          // raw Apple Events
+            || lower.contains("automator")           // Automator workflows (Apple Events)
+            || lower.contains("shortcuts run")       // Shortcuts CLI (often needs Automation)
     }
 
 }

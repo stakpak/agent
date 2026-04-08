@@ -120,9 +120,11 @@ extension AgentViewModel {
             }
 
             // Truncate if batch output is too large
-            let truncated = batchOutput.count > 50_000
-                ? String(batchOutput.prefix(50_000)) + "\n...(batch output truncated)"
-                : batchOutput
+            let truncated = LogLimits.trim(
+                batchOutput,
+                cap: LogLimits.batchOutputChars,
+                suffix: "Batch output truncated."
+            )
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": truncated],
@@ -172,9 +174,11 @@ extension AgentViewModel {
 
             tab.appendLog("● \(completed)/\(tasks.count) tasks completed")
             tab.flush()
-            let truncatedBatch = batchOutput.count > 50_000
-                ? String(batchOutput.prefix(50_000)) + "\n...(batch output truncated)"
-                : batchOutput
+            let truncatedBatch = LogLimits.trim(
+                batchOutput,
+                cap: LogLimits.batchOutputChars,
+                suffix: "Batch output truncated."
+            )
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": truncatedBatch],
                 isComplete: false

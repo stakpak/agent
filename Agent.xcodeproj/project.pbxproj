@@ -133,6 +133,7 @@
 		EAA08AAC2F7D549300D5998A /* AgentLLM in Frameworks */ = {isa = PBXBuildFile; productRef = EAA08AAB2F7D549300D5998A /* AgentLLM */; };
 		EAAI000000000000000001 /* AppleIntelligenceMediator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAI000000000000000002 /* AppleIntelligenceMediator.swift */; };
 		EABA0FBD2F7B78DA005CCD6E /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EABA0FBC2F7B78DA005CCD6E /* ChatModels.swift */; };
+		AA10000000000000000200 /* LogLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000201 /* LogLimits.swift */; };
 		EAE1E7032F7BF5270079432C /* AgentTerminalNeo in Frameworks */ = {isa = PBXBuildFile; productRef = EAE1E7022F7BF5270079432C /* AgentTerminalNeo */; };
 		EAE1E7062F7BF5470079432C /* AgentTools in Frameworks */ = {isa = PBXBuildFile; productRef = EAE1E7052F7BF5470079432C /* AgentTools */; };
 		EAE1E7092F7BF5590079432C /* AgentColorSyntax in Frameworks */ = {isa = PBXBuildFile; productRef = EAE1E7082F7BF5590079432C /* AgentColorSyntax */; };
@@ -360,6 +361,7 @@
 		EA80000000000000000002 /* NSAppleScriptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSAppleScriptService.swift; sourceTree = "<group>"; };
 		EAAI000000000000000002 /* AppleIntelligenceMediator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceMediator.swift; sourceTree = "<group>"; };
 		EABA0FBC2F7B78DA005CCD6E /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
+		AA10000000000000000201 /* LogLimits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogLimits.swift; sourceTree = "<group>"; };
 		EAE1E7232F7C01000079432C /* LLMProviderSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMProviderSetup.swift; sourceTree = "<group>"; };
 		EAF3666E2F623D6A004B7E38 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		EAFA000000000000000002 /* FoundationModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationModelService.swift; sourceTree = "<group>"; };
@@ -689,6 +691,7 @@
 				EABA0FBC2F7B78DA005CCD6E /* ChatModels.swift */,
 				TN10000000000000000000 /* ToolNames.swift */,
 				AA10000000000000000020 /* Models.swift */,
+				AA10000000000000000201 /* LogLimits.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -940,6 +943,7 @@
 				E3E55709254183FE587097A8 /* DiffStore.swift in Sources */,
 				AA10000000000000000103 /* RecentFoldersService.swift in Sources */,
 				EABA0FBD2F7B78DA005CCD6E /* ChatModels.swift in Sources */,
+				AA10000000000000000200 /* LogLimits.swift in Sources */,
 				AA100000000000000000B7 /* ToolsView.swift in Sources */,
 				AA10000000000000000104 /* TokenBadge.swift in Sources */,
 				AA100000000000000000B8 /* AgentOptionsView.swift in Sources */,

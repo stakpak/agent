@@ -244,7 +244,16 @@ struct ActivityLogView: NSViewRepresentable {
             }
 
             if textChanged || searchCleared {
-                let isAppending = len > lastLength && lastLength > 0 && !searchCleared
+                // Source `activityLog` is bounded at 50K by `ScriptTab.trimLog`. When trim
+                // happens, the front of the string shifts — the append optimization is only
+                // safe if the prefix is still intact. Compare a small window to detect shifts.
+                let prefixIntact: Bool = {
+                    guard lastLength > 0, !lastRenderedText.isEmpty else { return true }
+                    let n = min(64, min(text.count, lastRenderedText.count))
+                    guard n > 0 else { return true }
+                    return (text as NSString).substring(to: n) == (lastRenderedText as NSString).substring(to: n)
+                }()
+                let isAppending = len > lastLength && lastLength > 0 && !searchCleared && prefixIntact
 
                 if isAppending {
                     let prevLen = lastLength
@@ -261,11 +270,9 @@ struct ActivityLogView: NSViewRepresentable {
                     if hasTableLines || prevHasTableLines {
                         let savedOrigin = scrollView.contentView.bounds.origin
                         let wasAtBottom = isNearBottom(textView)
-                        let t0 = CFAbsoluteTimeGetCurrent()
                         textView.textStorage?.beginEditing()
-                        textView.textStorage?.setAttributedString(buildAttributedString(from: text, cap: renderCap))
+                        textView.textStorage?.setAttributedString(buildAttributedString(from: text))
                         textView.textStorage?.endEditing()
-                        adaptRenderCap(elapsed: CFAbsoluteTimeGetCurrent() - t0)
                         lastLength = len
                         lastRenderedText = text
                         if !wasAtBottom {
@@ -281,20 +288,6 @@ struct ActivityLogView: NSViewRepresentable {
                         CATransaction.setDisableActions(true)
                         textView.textStorage?.beginEditing()
                         textView.textStorage?.append(renderMarkdownOnly(newText))
-                        // Trim from top if textStorage exceeds adaptive cap
-                        if let storage = textView.textStorage, storage.length > renderCap {
-                            let trim = storage.length - renderCap
-                            let snapRange = NSRange(location: trim, length: min(200, storage.length - trim))
-                            let snippet = storage.string as NSString
-                            let nlRange = snippet.range(of: "\n", range: snapRange)
-                            let cutPoint = nlRange.location != NSNotFound ? nlRange.location + 1 : trim
-                            storage.deleteCharacters(in: NSRange(location: 0, length: cutPoint))
-                            let banner = NSAttributedString(string: "··· earlier output trimmed ···\n\n", attributes: [
-                                .font: font,
-                                .foregroundColor: NSColor.secondaryLabelColor
-                            ])
-                            storage.insert(banner, at: 0)
-                        }
                         textView.textStorage?.endEditing()
                         CATransaction.commit()
 
@@ -316,11 +309,9 @@ struct ActivityLogView: NSViewRepresentable {
                     if tabSwitched, swapToCachedStorage(for: tabID, text: text, textView: textView, scrollView: scrollView) {
                         // Cache hit — layout preserved, scroll restored
                     } else {
-                        let t0 = CFAbsoluteTimeGetCurrent()
                         textView.textStorage?.beginEditing()
-                        textView.textStorage?.setAttributedString(buildAttributedString(from: text, cap: renderCap))
+                        textView.textStorage?.setAttributedString(buildAttributedString(from: text))
                         textView.textStorage?.endEditing()
-                        adaptRenderCap(elapsed: CFAbsoluteTimeGetCurrent() - t0)
                         if !wasAtBottom {
                             scrollView.contentView.scroll(to: savedOrigin)
                             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -678,54 +669,25 @@ struct ActivityLogView: NSViewRepresentable {
             return result
         }
 
-        // MARK: - Beach Ball Predictor
-        /// Tracks render time to dynamically adjust truncation threshold.
-        /// Starts generous (200K), shrinks when renders get slow, grows when fast.
-        var renderCap = 500_000
-        /// Threshold in seconds — if a render takes longer, shrink the cap
-        private static let beachBallThreshold: CFAbsoluteTime = 0.08 // 80ms
-
-        /// Call after a render completes to adapt the cap for next time.
-        func adaptRenderCap(elapsed: CFAbsoluteTime) {
-            if elapsed > Self.beachBallThreshold {
-                // Slow render — shrink cap by 25%, floor at 100K
-                renderCap = max(100_000, renderCap * 3 / 4)
-            } else if elapsed < Self.beachBallThreshold / 2, renderCap < 1_000_000 {
-                // Fast render — grow cap by 10%, ceiling at 1M
-                renderCap = min(1_000_000, renderCap * 11 / 10)
-            }
-        }
-
         /// Build attributed string from text. Converts image/HTML paths to clickable links.
-        nonisolated func buildAttributedString(from text: String, cap: Int = 500_000) -> NSAttributedString {
+        /// Source `activityLog` is bounded to `ScriptTab.logCap` (50K) by `ScriptTab.trimLog`,
+        /// so this view never trims — it just renders and styles the trim banner literal yellow.
+        nonisolated func buildAttributedString(from text: String) -> NSAttributedString {
             let baseAttrs: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: NSColor.labelColor
             ]
 
-            // Truncate from the front if text exceeds adaptive render cap
-            var renderText = text
-            var wasTruncated = false
-            if renderText.count > cap {
-                let drop = renderText.count - cap
-                renderText = String(renderText.dropFirst(drop))
-                // Snap to next newline so we don't start mid-line
-                if let nl = renderText.firstIndex(of: "\n") {
-                    renderText = String(renderText[renderText.index(after: nl)...])
-                }
-                wasTruncated = true
-            }
-
             // Strip ANSI escape codes from the text
             let cleanText: String
             if let rx = MarkdownPatterns.ansiEscapePattern {
                 cleanText = rx.stringByReplacingMatches(
-                    in: renderText,
-                    range: NSRange(location: 0, length: (renderText as NSString).length),
+                    in: text,
+                    range: NSRange(location: 0, length: (text as NSString).length),
                     withTemplate: ""
                 )
             } else {
-                cleanText = renderText
+                cleanText = text
             }
 
             let nsText = cleanText as NSString
@@ -733,22 +695,9 @@ struct ActivityLogView: NSViewRepresentable {
             let imageMatches = MarkdownPatterns.imagePathPattern?.matches(in: cleanText, range: fullRange) ?? []
             let htmlMatches = MarkdownPatterns.htmlPathPattern?.matches(in: cleanText, range: fullRange) ?? []
 
-            // Build truncation banner if needed
-            let truncationBanner: NSAttributedString? = wasTruncated ? {
-                let bannerAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedSystemFont(ofSize: font.pointSize - 1, weight: .medium),
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                    .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.15)
-                ]
-                return NSAttributedString(string: "--- Log truncated (showing last 50K characters) ---\n", attributes: bannerAttrs)
-            }() : nil
-
             guard !imageMatches.isEmpty || !htmlMatches.isEmpty else {
                 let rendered = renderMarkdown(cleanText)
-                guard let banner = truncationBanner else { return rendered }
-                let combined = NSMutableAttributedString(attributedString: banner)
-                combined.append(rendered)
-                return combined
+                return Self.styleTrimBanner(rendered, font: font)
             }
 
             // Merge all matches sorted by location
@@ -777,10 +726,7 @@ struct ActivityLogView: NSViewRepresentable {
 
             guard !allMatches.isEmpty else {
                 let rendered = renderMarkdown(cleanText)
-                guard let banner = truncationBanner else { return rendered }
-                let combined = NSMutableAttributedString(attributedString: banner)
-                combined.append(rendered)
-                return combined
+                return Self.styleTrimBanner(rendered, font: font)
             }
 
             let result = NSMutableAttributedString()
@@ -814,12 +760,25 @@ struct ActivityLogView: NSViewRepresentable {
                 result.append(renderMarkdown(nsText.substring(with: remainingRange)))
             }
 
-            if let banner = truncationBanner {
-                let combined = NSMutableAttributedString(attributedString: banner)
-                combined.append(result)
-                return combined
-            }
-            return result
+            return Self.styleTrimBanner(result, font: font)
+        }
+
+        /// Apply yellow background + medium-weight styling to the trim-banner literal
+        /// (`ScriptTab.trimBanner`) wherever it appears in the rendered attributed string.
+        nonisolated static func styleTrimBanner(_ rendered: NSAttributedString, font: NSFont) -> NSAttributedString {
+            let bannerLiteral = ScriptTab.trimBanner.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !bannerLiteral.isEmpty else { return rendered }
+            let nsString = rendered.string as NSString
+            let searchRange = NSRange(location: 0, length: nsString.length)
+            let found = nsString.range(of: bannerLiteral, options: [], range: searchRange)
+            guard found.location != NSNotFound else { return rendered }
+            let mutable = NSMutableAttributedString(attributedString: rendered)
+            mutable.addAttributes([
+                .font: NSFont.monospacedSystemFont(ofSize: font.pointSize - 1, weight: .medium),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.15)
+            ], range: found)
+            return mutable
         }
 
         nonisolated private func renderMarkdown(_ text: String) -> NSAttributedString {

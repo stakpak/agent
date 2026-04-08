@@ -152,27 +152,90 @@ extension AgentViewModel {
             let scripts = await Self.offMain { [ss = scriptService] in ss.listScripts() }
             return scripts.isEmpty ? "No scripts found" : scripts.map { "\($0.name) (\($0.size) bytes)" }.joined(separator: "\n")
         case "run_agent":
-            let scriptName = input["name"] as? String ?? ""
+            let rawRunName = input["name"] as? String ?? ""
+            let scriptName = await Self.offMain { [ss = scriptService] in ss.resolveScriptName(rawRunName) }
             let arguments = input["arguments"] as? String ?? ""
-            guard let cmd = await Self.offMain({ [ss = scriptService] in ss.compileCommand(name: scriptName) }) else {
+            guard let compileCmd = await Self.offMain({ [ss = scriptService] in ss.compileCommand(name: scriptName) }) else {
                 return "Error: script '\(scriptName)' not found"
             }
+
+            // Spawn a fresh ScriptTab so the calling main task is not blocked.
+            // The script runs in a detached Task and streams output to the
+            // spawned tab; this handler returns immediately.
+            let spawnedTab = openScriptTab(scriptName: scriptName, selectTab: false)
+            spawnedTab.projectFolder = projectFolder
+            spawnedTab.isRunning = true
+            spawnedTab.appendLog("🦾 Spawned from main task")
+            spawnedTab.flush()
             RecentAgentsService.shared.recordRun(agentName: scriptName, arguments: arguments, prompt: "run \(scriptName) \(arguments)")
-            // Compile first
-            let compileResult = await Self.executeTCC(command: cmd)
-            guard compileResult.status == 0 else {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
-                return "Build failed:\n\(compileResult.output)"
+
+            let stderrCapture = scriptCaptureStderr
+            Task { [weak self, weak spawnedTab] in
+                guard let self, let spawnedTab else { return }
+
+                // Compile only if needed. MUST run via executeTCC (in-process)
+                // so swift build inherits the main app's TCC grants for
+                // ~/Documents access.
+                if await Self.offMain({ [ss = self.scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
+                    await MainActor.run {
+                        spawnedTab.appendLog("🦾 Compiling: \(scriptName)")
+                        spawnedTab.flush()
+                    }
+                    let compileResult = await Self.executeTCC(command: compileCmd)
+                    if compileResult.status != 0 {
+                        await MainActor.run {
+                            spawnedTab.appendLog("❌ Compile failed (exit code: \(compileResult.status))")
+                            spawnedTab.appendOutput(compileResult.output)
+                            spawnedTab.isRunning = false
+                            spawnedTab.exitCode = compileResult.status
+                            spawnedTab.flush()
+                        }
+                        RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
+                        return
+                    }
+                }
+
+                await MainActor.run {
+                    spawnedTab.appendLog("🦾 Running: \(scriptName)")
+                    spawnedTab.flush()
+                }
+
+                let cancelFlag = spawnedTab._cancelFlag
+                let runResult = await self.scriptService.loadAndRunScriptViaProcess(
+                    name: scriptName,
+                    arguments: arguments,
+                    projectFolder: spawnedTab.projectFolder,
+                    captureStderr: stderrCapture,
+                    isCancelled: { cancelFlag.value }
+                ) { [weak spawnedTab] chunk in
+                    Task { @MainActor in
+                        spawnedTab?.appendOutput(chunk)
+                    }
+                }
+
+                let isUsageOutput = runResult.output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Usage:")
+                let statusNote = runResult.status == 0 ? "completed" : (isUsageOutput ? "usage" : "exit code: \(runResult.status)")
+                let wasCancelled = await MainActor.run { spawnedTab.isCancelled } || runResult.status == 15
+
+                await MainActor.run {
+                    spawnedTab.isRunning = false
+                    spawnedTab.exitCode = runResult.status
+                    spawnedTab.appendLog("\(scriptName) \(statusNote)")
+                    spawnedTab.flush()
+                }
+
+                if wasCancelled {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .cancelled)
+                } else if isUsageOutput || runResult.status != 0 {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
+                } else {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .success)
+                }
             }
-            // Run the compiled dylib in-process via dlopen
-            let result = await scriptService.loadAndRunScript(name: scriptName, arguments: arguments)
-            let isUsage = result.output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Usage:")
-            if isUsage || result.status != 0 {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
-            } else {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .success)
-            }
-            return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
+
+            appendLog("🚀 Started '\(scriptName)' in background tab")
+            flushLog()
+            return "🚀 Started '\(scriptName)' in background script tab '\(scriptName)'. Output streams to that tab — switch to it to monitor progress. The current task continues."
         case "read_agent":
             let readName = input["name"] as? String ?? ""
             return await Self.offMain { [ss = scriptService] in ss.readScript(name: readName) ?? "Not found" }
@@ -183,6 +246,24 @@ extension AgentViewModel {
         case "delete_agent":
             let deleteName = input["name"] as? String ?? ""
             return await Self.offMain { [ss = scriptService] in ss.deleteScript(name: deleteName) }
+        case "restore_agent":
+            let restoreName = input["name"] as? String ?? ""
+            let backupFilename = input["backup"] as? String
+            return await Self.offMain { [ss = scriptService] in
+                ss.restoreScript(name: restoreName, backupFilename: backupFilename)
+            }
+        case "list_agent_backups":
+            let filterName = input["name"] as? String ?? ""
+            let backups = await Self.offMain { [ss = scriptService] in ss.listScriptBackups(name: filterName) }
+            if backups.isEmpty {
+                return filterName.isEmpty
+                    ? "No script backups found."
+                    : "No backups found for '\(filterName)'."
+            }
+            return backups.map { $0.lastPathComponent }.joined(separator: "\n")
+        case "pull_agent":
+            let pullName = input["name"] as? String ?? ""
+            return await scriptService.pullScriptFromRemote(name: pullName)
         case "combine_agents":
             let sourceA = input["source_a"] as? String ?? ""
             let sourceB = input["source_b"] as? String ?? ""
@@ -615,9 +696,7 @@ extension AgentViewModel {
                 if cleaned.isEmpty {
                     return "(no readable text content at \(urlStr))"
                 }
-                let capped = String(cleaned.prefix(8000))
-                let truncNote = cleaned.count > 8000 ? "\n\n... [truncated — \(cleaned.count) chars total]" : ""
-                return capped + truncNote
+                return LogLimits.trim(cleaned, cap: LogLimits.webFetchChars)
             } catch {
                 return "Error fetching \(urlStr): \(error.localizedDescription)"
             }

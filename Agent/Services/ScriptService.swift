@@ -11,6 +11,11 @@ final class ScriptService: @unchecked Sendable {
     private var sourcesDir: URL { Self.agentsDir.appendingPathComponent("Sources") }
     var scriptsDir: URL { sourcesDir.appendingPathComponent("Scripts") }
 
+    /// Static accessor for the scripts directory — used by the consolidated tool
+    /// dispatcher to resolve `agent_script(action:"edit", name:"X")` into a full
+    /// `file_path` without instantiating ScriptService.
+    static var scriptsDirURL: URL { agentsDir.appendingPathComponent("Sources/Scripts") }
+
     /// Directory for saved AppleScript files
     static let applescriptDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -42,6 +47,9 @@ final class ScriptService: @unchecked Sendable {
 
     private static let scriptsRepoURL = "https://github.com/macOS26/AgentScripts.git"
     private static let bridgesRepoURL = "https://github.com/macOS26/AgentEventBridges.git"
+    /// Raw GitHub URL prefix for pulling individual script files (single-file recovery
+    /// without a full clone). Path inside the repo: Agent/agents/Sources/Scripts/<name>.swift
+    static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/AgentScripts/main/Agent/agents/Sources/Scripts"
 
     /// Installed location: ~/Documents/AgentScript/bridges/
     static let installedBridgesPath: URL = {

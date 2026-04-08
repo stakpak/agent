@@ -70,6 +70,49 @@ extension AgentViewModel {
                 isComplete: false
             )
 
+        case "restore_agent":
+            let restoreName = input["name"] as? String ?? ""
+            let backupFilename = input["backup"] as? String
+            let output = await Self.offMain { [ss = scriptService] in
+                ss.restoreScript(name: restoreName, backupFilename: backupFilename)
+            }
+            tab.appendLog(output)
+            tab.flush()
+            return TabToolResult(
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                isComplete: false
+            )
+
+        case "list_agent_backups":
+            let filterName = input["name"] as? String ?? ""
+            let backups = await Self.offMain { [ss = scriptService] in ss.listScriptBackups(name: filterName) }
+            let output: String
+            if backups.isEmpty {
+                output = filterName.isEmpty
+                    ? "No script backups found."
+                    : "No backups found for '\(filterName)'."
+            } else {
+                output = backups.map { $0.lastPathComponent }.joined(separator: "\n")
+            }
+            tab.appendLog("🗑️ Backups: \(backups.count)")
+            tab.flush()
+            return TabToolResult(
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                isComplete: false
+            )
+
+        case "pull_agent":
+            let pullName = input["name"] as? String ?? ""
+            tab.appendLog("⬇️ Pulling \(pullName) from AgentScripts remote...")
+            tab.flush()
+            let output = await scriptService.pullScriptFromRemote(name: pullName)
+            tab.appendLog(output)
+            tab.flush()
+            return TabToolResult(
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
+                isComplete: false
+            )
+
         case "combine_agents":
             let rawSourceA = input["source_a"] as? String ?? ""
             let rawSourceB = input["source_b"] as? String ?? ""
@@ -115,77 +158,88 @@ extension AgentViewModel {
                 )
             }
 
-            // Skip compilation if dylib is up to date.
-            // MUST run via executeTCC (in-process) so swift build inherits the
-            // main app's TCC grants for ~/Documents access. The Launch Agent
-            // path (executeForTab → userService.execute) runs in a separate
-            // TCC context that can't getcwd() inside ~/Documents/AgentScript/.
-            if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
-                tab.appendLog("🦾 Compiling: \(scriptName)")
-                tab.flush()
-
-                let compileResult = await Self.executeTCC(command: compileCmd)
-                guard !Task.isCancelled else {
-                    return TabToolResult(
-                        toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": "Script cancelled"],
-                        isComplete: false
-                    )
-                }
-
-                if compileResult.status != 0 {
-                    tab.appendLog("❌ Compile failed (exit code: \(compileResult.status))")
-                    tab.appendOutput(compileResult.output)
-                    tab.flush()
-                    let toolOutput = compileResult.output.isEmpty
-                        ? "(compile failed, exit code: \(compileResult.status))"
-                        : compileResult.output
-                    return TabToolResult(
-                        toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": String(toolOutput.prefix(10000))],
-                        isComplete: false
-                    )
-                }
-            }
-
-            tab.appendLog("🦾 Running: \(scriptName)")
-            tab.isRunning = true
-            tab.flush()
+            // Spawn a fresh ScriptTab for the run so the calling LLM tab is
+            // not blocked. The script runs in a detached Task and streams
+            // output to the spawned tab; the calling tool returns immediately.
+            let spawnedTab = openScriptTab(scriptName: scriptName, selectTab: false)
+            // Inherit caller's project folder explicitly (openScriptTab uses
+            // self.projectFolder, which may not match the calling tab when
+            // tabs have diverged).
+            spawnedTab.projectFolder = tab.projectFolder
+            spawnedTab.isRunning = true
+            spawnedTab.appendLog("🦾 Spawned from \(tab.scriptName)")
+            spawnedTab.flush()
             RecentAgentsService.shared.recordRun(agentName: scriptName, arguments: arguments, prompt: "run \(scriptName) \(arguments)")
 
-            tab.resetLLMStreamCounters()
-            let cancelFlag = tab._cancelFlag
-            let runResult = await scriptService.loadAndRunScriptViaProcess(
-                name: scriptName,
-                arguments: arguments,
-                captureStderr: scriptCaptureStderr,
-                isCancelled: { cancelFlag.value }
-            ) { [weak tab] chunk in
-                Task { @MainActor in
-                    tab?.appendOutput(chunk)
+            let stderrCapture = scriptCaptureStderr
+            Task { [weak self, weak spawnedTab] in
+                guard let self, let spawnedTab else { return }
+
+                // Compile only if needed. MUST run via executeTCC (in-process)
+                // so swift build inherits the main app's TCC grants for
+                // ~/Documents access.
+                if await Self.offMain({ [ss = self.scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
+                    await MainActor.run {
+                        spawnedTab.appendLog("🦾 Compiling: \(scriptName)")
+                        spawnedTab.flush()
+                    }
+                    let compileResult = await Self.executeTCC(command: compileCmd)
+                    if compileResult.status != 0 {
+                        await MainActor.run {
+                            spawnedTab.appendLog("❌ Compile failed (exit code: \(compileResult.status))")
+                            spawnedTab.appendOutput(compileResult.output)
+                            spawnedTab.isRunning = false
+                            spawnedTab.exitCode = compileResult.status
+                            spawnedTab.flush()
+                        }
+                        RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
+                        return
+                    }
+                }
+
+                await MainActor.run {
+                    spawnedTab.appendLog("🦾 Running: \(scriptName)")
+                    spawnedTab.flush()
+                }
+
+                let cancelFlag = spawnedTab._cancelFlag
+                let runResult = await self.scriptService.loadAndRunScriptViaProcess(
+                    name: scriptName,
+                    arguments: arguments,
+                    projectFolder: spawnedTab.projectFolder,
+                    captureStderr: stderrCapture,
+                    isCancelled: { cancelFlag.value }
+                ) { [weak spawnedTab] chunk in
+                    Task { @MainActor in
+                        spawnedTab?.appendOutput(chunk)
+                    }
+                }
+
+                let isUsageOutput = runResult.output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Usage:")
+                let statusNote = runResult.status == 0 ? "completed" : (isUsageOutput ? "usage" : "exit code: \(runResult.status)")
+                let wasCancelled = await MainActor.run { spawnedTab.isCancelled } || runResult.status == 15
+
+                await MainActor.run {
+                    spawnedTab.isRunning = false
+                    spawnedTab.exitCode = runResult.status
+                    spawnedTab.appendLog("\(scriptName) \(statusNote)")
+                    spawnedTab.flush()
+                }
+
+                if wasCancelled {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .cancelled)
+                } else if isUsageOutput || runResult.status != 0 {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
+                } else {
+                    RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .success)
                 }
             }
 
-            tab.isRunning = false
+            tab.appendLog("🚀 Started '\(scriptName)' in background tab")
             tab.flush()
-            let isUsageOutput = runResult.output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Usage:")
-            let statusNote = runResult.status == 0 ? "completed" : (isUsageOutput ? "usage" : "exit code: \(runResult.status)")
-            tab.appendLog("\(scriptName) \(statusNote)")
-            tab.flush()
-
-            // Update agent menu status based on outcome
-            let wasCancelled = tab.isCancelled || runResult.status == 15
-            if wasCancelled {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .cancelled)
-            } else if isUsageOutput || runResult.status != 0 {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .failed)
-            } else {
-                RecentAgentsService.shared.updateStatus(agentName: scriptName, arguments: arguments, status: .success)
-            }
-
-            let toolOutput = runResult.output.isEmpty
-                ? "(no output, exit code: \(runResult.status))"
-                : runResult.output
+            let toolOutput = "🚀 Started '\(scriptName)' in background script tab '\(scriptName)'. Output streams to that tab — switch to it to monitor progress. The current task continues."
             return TabToolResult(
-                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": String(toolOutput.prefix(10000))],
+                toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": toolOutput],
                 isComplete: false
             )
 

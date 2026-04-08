@@ -24,6 +24,7 @@ extension AgentViewModel {
         let result = await scriptService.loadAndRunScriptViaProcess(
             name: "Selenium",
             arguments: args,
+            projectFolder: tab.projectFolder,
             captureStderr: false,
             isCancelled: { cancelFlag.value }
         ) { _ in }
