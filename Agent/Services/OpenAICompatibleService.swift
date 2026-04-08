@@ -418,9 +418,25 @@ final class OpenAICompatibleService {
         Self.lastRequestTime[provider] = CFAbsoluteTimeGetCurrent()
     }
 
-    /// Record a Retry-After value from a 429 response.
-    private static func recordRetryAfter(_ seconds: Double, for provider: APIProvider) {
+    /// Record a Retry-After value from a 429 response. Stays @MainActor
+    /// because retryAfterUntil is a per-class static dict shared across
+    /// every OpenAICompatibleService instance and the class itself is
+    /// @MainActor. Callers from nonisolated contexts (the static request
+    /// methods) await a hop via Task { @MainActor in ... }.
+    static func recordRetryAfter(_ seconds: Double, for provider: APIProvider) {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
+    }
+
+    /// Parse a Retry-After header value. Header is either an integer
+    /// (seconds to wait) per RFC 7231 §7.1.3, or an HTTP-date — we only
+    /// honor the integer form. Returns 0 if the header is missing or
+    /// unparseable; caller should fall back to a sensible default.
+    nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
+        guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
+              !v.isEmpty,
+              let seconds = Double(v) else { return 0 }
+        // Cap at 5 minutes — providers occasionally send absurd values
+        return min(seconds, 300)
     }
 
     func send(
@@ -460,7 +476,7 @@ final class OpenAICompatibleService {
         // Without sortedKeys, two semantically-identical requests can produce
         // different byte streams and silently miss the cache.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-        return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL)
+        return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL, provider: provider)
     }
 
     // MARK: - Streaming
@@ -497,6 +513,7 @@ final class OpenAICompatibleService {
             bodyData: bodyData,
             apiKey: apiKey,
             url: baseURL,
+            provider: provider,
             onTextDelta: onTextDelta
         )
     }
@@ -504,7 +521,7 @@ final class OpenAICompatibleService {
     // MARK: - Non-Streaming Request
 
     nonisolated private static func performRequest(
-        bodyData: Data, apiKey: String, url: URL
+        bodyData: Data, apiKey: String, url: URL, provider: APIProvider
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -519,6 +536,19 @@ final class OpenAICompatibleService {
             throw AgentError.invalidResponse
         }
         guard httpResponse.statusCode == 200 else {
+            // On 429, parse Retry-After header (if present) and seed
+            // retryAfterUntil so the next call's enforceRateLimit waits
+            // the right amount. If the header is missing or unparseable,
+            // default to 30 seconds (Z.ai returns 429 with body code 1305
+            // and no Retry-After header — 30s is a safe baseline).
+            if httpResponse.statusCode == 429 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds, for: provider)
+                }
+            }
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw AgentError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
         }
@@ -666,7 +696,7 @@ final class OpenAICompatibleService {
     // MARK: - Streaming Request (SSE)
 
     nonisolated private static func performStreamingRequest(
-        bodyData: Data, apiKey: String, url: URL,
+        bodyData: Data, apiKey: String, url: URL, provider: APIProvider,
         onTextDelta: @escaping @Sendable (String) -> Void
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
         var request = URLRequest(url: url)
@@ -683,6 +713,18 @@ final class OpenAICompatibleService {
         }
 
         guard httpResponse.statusCode == 200 else {
+            // On 429, parse Retry-After header — see performRequest for the
+            // full rationale. Recording it here means even if the loop's
+            // exponential backoff is shorter than the server's recommended
+            // wait, the next call's enforceRateLimit will pad it out.
+            if httpResponse.statusCode == 429 {
+                let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                let parsed = parseRetryAfter(header)
+                let waitSeconds = parsed > 0 ? parsed : 30
+                await MainActor.run {
+                    Self.recordRetryAfter(waitSeconds, for: provider)
+                }
+            }
             var errorData = Data()
             for try await byte in bytes {
                 errorData.append(byte)
