@@ -4,7 +4,7 @@
 # 🦾 Agent! for macOS 26
 
 ## **Agentic AI for your  Mac Desktop**
-## Open Source replacement for Claude Code, Cursor, Open Claw
+## Open Source replacement for Claude Code, Cursor, Cline, OpenClaw
 
 [![Latest Release](https://img.shields.io/github/v/release/macOS26/Agent?label=Download&color=blue&style=for-the-badge)](https://github.com/macOS26/Agent/releases/latest)
 [![GitHub Stars](https://img.shields.io/github/stars/macOS26/Agent?style=for-the-badge&logo=github&label=Stars&color=hotpink)](https://github.com/macOS26/Agent/stargazers)
@@ -15,16 +15,12 @@
 
 ## What's New 🚀
 
-- **Autonomous Task Loop:** Agent! now reasons, executes, and self-corrects until the task is complete.
-- **Agentic Coding:** Advanced code editing with **Time Machine-style backups** for every file change.
-- **Native Xcode Tools:** Faster, project-aware builds and runs without external MCP configuration.
-- **Privileged Root Access:** Secure, user-approved daemon for executing any system command.
-- **Desktop Automation:** Full control of any macOS app via AXorcist (Accessibility API).
-- **Expanded AI Support:** Stabilized tool calling for **Mistral** and **Google Gemini** models.
-- **Unified Provider Registry:** Centralized model and URL management via `LLMRegistry`.
-- **Ollama Pre-warming:** Eliminates cold-start delays by pre-loading models on launch.
-- **Enhanced Logging & Diagnostics:** Improved daemon status checks and error reporting in the activity log.
-- **Multi-tab LLM Configuration:** Per-tab provider/model settings for flexible multi-agent workflows.
+- **Apple AI as a real tool-calling agent:** On-device Apple Intelligence (FoundationModels.Tool) handles UI automation requests like *"take a photo using Photo Booth"* locally — multi-step tool calls, zero cloud LLM tokens, falls through to the cloud LLM only on failure.
+- **SDEF + runtime app discovery:** Bundle ID resolution is now zero-hardcoded. Apps in `Agent/SDEFs/` plus every `.app` in `/Applications`, `/System/Applications`, `~/Applications` are discovered at runtime — installing a new app extends what the agent can target with no code edit.
+- **Prompt caching for every OpenAI-format provider:** Z.ai, OpenAI, Grok, Mistral, DeepSeek, Qwen, Gemini, BigModel, Hugging Face — `cached_tokens` is parsed from the response and shown in the LLM Usage panel. JSON request bodies use `.sortedKeys` so byte-stable prefixes actually hit the provider's cache.
+- **On-device token compression:** Apple AI summarizes old conversation turns when context exceeds 30K tokens (Tier 1 of `tieredCompact`) — free, private, no API tokens consumed. Toggleable in the brain icon popover.
+- **Anti-hallucination prompt rule:** Every system prompt now includes explicit guidance against fabricating findings from incomplete tool reads. The 10-consecutive-reads guard pushes the model toward "narrow or call done()" instead of "guess".
+- **Autonomous task loop, Xcode integration, AXorcist desktop automation, privileged daemon, multi-tab LLM config, Ollama pre-warming via `LLMRegistry`** — all the previously-shipped fundamentals are still there.
 ---
 
 A native macOS AI agent that controls your apps, writes code, automates workflows, and runs tasks from your iPhone via iMessage. All powered by the AI provider of your choice.
@@ -51,9 +47,11 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
 4. **Approve the Helper Tool:** When prompted, authorize the privileged daemon to allow root-level command execution.
 5. **Configure your AI Provider:** Go to Settings and enter your API key or select a local provider like Ollama.
 
-> 💡 **No API key?** Use **Ollama** or **Hugging Face** with **GLM-5** -- completely free, runs offline (Ollama) or in the cloud (HF), no account needed for Ollama. Requires 32GB+ RAM for local.
+> 💡 **Cheapest cloud path?** **GLM-5** is inexpensive via several cloud providers — **Ollama** (cloud or self-hosted), **Hugging Face**, **Z.ai**, and **BigModel**. Pennies per million tokens vs Claude/GPT pricing.
 >
-> 💡 **Want the latest?** **Z.ai** ships **GLM-5.1** via API -- paid, but it's the recommended starting point for cloud use.
+> 💡 **Want the latest?** **Z.ai** ships **GLM-5.1** via API — still cheap, recommended starting point for cloud use.
+>
+> ⚠️ **Running GLM locally is "free" only if you already own the hardware.** GLM-5 is a 32B model — to run it well you need an M2/M3 Ultra Mac Studio with 64-128GB unified memory, or a Linux box with 24GB+ VRAM. If you're buying that hardware just to run a local LLM, the cloud APIs are dramatically cheaper.
 
 
 ## What Can It Do?
@@ -87,22 +85,31 @@ Securely runs root-level commands via a dedicated macOS Launch Daemon. The user 
 ### 🖥 Desktop Automation (AXorcist)
 Control any Mac app through the Accessibility API. Click buttons, type into fields, navigate menus, scroll, drag -- all programmatically. Powered by [AXorcist](https://github.com/steipete/AXorcist) for reliable, fuzzy-matched element finding.
 
-### 🤖 12 AI Providers
-| Provider | Cost | Best For |
+### 🤖 17 AI Providers
+
+The provider picker (LLM Settings, toolbar button #7) shows 16 providers; Apple Intelligence is reached via the separate brain icon (#8). Source of truth: `AgentTools.APIProvider`.
+
+| Provider | API key | Best for |
 |---|---|---|
-| **Z.ai/GLM-5.1** | Paid | Recommended starting point |
-| **Claude** (Anthropic) | Paid | Complex tasks |
-| **ChatGPT** (OpenAI) | Paid | General purpose |
-| **Google Gemini** | Paid/Free | High performance, long context |
-| **Apple Intelligence** | Free | On-device, assistant |
-| **DeepSeek** | Paid | Budget cloud AI |
-| **Grok-2** (xAI) | Paid | Real-time info |
-| **Local Ollama** | Free | Full privacy, offline |
-| **LM Studio** | Free | Easy local setup |
-| **Hugging Face** | Varies | Open-source models |
-| **vLLM** | Free | Local or Cloud |
-| **Mistral** | AI Studio | High-performance open models |
-| **Mistral Vibe** | Le Chat | High-performance open models |
+| **Claude** (Anthropic) | Paid | Long autonomous tasks, complex reasoning, prompt caching |
+| **OpenAI** | Paid | General purpose, tool calling, vision |
+| **Google Gemini** | Paid (free tier) | Long context, vision, fast |
+| **Grok** (xAI) | Paid | Real-time info |
+| **Mistral** | Paid | Open-weight cloud, fast tool calling |
+| **Codestral** (Mistral) | Paid | Code-specialized Mistral |
+| **Mistral Vibe** | Paid | Mistral's chat/agent product |
+| **DeepSeek** | Cheap | Budget cloud, strong coding, prompt cache hit reporting |
+| **Hugging Face** | Varies | Open-source models hosted serverless or on dedicated endpoints |
+| **Z.ai** | Cheap | GLM-5.1 via API — recommended starting point |
+| **BigModel** (Zhipu) | Cheap | GLM family via Zhipu's API |
+| **Qwen** (Alibaba) | Cheap | Qwen 2.5 / 3 via Dashscope |
+| **Ollama** (cloud) | Free tier | Run open models via Ollama's hosted endpoint |
+| **Local Ollama** | Free + hardware | Self-hosted Ollama daemon — fully offline, no account |
+| **vLLM** | Free + hardware | Self-hosted vLLM server with prefix caching |
+| **LM Studio** | Free + hardware | Self-hosted, easiest GUI for local models |
+| **Apple Intelligence** | Free, on-device | Triage, summary, accessibility intent (via brain icon, not the provider picker) |
+
+> 💡 **Self-hosted "free" providers (Local Ollama, vLLM, LM Studio) are only free in the API-fee sense.** Running a 30B+ model with usable speed needs an M2/M3/M4 Ultra Mac Studio (64-128GB unified memory) or a Linux box with 24GB+ VRAM. If you don't already have that hardware, the cloud paths above (Ollama Cloud, Hugging Face, Z.ai, BigModel, DeepSeek) are dramatically cheaper than buying it.
 
 ## Toolbar Buttons
 
@@ -272,11 +279,11 @@ These are the canonical tool names defined in `AgentTools.Name.*` and exposed to
 
 ## Keyboard Shortcuts
 
-Source of truth: the inline `NSEvent.addLocalMonitorForEvents` block in `Agent/Views/ContentView.swift`.
+Source of truth: the TextField `.onSubmit` in `Agent/Views/InputSectionView.swift` for `Return`, and the inline `NSEvent.addLocalMonitorForEvents` block in `Agent/Views/ContentView.swift` for everything else.
 
 | Shortcut | Action |
 |---|---|
-| `⌘ Return` | Run current task |
+| `Return` | Run current task (TextField submit — no modifier needed) |
 | `⌘ .` / `Escape` | Cancel running task |
 | `⌘ B` | Toggle LLM Output overlay (show/hide) |
 | `⌘ D` | Toggle both LLM chevrons on the current tab (expand/collapse) |
@@ -296,6 +303,23 @@ Source of truth: the inline `NSEvent.addLocalMonitorForEvents` block in `Agent/V
 | `⌘ Shift J` | Clear task history |
 | `⌘ Shift U` | Clear token counters |
 
+## Slash Commands
+
+Type these in the input field and press Return — they execute locally without going to any LLM. Source of truth: `AgentViewModel+RunStop.swift`.
+
+| Command | Action |
+|---|---|
+| `/clear` or `/clear log` | Clear the activity log for the current tab |
+| `/clear all` | Clear everything (log, LLM output, prompt history, task history, tokens) |
+| `/clear llm` | Clear the LLM output panel only |
+| `/clear history` | Clear prompt history |
+| `/clear tasks` | Clear task history |
+| `/clear tokens` | Reset token counters (task + session) |
+| `/memory` or `/memory show` | Print the current memory file contents to the activity log |
+| `/memory clear` | Wipe memory |
+| `/memory edit` | Open `~/Documents/AgentScript/memory.md` in the system default editor |
+| `/memory <text>` | Append `<text>` to memory (anything else after `/memory` becomes the new line) |
+
 ---
 
 ## FAQ
@@ -304,9 +328,9 @@ Source of truth: the inline `NSEvent.addLocalMonitorForEvents` block in `Agent/V
 
 **Is it safe?** Yes. Standard macOS automation, full activity logging, you approve permissions.
 
-**How much does it cost?** Agent! is free (MIT License). Cloud AI providers charge for API usage. Local models are free.
+**How much does it cost?** The Agent! app itself is free (MIT License). Cloud AI providers charge for API usage — the cheapest options for serious work are GLM-5/5.1 via Z.ai, BigModel, or Hugging Face (pennies per million tokens), or DeepSeek for budget coding. Self-hosted local models (Ollama, vLLM, LM Studio) have no API fees but only make sense if you already own the hardware to run them — see the hardware note below.
 
-**What Mac do I need?** macOS 26+. Apple Silicon recommended. 32GB+ RAM for local models.
+**What Mac do I need?** macOS 26+. Apple Silicon required. For cloud providers, any modern Mac works fine. For self-hosted local models (Ollama, vLLM, LM Studio): a 7B model fits in 16GB unified memory, a 13B model in 24GB, a 30B model needs 64GB+ (M2/M3/M4 Ultra Mac Studio territory). Apple Intelligence (the on-device mediator for triage / accessibility intent / token compression) needs an Apple Silicon Mac with Apple Intelligence enabled in System Settings.
 
 **How is this different from Siri?** Siri answers questions. Agent! *performs actions* -- controls apps, manages files, builds code, automates workflows.
 
@@ -447,7 +471,7 @@ Agent! is a 100% original pure Swift macOS application. It is not a port, fork, 
 | **Accessibility** | None (CLI) | Full macOS AX via AXorcist (25 top-level actions, 30+ AX subtypes via `perform_action`) |
 | **AppleScript** | None | Full NSAppleScript + JXA in-process with TCC |
 | **Xcode Integration** | Via Bash (`xcodebuild`) | Native (build/run/analyze/snippet/add_file/bump_version/code_review — 13 actions) |
-| **Apple Intelligence** | None | FoundationModels on-device |
+| **Apple Intelligence** | None | FoundationModels on-device — runs as a real `Tool`-calling agent for accessibility intent (e.g. *"take a photo using Photo Booth"* parsed and dispatched locally), task summaries, error explanations, and Tier 1 token compression. Falls through to the cloud LLM only on failure |
 | **ScriptingBridge** | None | Full SDEF + 51 event bridges (Finder, Mail, Music, Safari, Calendar, etc.) |
 | **Vision** | Image input via API | Image input via API |
 | **Auto-screenshots** | None (no UI) | Opt-in auto-verification after UI actions (default OFF — see `visionAutoScreenshotEnabled`) |
