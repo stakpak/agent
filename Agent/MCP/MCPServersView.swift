@@ -1,17 +1,28 @@
 import SwiftUI
 import AgentAudit
 
+/// Identifiable wrapper used to drive ONE `.sheet(item:)` for both the
+/// blank "+" Add and the preset-seeded Add. The fresh UUID per instance
+/// guarantees SwiftUI reads the captured `seed` when the sheet body
+/// evaluates — fixes the multi-sheet timing race where the first preset
+/// click would open an empty form because state hadn't propagated yet.
+private struct AddSheetItem: Identifiable {
+    let id = UUID()
+    /// nil → blank "Add MCP Server" form
+    /// non-nil → preset-seeded form (Z.AI Web Search, etc.)
+    let seed: MCPServerConfig?
+}
+
 struct MCPServersView: View {
     @Bindable var registry = MCPServerRegistry.shared
     @Bindable var mcpService = MCPService.shared
-    @State private var showingAddServer = false
+    @State private var addSheetItem: AddSheetItem?
     @State private var editingServer: MCPServerConfig?
     @State private var showingImport = false
     @State private var importText = ""
     @State private var connectingIds: Set<UUID> = []
     @State private var renderKey = false
     @State private var addError: String?
-    @State private var presetSeed: MCPServerConfig?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -46,7 +57,7 @@ struct MCPServersView: View {
                 Menu {
                     ForEach(MCPPresets.all) { preset in
                         Button(preset.menuLabel) {
-                            presetSeed = preset.makeConfig()
+                            addSheetItem = AddSheetItem(seed: preset.makeConfig())
                         }
                     }
                 } label: {
@@ -58,7 +69,7 @@ struct MCPServersView: View {
                 .help("Add a preset MCP server (Z.AI Web Search, etc.)")
 
                 Button {
-                    showingAddServer = true
+                    addSheetItem = AddSheetItem(seed: nil)
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -107,31 +118,16 @@ struct MCPServersView: View {
         .padding(.bottom, 15)
         .frame(width: 420)
         .frame(maxHeight: 500)
-        .sheet(isPresented: $showingAddServer) {
-            MCPServerEditView(server: nil) { newServer in
+        .sheet(item: $addSheetItem) { item in
+            // ONE sheet for both the blank "+" Add and the preset menu.
+            // .sheet(item:) re-evaluates this body every time `addSheetItem`
+            // becomes non-nil, so the wrapper's `seed` is read at the moment
+            // the sheet is presented — no SwiftUI multi-sheet timing race.
+            MCPServerEditView(server: item.seed) { newServer in
                 if let err = registry.add(newServer) {
                     addError = err
                 } else {
-                    showingAddServer = false
-                    // Auto-connect the new server
-                    let config = newServer
-                    Task {
-                        connectingIds.insert(config.id)
-                        try? await mcpService.connect(to: config)
-                        connectingIds.remove(config.id)
-                    }
-                }
-            }
-        }
-        .sheet(item: $presetSeed) { seed in
-            // .sheet(item:) re-evaluates the body each time `presetSeed`
-            // becomes non-nil, so the seed config we just built is the one
-            // the editor reads — no SwiftUI timing race.
-            MCPServerEditView(server: seed) { newServer in
-                if let err = registry.add(newServer) {
-                    addError = err
-                } else {
-                    presetSeed = nil
+                    addSheetItem = nil
                     let config = newServer
                     Task {
                         connectingIds.insert(config.id)
