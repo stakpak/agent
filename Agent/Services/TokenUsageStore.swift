@@ -69,7 +69,30 @@ final class TokenUsageStore {
         let date: String // "2026-03-29"
         var inputTokens: Int
         var outputTokens: Int
+        /// Prompt cache read tokens — what we saved by hitting the cache instead of
+        /// re-sending the prompt. Persisted so the 7-day chart can plot a cache line.
+        /// Optional in JSON for backward compat with older records.
+        var cacheReadTokens: Int = 0
         var totalTokens: Int { inputTokens + outputTokens }
+
+        // Manual decoding so existing token_usage.json files (without cacheReadTokens)
+        // still load cleanly.
+        enum CodingKeys: String, CodingKey {
+            case date, inputTokens, outputTokens, cacheReadTokens
+        }
+        init(date: String, inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0) {
+            self.date = date
+            self.inputTokens = inputTokens
+            self.outputTokens = outputTokens
+            self.cacheReadTokens = cacheReadTokens
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.date = try c.decode(String.self, forKey: .date)
+            self.inputTokens = try c.decode(Int.self, forKey: .inputTokens)
+            self.outputTokens = try c.decode(Int.self, forKey: .outputTokens)
+            self.cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
+        }
     }
 
     private(set) var days: [DayRecord] = []
@@ -121,10 +144,19 @@ final class TokenUsageStore {
 
     // MARK: - Prompt Cache Metrics
 
-    /// Record cache metrics from Claude API response.
+    /// Record cache metrics from Claude API response. Updates session counters AND
+    /// persists cache-read tokens onto today's DayRecord so the 7-day chart can plot it.
     func recordCacheMetrics(read: Int, creation: Int) {
         sessionCacheReadTokens += read
         sessionCacheCreationTokens += creation
+        guard read > 0 else { return }
+        let today = Self.dateString(Date())
+        if let idx = days.firstIndex(where: { $0.date == today }) {
+            days[idx].cacheReadTokens += read
+        } else {
+            days.append(DayRecord(date: today, inputTokens: 0, outputTokens: 0, cacheReadTokens: read))
+        }
+        save()
     }
 
     /// Cache hit rate as a percentage (0-100). Returns 0 if no cache activity.

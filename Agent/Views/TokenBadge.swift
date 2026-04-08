@@ -168,6 +168,14 @@ private struct TokenDetailView: View {
                             )
                             .foregroundStyle(.green)
                             .interpolationMethod(.catmullRom)
+
+                            LineMark(
+                                x: .value("Date", shortDate(day.date)),
+                                y: .value("Tokens", day.cacheReadTokens),
+                                series: .value("Type", "Cache")
+                            )
+                            .foregroundStyle(Color(red: 0.55, green: 0.78, blue: 1.0))
+                            .interpolationMethod(.catmullRom)
                         }
                     }
                     .chartYAxis {
@@ -203,6 +211,10 @@ private struct TokenDetailView: View {
                         HStack(spacing: 4) {
                             Circle().fill(.green).frame(width: 6, height: 6)
                             Text("↓ Received").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 4) {
+                            Circle().fill(Color(red: 0.55, green: 0.78, blue: 1.0)).frame(width: 6, height: 6)
+                            Text("⚡︎ Cache").font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.horizontal)
