@@ -828,7 +828,8 @@ struct AccessibilityArgs: Sendable {
     @Guide(description: "Element title or label to match (partial, case-insensitive). Optional for open_app.")
     let title: String?
 
-    @Guide(description: "App name like 'Photo Booth', 'Safari', 'TextEdit', or 'Mail'. Use the natural name — bundle ID resolution happens automatically.")
+    @Guide(description: "App name like 'Photo Booth', 'Safari', 'TextEdit', or 'Mail'. " +
+        "Use the natural name — bundle ID resolution happens automatically.")
     let app: String?
 
     @Guide(description: "Text to type — only for type_into_element.")
