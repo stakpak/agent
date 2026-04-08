@@ -46,3 +46,14 @@ Intermediates.noindex/
 
 # Sensitive
 ExportOptions.plist
+
+# Phantom Xcode workspace stub — the real project is ./Agent.xcodeproj.
+# AgentXcode/ contains only an empty workspace shell with no project.pbxproj
+# (probably created by an Xcode "Save As" or MCP tool that aborted halfway).
+# Ignored so it doesn't drift back into the repo if it's recreated by Xcode.
+AgentXcode/
+
+# Plan-mode files written by the agent's plan_mode tool. These are
+# scratchpad / working state, not source. Examples: plan_main.md,
+# plan_archivexcode.md, plan_<task>.md.
+plan*.md
