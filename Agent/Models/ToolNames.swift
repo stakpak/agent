@@ -1,14 +1,9 @@
 import Foundation
 import AgentTools
 
-/// Single source of truth for all tool names and group names.
-/// Use these constants everywhere — never hardcode tool or group strings.
-///
-/// Where possible, names below reference `AgentTools.Name.*` directly so the
-/// canonical string lives in exactly one place (the AgentTools package). The
-/// few entries that don't reference Name.* are tools defined locally in the
-/// Agent app and not yet hoisted into the public AgentTools package
-/// (memory/skill/spawn/tell/ask/fetch/file/git).
+/// Single source of truth for all tool/group names. Use constants everywhere, never hardcode.
+/// Names reference AgentTools.Name.* where possible. Local tools (memory/skill/spawn/tell/ask/fetch/file/git)
+/// are defined here until hoisted into the AgentTools package.
 enum Tool {
     // MARK: - Tool Names (what the LLM calls)
 
