@@ -648,20 +648,24 @@ final class AppleIntelligenceMediator: ObservableObject {
         // AI is told to just use the natural name in that case.
         let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You automate Mac UI via the accessibility tool. Use the natural app name \
-        like "Photo Booth", "Safari", or "TextEdit" — bundle ID resolution happens \
-        automatically. After tool calls succeed, reply with 1 sentence.
+        You automate Mac UI via the accessibility tool. Use the EXACT natural app \
+        name the user said in their request — bundle ID resolution happens \
+        automatically. NEVER substitute a different app name than what the user asked \
+        for. After tool calls succeed, reply with 1 sentence.
 
         Roles: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWebArea
 
         Apps Agent knows about (use these names exactly when applicable): \(knownApps)
 
-        For apps not in that list, just use whatever name the user gave you.
+        For apps not in that list, use whatever name the user gave you verbatim.
 
-        Multi-step example — "take a photo using Photo Booth":
-          1. open_app(app="Photo Booth")
-          2. click_element(role="AXButton", title="Take Photo", app="Photo Booth")
-          Reply: "Opened Photo Booth and took a photo."
+        Multi-step example — when the user says "open Calculator and click 5":
+          1. open_app(app="Calculator")
+          2. click_element(role="AXButton", title="5", app="Calculator")
+          Reply: "Opened Calculator and clicked 5."
+
+        The example app above is illustrative ONLY. Use the SAME app the user named \
+        in the actual request — do NOT pattern-match to apps from this prompt.
 
         If the request isn't Mac UI automation, reply briefly without calling the tool.
         """)
@@ -828,8 +832,9 @@ struct AccessibilityArgs: Sendable {
     @Guide(description: "Element title or label to match (partial, case-insensitive). Optional for open_app.")
     let title: String?
 
-    @Guide(description: "App name like 'Photo Booth', 'Safari', 'TextEdit', or 'Mail'. " +
-        "Use the natural name — bundle ID resolution happens automatically.")
+    @Guide(description: "App name — use the EXACT natural name from the user's request " +
+        "(e.g. 'Calculator', 'Safari', 'TextEdit', 'Mail'). Bundle ID resolution happens " +
+        "automatically. Do NOT substitute a different app than the user named.")
     let app: String?
 
     @Guide(description: "Text to type — only for type_into_element.")
@@ -850,7 +855,7 @@ struct AccessibilityAppleTool: FoundationModels.Tool {
 
     let name = "accessibility"
     let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. " +
-        "Every action takes role+title+app (use natural app names like Photo Booth), never coordinates. " +
+        "Every action takes role+title+app (use the natural app name the user said, verbatim), never coordinates. " +
         "For multi-step requests, call this tool multiple times in order — first open_app, then click_element."
 
     /// Closure that actually performs the accessibility action. Injected by
