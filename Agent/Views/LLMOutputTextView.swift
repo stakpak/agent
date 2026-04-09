@@ -33,12 +33,9 @@ final class FollowTextView: NSTextView {
     }
 }
 
-/// NSScrollView subclass that fires callbacks on user scroll and on hover
-/// enter/exit. We need this because the boundsDidChangeNotification observer
-/// has a perceptible lag (it fires AFTER the scroll lands), which lets a
-/// streaming chunk's snapToEnd race against the user's in-progress gesture.
-/// Intercepting scrollWheel directly disables auto-follow on the very first
-/// event, before any fight can happen.
+  /// NSScrollView subclass that fires callbacks on user scroll and hover enter/exit.
+  /// Intercepts scrollWheel directly so auto-follow disables on the very first event,
+  /// avoiding lag from boundsDidChangeNotification.
 final class FollowScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
@@ -76,20 +73,14 @@ final class FollowScrollView: NSScrollView {
 /// Local NSScrollView/NSTextView wrapper for the LLM Output HUD.
 /// Renders text via TerminalNeoRenderer for markdown/table styling.
 ///
-/// Scroll policy — hard switch model:
-/// - `autoFollowDisabled` is the single source of truth.
-/// - It flips to TRUE the moment the user does ANY of:
-///     • scrollWheel/trackpad event (caught instantly via FollowScrollView)
-///     • mouse hover-enter over the scroll view
-/// - It flips back to FALSE when:
-///     • user scrolls back to the very bottom AND mouse is not hovering
-///     • text shrinks (new task / reset) — fresh content always follows
+/// Scroll policy — hard switch model: `autoFollowDisabled` is the single truth.
+/// Set true on scroll/hover; cleared on hover-exit-at-bottom, text shrink, or
+/// user scrolling back to bottom while not hovering.
 ///
-/// Jitter avoidance (untouched from the smooth version):
-/// - Incremental append for non-table streaming chunks — no full re-layout.
-/// - CATransaction.setDisableActions(true) wrap suppresses implicit animations.
-/// - Full TerminalNeoRenderer re-render only for tables, shrinks, or first load.
-/// - Cursor-blink path mutates only the trailing char with no scroll calls.
+/// Jitter avoidance: incremental append for non-table chunks,
+/// CATransaction.setDisableActions for no implicit animations,
+/// full re-render only for tables/shrinks/first load, cursor blink via
+/// setAttributes on one char with no scroll calls.
 struct LLMOutputTextView: NSViewRepresentable {
     let text: String
     /// True while the LLM is actively streaming or the operation is otherwise in
@@ -354,9 +345,8 @@ struct LLMOutputTextView: NSViewRepresentable {
             }
         }
 
-        /// True iff the visible bottom is within 5pt of the content end.
-        /// Tight threshold so we only re-engage when the user really lands at
-        /// the bottom — not just somewhere near it.
+        /// True iff the visible bottom is within 5pt of the content end —
+        /// tight threshold so we only re-engage when truly at bottom.
         func isAtBottom(_ textView: NSTextView) -> Bool {
             guard let scrollView = textView.enclosingScrollView else { return true }
             let visibleBottom = scrollView.contentView.bounds.origin.y + scrollView.contentView.bounds.height
@@ -364,11 +354,8 @@ struct LLMOutputTextView: NSViewRepresentable {
             return (contentHeight - visibleBottom) < 5
         }
 
-        /// True iff the cursor is currently inside the given scroll view's
-        /// frame, polled synchronously via mouseLocationOutsideOfEventStream.
-        /// More reliable than NSTrackingArea callbacks because it doesn't
-        /// depend on AppKit having already delivered a mouseEntered event —
-        /// it just asks "where is the cursor RIGHT NOW?".
+        /// True iff cursor is inside the scroll view's frame, polled synchronously.
+        /// More reliable than NSTrackingArea — just asks "where is the cursor RIGHT NOW?".
         func isMouseInside(_ scrollView: NSScrollView) -> Bool {
             guard let window = scrollView.window else { return false }
             let pointInWindow = window.mouseLocationOutsideOfEventStream
@@ -376,18 +363,10 @@ struct LLMOutputTextView: NSViewRepresentable {
             return scrollView.bounds.contains(pointInView)
         }
 
-        /// Instant scroll to end. Drives the clip view directly so it works
-        /// even though FollowTextView's scrollRangeToVisible is a no-op.
-        /// Brackets the call with isProgrammaticScroll so the bounds observer
-        /// doesn't misread it.
-        ///
-        /// HOVER CHECK: before scrolling, polls the cursor position right now.
-        /// If the mouse is over the scroll view the user is reading — skip
-        /// this snap (no latching). The next chunk will re-poll, so as soon
-        /// as the mouse leaves, snaps resume naturally.
-        ///
-        /// `force: true` bypasses the hover check. Used by the mouse-exit
-        /// handler to catch up after the user moves away.
+        /// Instant scroll to end, driving clip view directly. Brackets with
+        /// isProgrammaticScroll so bounds observer doesn't misread it.
+        /// Skips snap if mouse is hovering over the scroll view (user is reading).
+        /// `force: true` bypasses hover check — used by mouse-exit handler.
         func snapToEnd(_ textView: NSTextView, force: Bool = false) {
             guard let scrollView = textView.enclosingScrollView else { return }
             if !force && isMouseInside(scrollView) {
