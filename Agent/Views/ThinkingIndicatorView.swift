@@ -670,20 +670,6 @@ private struct LLMOutputBox: View {
         .background(termBg)
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(termBorder, lineWidth: 1))
-        // Force arrow cursor by pushing onto NSCursor's STACK on hover-enter
-        // and popping on hover-exit. The cursor stack BYPASSES cursor rect
-        // lookup entirely — whatever's on top of the stack is what the OS
-        // shows, regardless of any I-beam rect the activity log NSTextView
-        // underneath has registered. .onHover gives matched enter/exit events
-        // so push/pop stays balanced and cursors don't leak.
-        .contentShape(Rectangle())
-        .onHover { isHovering in
-            if isHovering {
-                NSCursor.arrow.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
         .task {
             // Blink cursor at ~2Hz — always running, seamless streaming→idle
             while !Task.isCancelled {

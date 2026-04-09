@@ -2,91 +2,14 @@ import SwiftUI
 import AppKit
 import AgentTerminalNeo
 
-/// Invisible NSView-backed overlay that registers an arrow cursor rect at the
-/// AppKit layer. SwiftUI's `.onContinuousHover { NSCursor.arrow.set() }` is too
-/// weak — `set()` only holds until the next cursor rect kicks in, and the
-/// activity log NSTextView underneath has its own I-beam cursor rects that
-/// immediately re-take the cursor as soon as the mouse moves a pixel.
-///
-/// This overlay is invisible (no drawing), passes hit-testing through to
-/// SwiftUI views above (so buttons still work), but registers BOTH a
-/// classic cursor rect AND a tracking-area .cursorUpdate handler so the OS
-/// actually consults this view when computing the cursor over its bounds.
-/// The cursor rect competes with (and wins over) any underlying NSTextView
-/// I-beam because cursor rect lookup walks front-to-back through the view
-/// hierarchy.
-struct CursorOverride: NSViewRepresentable {
-    let cursor: NSCursor
-
-    func makeNSView(context: Context) -> NSView {
-        let view = CursorOverrideView()
-        view.cursor = cursor
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        if let view = nsView as? CursorOverrideView {
-            view.cursor = cursor
-            view.window?.invalidateCursorRects(for: view)
-        }
-    }
-
-    final class CursorOverrideView: NSView {
-        var cursor: NSCursor = .arrow
-        private var trackingArea: NSTrackingArea?
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let area = trackingArea { removeTrackingArea(area) }
-            let area = NSTrackingArea(
-                rect: bounds,
-                options: [.cursorUpdate, .activeAlways, .inVisibleRect],
-                owner: self,
-                userInfo: nil
-            )
-            addTrackingArea(area)
-            trackingArea = area
-        }
-
-        override func resetCursorRects() {
-            discardCursorRects()
-            addCursorRect(bounds, cursor: cursor)
-        }
-
-        override func cursorUpdate(with event: NSEvent) {
-            cursor.set()
-        }
-
-        // IMPORTANT: do NOT override hitTest to return nil. AppKit cursor rect
-        // lookup uses the same hit-testing mechanism as mouse events — if
-        // hitTest returns nil, the view is skipped for cursor rect resolution
-        // too. We rely on this view being placed in `.background` (BEHIND the
-        // SwiftUI content) so clicks naturally land on the SwiftUI views in
-        // front of us, while cursor rect lookup walks front-to-back through
-        // the AppKit hierarchy and finds our arrow rect.
-    }
-}
-
 /// NSTextView subclass whose scrollRangeToVisible is a no-op. Stock NSTextView
 /// implicitly scrolls the new range into view on every text mutation
 /// (storage.append, replaceCharacters, etc.) — that's the source of the
 /// remaining fight when streaming chunks arrive while the user is scrolled up.
 /// We disable that path entirely and drive scroll only via snapToEnd, which
 /// talks to the clip view directly.
-///
-/// Also overrides cursor rects so the HUD shows the arrow pointer instead of
-/// the default text I-beam — this is a read-only display surface, the user
-/// shouldn't think it's editable.
 final class FollowTextView: NSTextView {
     override func scrollRangeToVisible(_ range: NSRange) { /* no-op */ }
-
-    override func resetCursorRects() {
-        // Replace NSTextView's default I-beam cursor rect with the arrow cursor
-        // for the entire visible area. The LLM output is a read-only display, not
-        // an editable text field, so the I-beam is misleading.
-        discardCursorRects()
-        addCursorRect(visibleRect, cursor: .arrow)
-    }
 }
 
 /// NSScrollView subclass that fires callbacks on user scroll and on hover
@@ -111,14 +34,6 @@ final class FollowScrollView: NSScrollView {
         )
         addTrackingArea(area)
         hoverTrackingArea = area
-    }
-
-    override func resetCursorRects() {
-        // Cover the scroll view area too so any gaps the inner FollowTextView
-        // doesn't claim (margins, scroll bar gutter) still show the arrow
-        // instead of leaking the activity log's I-beam through.
-        discardCursorRects()
-        addCursorRect(bounds, cursor: .arrow)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -184,7 +99,12 @@ struct LLMOutputTextView: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
 
         textView.isEditable = false
-        textView.isSelectable = true
+        // isSelectable = false kills NSTextView's I-beam cursor at the source.
+        // NSTextView's cursor management is conditional on isSelectable — when
+        // false, it never registers an I-beam cursor rect and never calls
+        // NSCursor.iBeam.set() in its tracking. The LLM HUD is a read-only
+        // streaming display so selection isn't useful here anyway.
+        textView.isSelectable = false
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 10, height: 10)
