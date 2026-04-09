@@ -550,18 +550,9 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     // MARK: - Accessibility Intent
 
-    /// Cheap pre-filter: does this prompt LOOK like a UI automation request?
-    /// We don't want to spend an Apple AI round-trip on every user message —
-    /// only on prompts that contain a UI action verb. Conservative on purpose:
-    /// false negatives just fall through to the cloud LLM (no harm done),
-    /// false positives waste one cheap on-device call.
-    ///
-    /// The verb list grew after observing that "take a photo using Photo Booth"
-    /// was being routed to the cloud LLM because none of the original verbs
-    /// (click/tap/press/type/select/scroll/open/find/...) matched. Real Mac
-    /// users say things like "take a photo", "launch Safari", "play the next
-    /// song", "send a message" — so the list now covers the verbs people
-    /// actually use, not just the AX action names.
+    /// Cheap pre-filter: does this prompt look like a UI automation request?
+    /// Only run Apple AI on prompts with UI action verbs. False negatives fall
+    /// through to cloud LLM (no harm); false positives waste one cheap on-device call.
     static func looksLikeAccessibilityRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         // Long prompts are rarely single-shot UI commands; typical AX
