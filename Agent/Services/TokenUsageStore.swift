@@ -136,6 +136,10 @@ final class TokenUsageStore {
         let today = Self.dateString(Date())
         return days.first(where: { $0.date == today })?.outputTokens ?? 0
     }
+    var todayCacheRead: Int {
+        let today = Self.dateString(Date())
+        return days.first(where: { $0.date == today })?.cacheReadTokens ?? 0
+    }
 
     /// Last N days of records for charting.
     func recentDays(_ count: Int = 30) -> [DayRecord] {

@@ -137,6 +137,11 @@ private struct TokenDetailView: View {
                     Text("Total: \(fmt(store.todayInput + store.todayOutput))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    if store.todayCacheRead > 0 {
+                        Text("⚡︎ Cache: \(fmt(store.todayCacheRead))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.cyan)
+                    }
                 }
             }
 
@@ -174,7 +179,7 @@ private struct TokenDetailView: View {
                                 y: .value("Tokens", day.cacheReadTokens),
                                 series: .value("Type", "Cache")
                             )
-                            .foregroundStyle(Color(red: 0.55, green: 0.78, blue: 1.0))
+                            .foregroundStyle(.cyan)
                             .interpolationMethod(.catmullRom)
                         }
                     }
@@ -213,7 +218,7 @@ private struct TokenDetailView: View {
                             Text("↓ Received").font(.caption2).foregroundStyle(.secondary)
                         }
                         HStack(spacing: 4) {
-                            Circle().fill(Color(red: 0.55, green: 0.78, blue: 1.0)).frame(width: 6, height: 6)
+                            Circle().fill(.cyan).frame(width: 6, height: 6)
                             Text("⚡︎ Cache").font(.caption2).foregroundStyle(.secondary)
                         }
                     }
