@@ -603,7 +603,7 @@ private struct LLMOutputBox: View {
                 } else {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            Text("AGENT! > ")
+                            Text("AGENT! >")
                                 .font(.system(size: 16.5, design: .monospaced))
                                 .foregroundColor(termText)
                             Text(cursorVisible ? "█" : " ")
