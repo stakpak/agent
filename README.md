@@ -353,6 +353,11 @@ Agent! includes native Xcode integration that works without any MCP server setup
 | **xcode list_projects** | Discover open Xcode workspaces and projects |
 | **xcode select_project** | Switch the active project |
 | **xcode grant_permission** | Grant file access to the Xcode project folder |
+| **xcode get_version** | Read the current marketing version and build number from the Xcode project |
+| **xcode bump_version** | Bump the marketing version (major, minor, or patch), update the build number, build to verify, and auto-commit |
+| **xcode bump_build** | Increment only the build number |
+
+Just say *"bump version"* and Agent! reads the current version, asks major/minor/patch, updates Info.plist and project settings, builds to verify, and commits the change. No manual plist editing, no missed build numbers.
 
 The AI automatically uses these when you ask it to build, fix errors, or work with Xcode projects. No configuration needed -- just have your project open in Xcode.
 
