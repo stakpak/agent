@@ -257,18 +257,10 @@ struct LLMOutputTextView: NSViewRepresentable {
                 coord.snapToEnd(tv)
             }
         } else {
-            // Cursor blink — only the cursor's COLOR changes, never the
-            // character. The previous implementation called replaceCharacters
-            // to swap "█" ↔ " " every ~500ms. Even though it was a single
-            // character, NSTextView's typesetter re-glyphed and re-laid-out
-            // the entire last line on each pass; the subpixel anti-aliasing
-            // shifts were perceptible as the LAST WORD before the cursor
-            // visibly flickering along with the cursor itself.
-            //
-            // setAttributes(_:range:) on one character with just a color
-            // change does NOT trigger glyph regeneration or layout
-            // invalidation — only a foreground-color redraw — so the
-            // surrounding text stays pixel-stable while the cursor blinks.
+            // Cursor blink — only the color changes, not the character. Previous
+            // replaceCharacters("█" ↔ " ") re-laid-out the last line every 500ms.
+            // setAttributes on one char with a color change only triggers a
+            // foreground-color redraw — surrounding text stays pixel-stable.
             guard !coord.needsTableRender, hasCursor else { return }
             let attrLen = storage.length
             guard attrLen > 0 else { return }
