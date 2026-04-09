@@ -151,7 +151,10 @@ extension AgentViewModel {
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
             }
-            appendLog(output.components(separatedBy: "\n").first ?? output)
+            let outLines = output.components(separatedBy: "\n")
+            let status = outLines.first ?? output
+            let lineInfo = outLines.last(where: { $0.hasPrefix("📍") }) ?? ""
+            appendLog(lineInfo.isEmpty ? status : "\(status) \(lineInfo)")
             // Log edit to journal
             let afterEdit = try? String(contentsOfFile: expandedEdit, encoding: .utf8)
             FileChangeJournal.shared.log(

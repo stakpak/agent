@@ -113,7 +113,10 @@ extension AgentViewModel {
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
             }
-            tab.appendLog(output.components(separatedBy: "\n").first ?? output)
+            let outLines = output.components(separatedBy: "\n")
+            let status = outLines.first ?? output
+            let lineInfo = outLines.last(where: { $0.hasPrefix("📍") }) ?? ""
+            tab.appendLog(lineInfo.isEmpty ? status : "\(status) \(lineInfo)")
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
