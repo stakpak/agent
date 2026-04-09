@@ -83,10 +83,8 @@ final class FollowScrollView: NSScrollView {
 /// setAttributes on one char with no scroll calls.
 struct LLMOutputTextView: NSViewRepresentable {
     let text: String
-    /// True while the LLM is actively streaming or the operation is otherwise in
-    /// progress. When false, the mouse-exit handler will NOT force a snap to the
-    /// bottom — the view stays where the user parked it. We only catch the user
-    /// up to the tail mid-stream, never after the run is finished.
+    /// True while streaming — when false, mouse-exit won't force snap-to-bottom;
+    /// the view stays where the user parked it.
     var isStreaming: Bool = false
     var onContentHeight: ((CGFloat) -> Void)?
 
