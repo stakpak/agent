@@ -61,11 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Insert 🦾 Agents menu immediately + every time the app becomes active.
-        // Why both: SwiftUI's Commands modifier rebuilds the main menu AFTER
-        // applicationDidFinishLaunching, so a single insert here can be stomped
-        // on. didBecomeActive fires after SwiftUI's menu setup completes AND
-        // every time the user switches back to the app — guaranteed reinsert.
+        // Insert 🦾 Agents menu on launch and on every didBecomeActive to survive SwiftUI menu rebuilds.
         insertAgentsMenu()
         NotificationCenter.default.addObserver(
             self,
@@ -105,9 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Tell the view model to stop all running tasks, MCP servers, etc.
         NotificationCenter.default.post(name: .appWillQuit, object: nil)
-        // Drain the script compilation queue before exit to prevent a deadlock
-        // where C++ static destructors (DoIOSInit) try to fflush(stdout) while
-        // the compilation queue holds the flockfile(stdout) lock.
+        // Drain compilation queue before exit to prevent stdout deadlock with C++ static destructors.
         ScriptService.drainCompilationQueue()
         return .terminateNow
     }
