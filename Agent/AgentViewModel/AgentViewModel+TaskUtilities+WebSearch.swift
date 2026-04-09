@@ -18,12 +18,11 @@ extension AgentViewModel {
     /// Perform web search using the appropriate API based on provider.
     /// This delegates to the implementation in AgentViewModel+WebSearch.swift.
     nonisolated static func performWebSearchForTask(query: String, apiKey: String, provider: APIProvider) async -> String {
-        // Fallback chain — each step tries a more universal backend so users
-        // are never blocked just because they didn't pay for a search API:
-        //   1. Ollama provider + Ollama key  → Ollama Web Search
-        //   2. Z.AI/BigModel provider + Z.AI key → Z.AI search-prime
-        //   3. Tavily key → Tavily
-        //   4. DuckDuckGo HTML scrape (no key, no signup, no provider lock-in)
+        // Fallback chain — each step tries a more universal backend:
+        // 1. Ollama+key → Ollama Web Search
+        // 2. Z.AI/BigModel+key → Z.AI search-prime
+        // 3. Tavily key → Tavily
+        // 4. DuckDuckGo HTML scrape (no key, always available)
         if provider == .ollama || provider == .localOllama {
             if let ollamaKey = KeychainService.shared.getOllamaAPIKey(), !ollamaKey.isEmpty {
                 let ollamaResult = await performOllamaWebSearchInternal(query: query, apiKey: ollamaKey)
@@ -32,12 +31,9 @@ extension AgentViewModel {
                 }
             }
         }
-        // For Z.AI / BigModel providers, try Z.AI's native web_search API first.
-        // It's a "search-prime" engine purpose-built for LLMs and returns
-        // structured results (title/url/summary/icon/publish_date) — same shape
-        // we expect from Tavily, so the rest of the pipeline doesn't change.
-        // Not all Z.AI accounts include the web_search add-on, so we still
-        // fall through to Tavily / DDG when this returns an error.
+        // Z.AI / BigModel providers: try native web_search API first. Returns
+        // structured results like Tavily. Not all accounts include it, so fall
+        // through on error.
         if provider == .zAI || provider == .bigModel {
             if let zKey = KeychainService.shared.getZAIAPIKey(), !zKey.isEmpty {
                 let zResult = await performZAIWebSearchInternal(query: query, apiKey: zKey)
@@ -46,27 +42,20 @@ extension AgentViewModel {
                 }
             }
         }
-        // Tavily — only attempt if a key is configured. The legacy behavior
-        // returned a hard "Error: Tavily API key not set" when no key existed,
-        // which dead-ended the search. Now we treat a missing key as "skip"
-        // and fall through to the keyless DuckDuckGo backend.
+        // Tavily — only attempt if a key is configured. Missing key → skip,
+        // fall through to keyless DuckDuckGo instead of dead-ending.
         if !apiKey.isEmpty {
             let tavilyResult = await performTavilySearchForTask(query: query, apiKey: apiKey)
             if !tavilyResult.hasPrefix("Error:") {
                 return tavilyResult
             }
         }
-        // Universal keyless fallback. Never returns "Error: API key not set"
-        // because there is no key. Always-on safety net so the LLM can still
-        // research things even when the user has no search API at all.
+        // Universal keyless fallback — always-on safety net.
         return await performDuckDuckGoSearchInternal(query: query)
     }
 
-    /// Calls Z.AI's standalone /web_search endpoint. Documented at
-    /// https://docs.z.ai/api-reference/tools/web-search — POST to
-    /// https://api.z.ai/api/paas/v4/web_search with the search-prime engine,
-    /// returns a `search_result` array with title/content/link/media/publish_date.
-    /// Used as a Tavily replacement when the user has a Z.AI API key configured.
+    /// Calls Z.AI's /web_search endpoint (search-prime engine). Returns structured
+    /// results. Used as Tavily replacement when user has a Z.AI API key configured.
     nonisolated private static func performZAIWebSearchInternal(query: String, apiKey: String) async -> String {
         guard !apiKey.isEmpty else { return "Error: Z.AI API key not set." }
         guard let url = URL(string: "https://api.z.ai/api/paas/v4/web_search") else {
@@ -122,15 +111,8 @@ extension AgentViewModel {
         }
     }
 
-    /// Universal keyless web search via DuckDuckGo's HTML endpoint. No API
-    /// key, no signup, no per-provider gating. This is the always-on safety
-    /// net so the LLM can still research things when the user hasn't paid
-    /// for any search API.
-    ///
-    /// Uses `https://html.duckduckgo.com/html/?q=...` and parses the result
-    /// rows with NSRegularExpression. The href DDG returns is wrapped in
-    /// their click-tracker (`/l/?uddg=ENCODED_URL&...`) so we percent-decode
-    /// the `uddg` parameter to recover the real destination URL.
+    /// Universal keyless web search via DuckDuckGo HTML endpoint. No API key needed.
+    /// Parses result rows with regex; extracts real URLs from DDG click-tracker links.
     nonisolated private static func performDuckDuckGoSearchInternal(query: String) async -> String {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return "Error: failed to encode query"
