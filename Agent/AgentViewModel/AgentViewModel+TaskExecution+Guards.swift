@@ -10,18 +10,10 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Runs the overnight coding guardrails that track runaway loops and
-    /// nudge or stop the task loop:
-    ///
-    /// 1. **Read guard** — nudge at 5 consecutive reads without action,
-    ///    hard snap-out at 25.
-    /// 2. **Build enforcement** (Xcode only) — nudge after 3 unbuilt edits.
-    /// 3. **Error budget** (Xcode only) — stop after 5 consecutive build failures.
-    /// 4. **Stuck-file detection** — nudge at 3 consecutive edit failures on
-    ///    the same file, give-up nudge at 6.
-    ///
-    /// Returns `true` if the caller should `break` the outer task loop
-    /// (triggered only by hitting 5 consecutive build failures in case 3).
+    /// Overnight coding guardrails — track runaway loops and nudge/stop:
+    /// 1) Read guard: nudge at 5, snap-out at 25. 2) Build enforcement: nudge at 3 unbuilt edits.
+    /// 3) Error budget: stop at 5 consecutive build failures. 4) Stuck-file: nudge at 3, give-up at 6.
+    /// Returns true only when error budget triggers (caller should break the task loop).
     func runOvernightCodingGuards(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         toolResults: inout [[String: Any]],
@@ -61,17 +53,9 @@ extension AgentViewModel {
             let hadEdit = pendingTools.contains { editTools.contains($0.name) }
             let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
 
-            // 1. Read guard — nudge at 5, hard snap-out at 25 (no stop)
-            //
-            // The previous snap-out message told the model to "pick the most
-            // likely file and make an edit". That phrasing pushed the LLM into
-            // confabulating answers from incomplete data — observed in the
-            // wild as a "gap analysis" tool result that invented findings the
-            // model had never read. The new wording forces the only two
-            // legitimate moves when reads are exhausted: narrow the question
-            // to a SINGLE concrete fact and act on it, OR call done() and
-            // honestly report what's still unknown. Fabricating from partial
-            // reads is explicitly worse than admitting uncertainty.
+            // 1. Read guard — nudge at 5, hard snap-out at 25. Wording forces two
+            //    legitimate moves: narrow to a single fact and act, or call done()
+            //    and report unknowns. No confabulation from partial reads.
             if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
             if consecutiveReadOnlyCount >= 25 {
                 toolResults.append([
