@@ -667,23 +667,16 @@ private struct LLMOutputBox: View {
                         .onEnded { _ in dragStartHeight = 0 }
                 )
         }
-        // CursorOverride MUST come BEFORE .background(termBg) so it sits
-        // behind the visible background but still in front of the activity
-        // log NSTextView underneath. .background layers stack
-        // outside-in: each .background goes BEHIND the previous one in the
-        // AppKit z-order. The CursorOverride needs to be ABOVE the activity
-        // log (so its cursor rect wins) but BEHIND the SwiftUI HUD content
-        // (so clicks pass through to buttons/text view naturally).
-        //
-        // We don't override hitTest to nil — that would skip the view from
-        // cursor rect lookup. Instead, .background placement is what makes
-        // clicks pass through (the SwiftUI content is rendered IN FRONT).
-        .background {
-            CursorOverride(cursor: .arrow)
-        }
         .background(termBg)
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(termBorder, lineWidth: 1))
+        // SwiftUI macOS 15+ native cursor control. Forces the default arrow
+        // cursor over the entire HUD bounds, overriding any I-beam from the
+        // activity log NSTextView underneath. This is the OFFICIAL Apple API
+        // for the "cursor over an overlaid SwiftUI view" problem — replaces
+        // earlier .onHover/.onContinuousHover and CursorOverride NSView
+        // attempts that all lost to AppKit's cursor rect lookup.
+        .pointerStyle(.default)
         .task {
             // Blink cursor at ~2Hz — always running, seamless streaming→idle
             while !Task.isCancelled {
