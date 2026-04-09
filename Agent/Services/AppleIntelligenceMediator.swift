@@ -644,6 +644,14 @@ final class AppleIntelligenceMediator: ObservableObject {
             // If any tool call failed, fall through to the cloud LLM with
             // the failure context (caller handles the partial-success case).
             if tracker.failed { return nil }
+            // If Apple AI's response indicates refusal/inability, fall through to cloud LLM.
+            let upper = content.uppercased()
+            if upper.contains("I'M SORRY") || upper.contains("I'M UNABLE") || upper.contains("I CANNOT")
+                || upper.contains("I CAN'T") || upper.contains("NOT ABLE TO") || upper.contains("UNABLE TO PERFORM")
+                || upper.contains("ERROR WITH") || upper.contains("COULDN'T") || upper.contains("COULD NOT")
+            {
+                return nil
+            }
             return sanitize(content)
         } catch {
             return nil
