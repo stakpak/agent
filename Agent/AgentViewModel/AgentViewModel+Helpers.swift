@@ -413,7 +413,13 @@ extension AgentViewModel {
             case "scroll": return ("ax_scroll", mapped)
             case "highlight_element": return ("ax_highlight_element", mapped)
             case "scroll_to_element": return ("ax_scroll_to_element", mapped)
-            case "manage_app": return ("ax_manage_app", mapped)
+            case "manage_app":
+                // If sub_action wasn't provided, action is still "manage_app" which is invalid
+                let resolvedAction = mapped["action"] as? String ?? "manage_app"
+                if resolvedAction == "manage_app" {
+                    mapped["action"] = "list" // default to list when no sub_action given
+                }
+                return ("ax_manage_app", mapped)
             case "show_menu": return ("ax_show_menu", mapped)
             case "click_menu_item": return ("ax_click_menu_item", mapped)
             case "check_permission": return ("ax_check_permission", mapped)
