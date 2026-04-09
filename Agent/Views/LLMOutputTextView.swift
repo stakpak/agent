@@ -71,15 +71,10 @@ final class FollowScrollView: NSScrollView {
 }
 
 /// Local NSScrollView/NSTextView wrapper for the LLM Output HUD.
-/// Renders text via TerminalNeoRenderer for markdown/table styling.
-///
-/// Scroll policy: `autoFollowDisabled` is the single truth — set true on
-/// scroll/hover; cleared on hover-exit-at-bottom, text shrink, or user
-/// scrolling back to bottom while not hovering.
-///
-/// Jitter avoidance: incremental append, CATransaction.setDisableActions,
-/// full re-render only for tables/shrinks/first load, cursor blink via
-/// setAttributes on one char.
+/// Renders via TerminalNeoRenderer. Scroll policy: `autoFollowDisabled`
+/// is single truth (set on scroll/hover, cleared on hover-exit-at-bottom
+/// or shrink). Jitter: incremental append, no implicit animations, cursor
+/// blink via setAttributes on one char.
 struct LLMOutputTextView: NSViewRepresentable {
     let text: String
     /// True while streaming — when false, mouse-exit won't force snap-to-bottom;
