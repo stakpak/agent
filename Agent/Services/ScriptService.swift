@@ -49,7 +49,7 @@ final class ScriptService: @unchecked Sendable {
 
       /// Pinned AgentScripts release tag. Bump when a new release ships.
       /// Pull/sync URLs use this tag — users get an immutable snapshot, not main HEAD.
-    static let scriptsRelease = "1.0.5"
+    static let scriptsRelease = "1.0.6"
 
     /// Pinned AgentEventBridges release tag. Same rationale as scriptsRelease — every
     /// user clones the same immutable bridges snapshot rather than main HEAD.
