@@ -119,14 +119,10 @@ extension AgentViewModel {
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            // Resolve the app name via the SDEF catalog (the canonical
-            // "apps Agent knows about" list driven by Agent/SDEFs/*.json).
-            // If SDEF doesn't have it, the existing handleAccessibilityAction
-            // → AccessibilityService.resolveBundleId pipeline will try its
-            // NSRunningApplications fallback. So Apple AI can pass any of:
-            //   "Safari" → SDEF resolves → com.apple.Safari
-            //   "Photo Booth" → no SDEF → falls back, NSWorkspace finds it
-            //   "com.apple.Safari" → already a bundle ID, passthrough
+            // Resolve app name via SDEF catalog. If not found, falls back through
+            // AccessibilityService.resolveBundleId → NSRunningApplications.
+            // "Safari" → SDEF → com.apple.Safari, "Photo Booth" → fallback,
+            // "com.apple.Safari" → passthrough.
             if let rawApp = args.app {
                 let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
                 input["appBundleId"] = resolved

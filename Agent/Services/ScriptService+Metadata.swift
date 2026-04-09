@@ -389,14 +389,9 @@ extension ScriptService {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Pull a missing script straight from the AgentScripts GitHub repo (raw file URL,
-    /// no full clone). Recovery path for when the model deleted a script the user wants
-    /// the upstream version of (rather than a `.Trash` backup that might be a local edit).
-    ///
-    /// Refuses to overwrite a live script that has DIVERGED from upstream — caller
-    /// must delete it first (which creates a fresh backup), so the operation is
-    /// always reversible. If the local file is byte-identical to upstream, returns
-    /// a no-op success message instead of an error.
+    /// Pull a missing script from AgentScripts GitHub (raw file URL, no clone).
+    /// Recovery path for restoring upstream version. Refuses to overwrite a diverged
+    /// live script — delete first. Returns no-op success if already identical.
     func pullScriptFromRemote(name: String) async -> String {
         AuditLog.log(.agentScript, "pullScriptFromRemote: \(name)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
@@ -542,7 +537,6 @@ extension ScriptService {
         // a file in ~/Documents/. Swift Package Manager detects source changes
         // via the .swift file mtimes, so touching Package.swift is a no-op for
         // build invalidation.
-        //
         // Re-sign dylib with the app's identity so macOS attributes AppleScript
         // permission prompts to "Agent!" instead of "Xcode".
         return

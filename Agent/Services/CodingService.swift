@@ -337,10 +337,8 @@ enum CodingService {
     /// Pass 1: tabs→spaces + strip trailing whitespace.
     /// Pass 2: trim all leading/trailing whitespace per line (catches indentation mismatches).
     /// Also strips leading/trailing blank lines from target before matching.
-    /// Build a snippet of the current file content for an edit_file failure recovery
-    /// message. Tries to anchor on the firstLine of the model's old_string; falls back
-    /// to a trimmed match; falls back to the file head. Returns ~10 lines max in a
-    /// fenced code block with line numbers so the model can directly copy the bytes.
+    /// Edit failure recovery: anchors on firstLine of old_string, falls back to
+    /// trimmed match, falls back to file head. Returns ~10 lines max.
     static func findEditFailureContext(in content: String, firstLine: String?, trimmedNeedle: String) -> String {
         let lines = content.components(separatedBy: "\n")
         let contextLines = 10

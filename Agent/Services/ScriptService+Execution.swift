@@ -75,14 +75,10 @@ extension ScriptService {
         }
     }
 
-    /// Run a compiled script dylib out-of-process via a small runner executable.
-    /// Each invocation gets its own process with its own stdout — fully concurrent.
-    ///
-    /// `projectFolder` is the active tab/main project directory. It's exported as
-    /// `AGENT_PROJECT_FOLDER` (always set, separate from `AGENT_SCRIPT_ARGS`) and
-    /// used as the process cwd. Scripts read it directly when they need a default
-    /// working directory; `AGENT_SCRIPT_ARGS` carries only what the LLM explicitly
-    /// passed.
+    /// Run a compiled script dylib out-of-process via a runner executable.
+    /// Each invocation gets its own process — fully concurrent.
+    /// `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args).
+    /// `AGENT_SCRIPT_ARGS` carries only what the LLM explicitly passed.
     func loadAndRunScriptViaProcess(
         name: String, arguments: String = "", projectFolder: String = "",
         captureStderr: Bool = false,

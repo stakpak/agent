@@ -664,14 +664,9 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Triage a user prompt. Checks direct commands first, then accessibility
-    /// agent (Apple AI), then conversational patterns. Falls back to
-    /// .passThrough for anything that needs the cloud LLM.
-    ///
-    /// `axDispatch` is the injected callback that routes an AccessibilityArgs
-    /// to the AgentViewModel's tool dispatcher (executeNativeTool). It must
-    /// be passed in by the caller because the mediator deliberately doesn't
-    /// hold a reference to the view model.
+    /// Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns.
+    /// Falls back to .passThrough for anything needing the cloud LLM.
+    /// `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
     func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
