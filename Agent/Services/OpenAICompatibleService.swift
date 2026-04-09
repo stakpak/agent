@@ -153,17 +153,8 @@ final class OpenAICompatibleService {
     /// Set to true when a tool call fails — next turn sends full _tool names, then resets.
     var needsFullToolNames: Bool = false
 
-    /// Convert Claude-format messages to OpenAI chat messages.
-    ///
-    /// We send the full system prompt every turn. There is no per-message
-    /// cache_control to set: every supported OpenAI-format provider
-    /// (OpenAI, Z.ai, Grok, Mistral, DeepSeek, Qwen, Gemini, BigModel, etc.)
-    /// does prefix caching AUTOMATICALLY when consecutive requests share
-    /// a byte-stable prefix. The lever we have is keeping the prefix
-    /// byte-stable — same system prompt, same tool order, no per-call
-    /// timestamps or UUIDs in the prefix — and the response parser will
-    /// surface cached_tokens via TokenUsageStore so the LLM Usage panel
-    /// shows whether the cache is actually hitting.
+    /// Convert Claude-format messages to OpenAI chat messages. Full system
+    /// prompt every turn — providers cache automatically via byte-stable prefix.
     private func convertMessages(_ messages: [[String: Any]]) -> [[String: Any]] {
         let prompt = systemPrompt
         var chatMessages: [[String: Any]] = [
