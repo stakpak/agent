@@ -272,14 +272,10 @@ extension ScriptService {
     private static let bundledCatalogAPIURL =
         "https://api.github.com/repos/macOS26/AgentScripts/contents/Agent/agents/Sources/Scripts"
 
-    /// Refresh upstream-bundled scripts on app launch when version changes.
-    /// Version-gated, catalog-driven, SHA-compared, backed up before replacing,
-    /// silent on failure, and never auto-resurrects locally-deleted scripts.
+    /// Refresh upstream-bundled scripts on launch when version changes. Version-gated, catalog-driven, SHA-compared, backed up before replacing, silent on failure, never auto-resurrects locally-deleted scripts.
     func syncBundledScriptsFromRemote() async {
         AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: start")
-        // Include both short version and build number so a TestFlight build bump
-        // (same X.Y.Z, new build) re-syncs. Resilient to UserDefaults sync across
-        // machines too — different machines with different builds re-sync.
+        // Include both short version and build number so a TestFlight build bump re-syncs.
         let info = Bundle.main.infoDictionary
         let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
         let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
@@ -377,9 +373,7 @@ extension ScriptService {
         UserDefaults.standard.set(currentVersion, forKey: Self.lastSyncedAgentVersionKey)
     }
 
-    /// Compute the git blob SHA1 of a file's content. Matches the SHA reported
-    /// by GitHub's contents API in the `sha` field, so we can skip downloading
-    /// files that haven't changed upstream.
+    /// Compute git blob SHA1 of file content. Matches GitHub contents API `sha` field so we skip unchanged files.
     static func gitBlobSHA1(of content: String) -> String {
         let bodyData = content.data(using: .utf8) ?? Data()
         guard let header = "blob \(bodyData.count)\0".data(using: .utf8) else { return "" }
@@ -389,9 +383,7 @@ extension ScriptService {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Pull a missing script from AgentScripts GitHub (raw file URL, no clone).
-    /// Recovery path for restoring upstream version. Refuses to overwrite a diverged
-    /// live script — delete first. Returns no-op success if already identical.
+    /// Pull missing script from AgentScripts GitHub (raw URL, no clone). Refuses to overwrite diverged live script — delete first.
     func pullScriptFromRemote(name: String) async -> String {
         AuditLog.log(.agentScript, "pullScriptFromRemote: \(name)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
