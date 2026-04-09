@@ -14,12 +14,7 @@ final class ClaudeService {
     private let isLocalEndpoint: Bool
 
     // MARK: - Rate Limit Tracking
-    //
-    // When Anthropic returns 429 (rate limit) or 529 (overloaded), we capture
-    // the Retry-After header and pad the next request's wait so we don't
-    // immediately re-trigger the same response. Mirrors the pattern in
-    // OpenAICompatibleService — same shape, separate dict because the two
-    // services don't share state and Anthropic's rate limit window is its own.
+    // Anthropic 429/529 → capture Retry-After, pad next request. Mirrors OpenAICompatibleService pattern, separate dict for independent tracking.
     private static var retryAfterUntil: CFAbsoluteTime = 0
 
     /// Wait if needed to respect Retry-After backoff from a previous 429/529.
@@ -31,18 +26,12 @@ final class ClaudeService {
         }
     }
 
-    /// Record a Retry-After value from a 429/529 response. @MainActor because
-    /// the static var is owned by this @MainActor class; called from the
-    /// nonisolated request methods via `await MainActor.run { ... }`.
+    /// Record Retry-After from 429/529. @MainActor because static var is owned by this @MainActor class; called from nonisolated via `await MainActor.run`.
     static func recordRetryAfter(_ seconds: Double) {
         retryAfterUntil = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse a Retry-After header value. Header is either an integer
-    /// (seconds to wait) per RFC 7231 §7.1.3, or an HTTP-date — we only
-    /// honor the integer form. Returns 0 if missing/unparseable; caller
-    /// falls back to a sensible default. Capped at 5 minutes to defend
-    /// against absurdly large values.
+    /// Parse Retry-After header. Integer seconds per RFC 7231 §7.1.3. Returns 0 if missing/unparseable; capped at 5 min.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -82,10 +71,7 @@ final class ClaudeService {
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLocalEndpoint {
-            // Local Claude-protocol endpoints (LM Studio with Anthropic protocol)
-            // bypass the on-disk SystemPromptService path, so wrap with the
-            // anti-hallucination rules here too — otherwise this code path
-            // would silently miss them.
+            // Local Claude-protocol endpoints (LM Studio) bypass SystemPromptService — wrap with anti-hallucination rules to match other providers.
             return SystemPromptService.wrapWithRules(
                 AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
             )
@@ -176,13 +162,7 @@ final class ClaudeService {
             body["tools"] = toolDefs
         }
 
-        // Serialize on main actor, then offload network I/O + response parsing.
-        // .sortedKeys produces byte-stable JSON regardless of Swift dictionary
-        // iteration order. Required for prefix caching to actually hit:
-        // sanitizeSchema/compactProperties build new dictionaries on every
-        // call, and Swift's dict iteration order isn't guaranteed stable
-        // across rebuilds. Without sortedKeys, two semantically-identical
-        // requests can produce different byte streams and miss the cache.
+        // Serialize on main actor, then offload network I/O + parsing. .sortedKeys produces byte-stable JSON regardless of dict iteration order — required for prefix caching to hit.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
@@ -212,11 +192,7 @@ final class ClaudeService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // 429 = standard HTTP rate limit. 529 = Anthropic's "Overloaded"
-            // status. Both ship with a Retry-After header (integer seconds);
-            // record it so the next call's enforceRateLimit pads the wait
-            // beyond the loop's exponential backoff. Defaults to 30s if the
-            // header is missing or unparseable.
+            // 429 = rate limit, 529 = Anthropic "Overloaded". Both include Retry-After header (integer seconds); record it so next call's enforceRateLimit pads the wait. Default 30s if header missing.
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 529 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = Self.parseRetryAfter(header)
