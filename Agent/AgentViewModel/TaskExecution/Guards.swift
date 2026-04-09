@@ -53,41 +53,11 @@ extension AgentViewModel {
 
             // 1. Read guard — nudge at 5, hard snap-out at 25. Wording forces two legitimate moves: narrow to a single
             // fact and act, or call done() and report unknowns. No confabulation from partial reads.
+            // Read guard removed — LLMs need freedom to research entire projects
+            // without being interrupted. The snap-out was counter-productive:
+            // models worked around it by making dummy edits, and legitimate
+            // deep-dive analysis tasks were blocked at 25 reads.
             if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
-            if consecutiveReadOnlyCount >= 25 {
-                toolResults.append([
-                    "type": "tool_result",
-                    "tool_use_id": "read_snap",
-                    "content": """
-                        🛑 INSUFFICIENT EVIDENCE: \(consecutiveReadOnlyCount) \
-                        consecutive reads/searches with NO edits, builds, or actions. \
-                        You do NOT have enough information to produce a confident answer. \
-                        You have exactly TWO legitimate moves: \
-                        (a) Narrow your question to ONE specific file/function/fact, \
-                        look it up, then act ONLY on what you actually read. \
-                        (b) Call done() and honestly report what you found AND what is \
-                        still unknown. DO NOT fabricate findings, gap analyses, summaries, \
-                        or comparisons from incomplete reads. DO NOT 'pick the most likely \
-                        answer' — confabulating from partial evidence is worse than \
-                        admitting uncertainty. If you cannot narrow further, call done() \
-                        with 'I need more information about X' in the summary.
-                        """
-                ])
-                appendLog("🛑 Snap-out: \(consecutiveReadOnlyCount) reads — narrow or call done()")
-                flushLog()
-                consecutiveReadOnlyCount = 0 // Reset after snap so we don't loop the nudge
-            } else if consecutiveReadOnlyCount >= 5 {
-                toolResults.append([
-                    "type": "tool_result",
-                    "tool_use_id": "read_guard",
-                    "content": """
-                        ⚠️ \(consecutiveReadOnlyCount) consecutive reads without \
-                        editing or acting. Either narrow to one specific question \
-                        and act on it, or call done() with what you actually know — \
-                        do NOT guess or fabricate from partial evidence.
-                        """
-                ])
-            }
 
             // 2. Build enforcement — only for Xcode projects
             if isXcode {
