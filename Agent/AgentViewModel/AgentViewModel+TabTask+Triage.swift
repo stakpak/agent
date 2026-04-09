@@ -159,16 +159,9 @@ extension AgentViewModel {
             tab.isLLMThinking = false
             return .done
         case .accessibilityHandled(let summary):
-            // Apple AI ran the accessibility tool itself (one or more times)
-            // and produced a final summary. The tool calls already happened
-            // through the axDispatch closure above — they went through the
-            // same executeNativeTool path the cloud LLM uses, so they're
-            // already logged in the activity log. The summary string is
-            // what Apple AI said it accomplished.
-            //
-            // If Apple AI never called the tool, or any tool call failed,
-            // runAccessibilityAgent returns nil → triage returns .passThrough
-            // → we never reach this case and the cloud LLM takes over.
+            // Apple AI ran accessibility tool(s) and produced a summary.
+            // Tool calls went through axDispatch → executeNativeTool (already logged).
+            // If Apple AI never called the tool or any call failed, we get nil → .passThrough → cloud LLM.
             tab.rawLLMOutput = summary
             tab.displayedLLMOutput = summary
             tab.dripDisplayIndex = summary.count
