@@ -670,6 +670,19 @@ private struct LLMOutputBox: View {
         .background(termBg)
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(termBorder, lineWidth: 1))
+        // Capture mouse events for the WHOLE HUD so the activity log NSTextView
+        // underneath doesn't bleed its I-beam cursor through transparent SwiftUI
+        // areas (steps list, header, padding). Force the arrow cursor while the
+        // pointer is anywhere inside the HUD bounds.
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                NSCursor.arrow.set()
+            case .ended:
+                break
+            }
+        }
         .task {
             // Blink cursor at ~2Hz — always running, seamless streaming→idle
             while !Task.isCancelled {

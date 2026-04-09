@@ -8,8 +8,20 @@ import AgentTerminalNeo
 /// remaining fight when streaming chunks arrive while the user is scrolled up.
 /// We disable that path entirely and drive scroll only via snapToEnd, which
 /// talks to the clip view directly.
+///
+/// Also overrides cursor rects so the HUD shows the arrow pointer instead of
+/// the default text I-beam — this is a read-only display surface, the user
+/// shouldn't think it's editable.
 final class FollowTextView: NSTextView {
     override func scrollRangeToVisible(_ range: NSRange) { /* no-op */ }
+
+    override func resetCursorRects() {
+        // Replace NSTextView's default I-beam cursor rect with the arrow cursor
+        // for the entire visible area. The LLM output is a read-only display, not
+        // an editable text field, so the I-beam is misleading.
+        discardCursorRects()
+        addCursorRect(visibleRect, cursor: .arrow)
+    }
 }
 
 /// NSScrollView subclass that fires callbacks on user scroll and on hover
@@ -34,6 +46,14 @@ final class FollowScrollView: NSScrollView {
         )
         addTrackingArea(area)
         hoverTrackingArea = area
+    }
+
+    override func resetCursorRects() {
+        // Cover the scroll view area too so any gaps the inner FollowTextView
+        // doesn't claim (margins, scroll bar gutter) still show the arrow
+        // instead of leaking the activity log's I-beam through.
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     override func scrollWheel(with event: NSEvent) {
