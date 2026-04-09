@@ -160,22 +160,9 @@ enum CodingService {
 
     // MARK: - Edit File (d1f-powered string replacement)
 
-    /// Replace exact text in a file with d1f-verified diff/apply pipeline.
-    /// Pipeline:
-    ///  1. Read file + normalize line endings
-    ///  2. Locate the match — exact → fuzzy whitespace → context disambiguation
-    ///  3. Compute the proposed updated content via direct substring replacement
-    ///  4. Build a structured d1f diff from original → updated (carries metadata
-    ///     including source line numbers and total line count)
-    ///  5. Re-apply the diff via d1f.applyDiff to verify it round-trips
-    ///  6. Verify the d1f diff with d1f.verifyDiff (catches library-side bugs)
-    ///  7. Write the verified result to disk
-    ///  8. Return d1f's .ai display preview alongside line-number metadata
-    ///
-    /// This gives every edit the same correctness guarantees as create_diff +
-    /// apply_diff while preserving the simple old_string/new_string interface,
-    /// AND returns a preview block in the same format the LLM already knows from
-    /// apply_diff results — so the model can read its own edits consistently.
+    /// Replace exact text in a file with d1f-verified diff/apply pipeline:
+    /// read → locate match (exact → fuzzy → context) → compute replacement →
+    /// build d1f diff → verify round-trip → write → return .ai preview.
     static func editFile(path: String, oldString: String, newString: String, replaceAll: Bool, context: String? = nil) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
