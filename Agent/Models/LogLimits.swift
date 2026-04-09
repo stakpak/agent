@@ -1,14 +1,9 @@
 import Foundation
 
-/// Central caps + trim helper for tool-result data being packaged into LLM prompts.
-///
-/// Different sites use different caps on purpose — e.g. `read_file` allows more
-/// characters than a per-tool-result slot because it's meant to deliver whole
-/// source files in one read. The unification here is on the *trim function*
-/// and *banner format*, not the cap values.
-///
-/// NOTE: This is for LLM-bound data. Activity-log display trimming lives in
-/// `ScriptTab.trimLog(_:)` and is a separate concern — do not conflate the two.
+/// Central caps + trim helper for LLM-bound tool-result data.
+/// Different caps per site on purpose (read_file allows more than per-tool-result slots).
+/// Unification is on the trim function and banner format, not cap values.
+/// NOTE: For LLM-bound data only. Activity-log display trimming is in ScriptTab.trimLog.
 enum LogLimits {
 
     // MARK: - Named caps
@@ -45,14 +40,9 @@ enum LogLimits {
 
     // MARK: - Shared trim helper
 
-    /// Trim `text` to `cap` chars, appending a consistent truncation banner.
-    ///
-    /// If `text.count <= cap`, returns `text` unchanged. Otherwise returns
-    /// `String(text.prefix(cap))` plus a trailing banner of the form:
-    ///
-    ///     ... [truncated — N chars total, M lines. <suffix>]
-    ///
-    /// `lineCount` and `suffix` are optional; omit them to get a minimal banner.
+    /// Trim `text` to `cap` chars with a trailing truncation banner.
+    /// If under cap, returns unchanged. Otherwise: prefix + banner like
+    /// "... [truncated — N chars total, M lines. suffix]"
     static func trim(
         _ text: String,
         cap: Int,
