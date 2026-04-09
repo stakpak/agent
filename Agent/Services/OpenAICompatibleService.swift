@@ -3,8 +3,7 @@ import AgentAudit
 @preconcurrency import Foundation
 import AgentTools
 
-/// Unified service for OpenAI and Hugging Face Inference API.
-/// Both use the OpenAI chat completions format with SSE streaming.
+/// Unified service for OpenAI and Hugging Face Inference API (both use OpenAI chat completions format with SSE streaming).
 /// Generate a 9-char alphanumeric tool call ID compatible with all providers (including Mistral).
 private func shortToolId() -> String {
     let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -74,9 +73,7 @@ final class OpenAICompatibleService {
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLMStudio {
-            // LM Studio bypasses the on-disk SystemPromptService path. Wrap
-            // with the anti-hallucination rules here so this code path matches
-            // the disk-seeded prompts every other provider receives.
+            // LM Studio bypasses SystemPromptService — wrap with anti-hallucination rules to match disk-seeded prompts.
             return SystemPromptService.wrapWithRules(
                 AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
             )
@@ -287,9 +284,7 @@ final class OpenAICompatibleService {
                 }
             }
         }
-        // Mistral requires strict tool message ordering:
-        // 1. tool messages must follow an assistant message with tool_calls
-        // 2. number of tool responses must equal number of tool_calls
+        // Mistral requires strict tool message ordering: tool messages follow assistant with tool_calls, response count equals tool_calls count
         if provider == .mistral || provider == .codestral || provider == .vibe {
             var cleaned: [[String: Any]] = []
             var i = 0
