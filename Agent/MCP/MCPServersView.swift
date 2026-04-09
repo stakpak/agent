@@ -1,11 +1,7 @@
 import SwiftUI
 import AgentAudit
 
-/// Identifiable wrapper used to drive ONE `.sheet(item:)` for both the
-/// blank "+" Add and the preset-seeded Add. The fresh UUID per instance
-/// guarantees SwiftUI reads the captured `seed` when the sheet body
-/// evaluates — fixes the multi-sheet timing race where the first preset
-/// click would open an empty form because state hadn't propagated yet.
+/// Identifiable wrapper for `.sheet(item:)` — drives both blank "+" Add and preset-seeded Add with a fresh UUID per instance to avoid the multi-sheet timing race.
 private struct AddSheetItem: Identifiable {
     let id = UUID()
     /// nil → blank "Add MCP Server" form
@@ -121,10 +117,7 @@ struct MCPServersView: View {
         .frame(width: 420)
         .frame(maxHeight: 500)
         .sheet(item: $addSheetItem) { item in
-            // ONE sheet for both the blank "+" Add and the preset menu.
-            // .sheet(item:) re-evaluates this body every time `addSheetItem`
-            // becomes non-nil, so the wrapper's `seed` is read at the moment
-            // the sheet is presented — no SwiftUI multi-sheet timing race.
+            // One sheet for both blank "+" Add and preset menu — `.sheet(item:)` re-evaluates body each time, reading the wrapper's seed immediately.
             MCPServerEditView(server: item.seed) { newServer in
                 if let err = registry.add(newServer) {
                     addError = err
@@ -585,9 +578,7 @@ struct MCPServerEditView: View {
         }
     }
 
-    /// Parse edited JSON back into the form fields.
-    /// Accepts standard MCP format: {"mcpServers":{"name":{...}}} or {"name":{...}} or bare {command, args, ...}
-    /// Preserves unsupported fields for export round-tripping
+    /// Parse edited JSON back into form fields. Accepts standard MCP format or bare {command, args, ...}, preserving unsupported fields for round-tripping.
     private func applyJSON(_ json: String) {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
