@@ -66,9 +66,22 @@ extension AgentViewModel {
     }
 
     /// Start executing a task on a tab (not queued).
+    ///
+    /// Same drain-then-start pattern as `startMainTask` — wait for any
+    /// previous tab task to fully exit before launching the new one. Without
+    /// this, an old retry-loop can keep firing log lines into the SAME
+    /// `tab.activityLog` after a Stop+New-Task sequence, mixing messages
+    /// from two providers.
     private func startTabTask(tab: ScriptTab, prompt: String) {
+        let previousTask = tab.runningLLMTask
         tab.currentTaskPrompt = prompt
         tab.runningLLMTask = Task {
+            if let previous = previousTask {
+                previous.cancel()
+                _ = await previous.value
+            }
+            // Reset the cancelled flag AFTER the previous task has fully exited.
+            tab.isCancelled = false
             await executeTabTask(tab: tab, prompt: prompt)
             // When done, run next queued task
             if !tab.taskQueue.isEmpty && !tab.isCancelled {

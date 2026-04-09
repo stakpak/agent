@@ -159,12 +159,32 @@ extension AgentViewModel {
     }
 
     /// Start executing a task on the main tab (not queued).
+    ///
+    /// Critical: if a previous main task is still alive (e.g., user clicked Stop
+    /// then immediately started a new task while the old one was still draining
+    /// its retry loop or in-flight HTTP request), we MUST wait for it to fully
+    /// terminate before starting the new one. Otherwise both loops run
+    /// concurrently and write to the SAME `activityLog`, producing nonsense like
+    /// "Z.ai 429 retry" log lines while the new task is using Ollama.
     private func startMainTask(_ task: String) {
-        isCancelled = false
-        currentTaskPrompt = task
-        ChatHistoryStore.shared.startNewTask(prompt: task)
-
+        let previousTask = runningTask
         runningTask = Task {
+            // Drain any previous main task before starting this one. cancel()
+            // is idempotent — stop() may have already called it, this just
+            // ensures it. Then await the previous task's value so we know it
+            // has fully exited its loop, including any in-flight HTTP request
+            // and any catch-block log lines.
+            if let previous = previousTask {
+                previous.cancel()
+                _ = await previous.value
+            }
+            // Reset cancellation flag AFTER the previous task has fully exited.
+            // Setting it before would let the previous task think it's no
+            // longer cancelled if it polls vm.isCancelled (some loops do).
+            isCancelled = false
+            currentTaskPrompt = task
+            ChatHistoryStore.shared.startNewTask(prompt: task)
+
             await executeTask(task)
             // When done, run next queued task
             if !mainTaskQueue.isEmpty && !isCancelled {
