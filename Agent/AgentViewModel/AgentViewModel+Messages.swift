@@ -227,17 +227,9 @@ extension AgentViewModel {
     }
 
     // MARK: - "Agent!" Prefix Detection
-    //
-    // Both inbound (incoming iMessages) and outbound (replies we send back)
-    // need to recognize and strip the "Agent!" wake word. We accept it
-    // case-insensitively, with or without the trailing "!", because:
-    //   - iPhone autocorrect routinely strips "!" or recapitalizes
-    //   - older Macs/contacts use lowercase "agent "
-    //   - the brand name is "Agent!" but a user typing on a tiny keyboard
-    //     should not have to fight their keyboard to invoke the agent
-    // The "agent" portion must be a complete word — the next character must
-    // be either end-of-string, "!", or whitespace. That keeps random sentences
-    // starting with "agency" or "agentic" from triggering.
+    // Accept "agent"/"Agent!" case-insensitively, with or without trailing "!".
+    // Must be a complete word (followed by end-of-string, "!", or whitespace)
+    // so "agency"/"agentic" don't trigger.
 
     /// True iff `text` starts with "agent" / "agent!" as a complete leading
     /// word (case-insensitive). Followed by end-of-string, "!", or whitespace.
