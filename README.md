@@ -3,7 +3,7 @@
 
 # 🦾 Agent! for macOS 26
 
-<img width="1209" height="1044" alt="image" src="https://github.com/user-attachments/assets/e303153c-0e5a-4f6e-b0e4-febc8083de6b" />
+<img width="1076" height="1034" alt="image" src="https://github.com/user-attachments/assets/9d54b064-37b8-4adc-8b97-cc37691993ac" />
 
 ## **Agentic AI for your  Mac Desktop**
 ## Open Source replacement for Claude Code, Cursor, Cline, OpenClaw
