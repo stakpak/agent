@@ -2,33 +2,32 @@ import SwiftUI
 import AppKit
 import AgentTerminalNeo
 
-/// NSTextView subclass whose scrollRangeToVisible is a no-op. Stock NSTextView
-/// implicitly scrolls the new range into view on every text mutation
-/// (storage.append, replaceCharacters, etc.) — that's the source of the
-/// remaining fight when streaming chunks arrive while the user is scrolled up.
-/// We disable that path entirely and drive scroll only via snapToEnd, which
-/// talks to the clip view directly.
-///
-/// Also forces the arrow cursor instead of NSTextView's stock I-beam, even
-/// though isSelectable=true (so click+drag text selection still works). The
-/// trick is to override cursorUpdate(with:) WITHOUT calling super and to
-/// override resetCursorRects() WITHOUT calling super — NSTextView's I-beam
-/// is installed via those two methods, and skipping super on both prevents
-/// the I-beam from ever being set while still letting selection drag work
-/// (selection is driven by mouse-down/mouse-drag handling, not by cursor).
+/// NSTextView with no-op scrollRangeToVisible (we drive scroll manually via
+/// snapToEnd) and arrow cursor instead of I-beam. Selection still works.
 final class FollowTextView: NSTextView {
+    private var arrowTrackingArea: NSTrackingArea?
+
     override func scrollRangeToVisible(_ range: NSRange) { /* no-op */ }
 
-    override func cursorUpdate(with event: NSEvent) {
-        // Skip super — NSTextView.cursorUpdate sets NSCursor.iBeam when
-        // isSelectable. We force arrow instead.
-        NSCursor.arrow.set()
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.options.contains(.cursorUpdate) {
+            removeTrackingArea(area)
+        }
+        if let existing = arrowTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        arrowTrackingArea = area
     }
 
+    override func cursorUpdate(with event: NSEvent) { NSCursor.arrow.set() }
+
     override func resetCursorRects() {
-        // Skip super — NSTextView.resetCursorRects adds an I-beam cursor
-        // rect over its text container area. We add an arrow rect for the
-        // entire visible region instead.
         discardCursorRects()
         addCursorRect(visibleRect, cursor: .arrow)
     }

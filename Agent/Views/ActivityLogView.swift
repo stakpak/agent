@@ -4,15 +4,28 @@ import Combine
 import AgentColorSyntax
 import AgentTerminalNeo
 
-/// NSTextView subclass that forces the arrow cursor instead of NSTextView's
-/// stock I-beam, even with isSelectable=true. Selection still works because
-/// it's driven by mouse-down/mouse-drag handling, not by cursor display.
-/// Override cursorUpdate AND resetCursorRects WITHOUT calling super so the
-/// I-beam is never installed.
+/// NSTextView with arrow cursor instead of I-beam. Selection still works.
 final class ArrowCursorTextView: NSTextView {
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.arrow.set()
+    private var arrowTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.options.contains(.cursorUpdate) {
+            removeTrackingArea(area)
+        }
+        if let existing = arrowTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        arrowTrackingArea = area
     }
+
+    override func cursorUpdate(with event: NSEvent) { NSCursor.arrow.set() }
+
     override func resetCursorRects() {
         discardCursorRects()
         addCursorRect(visibleRect, cursor: .arrow)
@@ -45,10 +58,6 @@ struct ActivityLogView: NSViewRepresentable {
     var onMatchCount: ((Int) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
-        // Manual NSTextView + NSScrollView setup so we can install our
-        // ArrowCursorTextView subclass from the start (instead of using the
-        // NSTextView.scrollableTextView() factory and trying to swap classes
-        // after the fact, which silently failed in earlier attempts).
         let scrollView = NSScrollView()
         let contentSize = scrollView.contentSize
         let textContainer = NSTextContainer(
@@ -70,10 +79,6 @@ struct ActivityLogView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         scrollView.documentView = textView
         textView.isEditable = false
-        // Selection enabled — user can click+drag to select log text and
-        // Cmd+C to copy. The arrow cursor (instead of NSTextView's stock
-        // I-beam) is forced via the ArrowCursorTextView subclass overrides
-        // on cursorUpdate + resetCursorRects.
         textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.backgroundColor = .clear
