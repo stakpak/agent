@@ -72,7 +72,7 @@ struct InputSectionView: View {
                 )
                 .textFieldStyle(.plain)
                 // Rounded feels natural for text input (Spotlight, Messages) at 14pt
-                .font(.system(size: 14, design: .rounded))
+                .font(.system(size: 12, design: .rounded))
                 .padding(.vertical, 5)
                 .padding(.horizontal, 7)
                 .background(Color(nsColor: .controlBackgroundColor))
