@@ -27,7 +27,7 @@ extension AgentViewModel {
         } else {
             rawFolder = projectFolder
         }
-        let effectiveFolder = AgentViewModel.resolvedWorkingDirectory(rawFolder)
+        _ = AgentViewModel.resolvedWorkingDirectory(rawFolder)
 
         // Local helpers to route logging to the correct destination
         func log(_ message: String) {
