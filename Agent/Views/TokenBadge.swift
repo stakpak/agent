@@ -158,6 +158,29 @@ private struct TokenDetailView: View {
 
                     Chart {
                         ForEach(recent, id: \.date) { day in
+                            // PointMarks ensure single-day data is visible — LineMark
+                            // alone draws nothing when there's only one data point.
+                            PointMark(
+                                x: .value("Date", shortDate(day.date)),
+                                y: .value("Tokens", day.inputTokens)
+                            )
+                            .foregroundStyle(.blue)
+                            .symbolSize(40)
+
+                            PointMark(
+                                x: .value("Date", shortDate(day.date)),
+                                y: .value("Tokens", day.outputTokens)
+                            )
+                            .foregroundStyle(.green)
+                            .symbolSize(40)
+
+                            PointMark(
+                                x: .value("Date", shortDate(day.date)),
+                                y: .value("Tokens", day.cacheReadTokens)
+                            )
+                            .foregroundStyle(.cyan)
+                            .symbolSize(40)
+
                             LineMark(
                                 x: .value("Date", shortDate(day.date)),
                                 y: .value("Tokens", day.inputTokens),

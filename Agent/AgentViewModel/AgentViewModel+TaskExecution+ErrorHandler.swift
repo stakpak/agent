@@ -189,6 +189,15 @@ extension AgentViewModel {
                     flushLog()
                 }
 
+                // Retry budget exhausted on the same provider — try fallback chain
+                // BEFORE giving up. Without this, every timeout/exhaustion would
+                // skip past the fallback entirely and the user would never see it
+                // trigger.
+                if let fallback = await tryFallbackChain(reason: "\(errorSource) timeout after \(maxTimeoutRetries) retries") {
+                    timeoutRetryCount = 0
+                    return fallback
+                }
+
                 let timeoutMessage =
                     """
                     \(errorSource) timeout after \(maxTimeoutRetries) \
@@ -261,26 +270,20 @@ extension AgentViewModel {
                 if Task.isCancelled { return .breakLoop }
                 return .continueLoop
             } else {
+                // Network retry budget exhausted — try fallback chain before giving up.
+                if let fallback = await tryFallbackChain(reason: "network connection lost after \(maxTimeoutRetries) retries") {
+                    timeoutRetryCount = 0
+                    return fallback
+                }
                 appendLog("🌐 Network connection lost after \(maxTimeoutRetries) retries.")
                 flushLog()
                 return .breakLoop
             }
         } else {
             // Try fallback chain before giving up
-            if let fallback = FallbackChainService.shared.recordFailure() {
-                appendLog("🔄 Switching to fallback: \(fallback.displayName)")
-                flushLog()
-                // Resolve provider+model from the fallback entry, then rebuild services
-                if let fbProvider = APIProvider(rawValue: fallback.provider) {
-                    var newIsVision = Self.isVisionModel(fallback.model)
-                    if forceVision { newIsVision = true }
-                    appendLog("✅ Now using \(fbProvider.displayName) / \(fallback.model)")
-                    flushLog()
-                    timeoutRetryCount = 0
-                    return .fallbackRequested(provider: fbProvider, modelName: fallback.model, isVision: newIsVision)
-                }
+            if let fallback = await tryFallbackChain(reason: "\(errorSource) error: \(errMsg)") {
                 timeoutRetryCount = 0
-                return .continueLoop
+                return fallback
             }
 
             // Non-recoverable error — no fallback available
@@ -297,5 +300,23 @@ extension AgentViewModel {
             }
             return .breakLoop
         }
+    }
+
+    /// Shared helper used by every error branch in handleTaskLoopError. Records
+    /// a failure with FallbackChainService and, if the threshold is reached and
+    /// a fallback entry is available, returns the .fallbackRequested outcome
+    /// for the caller to act on. Returns nil if no fallback should fire (chain
+    /// disabled, threshold not yet reached, or no more entries).
+    private func tryFallbackChain(reason: String) async -> TaskLoopErrorOutcome? {
+        guard let fallback = FallbackChainService.shared.recordFailure() else { return nil }
+        appendLog("🔄 Fallback triggered (\(reason))")
+        appendLog("🔄 Switching to fallback: \(fallback.displayName)")
+        flushLog()
+        guard let fbProvider = APIProvider(rawValue: fallback.provider) else { return .continueLoop }
+        var newIsVision = Self.isVisionModel(fallback.model)
+        if forceVision { newIsVision = true }
+        appendLog("✅ Now using \(fbProvider.displayName) / \(fallback.model)")
+        flushLog()
+        return .fallbackRequested(provider: fbProvider, modelName: fallback.model, isVision: newIsVision)
     }
 }
