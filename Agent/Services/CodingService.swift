@@ -21,6 +21,56 @@ enum CodingService {
 
     // MARK: - Read File
 
+    /// Walk up from the (non-existent) `originalPath` to find the nearest existing
+    /// ancestor directory, then enumerate up to 4 levels deep looking for any file
+    /// whose basename matches. Returns the matching absolute paths so the read_file
+    /// error can hand them to the model directly. Capped at `maxResults` to keep
+    /// the error message terse.
+    private static func findFilesByBasename(originalPath: String, maxResults: Int) -> [String] {
+        let basename = (originalPath as NSString).lastPathComponent
+        guard !basename.isEmpty else { return [] }
+        let fm = FileManager.default
+
+        // Walk up to find the nearest existing ancestor directory
+        var search = (originalPath as NSString).deletingLastPathComponent
+        var isDir: ObjCBool = false
+        while !search.isEmpty, search != "/" {
+            if fm.fileExists(atPath: search, isDirectory: &isDir), isDir.boolValue {
+                break
+            }
+            search = (search as NSString).deletingLastPathComponent
+        }
+        guard !search.isEmpty, fm.fileExists(atPath: search, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+
+        // BFS for matching basenames, max depth 4, skip dotfiles, build/.git/.swiftpm/DerivedData
+        var results: [String] = []
+        let skipDirs: Set<String> = [".git", ".build", ".swiftpm", "DerivedData", "node_modules", ".Trash", "Pods"]
+        var queue: [(path: String, depth: Int)] = [(search, 0)]
+        while let (current, depth) = queue.first {
+            queue.removeFirst()
+            if results.count >= maxResults { break }
+            guard depth <= 4 else { continue }
+            guard let entries = try? fm.contentsOfDirectory(atPath: current) else { continue }
+            for entry in entries {
+                if entry.hasPrefix(".") { continue }
+                if skipDirs.contains(entry) { continue }
+                let full = (current as NSString).appendingPathComponent(entry)
+                var entryIsDir: ObjCBool = false
+                if fm.fileExists(atPath: full, isDirectory: &entryIsDir) {
+                    if entryIsDir.boolValue {
+                        queue.append((full, depth + 1))
+                    } else if entry == basename {
+                        results.append(full)
+                        if results.count >= maxResults { break }
+                    }
+                }
+            }
+        }
+        return results
+    }
+
     /// Read file contents with line numbers (like `cat -n`).
     /// - Parameters:
     ///   - path: Absolute file path
@@ -30,13 +80,30 @@ enum CodingService {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
+            // The model guessed a wrong path. Instead of telling it to list a
+            // directory (which won't help when the file is in a subfolder),
+            // walk up to the nearest existing ancestor and find any files
+            // matching the basename. Hand the model the actual path inline so
+            // it can fix the call in one shot — no extra round-trip needed.
+            let candidates = findFilesByBasename(originalPath: path, maxResults: 5)
             let dir = (path as NSString).deletingLastPathComponent
             let suggestPath = dir.isEmpty ? "." : dir
-            return
-                "Error: file not found: \(path)\n"
-                + "STOP guessing paths. Call file_manager("
-                + "action:\"list\", path:\"\(suggestPath)\") "
-                + "to see what files exist."
+            if !candidates.isEmpty {
+                let list = candidates.map { "  \($0)" }.joined(separator: "\n")
+                return """
+                    Error: file not found: \(path)
+                    Found \(candidates.count) file(s) with the same name in nearby directories:
+                    \(list)
+                    Recovery: re-call read_file with the correct path from the list above.
+                    """
+            }
+            return """
+                Error: file not found: \(path)
+                No files matching the basename were found in the parent directory or its subfolders.
+                Recovery: call file_manager(action:"list", path:"\(suggestPath)") to see what \
+                exists, or file_manager(action:"search", pattern:"\((path as NSString).lastPathComponent)") \
+                to search the project tree.
+                """
         }
 
         // Check if it's a directory
