@@ -8,8 +8,30 @@ import AgentTerminalNeo
 /// remaining fight when streaming chunks arrive while the user is scrolled up.
 /// We disable that path entirely and drive scroll only via snapToEnd, which
 /// talks to the clip view directly.
+///
+/// Also forces the arrow cursor instead of NSTextView's stock I-beam, even
+/// though isSelectable=true (so click+drag text selection still works). The
+/// trick is to override cursorUpdate(with:) WITHOUT calling super and to
+/// override resetCursorRects() WITHOUT calling super — NSTextView's I-beam
+/// is installed via those two methods, and skipping super on both prevents
+/// the I-beam from ever being set while still letting selection drag work
+/// (selection is driven by mouse-down/mouse-drag handling, not by cursor).
 final class FollowTextView: NSTextView {
     override func scrollRangeToVisible(_ range: NSRange) { /* no-op */ }
+
+    override func cursorUpdate(with event: NSEvent) {
+        // Skip super — NSTextView.cursorUpdate sets NSCursor.iBeam when
+        // isSelectable. We force arrow instead.
+        NSCursor.arrow.set()
+    }
+
+    override func resetCursorRects() {
+        // Skip super — NSTextView.resetCursorRects adds an I-beam cursor
+        // rect over its text container area. We add an arrow rect for the
+        // entire visible region instead.
+        discardCursorRects()
+        addCursorRect(visibleRect, cursor: .arrow)
+    }
 }
 
 /// NSScrollView subclass that fires callbacks on user scroll and on hover
@@ -99,12 +121,10 @@ struct LLMOutputTextView: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
 
         textView.isEditable = false
-        // isSelectable = false kills NSTextView's I-beam cursor at the source.
-        // NSTextView's cursor management is conditional on isSelectable — when
-        // false, it never registers an I-beam cursor rect and never calls
-        // NSCursor.iBeam.set() in its tracking. The LLM HUD is a read-only
-        // streaming display so selection isn't useful here anyway.
-        textView.isSelectable = false
+        // Selection enabled — user can click+drag to select text and Cmd+C to
+        // copy. The arrow cursor (instead of I-beam) is forced via the
+        // FollowTextView class overrides on cursorUpdate + resetCursorRects.
+        textView.isSelectable = true
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 10, height: 10)

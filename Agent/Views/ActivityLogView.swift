@@ -4,6 +4,21 @@ import Combine
 import AgentColorSyntax
 import AgentTerminalNeo
 
+/// NSTextView subclass that forces the arrow cursor instead of NSTextView's
+/// stock I-beam, even with isSelectable=true. Selection still works because
+/// it's driven by mouse-down/mouse-drag handling, not by cursor display.
+/// Override cursorUpdate AND resetCursorRects WITHOUT calling super so the
+/// I-beam is never installed.
+final class ArrowCursorTextView: NSTextView {
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(visibleRect, cursor: .arrow)
+    }
+}
+
 /// NSTextView-backed activity log — avoids SwiftUI Text layout storms on large/streaming content.
 /// Detects image/HTML file paths in log output and shows clickable links that open in Preview/Browser.
 /// Optimized for smooth streaming with incremental updates and debouncing.
@@ -30,18 +45,36 @@ struct ActivityLogView: NSViewRepresentable {
     var onMatchCount: ((Int) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+        // Manual NSTextView + NSScrollView setup so we can install our
+        // ArrowCursorTextView subclass from the start (instead of using the
+        // NSTextView.scrollableTextView() factory and trying to swap classes
+        // after the fact, which silently failed in earlier attempts).
+        let scrollView = NSScrollView()
+        let contentSize = scrollView.contentSize
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.widthTracksTextView = true
+        let layoutManager = NSLayoutManager()
+        layoutManager.addTextContainer(textContainer)
+        let textStorage = NSTextStorage()
+        textStorage.addLayoutManager(layoutManager)
+        let textView = ArrowCursorTextView(
+            frame: NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height),
+            textContainer: textContainer
+        )
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        scrollView.documentView = textView
         textView.isEditable = false
-        // isSelectable = false is what FINALLY kills the I-beam — NSTextView's
-        // cursor management is conditional on isSelectable. With it false,
-        // NSTextView never registers an I-beam cursor rect AND never calls
-        // NSCursor.iBeam.set() in its mouse-tracking. No subclass, no swizzle,
-        // no overlay needed — the cursor is arrow because there's nothing to
-        // select. Trade-off: user cannot click+drag to select text from the
-        // activity log. Link clicks and the existing
-        // textView(_:clickedOnLink:at:) delegate path still work.
-        textView.isSelectable = false
+        // Selection enabled — user can click+drag to select log text and
+        // Cmd+C to copy. The arrow cursor (instead of NSTextView's stock
+        // I-beam) is forced via the ArrowCursorTextView subclass overrides
+        // on cursorUpdate + resetCursorRects.
+        textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.backgroundColor = .clear
         textView.textContainerInset = NSSize(width: 12, height: 12)
