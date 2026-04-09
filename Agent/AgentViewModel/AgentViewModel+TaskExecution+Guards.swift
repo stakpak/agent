@@ -14,7 +14,7 @@ extension AgentViewModel {
     /// nudge or stop the task loop:
     ///
     /// 1. **Read guard** — nudge at 5 consecutive reads without action,
-    ///    hard snap-out at 10.
+    ///    hard snap-out at 25.
     /// 2. **Build enforcement** (Xcode only) — nudge after 3 unbuilt edits.
     /// 3. **Error budget** (Xcode only) — stop after 5 consecutive build failures.
     /// 4. **Stuck-file detection** — nudge at 3 consecutive edit failures on
@@ -61,7 +61,7 @@ extension AgentViewModel {
             let hadEdit = pendingTools.contains { editTools.contains($0.name) }
             let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
 
-            // 1. Read guard — nudge at 5, hard snap-out at 10 (no stop)
+            // 1. Read guard — nudge at 5, hard snap-out at 25 (no stop)
             //
             // The previous snap-out message told the model to "pick the most
             // likely file and make an edit". That phrasing pushed the LLM into
@@ -73,7 +73,7 @@ extension AgentViewModel {
             // honestly report what's still unknown. Fabricating from partial
             // reads is explicitly worse than admitting uncertainty.
             if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
-            if consecutiveReadOnlyCount >= 10 {
+            if consecutiveReadOnlyCount >= 25 {
                 toolResults.append([
                     "type": "tool_result",
                     "tool_use_id": "read_snap",
