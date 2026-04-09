@@ -71,8 +71,8 @@ struct InputSectionView: View {
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                // Match Terminal Neo's 16pt — same visual size as the LLM output buffer
-                .font(.system(size: 16))
+                // Rounded feels natural for text input (Spotlight, Messages) at 14pt
+                .font(.system(size: 14, design: .rounded))
                 .padding(.vertical, 5)
                 .padding(.horizontal, 7)
                 .background(Color(nsColor: .controlBackgroundColor))
@@ -170,7 +170,7 @@ struct InputSectionView: View {
                     .focused($isTaskFieldFocused)
                     .textFieldStyle(.plain)
                     // Match Terminal Neo's 16pt — same visual size as the LLM output buffer
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                     .padding(.vertical, 5)
                     .padding(.horizontal, 7)
                     .background(Color(nsColor: .controlBackgroundColor))
