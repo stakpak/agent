@@ -157,15 +157,10 @@ final class SDEFService: @unchecked Sendable {
         return load(name)
     }
 
-    // MARK: - Name → Bundle ID Lookup
-    //
-    // The SDEF directory IS the canonical "apps Agent knows about" list. We
-    // build a name→bundleID inverse map at first access so callers can pass
-    // a natural name like "Photo Booth", "safari", or "system settings" and
-    // get back the real bundle identifier without hardcoding it anywhere
-    // outside this file. Anything not in the SDEF catalog falls through to
-    // the caller's existing fallback (e.g. AccessibilityService.
-    // resolveBundleId's NSRunningApplications scan).
+      // MARK: - Name → Bundle ID Lookup
+      // SDEF directory is the canonical "apps Agent knows about" list.
+      // Name→bundleID inverse map lets callers pass natural names like
+      // "Photo Booth" or "safari" and get the real bundle ID.
 
     private static let nameToBundleID: [String: String] = {
         var map: [String: String] = [:]
@@ -242,16 +237,11 @@ final class SDEFService: @unchecked Sendable {
         return map
     }()
 
-    /// Resolve a natural app name (or bundle ID) to a canonical bundle ID
-    /// using the SDEF directory as the source of truth. Returns nil if the
-    /// app isn't in the SDEF catalog — caller should fall back to
-    /// AccessibilityService.resolveBundleId or similar runtime discovery.
-    ///
-    /// Accepted forms:
-    ///   - "Safari" / "safari" / "SAFARI"        → com.apple.Safari
-    ///   - "System Settings" / "systemsettings"  → com.apple.systempreferences
-    ///   - "TextEdit" / "text edit" / "textedit" → com.apple.TextEdit
-    ///   - "com.apple.Safari"                    → com.apple.Safari (passthrough)
+    /// Resolve a natural app name (or bundle ID) to a canonical bundle ID.
+    /// Uses SDEF directory as source of truth; returns nil if not found
+    /// (caller falls back to AccessibilityService.resolveBundleId).
+    /// Accepts: "Safari"/"safari"/"SAFARI" → com.apple.Safari,
+    /// "System Settings" → com.apple.systempreferences, bundle IDs pass through.
     func resolveBundleId(name: String?) -> String? {
         guard let raw = name else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
