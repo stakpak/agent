@@ -6,76 +6,38 @@ import AgentMCP
 
 extension AgentViewModel {
 
-    /// Auto-inject SDEF dictionary into a failed AppleScript tool result.
-    ///
-    /// When `applescript(action:"execute", source:"tell application \"Pages\" to ...")`
-    /// fails, the LLM almost always failed because it guessed at command/property
-    /// names that don't exist in that app's scripting dictionary. Rather than
-    /// throwing the bare error back at the model and hoping it retries with
-    /// better syntax, we extract the `tell application "X"` clause from the
-    /// source, look up X's SDEF via SDEFService, and prepend the dictionary
-    /// summary to the error message. The next attempt then has the canonical
-    /// commands+classes+properties in context — turning blind retries into
-    /// informed corrections.
-    ///
-    /// Belt-and-suspenders companion to the system-prompt rule that tells the
-    /// LLM to call `lookup_sdef` BEFORE writing AppleScript. The rule covers
-    /// the compliant case; this helper covers the model that just dives in.
-    ///
-    /// Skips silently when:
-    ///   - The source has no `tell application "X"` clause
-    ///   - X isn't in the SDEF catalog (no JSON file for it)
-    ///   - SDEFService returns "No SDEF found"
-    /// Output is capped to keep the total tool result under ~10K chars.
+    /// Auto-inject SDEF dictionary into failed AppleScript results. When the LLM
+    /// guesses wrong command/property names, we extract `tell application "X"`,
+    /// look up X's SDEF, and prepend it so the next attempt is informed. Companion
+    /// to the system-prompt rule to call lookup_sdef first. Skips if no tell
+    /// clause found, X isn't in the catalog, or TCC error detected (those need
+    /// System Settings, not a vocabulary dump).
     static func enrichAppleScriptFailure(source: String, output: String) -> String {
-        // FIRST check for TCC permission errors. Those have nothing to do with
-        // vocabulary — dumping the SDEF in response to "Agent! is not allowed
-        // to send keystrokes" is noise and burns context for no reason. The
-        // LLM needs to know which permission is missing and that the user has
-        // to grant it in System Settings, not which classes the app exposes.
+        // TCC permission errors need System Settings, not a vocabulary dump.
         if let tcc = Self.detectTCCError(output) {
             Self.openTCCPaneIfNeeded(tcc)
             return Self.formatTCCError(originalOutput: output, kind: tcc)
         }
-        // Vocabulary error path — match `tell application "X"` clauses and
-        // inject every SDEF we have. Multi-app scripts are common (Safari +
-        // System Events, Pages + Image Events + Finder, etc.) so we collect
-        // ALL distinct references.
+        // Vocabulary error path — match `tell application "X"` clauses and inject
+        // every SDEF. Multi-app scripts are common (Safari + System Events, etc.).
         let pattern = #"tell\s+application\s+(?:id\s+)?"([^"]+)""#
         let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: true)
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "AppleScript")
     }
 
-    /// Auto-inject SDEF dictionary into a failed JXA (JavaScript for Automation) tool result.
-    ///
-    /// JXA talks to ScriptingBridge through the same scripting dictionaries
-    /// that AppleScript uses, but with a JavaScript surface:
-    ///   `Application("Music").play()`
-    ///   `var safari = Application('com.apple.Safari')`
-    /// When a JXA call fails, the LLM almost always failed for the same
-    /// reason an AppleScript call would fail — it guessed at command names
-    /// that don't exist in the app's dictionary. This helper extracts the
-    /// `Application("X")` argument, resolves it through SDEFService (which
-    /// accepts both natural names and bundle IDs), and prepends the
-    /// dictionary so the next attempt has canonical terms.
-    ///
-    /// Skips silently when:
-    ///   - The source has no `Application("...")` call
-    ///   - The captured name isn't in the SDEF catalog
-    ///   - SDEFService returns "No SDEF found"
+    /// Auto-inject SDEF dictionary into failed JXA results. JXA uses the same
+    /// scripting dictionaries as AppleScript but with JS syntax. Extracts
+    /// `Application("X")` names, resolves via SDEFService (accepts names and
+    /// bundle IDs), and prepends canonical terms. Skips if no app reference
+    /// found, not in catalog, or SDEFService returns nothing.
     static func enrichJXAFailure(source: String, output: String) -> String {
-        // TCC errors take priority over vocabulary injection. Same reasoning
-        // as enrichAppleScriptFailure — the dictionary doesn't fix a missing
-        // Accessibility / Automation grant.
+        // TCC errors take priority — the dictionary won't fix a missing permission.
         if let tcc = Self.detectTCCError(output) {
             Self.openTCCPaneIfNeeded(tcc)
             return Self.formatTCCError(originalOutput: output, kind: tcc)
         }
-        // Match: Application("X") | Application('X')
-        // Multi-app JXA scripts are common (e.g. Application("Safari") +
-        // Application("System Events") for keystroke automation) — collect
-        // ALL distinct references and inject every SDEF we have.
-        // We skip Application.currentApplication() since there's no quoted name.
+        // Match: Application("X") | Application('X'). Collect ALL distinct
+        // references (multi-app JXA is common). Skip currentApplication().
         let pattern = #"Application\s*\(\s*['"]([^'"]+)['"]\s*\)"#
         let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: false)
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "JXA")
@@ -102,18 +64,12 @@ extension AgentViewModel {
         return ordered
     }
 
-    /// Resolve each app name to a bundle ID via SDEFService and append every
-    /// available SDEF summary to the original tool output. Splits the 9KB
-    /// total budget evenly across resolved apps so a 4-app script doesn't
-    /// blow past the tool-result size guardrails.
-    ///
-    /// Apps that don't resolve (no JSON in the catalog, "No SDEF found")
-    /// are skipped silently — there's nothing useful to inject.
+    /// Resolve each app name → bundle ID via SDEFService, append SDEF summaries to
+    /// output. 9KB total budget split evenly; apps that don't resolve are skipped.
     private static func injectMultipleSDEFs(appNames: [String], output: String, syntaxHint: String) -> String {
         if appNames.isEmpty { return output }
 
-        // (originalName, bundleID, summary) — pre-resolve everything so we
-        // can divide the budget across only the apps that actually have data.
+        // (originalName, bundleID, summary) — pre-resolve so we budget only across apps with data.
         var resolved: [(name: String, bundleID: String, summary: String)] = []
         for name in appNames {
             guard let bundleID = SDEFService.shared.resolveBundleId(name: name) else { continue }
@@ -123,9 +79,7 @@ extension AgentViewModel {
         }
         if resolved.isEmpty { return output }
 
-        // ~9KB total budget. Per-app cap = budget / count, floored at 1500
-        // chars (so even 6 apps each get something usable). The original
-        // single-app cap was 7000 — single-app result still gets that.
+        // ~9KB total budget. Per-app cap = budget / count, min 1500 chars.
         let totalBudget = 9000
         let perAppCap = max(1500, totalBudget / resolved.count)
 
@@ -207,9 +161,8 @@ extension AgentViewModel {
         return nil
     }
 
-    /// Format a short, LLM-targeted message that explains the TCC error
-    /// without dumping a full SDEF. The original error stays in the output
-    /// so the LLM can read the exact message macOS produced.
+    /// Format a short, LLM-targeted TCC error message without dumping a full SDEF.
+    /// The original macOS error is preserved so the LLM can read the exact message.
     static func formatTCCError(originalOutput: String, kind: TCCRequirement) -> String {
         let permName: String
         let permPath: String
@@ -247,9 +200,7 @@ extension AgentViewModel {
         """
     }
 
-    /// Open the System Settings pane for the given TCC requirement, but
-    /// only ONCE per (kind) per app-session. Repeat opens are spammy and
-    /// don't help — the user has already seen it.
+    /// Open the System Settings pane for a TCC requirement, once per kind per app session.
     static func openTCCPaneIfNeeded(_ kind: TCCRequirement) {
         let key: String
         let urlString: String
