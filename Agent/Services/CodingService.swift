@@ -21,11 +21,8 @@ enum CodingService {
 
     // MARK: - Read File
 
-    /// Walk up from the (non-existent) `originalPath` to find the nearest existing
-    /// ancestor directory, then enumerate up to 4 levels deep looking for any file
-    /// whose basename matches. Returns the matching absolute paths so the read_file
-    /// error can hand them to the model directly. Capped at `maxResults` to keep
-    /// the error message terse.
+      /// Walk up from `originalPath` to find nearest existing ancestor directory, then
+      /// search up to 4 levels deep for matching basenames. Capped at `maxResults`.
     private static func findFilesByBasename(originalPath: String, maxResults: Int) -> [String] {
         let basename = (originalPath as NSString).lastPathComponent
         guard !basename.isEmpty else { return [] }
@@ -71,20 +68,14 @@ enum CodingService {
         return results
     }
 
-    /// Read file contents with line numbers (like `cat -n`).
-    /// - Parameters:
-    ///   - path: Absolute file path
-    ///   - offset: 1-based line to start from (default 1)
-    ///   - limit: Max lines to return (default 2000)
+      /// Read file contents with line numbers. Parameters: path (absolute), offset
+      /// (1-based start line, default 1), limit (max lines, default 2000).
     static func readFile(path: String, offset: Int?, limit: Int?) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            // The model guessed a wrong path. Instead of telling it to list a
-            // directory (which won't help when the file is in a subfolder),
-            // walk up to the nearest existing ancestor and find any files
-            // matching the basename. Hand the model the actual path inline so
-            // it can fix the call in one shot — no extra round-trip needed.
+            // Model guessed wrong path — find files with same basename in nearby dirs
+            // and hand the model the actual path inline so it can fix in one shot.
             let candidates = findFilesByBasename(originalPath: path, maxResults: 5)
             let dir = (path as NSString).deletingLastPathComponent
             let suggestPath = dir.isEmpty ? "." : dir
