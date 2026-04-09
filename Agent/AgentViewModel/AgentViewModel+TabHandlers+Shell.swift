@@ -12,15 +12,9 @@ extension AgentViewModel {
 
         switch name {
         case "batch_commands":
-            // batch_commands runs every step inside the SAME bash process so env vars,
-            // cwd changes, exported functions, and aliases all persist across steps.
-            // Without this the LLM has to manually && everything together because
-            // STAGING="..." in step 1 wouldn't survive into step 2.
-            //
-            // How it works: build a single shell script with all commands separated by
-            // a unique delimiter line that captures each command's exit code, run it as
-            // ONE bash invocation, then split the aggregated output on the delimiter to
-            // attribute per-step output and rc back to each command for the UI display.
+            // batch_commands: runs all steps in ONE bash process so env vars, cwd,
+            // exports, and aliases persist across steps. Builds a single script with
+            // unique delimiters to capture per-step exit codes, then splits output.
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
             let rawCommands = input["commands"] as? String ?? ""
             let commands = rawCommands.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
