@@ -1,17 +1,8 @@
 import Foundation
 
-/// Hard local guardrail for shell commands. Runs BEFORE every shell-execution
-/// surface (in-process TCC, Launch Agent, Launch Daemon) and rejects known
-/// catastrophic commands without dispatching them to a Process or XPC.
-///
-/// This is the PRIMARY defense. Two backstops also exist:
-///   - The cloud-LLM system prompt (`AgentTools.systemPrompt`) tells the
-///     model to refuse these commands.
-///   - The Apple Intelligence compact system prompt has a terser version of
-///     the same warning.
-///
-/// We never trust the LLM to enforce safety. The model can be jailbroken,
-/// quantized to oblivion, or just confused — this struct is the actual stop.
+/// Hard local guardrail for shell commands — runs BEFORE every execution surface
+/// and rejects catastrophic commands without dispatching them. Primary defense;
+/// LLM system prompts are backstops, not the enforcement layer.
 enum ShellSafetyService {
 
     struct Verdict {
