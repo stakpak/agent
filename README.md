@@ -23,13 +23,8 @@
 - **On-device token compression:** Apple AI summarizes old conversation turns when context exceeds 30K tokens (Tier 1 of `tieredCompact`) — free, private, no API tokens consumed. Toggleable in the brain icon popover.
 - **Anti-hallucination prompt rule:** Every system prompt now includes explicit guidance against fabricating findings from incomplete tool reads. The 10-consecutive-reads guard pushes the model toward "narrow or call done()" instead of "guess".
 - **Autonomous task loop, Xcode integration, AXorcist desktop automation, privileged daemon, multi-tab LLM config, Ollama pre-warming via `LLMRegistry`** — all the previously-shipped fundamentals are still there.
----
 
 A native macOS AI agent that controls your apps, writes code, automates workflows, and runs tasks from your iPhone via iMessage. All powered by the AI provider of your choice.
-
-<img width="1175" height="1257" alt="image" src="https://github.com/user-attachments/assets/4c4fc9bb-069c-4134-a3e0-090160e4bb20" />
-
----
 
 ## Quick Start (Download)
 
