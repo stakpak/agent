@@ -14,8 +14,14 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Timeout for Apple Intelligence to finish once started (seconds).
     private static let finishTimeout: TimeInterval = 2
 
-    /// Maximum context window size (approximate token limit for context)
-    private static let maxContextTokens: Int = 4096
+    /// Maximum context window size — reads dynamically from the on-device model (macOS 26.4+).
+    /// Falls back to 4096 if the model isn't available yet.
+    private static var maxContextTokens: Int {
+        if case .available = SystemLanguageModel.default.availability {
+            return SystemLanguageModel.default.contextSize
+        }
+        return 4096
+    }
 
     /// Whether Apple Intelligence mediation is enabled
     @Published var isEnabled: Bool = UserDefaults.standard.bool(forKey: "appleIntelligenceMediatorEnabled") {
@@ -165,6 +171,12 @@ final class AppleIntelligenceMediator: ObservableObject {
         """
     }
 
+    /// Deterministic generation options for intent parsing — low temperature for consistent results.
+    private static let deterministicOptions = GenerationOptions(sampling: .greedy, temperature: 0.0)
+
+    /// Slightly creative generation options for annotations and summaries.
+    private static let annotationOptions = GenerationOptions(temperature: 0.3)
+
     private func ensureSession() -> LanguageModelSession {
         // Always create a fresh session with current context to avoid stale/stuck state
         let s = LanguageModelSession(
@@ -177,7 +189,7 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// Wraps a session.respond call with timeout.
     /// Returns nil on timeout so the request goes straight to the LLM.
-    private func respondWithTimeout(_ session: LanguageModelSession, prompt: String, label: String) async -> String? {
+    private func respondWithTimeout(_ session: LanguageModelSession, prompt: String, label: String, options: GenerationOptions? = nil) async -> String? {
 
         let startLimit = Self.startTimeout
         let finishLimit = Self.finishTimeout
@@ -187,7 +199,11 @@ final class AppleIntelligenceMediator: ObservableObject {
                 group.addTask {
                     // Start timeout — must begin responding within startTimeout
                     let startDeadline = CFAbsoluteTimeGetCurrent()
-                    let response = try await session.respond(to: prompt)
+                    let response = if let opts = options {
+                        try await session.respond(to: prompt, options: opts)
+                    } else {
+                        try await session.respond(to: prompt)
+                    }
                     let startElapsed = CFAbsoluteTimeGetCurrent() - startDeadline
                     if startElapsed > startLimit {
                         throw CancellationError()
@@ -246,7 +262,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
 
         do {
-            guard let content = await respondWithTimeout(session, prompt: prompt, label: "summarize") else {
+            guard let content = await respondWithTimeout(session, prompt: prompt, label: "summarize", options: Self.annotationOptions) else {
                 return nil
             }
             let trimmed = sanitize(content)
@@ -268,7 +284,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         Explain in 1 sentence and suggest a fix.
         """
 
-        guard let content = await respondWithTimeout(session, prompt: prompt, label: "explainError") else {
+        guard let content = await respondWithTimeout(session, prompt: prompt, label: "explainError", options: Self.annotationOptions) else {
             return nil
         }
         let trimmed = sanitize(content)
@@ -289,7 +305,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         Suggest the next step in 1 sentence. If none obvious, reply with nothing.
         """
 
-        guard let content = await respondWithTimeout(session, prompt: prompt, label: "nextSteps") else {
+        guard let content = await respondWithTimeout(session, prompt: prompt, label: "nextSteps", options: Self.annotationOptions) else {
             return nil
         }
         let trimmed = sanitize(content)
@@ -658,7 +674,7 @@ final class AppleIntelligenceMediator: ObservableObject {
 
         User: "\(message)"
         """
-        guard let content = await respondWithTimeout(session, prompt: prompt, label: "triage") else {
+        guard let content = await respondWithTimeout(session, prompt: prompt, label: "triage", options: Self.deterministicOptions) else {
             return .passThrough
         }
         let trimmed = sanitize(content)
@@ -715,6 +731,12 @@ final class AppleIntelligenceMediator: ObservableObject {
         return text
     }
 
+    /// The current session's transcript — the framework's built-in conversation history.
+    /// Useful for inspecting what the on-device model has seen in the current session.
+    var transcript: Transcript? {
+        session?.transcript
+    }
+
     /// Get the current conversation context for debugging/inspection
     func getContextStatus() -> String {
         var parts: [String] = []
@@ -722,6 +744,9 @@ final class AppleIntelligenceMediator: ObservableObject {
         if let aiMsg = lastAppleAIMessage { parts.append("Last Apple AI: \(aiMsg.prefix(100))...") }
         if let llm = lastLLMResponse { parts.append("Last LLM: \(String(llm.prefix(100)))...") }
         if let summary = conversationSummary { parts.append("Summary: \(summary)") }
+        if let t = session?.transcript {
+            parts.append("Transcript entries: \(t.count)")
+        }
         return parts.isEmpty ? "No context stored" : parts.joined(separator: "\n")
     }
 }

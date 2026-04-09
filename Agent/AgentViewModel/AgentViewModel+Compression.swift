@@ -162,13 +162,14 @@ extension AgentViewModel {
 
     /// Two-tier compaction: try Apple AI summarization first (fast), fall back to aggressive pruning.
     /// Returns true if tokens were meaningfully reduced.
+    @MainActor
     static func tieredCompact(
         _ messages: inout [[String: Any]],
         state: inout CompactionState,
         log: ((String) -> Void)? = nil
     ) async -> Bool
     {
-        let tokensBefore = estimateTokens(messages: messages)
+        let tokensBefore = await preciseTokenCount(messages: messages)
         guard state.shouldCompact(estimatedTokens: tokensBefore) else { return false }
 
         log?("🗜️ Compacting context (\(tokensBefore) est. tokens, threshold \(state.compactThreshold))...")
@@ -183,7 +184,7 @@ extension AgentViewModel {
         // Gated on tokenCompressionEnabled so users can opt out if it's slow on their device or if the summaries are ...
         if FoundationModelService.isAvailable && AppleIntelligenceMediator.shared.tokenCompressionEnabled {
             await summarizeOldMessages(&messages)
-            let tokensAfterT1 = estimateTokens(messages: messages)
+            let tokensAfterT1 = await preciseTokenCount(messages: messages)
             if state.recordAttempt(tokensBefore: tokensBefore, tokensAfter: tokensAfterT1) {
                 log?("🗜️ Apple AI compaction: \(tokensBefore) → \(tokensAfterT1) tokens")
                 if tokensAfterT1 <= state.compactThreshold { return true }
@@ -192,7 +193,7 @@ extension AgentViewModel {
 
         // Tier 2: Aggressive prune (drops middle messages into summary)
         pruneMessages(&messages)
-        let tokensAfterT2 = estimateTokens(messages: messages)
+        let tokensAfterT2 = await preciseTokenCount(messages: messages)
         let reduced = state.recordAttempt(tokensBefore: tokensBefore, tokensAfter: tokensAfterT2)
         if reduced {
             log?("🗜️ Pruned context: \(tokensBefore) → \(tokensAfterT2) tokens")
@@ -232,9 +233,28 @@ extension AgentViewModel {
         }
     }
 
-    // MARK: - Token Estimation (~4 chars per token)
+    // MARK: - Token Counting (precise via Apple AI on macOS 26.4+, fallback ~4 chars/token)
 
-    /// Estimate input tokens from message array.
+    /// Count tokens using Apple Intelligence's tokenCount(for:) when available (macOS 26.4+),
+    /// falls back to ~4 chars per token estimate otherwise.
+    @MainActor
+    private static func countTokens(for text: String) async -> Int {
+        if FoundationModelService.isAvailable {
+            do {
+                return try await SystemLanguageModel.default.tokenCount(for: text)
+            } catch {
+                // Fall through to estimate
+            }
+        }
+        return max(1, text.count / 4)
+    }
+
+    /// Synchronous ~4 chars per token estimate (used when async isn't available).
+    private static func estimateTokensFallback(chars: Int) -> Int {
+        max(1, chars / 4)
+    }
+
+    /// Count input tokens from message array.
     static func estimateTokens(messages: [[String: Any]]) -> Int {
         var chars = 0
         for msg in messages {
@@ -247,10 +267,27 @@ extension AgentViewModel {
                 }
             }
         }
-        return max(1, chars / 4)
+        return estimateTokensFallback(chars: chars)
     }
 
-    /// Estimate output tokens from response content blocks.
+    /// Precise async token count using Apple Intelligence when available.
+    @MainActor
+    static func preciseTokenCount(messages: [[String: Any]]) async -> Int {
+        var allText = ""
+        for msg in messages {
+            if let text = msg["content"] as? String {
+                allText += text
+            } else if let blocks = msg["content"] as? [[String: Any]] {
+                for block in blocks {
+                    if let text = block["text"] as? String { allText += text }
+                    else if let text = block["content"] as? String { allText += text }
+                }
+            }
+        }
+        return await countTokens(for: allText)
+    }
+
+    /// Count output tokens from response content blocks.
     static func estimateTokens(content: [[String: Any]]) -> Int {
         var chars = 0
         for block in content {
@@ -261,6 +298,6 @@ extension AgentViewModel {
                 chars += data.count
             }
         }
-        return max(1, chars / 4)
+        return estimateTokensFallback(chars: chars)
     }
 }

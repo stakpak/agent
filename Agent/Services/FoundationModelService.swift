@@ -19,6 +19,11 @@ final class FoundationModelService {
     /// Call to force a new session (e.g. after prompt changes).
     func resetSession() { session = nil }
 
+    /// The current session's transcript — the framework's built-in conversation history.
+    var transcript: Transcript? {
+        session?.transcript
+    }
+
     // MARK: - Enabled Tools (none — Apple AI is text-only, main LLM handles tools)
 
     /// Names of tools currently enabled for Apple Intelligence.

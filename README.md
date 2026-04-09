@@ -1,7 +1,7 @@
 <div align="center">
 <img width="256" height="256" alt="Agent! icon" src="https://github.com/user-attachments/assets/7a452184-6b31-49fa-9b24-d450d2889f66" />
 
-# 🦾 Agent! for macOS 26
+# 🦾 Agent! for macOS 26.4+
 
 <img width="1076" height="1034" alt="image" src="https://github.com/user-attachments/assets/9d54b064-37b8-4adc-8b97-cc37691993ac" />
 
@@ -11,7 +11,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/macOS26/Agent?label=Download&color=blue&style=for-the-badge)](https://github.com/macOS26/Agent/releases/latest)
 [![GitHub Stars](https://img.shields.io/github/stars/macOS26/Agent?style=for-the-badge&logo=github&label=Stars&color=hotpink)](https://github.com/macOS26/Agent/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/macOS26/Agent?style=for-the-badge&logo=github&label=Forks&color=white)](https://github.com/macOS26/Agent/fork)
-[![macOS 26+](https://img.shields.io/badge/macOS-26%2B-purple?style=for-the-badge)](https://github.com/apple)
+[![macOS 26.4+](https://img.shields.io/badge/macOS-26.4%2B-purple?style=for-the-badge)](https://github.com/apple)
 [![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange?style=for-the-badge)](https://www.swift.org)
 </div>
 
@@ -327,7 +327,7 @@ Type these in the input field and press Return — they execute locally without 
 
 **How much does it cost?** The Agent! app itself is free (MIT License). Cloud AI providers charge for API usage — the cheapest options for serious work are GLM-5/5.1 via Z.ai, BigModel, or Hugging Face (pennies per million tokens), or DeepSeek for budget coding. Self-hosted local models (Ollama, vLLM, LM Studio) have no API fees but only make sense if you already own the hardware to run them — see the hardware note below.
 
-**What Mac do I need?** macOS 26+. Apple Silicon required. For cloud providers, any modern Mac works fine. For self-hosted local models (Ollama, vLLM, LM Studio): a 7B model fits in 16GB unified memory, a 13B model in 24GB, a 30B model needs 64GB+ (M2/M3/M4 Ultra Mac Studio territory). Apple Intelligence (the on-device mediator for triage / accessibility intent / token compression) needs an Apple Silicon Mac with Apple Intelligence enabled in System Settings.
+**What Mac do I need?** macOS 26.4+. Apple Silicon required. For cloud providers, any modern Mac works fine. For self-hosted local models (Ollama, vLLM, LM Studio): a 7B model fits in 16GB unified memory, a 13B model in 24GB, a 30B model needs 64GB+ (M2/M3/M4 Ultra Mac Studio territory). Apple Intelligence (the on-device mediator for triage / accessibility intent / token compression) needs an Apple Silicon Mac with Apple Intelligence enabled in System Settings.
 
 **How is this different from Siri?** Siri answers questions. Agent! *performs actions* -- controls apps, manages files, builds code, automates workflows.
 
@@ -445,7 +445,7 @@ MIT - free and open source.
 
 <div align="center">
 
-### **Agent! for macOS 26 - Agentic AI for your  Mac Desktop**
+### **Agent! for macOS 26.4+ - Agentic AI for your  Mac Desktop**
 > Note: Claude refers to the Anthropic AI model integrated into Agent! for LLM functionality. It is not a human contributor Agent!
 </div>
 
@@ -462,7 +462,7 @@ Agent! is a 100% original pure Swift macOS application. It is not a port, fork, 
 |---|---|---|
 | **Language** | TypeScript/JavaScript | Pure Swift 6.2 |
 | **UI Framework** | Ink (terminal React) | SwiftUI (native macOS) |
-| **Platform** | CLI — Linux, macOS, Windows | Native macOS 26 only |
+| **Platform** | CLI — Linux, macOS, Windows | Native macOS 26.4+ only |
 | **Runtime** | Node.js/Bun | Native compiled binary |
 | **Architecture** | Terminal REPL with streaming | Desktop app with XPC daemons |
 | **Accessibility** | None (CLI) | Full macOS AX via AXorcist (25 top-level actions, 30+ AX subtypes via `perform_action`) |

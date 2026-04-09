@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import FoundationModels
 
 /// App identifiers — single source of truth for bundle ID, XPC services, plists, etc.
 enum AppConstants {
@@ -116,6 +117,12 @@ struct AgentApp: App {
                 .task {
                     // Initialize SwiftData chat history store
                     ChatHistoryStore.shared.migrateFromUserDefaults()
+
+                    // Pre-warm Apple Intelligence model into memory for instant first response
+                    if case .available = SystemLanguageModel.default.availability {
+                        let warmupSession = LanguageModelSession()
+                        warmupSession.prewarm()
+                    }
 
                     await MCPService.shared.startAutoStartServers()
                     // Sync registry enabled flags with actual connection state
