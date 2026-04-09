@@ -581,7 +581,7 @@ private struct LLMOutputBox: View {
         let cursor = inTable ? "" : (cursorVisible ? "█" : " ")
         let displayText = trimmed.isEmpty ? "" : trimmed + cursor
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topTrailing) {
                 if !displayText.isEmpty {
                     LLMOutputTextView(text: displayText, isStreaming: isStreaming) { h in
                         guard dragStartHeight == 0 else { return }
@@ -625,18 +625,17 @@ private struct LLMOutputBox: View {
                     .onAppear { height = minHeight }
                 }
 
-                // Dismiss button — overlaid bottom right, no extra space
+                // Dismiss button — overlaid top right
                 if showDismiss {
                     Button {
                         onDismiss?()
                     } label: {
-                        Text("Dismiss")
-                            .font(.system(size: 11, design: .monospaced).bold())
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(dismissEnabled ? termText : termDim)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
+                            .frame(width: 20, height: 20)
                             .background(termBg.opacity(0.9))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(termBorder, lineWidth: 1))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(!dismissEnabled)
