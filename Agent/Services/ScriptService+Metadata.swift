@@ -574,16 +574,10 @@ extension ScriptService {
         return dylibDate > sourceDate
     }
 
-    /// Load and run a compiled script dylib in-process via dlopen/dlsym.
-    /// Captures stdout (and optionally stderr) and returns the output + exit status.
-    /// Runs on a background thread to avoid blocking the main thread.
-    ///
-    /// `projectFolder` is the active tab/main project directory. It's exported as
-    /// `AGENT_PROJECT_FOLDER` (always set, separate from `AGENT_SCRIPT_ARGS`).
-    /// Scripts read it directly when they need a default working directory.
-    /// Note: this in-process variant cannot safely chdir without affecting the
-    /// rest of the host app, so scripts that need cwd MUST read
-    /// `AGENT_PROJECT_FOLDER` rather than relying on `getcwd()`.
+    /// Load and run a compiled script dylib via dlopen/dlsym. Captures stdout
+    /// (and optionally stderr), returns output + exit status. Runs on background thread.
+    /// `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args).
+    /// In-process variant can't safely chdir, so scripts must read AGENT_PROJECT_FOLDER.
     func loadAndRunScript(
         name: String, arguments: String = "", projectFolder: String = "",
         captureStderr: Bool = false,
