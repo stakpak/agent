@@ -234,21 +234,10 @@ final class ScriptService: @unchecked Sendable {
         }
     }
 
-    // MARK: - Git clone
-    //
-    // AgentScripts and AgentEventBridges are NOT bundled with the Agent app
-    // and NOT copied at build time. They live in their own GitHub repos and
-    // are cloned at runtime on first script-tool use:
-    //
-    //   AgentScripts:        https://github.com/macOS26/AgentScripts
-    //                        → ~/Documents/AgentScript/agents/Sources/
-    //   AgentEventBridges:   https://github.com/macOS26/AgentEventBridges
-    //                        → ~/Documents/AgentScript/bridges/Sources/
-    //
-    // Both clones are guarded by an isFileExists check so they only run once
-    // per install. This used to live in a "Copy Agent Resources" build phase
-    // (which had no body, just comments) — that phase was removed because it
-    // wasted a build step on every xcodebuild and the comments belonged here.
+      // MARK: - Git clone
+      // AgentScripts (→ ~/Documents/AgentScript/agents/Sources/) and
+      // AgentEventBridges (→ ~/Documents/AgentScript/bridges/Sources/)
+      // are cloned from their GitHub repos on first use, not bundled at build.
 
     /// Clone AgentScripts repo to ~/Documents/AgentScript/agents/
     private func cloneScriptsRepo() {
