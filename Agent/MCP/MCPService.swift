@@ -2,9 +2,8 @@ import AgentAudit
 import Foundation
 import AgentMCP
 
-/// Service for managing MCP server connections
-/// Acts as a bridge between the UI (MCPServersView) and the underlying MCP client
-/// The MCPClient is imported from the AgentMCP package
+/// / Service for managing MCP server connections / Acts as a bridge between the UI (MCPServersView) and the underlying
+/// MCP client / The MCPClient is imported from the AgentMCP package
 @MainActor @Observable
 final class MCPService: @unchecked Sendable {
     static let shared = MCPService()

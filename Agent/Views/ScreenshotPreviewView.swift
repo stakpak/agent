@@ -1,9 +1,4 @@
-//
-//  ScreenshotPreviewView.swift
-//  Agent
-//
-//  Extracted from ContentView.swift
-//
+//  ScreenshotPreviewView.swift Agent  Extracted from ContentView.swift 
 
 import SwiftUI
 

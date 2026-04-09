@@ -138,9 +138,8 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         enabled = true
         autoStart = true
 
-        // Standard fields for the ACTUAL transport type
-        // HTTP transport uses: transport, url, headers, sseEndpoint, httpEndpoint
-        // Stdio transport uses: transport, command, args, env
+        // Standard fields for the ACTUAL transport type HTTP transport uses: transport, url, headers, sseEndpoint,
+        // httpEndpoint Stdio transport uses: transport, command, args, env
         let httpStandardFields = Set(["transport", "url", "headers", "sseEndpoint", "httpEndpoint"])
         let stdioStandardFields = Set(["transport", "command", "args", "env"])
 

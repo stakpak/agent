@@ -11,9 +11,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Handles file CRUD, diff, list/search, backup/restore, symbol search,
-    /// and refactor_rename tool calls. Returns `nil` if the name is not a
-    /// file-group tool so the main dispatcher can fall through.
+    /// / Handles file CRUD, diff, list/search, backup/restore, symbol search, / and refactor_rename tool calls. Returns
+    /// `nil` if the name is not a / file-group tool so the main dispatcher can fall through.
     func handleFileNativeTool(name: String, input: [String: Any]) async -> String? {
         let pf = projectFolder
         switch name {
@@ -28,9 +27,8 @@ extension AgentViewModel {
                     what files exist if you don't know the path.
                     """
             }
-            // Delegate to CodingService.readFile which returns line-numbered output
-            // and gives a clear 'file not found' error with a list-files suggestion
-            // when the path is wrong. Honors offset+limit (1-based offset).
+            // Delegate to CodingService.readFile which returns line-numbered output and gives a clear 'file not found'
+            // error with a list-files suggestion when the path is wrong. Honors offset+limit (1-based offset).
             let offset = input["offset"] as? Int
             let limit = input["limit"] as? Int
             return await Self.offMain {
@@ -46,11 +44,8 @@ extension AgentViewModel {
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             do { try content.write(to: url, atomically: true, encoding: .utf8); return "Wrote \(path)" }
             catch { return "Error: \(error.localizedDescription)" }
-        // MARK: edit_file — delegate to CodingService.editFile (d1f-powered with
-        // line-ending normalization, fuzzy whitespace match, context disambiguation,
-        // and round-trip verification). The duplicate edit_file logic that lived
-        // here had none of those safeguards and was the source of most "old_string
-        // not found" errors when the LLM had a slightly-stale snapshot of the file.
+        // MARK: edit_file — delegate to CodingService.editFile (d1f-powered with line-ending normalization, fuzzy
+        // whitespace match, context disambiguation, and round-trip verification). The duplicate edit_file logic that lived here had none of those safeguards and was the source of most "old_string not found" errors when the LLM had a slightly-stale snapshot of the file.
         case "edit_file":
             let path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else { return "Error: file_path is required for edit_file" }

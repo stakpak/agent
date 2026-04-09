@@ -1,9 +1,8 @@
 import Foundation
 import AgentAudit
 
-/// Backs up files before editing, organized by tab UUID.
-/// Structure: ~/Documents/AgentScript/backups/<tabUUID>/<timestamp>_<filename>
-/// TTL: 1 week — old backups auto-cleaned on launch.
+/// / Backs up files before editing, organized by tab UUID. / Structure:
+/// ~/Documents/AgentScript/backups/<tabUUID>/<timestamp>_<filename> / TTL: 1 week — old backups auto-cleaned on launch.
 @MainActor
 final class FileBackupService {
     static let shared = FileBackupService()
@@ -85,8 +84,7 @@ final class FileBackupService {
         let backups = listBackups(tabID: tabID).filter { $0.original == fileName }
         guard let latest = backups.first else { return false }
 
-        // Find the original path by searching common locations
-        // The backup only stores the filename, not the full path
+        // Find the original path by searching common locations The backup only stores the filename, not the full path
         // This is a limitation — caller should provide the full path
         let fm = FileManager.default
         do {

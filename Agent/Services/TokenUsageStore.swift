@@ -69,9 +69,8 @@ final class TokenUsageStore {
         let date: String // "2026-03-29"
         var inputTokens: Int
         var outputTokens: Int
-        /// Prompt cache read tokens — what we saved by hitting the cache instead of
-        /// re-sending the prompt. Persisted so the 7-day chart can plot a cache line.
-        /// Optional in JSON for backward compat with older records.
+        /// / Prompt cache read tokens — what we saved by hitting the cache instead of / re-sending the prompt.
+        /// Persisted so the 7-day chart can plot a cache line. / Optional in JSON for backward compat with older records.
         var cacheReadTokens: Int = 0
         var totalTokens: Int { inputTokens + outputTokens }
 

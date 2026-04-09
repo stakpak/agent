@@ -75,10 +75,8 @@ extension ScriptService {
         }
     }
 
-    /// Run a compiled script dylib out-of-process via a runner executable.
-    /// Each invocation gets its own process — fully concurrent.
-    /// `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args).
-    /// `AGENT_SCRIPT_ARGS` carries only what the LLM explicitly passed.
+    /// / Run a compiled script dylib out-of-process via a runner executable. / Each invocation gets its own process —
+    /// fully concurrent. / `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args). / `AGENT_SCRIPT_ARGS` carries only what the LLM explicitly passed.
     func loadAndRunScriptViaProcess(
         name: String, arguments: String = "", projectFolder: String = "",
         captureStderr: Bool = false,
@@ -112,9 +110,8 @@ extension ScriptService {
         // Inherit current environment and add script args
         var env = ProcessInfo.processInfo.environment
         env["HOME"] = NSHomeDirectory()
-        // AGENT_PROJECT_FOLDER is always set so scripts have a stable default
-        // for cwd-style operations (e.g. file paths) regardless of what the LLM
-        // passed in arguments. AGENT_SCRIPT_ARGS only carries explicit arguments.
+        // AGENT_PROJECT_FOLDER is always set so scripts have a stable default for cwd-style operations (e.g. file
+        // paths) regardless of what the LLM passed in arguments. AGENT_SCRIPT_ARGS only carries explicit arguments.
         env["AGENT_PROJECT_FOLDER"] = cwdPath
         let runnerPaths = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = runnerPaths + ":" + (env["PATH"] ?? "")

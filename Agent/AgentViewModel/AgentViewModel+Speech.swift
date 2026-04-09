@@ -154,10 +154,8 @@ extension AgentViewModel {
 
     // MARK: - Hotword Processing
 
-    /// Find the LAST word-boundary occurrence of "agent"/"agent!" in lowercased
-    /// transcription and return index after it. Word-boundary = char before must be
-    /// non-letter (or start) AND char after "t"/"!" must be non-letter (or end).
-    /// Anchors on LAST occurrence so "agent open agent script" treats second as wake word.
+    /// / Find the LAST word-boundary occurrence of "agent"/"agent!" in lowercased / transcription and return index
+    /// after it. Word-boundary = char before must be / non-letter (or start) AND char after "t"/"!" must be non-letter (or end). / Anchors on LAST occurrence so "agent open agent script" treats second as wake word.
     private static func wakeWordAnchor(in transcription: String) -> String.Index? {
         let lower = transcription.lowercased()
         let wakes = ["agent!", "agent"] // try the punctuated form first

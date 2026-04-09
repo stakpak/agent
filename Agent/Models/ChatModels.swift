@@ -139,9 +139,8 @@ final class ChatHistoryStore {
         // Migrate: if old default.store has our tables, rename it to chat2.store
         Self.migrateDefaultStoreToChatStore()
 
-        // Pre-validate: if store file exists but lacks required tables, delete it
-        // before creating the ModelContainer. This prevents ObjC NSExceptions
-        // (e.g. _PFFaultHandlerLookupRow) that Swift do/catch cannot intercept.
+        // Pre-validate: if store file exists but lacks required tables, delete it before creating the ModelContainer.
+        // This prevents ObjC NSExceptions (e.g. _PFFaultHandlerLookupRow) that Swift do/catch cannot intercept.
         if FileManager.default.fileExists(atPath: url.path) {
             if !Self.storeHasRequiredTables(at: url) {
                 AuditLog.log(.storage, "SwiftData store missing required tables — deleting for recreation")
@@ -226,10 +225,8 @@ final class ChatHistoryStore {
         return task.id
     }
 
-    /// End current task with optional summary — crash-safe against stale SwiftData objects.
-    /// Does NOT call context.save() — SwiftData auto-saves, and calling save() here
-    /// triggers _PFFaultHandlerLookupRow crashes via inverse relationship maintenance
-    /// on stale/deleted objects (an ObjC NSException that Swift can't catch).
+    /// / End current task with optional summary — crash-safe against stale SwiftData objects. / Does NOT call
+    /// context.save() — SwiftData auto-saves, and calling save() here / triggers _PFFaultHandlerLookupRow crashes via inverse relationship maintenance / on stale/deleted objects (an ObjC NSException that Swift can't catch).
     func endCurrentTask(summary: String? = nil, cancelled: Bool = false) {
         defer { currentTask = nil }
         guard let task = currentTask else { return }
@@ -261,11 +258,8 @@ final class ChatHistoryStore {
         context?.insert(message)
     }
 
-    /// Save pending changes — guarded against stale/deleted managed objects.
-    /// Rolls back inserted objects whose relationships point to deleted/faulted
-    /// targets, preventing _PFFaultHandlerLookupRow crashes during inverse
-    /// relationship maintenance (an ObjC NSException that Swift can't catch and
-    /// that CoreData's internal performBlockAndWait rethrows past ObjCTry).
+    /// / Save pending changes — guarded against stale/deleted managed objects. / Rolls back inserted objects whose
+    /// relationships point to deleted/faulted / targets, preventing _PFFaultHandlerLookupRow crashes during inverse / relationship maintenance (an ObjC NSException that Swift can't catch and / that CoreData's internal performBlockAndWait rethrows past ObjCTry).
     func save() {
         guard !storeDisabled, let context else { return }
         // Check if current task is still valid before saving

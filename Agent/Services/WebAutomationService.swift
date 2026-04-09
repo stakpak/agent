@@ -3,9 +3,8 @@ import AgentAudit
 import Foundation
 import AppKit
 
-/// Unified web automation service that combines Accessibility, AppleScript/JS, and Selenium.
-/// Auto-selects the best strategy based on the browser and operation.
-/// Phase 2 Implementation: Unified API with caching and fuzzy matching.
+/// / Unified web automation service that combines Accessibility, AppleScript/JS, and Selenium. / Auto-selects the best
+/// strategy based on the browser and operation. / Phase 2 Implementation: Unified API with caching and fuzzy matching.
 final class WebAutomationService: @unchecked Sendable {
     static let shared = WebAutomationService()
     
@@ -136,13 +135,8 @@ final class WebAutomationService: @unchecked Sendable {
         return "Error: could not get page title"
     }
     
-    /// Find an element using the best available strategy
-    /// - Parameters:
-    ///   - selector: CSS selector, XPath, or accessibility identifier
-    ///   - strategy: Auto, Accessibility, JavaScript, or Selenium
-    ///   - timeout: Maximum wait time
-    ///   - fuzzyThreshold: Minimum match score (0-1) for fuzzy matching
-    /// - Returns: Element properties and source
+    /// / Find an element using the best available strategy / - Parameters: / - selector: CSS selector, XPath, or
+    /// accessibility identifier / - strategy: Auto, Accessibility, JavaScript, or Selenium / - timeout: Maximum wait time / - fuzzyThreshold: Minimum match score (0-1) for fuzzy matching / - Returns: Element properties and source
     func findElement(
         selector: String,
         strategy: SelectorStrategy = .auto,
@@ -463,9 +457,8 @@ final class WebAutomationService: @unchecked Sendable {
     }
     
     private func findViaSelenium(selector: String, timeout: TimeInterval) async throws -> [String: Any]? {
-        // Note: Selenium operations are handled via Selenium AgentScript
-        // This method returns nil to indicate Selenium should be called separately
-        // The unified API will fall back to Accessibility/JS strategies
+        // Note: Selenium operations are handled via Selenium AgentScript This method returns nil to indicate Selenium
+        // should be called separately The unified API will fall back to Accessibility/JS strategies
         return nil
     }
     
@@ -592,13 +585,8 @@ final class WebAutomationService: @unchecked Sendable {
             return "Clicked element via event dispatch: \(selector)"
         }
 
-        // Both JS paths failed. The previous third-try fallback used
-        // AccessibilityService.clickAt to drive a raw OS click at the element's
-        // bounding-rect coordinates, but that path has been removed because
-        // AgentAccess is now AXorcist-only. If the JS dispatch can't reach this
-        // element, the LLM should switch to accessibility(action:"click_element")
-        // against the browser's AXWebArea — Safari and Chrome both expose page
-        // links/buttons as AXLink/AXButton inside the web area.
+        // Both JS paths failed. The previous third-try fallback used AccessibilityService.clickAt to drive a raw OS
+        // click at the element's bounding-rect coordinates, but that path has been removed because AgentAccess is now AXorcist-only. If the JS dispatch can't reach this element, the LLM should switch to accessibility(action:"click_element") against the browser's AXWebArea — Safari and Chrome both expose page links/buttons as AXLink/AXButton inside the web area.
         return
             "Error: could not click element via JavaScript: \(selector). "
             + "The page may block synthetic events. "
@@ -612,11 +600,8 @@ final class WebAutomationService: @unchecked Sendable {
         let escapedSel = Self.escapeJS(selector)
         let isXPath = selector.hasPrefix("/") || selector.hasPrefix("./")
 
-        // Universal type function that handles:
-        // 1. <input> / <textarea> — use React-compatible native setter
-        // 2. contenteditable divs — use innerText + InputEvent (LinkedIn post, Gmail, Slack)
-        // 3. [role="textbox"] — same as contenteditable
-        // 4. Plain elements with .value — fallback
+        // Universal type function that handles: 1. <input> / <textarea> — use React-compatible native setter 2.
+        // contenteditable divs — use innerText + InputEvent (LinkedIn post, Gmail, Slack) 3. [role="textbox"] — same as contenteditable 4. Plain elements with .value — fallback
         let typeJS = """
         (function() {
             var sel = '\(escapedSel)';

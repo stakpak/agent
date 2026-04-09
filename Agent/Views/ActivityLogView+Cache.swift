@@ -1,9 +1,8 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Coordinator: Per-Tab TextStorage Cache
-//
-// Swapping a cached `NSTextStorage` on a tab switch avoids re-layout entirely.
+// MARK: - Coordinator: Per-Tab TextStorage Cache Swapping a cached `NSTextStorage` on a tab switch avoids re-layout
+// entirely.
 
 extension ActivityLogView.Coordinator {
     /// Returns cached text storage if the text hasn't changed, otherwise nil

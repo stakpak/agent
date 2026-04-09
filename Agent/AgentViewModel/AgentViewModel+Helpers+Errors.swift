@@ -94,9 +94,8 @@ extension AgentViewModel {
 
     // MARK: - TCC error detection
 
-    /// Which TCC permission a failed AppleScript needs. Used to skip the
-    /// SDEF dump (it's noise for permission errors) and to open the right
-    /// System Settings pane on the user's behalf.
+    /// / Which TCC permission a failed AppleScript needs. Used to skip the / SDEF dump (it's noise for permission
+    /// errors) and to open the right / System Settings pane on the user's behalf.
     enum TCCRequirement: Sendable {
         case accessibility    // sending keystrokes / clicking via System Events
         case automation       // sending Apple Events to other apps
@@ -105,15 +104,13 @@ extension AgentViewModel {
         case inputMonitoring  // raw key events
     }
 
-    /// Track which TCC panes we've already opened during this app session,
-    /// so a script that fails 5 times in a row doesn't pop System Settings
-    /// 5 times. The user only needs the prompt once.
+    /// / Track which TCC panes we've already opened during this app session, / so a script that fails 5 times in a row
+    /// doesn't pop System Settings / 5 times. The user only needs the prompt once.
     nonisolated(unsafe) private static var openedTCCPanes = Set<String>()
     private static let openedTCCPanesLock = NSLock()
 
-    /// Inspect a failed AppleScript / JXA / osascript output for TCC error
-    /// signatures. Returns the relevant TCCRequirement when one matches,
-    /// nil for vocabulary or other errors.
+    /// / Inspect a failed AppleScript / JXA / osascript output for TCC error / signatures. Returns the relevant
+    /// TCCRequirement when one matches, / nil for vocabulary or other errors.
     static func detectTCCError(_ output: String) -> TCCRequirement? {
         let lower = output.lowercased()
         // Accessibility — most common, fired by `keystroke`, `key code`, and AX click attempts via System

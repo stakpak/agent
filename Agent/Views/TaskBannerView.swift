@@ -1,9 +1,4 @@
-//
-//  TaskBannerView.swift
-//  Agent
-//
-//  Extracted from ContentView.swift
-//
+//  TaskBannerView.swift Agent  Extracted from ContentView.swift 
 
 import SwiftUI
 

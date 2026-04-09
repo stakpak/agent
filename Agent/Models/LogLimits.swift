@@ -1,9 +1,7 @@
 import Foundation
 
-/// Central caps + trim helper for LLM-bound tool-result data.
-/// Different caps per site on purpose (read_file allows more than per-tool-result slots).
-/// Unification is on the trim function and banner format, not cap values.
-/// NOTE: For LLM-bound data only. Activity-log display trimming is in ScriptTab.trimLog.
+/// / Central caps + trim helper for LLM-bound tool-result data. / Different caps per site on purpose (read_file allows
+/// more than per-tool-result slots). / Unification is on the trim function and banner format, not cap values. / NOTE: For LLM-bound data only. Activity-log display trimming is in ScriptTab.trimLog.
 enum LogLimits {
 
     // MARK: - Named caps
@@ -25,9 +23,8 @@ enum LogLimits {
     /// `web_fetch` cleaned HTML cap.
     static let webFetchChars = 8_000
 
-    /// Short summary/excerpt cap — used for sub-agent result snapshots and
-    /// per-message compression input. Small enough that an LLM can summarize
-    /// it cheaply, large enough to preserve meaningful context.
+    /// / Short summary/excerpt cap — used for sub-agent result snapshots and / per-message compression input. Small
+    /// enough that an LLM can summarize / it cheaply, large enough to preserve meaningful context.
     static let summaryChars = 2_000
 
     /// Outbound iMessage reply cap. iMessage tolerates ~65 KB but carriers
@@ -40,9 +37,8 @@ enum LogLimits {
 
     // MARK: - Shared trim helper
 
-    /// Trim `text` to `cap` chars with a trailing truncation banner.
-    /// If under cap, returns unchanged. Otherwise: prefix + banner like
-    /// "... [truncated — N chars total, M lines. suffix]"
+    /// / Trim `text` to `cap` chars with a trailing truncation banner. / If under cap, returns unchanged. Otherwise:
+    /// prefix + banner like / "... [truncated — N chars total, M lines. suffix]"
     static func trim(
         _ text: String,
         cap: Int,

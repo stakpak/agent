@@ -2,10 +2,8 @@ import SwiftUI
 import AppKit
 import AgentColorSyntax
 
-// MARK: - Coordinator: Block-Level Markdown Rendering
-//
-// Fenced code blocks, headers, bullets, blockquotes, horizontal rules,
-// and NSTextTable-backed markdown tables.
+// MARK: - Coordinator: Block-Level Markdown Rendering Fenced code blocks, headers, bullets, blockquotes, horizontal
+// rules, and NSTextTable-backed markdown tables.
 
 extension ActivityLogView.Coordinator {
     nonisolated func renderMarkdown(_ text: String) -> NSAttributedString {
@@ -34,9 +32,8 @@ extension ActivityLogView.Coordinator {
             return block
         }
 
-        // Detect source code output (e.g. from cat command) — look for Swift/code patterns
-        // Skip this heuristic if text contains markdown indicators (headers, fences, bullets)
-        // to avoid treating markdown summaries with embedded code as raw code output
+        // Detect source code output (e.g. from cat command) — look for Swift/code patterns Skip this heuristic if text
+        // contains markdown indicators (headers, fences, bullets) to avoid treating markdown summaries with embedded code as raw code output
         let hasMarkdownStructure = lines.contains { line in
             let t = line.trimmingCharacters(in: .whitespaces)
             return t.hasPrefix("#") || t.hasPrefix("```") || t.hasPrefix("- ") || t.hasPrefix("* ")

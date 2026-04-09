@@ -1,9 +1,4 @@
-//
-//  AgentViewModel+TaskExecution+SavedScripts.swift
-//  Agent
-//
-//  Saved scripts (AppleScript and JXA) management tools
-//
+//  AgentViewModel+TaskExecution+SavedScripts.swift Agent  Saved scripts (AppleScript and JXA) management tools 
 
 import Foundation
 

@@ -55,9 +55,8 @@ extension AgentViewModel {
             let cmd = CodingService.buildGitDiffCommand(path: pf.isEmpty ? nil : pf, staged: false, target: target)
             let result = await executeViaUserAgent(command: cmd, workingDirectory: dir)
             return result.output.isEmpty ? "(no changes)" : result.output
-        // Batch commands — single bash process so env vars / cwd / functions persist
-        // across steps. Per-step output is split out via delimiter markers so the LLM
-        // sees which command produced what (and the per-command exit code).
+        // Batch commands — single bash process so env vars / cwd / functions persist across steps. Per-step output is
+        // split out via delimiter markers so the LLM sees which command produced what (and the per-command exit code).
         case "batch_commands":
             let commands = (input["commands"] as? String ?? "")
                 .components(separatedBy: "\n")

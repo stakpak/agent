@@ -86,11 +86,8 @@ extension AgentViewModel {
         guard let handle = agentReplyHandle else { return }
         agentReplyHandle = nil
 
-        // Strip leading "Agent!" / "Agent " from outgoing replies so the
-        // receiving Mac doesn't loop on its own command. Use the same
-        // case-insensitive prefix logic as inbound parsing.
-        // Cap via LogLimits.messageReplyChars (4K) — iMessage tolerates more
-        // but carriers split unpredictably above that.
+        // Strip leading "Agent!" / "Agent " from outgoing replies so the receiving Mac doesn't loop on its own command.
+        // Use the same case-insensitive prefix logic as inbound parsing. Cap via LogLimits.messageReplyChars (4K) — iMessage tolerates more but carriers split unpredictably above that.
         let reply = LogLimits.trim(Self.stripAgentPrefix(from: summary), cap: LogLimits.messageReplyChars)
         // Escape for AppleScript
         let escaped = reply
@@ -226,10 +223,8 @@ extension AgentViewModel {
         return f(cls, sel, data as NSData) as? NSAttributedString
     }
 
-    // MARK: - "Agent!" Prefix Detection
-    // Accept "agent"/"Agent!" case-insensitively, with or without trailing "!".
-    // Must be a complete word (followed by end-of-string, "!", or whitespace)
-    // so "agency"/"agentic" don't trigger.
+    // MARK: - "Agent!" Prefix Detection Accept "agent"/"Agent!" case-insensitively, with or without trailing "!". Must
+    // be a complete word (followed by end-of-string, "!", or whitespace) so "agency"/"agentic" don't trigger.
 
     /// True iff `text` starts with "agent" / "agent!" as a complete leading
     /// word (case-insensitive). Followed by end-of-string, "!", or whitespace.
@@ -494,12 +489,8 @@ extension AgentViewModel {
 
             guard !row.text.isEmpty else { continue }
 
-            // Only process messages that start with the wake prefix.
-            // Case-insensitive, exclamation mark optional (iPhone autocorrect
-            // strips "!" routinely; older Macs/contacts use lowercase "agent ").
-            // hasAgentPrefix returns true for "Agent!", "agent!", "AGENT!",
-            // "Agent ", "agent ", "AGENT " — anything where the first word is
-            // "agent" (with or without trailing punctuation).
+            // Only process messages that start with the wake prefix. Case-insensitive, exclamation mark optional
+            // (iPhone autocorrect strips "!" routinely; older Macs/contacts use lowercase "agent "). hasAgentPrefix returns true for "Agent!", "agent!", "AGENT!", "Agent ", "agent ", "AGENT " — anything where the first word is "agent" (with or without trailing punctuation).
             guard Self.hasAgentPrefix(row.text) else { continue }
 
             // Auto-discover this sender

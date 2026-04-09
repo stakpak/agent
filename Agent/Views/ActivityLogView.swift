@@ -32,11 +32,8 @@ final class ArrowCursorTextView: NSTextView {
     }
 }
 
-/// NSTextView-backed activity log — avoids SwiftUI Text layout storms.
-/// Detects image/HTML paths and shows clickable links. Optimized for streaming.
-/// Rendering, scroll, search, markdown, and cache live on `Coordinator`, split across:
-/// ActivityLogView+Update.swift, +Scroll, +Search, +Markdown, +MarkdownBlock,
-/// +MarkdownInline, +Cache, +Rendering.
+/// / NSTextView-backed activity log — avoids SwiftUI Text layout storms. / Detects image/HTML paths and shows clickable
+/// links. Optimized for streaming. / Rendering, scroll, search, markdown, and cache live on `Coordinator`, split across: / ActivityLogView+Update.swift, +Scroll, +Search, +Markdown, +MarkdownBlock, / +MarkdownInline, +Cache, +Rendering.
 struct ActivityLogView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     let text: String

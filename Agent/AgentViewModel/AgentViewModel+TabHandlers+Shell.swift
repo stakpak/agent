@@ -12,9 +12,8 @@ extension AgentViewModel {
 
         switch name {
         case "batch_commands":
-            // batch_commands: runs all steps in ONE bash process so env vars, cwd,
-            // exports, and aliases persist across steps. Builds a single script with
-            // unique delimiters to capture per-step exit codes, then splits output.
+            // batch_commands: runs all steps in ONE bash process so env vars, cwd, exports, and aliases persist across
+            // steps. Builds a single script with unique delimiters to capture per-step exit codes, then splits output.
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
             let rawCommands = input["commands"] as? String ?? ""
             let commands = rawCommands.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -25,9 +24,8 @@ extension AgentViewModel {
                 )
             }
 
-            // Pre-flight: check every command for tool suggestions / unsafe patterns
-            // BEFORE running anything. If any are blocked, return all the blocks at once
-            // so the LLM can fix them in a single retry instead of half-running the batch.
+            // Pre-flight: check every command for tool suggestions / unsafe patterns BEFORE running anything. If any
+            // are blocked, return all the blocks at once so the LLM can fix them in a single retry instead of half-running the batch.
             var blocks = ""
             for (idx, rawCmd) in commands.enumerated() {
                 let prefixed = Self.prependWorkingDirectory(rawCmd, projectFolder: tabFolder)
@@ -56,9 +54,8 @@ extension AgentViewModel {
             }
             tab.flush()
 
-            // Build the single-process script. After each command, print a unique
-            // delimiter line followed by the exit code so the parser can split per-step.
-            // Using printf (not echo) to guarantee the format isn't mangled by aliases.
+            // Build the single-process script. After each command, print a unique delimiter line followed by the exit
+            // code so the parser can split per-step. Using printf (not echo) to guarantee the format isn't mangled by aliases.
             let delim = "===AGENT_BATCH_STEP_\(UUID().uuidString.prefix(8))==="
             var script = ""
             for cmd in commands {
@@ -199,12 +196,8 @@ extension AgentViewModel {
                     isComplete: false
                 )
             }
-            // TCC commands MUST run in-process where Agent! holds the
-            // user's TCC grants. This check has to come BEFORE the
-            // privileged-daemon branch — otherwise an
-            // `execute_daemon_command(command:"osascript ...")` would go to
-            // the root daemon (which has zero TCC) and fail with a
-            // confusing permission error.
+            // TCC commands MUST run in-process where Agent! holds the user's TCC grants. This check has to come BEFORE
+            // the privileged-daemon branch — otherwise an `execute_daemon_command(command:"osascript ...")` would go to the root daemon (which has zero TCC) and fail with a confusing permission error.
             let needsTCC = Self.needsTCCPermissions(command)
             let isPrivileged = (name == "execute_daemon_command") && rootEnabled && !needsTCC
             let routePrefix: String
@@ -220,9 +213,8 @@ extension AgentViewModel {
 
             let result: (status: Int32, output: String)
             if needsTCC {
-                // TCC commands → Agent process (inherits TCC permissions).
-                // Wins over the privileged check by design — TCC grants
-                // belong to the GUI app, not to the root daemon.
+                // TCC commands → Agent process (inherits TCC permissions). Wins over the privileged check by design —
+                // TCC grants belong to the GUI app, not to the root daemon.
                 result = await Self.executeTCC(command: command)
             } else if isPrivileged {
                 // Root commands → LaunchDaemon via XPC

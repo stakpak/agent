@@ -3,13 +3,11 @@ import AgentTools
 
 // MARK: - Task Mode (auto tool subsetting)
 
-/// Determines which tool groups are sent to the LLM based on task type.
-/// Reduces token usage by only sending relevant tools.
-// TaskMode removed — all tool groups always available, user controls via UI toggles.
+/// / Determines which tool groups are sent to the LLM based on task type. / Reduces token usage by only sending
+/// relevant tools. TaskMode removed — all tool groups always available, user controls via UI toggles.
 
-/// Manages which internal tools are enabled per LLM provider.
-/// Claude/Ollama: all tools on by default.
-/// Apple AI: only core tools on by default (context window is too small for 40+).
+/// / Manages which internal tools are enabled per LLM provider. / Claude/Ollama: all tools on by default. / Apple AI:
+/// only core tools on by default (context window is too small for 40+).
 @MainActor @Observable
 final class ToolPreferencesService {
     static let shared = ToolPreferencesService()
@@ -27,9 +25,8 @@ final class ToolPreferencesService {
     private static let udGroupsKey = "agent.disabledToolGroups"
     private static let appleAISeededKey = "agent.appleAISeeded.v2"
 
-    /// Tool group definitions - maps group name to tool name prefixes.
-    /// Each entry includes both the canonical short name (Tool.xxx) and the
-    /// post-expansion handler name so the user-pref filter catches both.
+    /// / Tool group definitions - maps group name to tool name prefixes. / Each entry includes both the canonical short
+    /// name (Tool.xxx) and the / post-expansion handler name so the user-pref filter catches both.
     static let toolGroups: [String: Set<String>] = [
         Tool.Group.core: Set([
             Tool.done, "task_complete", Tool.tools, Tool.search, "web_search",
@@ -43,10 +40,8 @@ final class ToolPreferencesService {
         Tool.Group.auto: Set([Tool.as, Tool.ax, Tool.js, "jxa", "lookup_sdef", Tool.web]),
         Tool.Group.user: Set([Tool.user, "execute_agent_command"]),
         Tool.Group.root: Set([Tool.root, "execute_daemon_command"]),
-        // Sub-agents group: spawn_agent and tell_agent were previously split
-        // across the Work and Core groups respectively, which made no sense —
-        // they're a coherent feature set (parent agent orchestrates isolated
-        // child tasks via mailbox messaging). One toggle now hides/shows both.
+        // Sub-agents group: spawn_agent and tell_agent were previously split across the Work and Core groups
+        // respectively, which made no sense — they're a coherent feature set (parent agent orchestrates isolated child tasks via mailbox messaging). One toggle now hides/shows both.
         Tool.Group.subAgents: Set([Tool.spawn, "spawn_agent", Tool.messageAgent, "tell_agent"]),
         Tool.Group.exp: Set([Tool.sel, "selenium", "ax_screenshot"]),
     ]

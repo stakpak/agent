@@ -15,9 +15,8 @@ extension AgentViewModel {
 
     // MARK: - Direct Agent Execution (no LLM)
 
-    /// Run an agent script directly — skips the LLM entirely.
-    /// Opens a fresh tab and kicks off execution without blocking the main tab.
-    /// Returns true if the agent was found and launched, false if not found.
+    /// / Run an agent script directly — skips the LLM entirely. / Opens a fresh tab and kicks off execution without
+    /// blocking the main tab. / Returns true if the agent was found and launched, false if not found.
     @discardableResult
     func runAgentDirect(name: String, arguments: String = "", switchToTab: Bool = true) async -> Bool {
         let resolved = await Self.offMain { [ss = scriptService] in ss.resolveScriptName(name) }
@@ -60,13 +59,8 @@ extension AgentViewModel {
         tab.isLLMThinking = false
         tab.appendLog("--- Direct Run ---")
 
-        // Compile only if needed.
-        // Run via executeTCC (in-process) NOT userService.execute (Launch Agent
-        // XPC). The Launch Agent runs in a separate TCC context that doesn't have
-        // Documents folder permission, so swift build can't even getcwd() inside
-        // ~/Documents/AgentScript/agents/ and fails with "couldn't determine the
-        // current working directory". The in-process path inherits the main app's
-        // TCC grants and works.
+        // Compile only if needed. Run via executeTCC (in-process) NOT userService.execute (Launch Agent XPC). The
+        // Launch Agent runs in a separate TCC context that doesn't have Documents folder permission, so swift build can't even getcwd() inside ~/Documents/AgentScript/agents/ and fails with "couldn't determine the current working directory". The in-process path inherits the main app's TCC grants and works.
         if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: name) }) {
             tab.appendLog("🦾 Compiling: \(name)")
             tab.flush()

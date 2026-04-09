@@ -1,10 +1,8 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Coordinator: Markdown Build Pipeline
-//
-// Top-level attributed-string builders: detect image/HTML file paths, convert
-// them to clickable links, and style the `ScriptTab.trimBanner` literal.
+// MARK: - Coordinator: Markdown Build Pipeline Top-level attributed-string builders: detect image/HTML file paths,
+// convert them to clickable links, and style the `ScriptTab.trimBanner` literal.
 
 extension ActivityLogView.Coordinator {
     /// Fast render for incremental text updates - detects image/HTML paths and creates clickable links
@@ -80,9 +78,8 @@ extension ActivityLogView.Coordinator {
         return result
     }
 
-    /// Build attributed string from text. Converts image/HTML paths to clickable links.
-    /// Source `activityLog` is bounded to `ScriptTab.logCap` (50K) by `ScriptTab.trimLog`,
-    /// so this view never trims — it just renders and styles the trim banner literal yellow.
+    /// / Build attributed string from text. Converts image/HTML paths to clickable links. / Source `activityLog` is
+    /// bounded to `ScriptTab.logCap` (50K) by `ScriptTab.trimLog`, / so this view never trims — it just renders and styles the trim banner literal yellow.
     nonisolated func buildAttributedString(from text: String) -> NSAttributedString {
         let baseAttrs: [NSAttributedString.Key: Any] = [
             .font: font,

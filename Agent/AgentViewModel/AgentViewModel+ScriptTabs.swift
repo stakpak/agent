@@ -214,10 +214,8 @@ extension AgentViewModel {
         persistScriptTabs()
     }
 
-    /// Ensure an LLM tab is selected when a task comes in:
-    /// 1. If currently on a main LLM tab, stay there
-    /// 2. If on a script tab with a parent, switch to the parent LLM tab
-    /// 3. Otherwise, switch to main tab
+    /// / Ensure an LLM tab is selected when a task comes in: / 1. If currently on a main LLM tab, stay there / 2. If on
+    /// a script tab with a parent, switch to the parent LLM tab / 3. Otherwise, switch to main tab
     func ensureLLMTabSelected() {
         if selectedTabId == nil {
             // Already on main tab

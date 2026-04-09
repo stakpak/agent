@@ -390,9 +390,8 @@ extension ScriptService {
         let scriptFile = scriptsDir.appendingPathComponent("\(scriptName).swift")
         let fm = FileManager.default
 
-        // Try `main` first, fall back to `master` for older repos. Both URLs come
-        // from the raw.githubusercontent.com host so the failure mode is just an
-        // HTTP 404 — no DNS or auth differences to worry about.
+        // Try `main` first, fall back to `master` for older repos. Both URLs come from the raw.githubusercontent.com
+        // host so the failure mode is just an HTTP 404 — no DNS or auth differences to worry about.
         let fetchedContent: String
         switch await fetchUpstreamScript(scriptName: scriptName, branch: "main") {
         case .success(let content):
@@ -410,9 +409,8 @@ extension ScriptService {
             return "Error pulling '\(scriptName)' from remote: \(err). Recovery: try again in a moment, or use agent_script(action:\"restore\", name:\"\(scriptName)\") to recover from .Trash backup."
         }
 
-        // If the live file is byte-identical to upstream, treat as a no-op success
-        // rather than an error. Lets the model call `pull` defensively without
-        // having to delete first when nothing actually needs to change.
+        // If the live file is byte-identical to upstream, treat as a no-op success rather than an error. Lets the model
+        // call `pull` defensively without having to delete first when nothing actually needs to change.
         if fm.fileExists(atPath: scriptFile.path) {
             if let local = try? String(contentsOf: scriptFile, encoding: .utf8), local == fetchedContent {
                 return "'\(scriptName)' already matches AgentScripts upstream (no-op, \(fetchedContent.count) bytes)."
@@ -431,9 +429,8 @@ extension ScriptService {
         case failure(String)
     }
 
-    /// Fetch a script's raw content from the AgentScripts repo on a specific branch.
-    /// Returns `.notFound` for HTTP 404 (so the caller can try a fallback branch),
-    /// `.failure` for any other error, `.success` with the content otherwise.
+    /// / Fetch a script's raw content from the AgentScripts repo on a specific branch. / Returns `.notFound` for HTTP
+    /// 404 (so the caller can try a fallback branch), / `.failure` for any other error, `.success` with the content otherwise.
     private func fetchUpstreamScript(scriptName: String, branch: String) async -> UpstreamFetchResult {
         let prefix = Self.scriptsRawURLPrefix.replacingOccurrences(of: "/main/", with: "/\(branch)/")
         guard let url = URL(string: "\(prefix)/\(scriptName).swift") else {
@@ -524,13 +521,8 @@ extension ScriptService {
         let agentsPath = Self.agentsDir.path.replacingOccurrences(of: "'", with: "'\\''")
         let dylibFile = dylibPath(name: scriptName).replacingOccurrences(of: "'", with: "'\\''")
         let escapedName = scriptName.replacingOccurrences(of: "'", with: "'\\''")
-        // No `touch Package.swift` here — it had no documented reason and was
-        // failing under TCC when the User Launch Agent tried to update mtime on
-        // a file in ~/Documents/. Swift Package Manager detects source changes
-        // via the .swift file mtimes, so touching Package.swift is a no-op for
-        // build invalidation.
-        // Re-sign dylib with the app's identity so macOS attributes AppleScript
-        // permission prompts to "Agent!" instead of "Xcode".
+        // No `touch Package.swift` here — it had no documented reason and was failing under TCC when the User Launch
+        // Agent tried to update mtime on a file in ~/Documents/. Swift Package Manager detects source changes via the .swift file mtimes, so touching Package.swift is a no-op for build invalidation. Re-sign dylib with the app's identity so macOS attributes AppleScript permission prompts to "Agent!" instead of "Xcode".
         return
             "cd '\(agentsPath)' && swift build --product '\(escapedName)' 2>&1 "
             + "&& codesign --force --sign - --identifier \(AppConstants.bundleID) "
@@ -560,10 +552,8 @@ extension ScriptService {
         return dylibDate > sourceDate
     }
 
-    /// Load and run a compiled script dylib via dlopen/dlsym. Captures stdout
-    /// (and optionally stderr), returns output + exit status. Runs on background thread.
-    /// `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args).
-    /// In-process variant can't safely chdir, so scripts must read AGENT_PROJECT_FOLDER.
+    /// / Load and run a compiled script dylib via dlopen/dlsym. Captures stdout / (and optionally stderr), returns
+    /// output + exit status. Runs on background thread. / `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args). / In-process variant can't safely chdir, so scripts must read AGENT_PROJECT_FOLDER.
     func loadAndRunScript(
         name: String, arguments: String = "", projectFolder: String = "",
         captureStderr: Bool = false,

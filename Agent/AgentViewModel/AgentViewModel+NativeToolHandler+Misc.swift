@@ -11,9 +11,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Handles list_tools, memory, skills, spawn_agent, ask_user, visual_test,
-    /// git_pr, create_project, web_fetch, tell_agent, task_complete.
-    /// Returns `nil` if the name is not a misc-group tool.
+    /// / Handles list_tools, memory, skills, spawn_agent, ask_user, visual_test, / git_pr, create_project, web_fetch,
+    /// tell_agent, task_complete. / Returns `nil` if the name is not a misc-group tool.
     func handleMiscNativeTool(name: String, input: [String: Any]) async -> String? {
         switch name {
         // Tool discovery
@@ -115,10 +114,8 @@ extension AgentViewModel {
             let name = input["name"] as? String ?? "agent-\(subAgents.count + 1)"
             let prompt = input["prompt"] as? String ?? ""
             guard !prompt.isEmpty else { return "Error: prompt is required for spawn_agent." }
-            // Configurable tool groups: "all" or comma-separated group names.
-            // The legacy 'coding' / 'automation' aliases are gone with the rest of
-            // the mode system; pass explicit group names like "Core,Code,User" if
-            // you want to narrow a sub-agent's tool list.
+            // Configurable tool groups: "all" or comma-separated group names. The legacy 'coding' / 'automation'
+            // aliases are gone with the rest of the mode system; pass explicit group names like "Core,Code,User" if you want to narrow a sub-agent's tool list.
             var toolGroups: Set<String>? = nil
             if let mode = input["tools"] as? String {
                 if mode == "all" {

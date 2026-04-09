@@ -121,9 +121,8 @@ extension AgentViewModel {
 
     // MARK: - Static helpers
 
-    /// Detect vision-capable models by name patterns
-    /// Auto-detect vision-capable models by name keywords.
-    /// Sources: ollama.com/search?c=vision, OpenAI docs, Anthropic docs
+    /// / Detect vision-capable models by name patterns / Auto-detect vision-capable models by name keywords. / Sources:
+    /// ollama.com/search?c=vision, OpenAI docs, Anthropic docs
     nonisolated static func isVisionModel(_ model: String) -> Bool {
         let lower = model.lowercased()
         let visionKeywords = [

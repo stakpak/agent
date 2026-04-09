@@ -622,9 +622,8 @@ final class AppleIntelligenceMediator: ObservableObject {
                 return result
             }
 
-            // If Apple AI didn't actually call the tool, it just chatted at
-            // the user — that means it didn't recognize the request as UI
-            // automation. Fall through to the cloud LLM.
+            // If Apple AI didn't actually call the tool, it just chatted at the user — that means it didn't recognize
+            // the request as UI automation. Fall through to the cloud LLM.
             guard tracker.called else { return nil }
             // If any tool call failed, fall through to the cloud LLM with
             // the failure context (caller handles the partial-success case).
@@ -635,18 +634,16 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns.
-    /// Falls back to .passThrough for anything needing the cloud LLM.
-    /// `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
+    /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
+    /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
     func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
             return .directCommand(cmd) // Caller executes the tool
         }
         guard isEnabled && Self.isAvailable else { return .passThrough }
-        // Accessibility agent — let Apple AI try to handle UI automation
-        // requests locally with full tool-calling support. Pre-filter on
-        // action verbs so we don't spend an AI call on every user message.
+        // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
+        // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
             if let result = await runAccessibilityAgent(message, dispatch: axDispatch) {
                 return .accessibilityHandled(result)
@@ -729,14 +726,11 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 }
 
-// MARK: - Accessibility Tool for Apple Intelligence
-// FoundationModels-native tool — framework handles schema/validation/agent loop.
-// We just provide the dispatch closure routing to AgentViewModel.executeNativeTool.
+// MARK: - Accessibility Tool for Apple Intelligence FoundationModels-native tool — framework handles
+// schema/validation/agent loop. We just provide the dispatch closure routing to AgentViewModel.executeNativeTool.
 
-/// Generable arguments for the accessibility tool. @Generable derives
-/// ConvertibleFromGeneratedContent + GenerationSchema for Apple AI.
-/// `app` uses natural names (e.g. "Photo Booth"); dispatch resolves via
-/// AccessibilityService.resolveBundleId().
+/// / Generable arguments for the accessibility tool. @Generable derives / ConvertibleFromGeneratedContent +
+/// GenerationSchema for Apple AI. / `app` uses natural names (e.g. "Photo Booth"); dispatch resolves via / AccessibilityService.resolveBundleId().
 @Generable
 struct AccessibilityArgs: Sendable {
     @Guide(description: "The accessibility action: click_element, type_into_element, scroll_to_element, open_app, or find_element")

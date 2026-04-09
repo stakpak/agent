@@ -80,9 +80,8 @@ extension ActivityLogView.Coordinator {
         }
 
         if textChanged || searchCleared {
-            // Source `activityLog` is bounded at 50K by `ScriptTab.trimLog`. When trim
-            // happens, the front of the string shifts — the append optimization is only
-            // safe if the prefix is still intact. Compare a small window to detect shifts.
+            // Source `activityLog` is bounded at 50K by `ScriptTab.trimLog`. When trim happens, the front of the string
+            // shifts — the append optimization is only safe if the prefix is still intact. Compare a small window to detect shifts.
             let prefixIntact: Bool = {
                 guard lastLength > 0, !lastRenderedText.isEmpty else { return true }
                 let n = min(64, min(text.count, lastRenderedText.count))

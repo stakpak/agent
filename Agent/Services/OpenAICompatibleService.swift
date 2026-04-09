@@ -734,12 +734,8 @@ final class OpenAICompatibleService {
             guard let data = payload.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
-            // Extract usage if present (final chunk).
-            // Most OpenAI-format providers stream the usage block in the
-            // FINAL SSE event. We also surface cached_tokens here so the
-            // LLM Usage panel reflects automatic prefix-cache hits for
-            // OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek/etc. exactly
-            // the same way Claude's explicit cache_control hits are tracked.
+            // Extract usage if present (final chunk). Most OpenAI-format providers stream the usage block in the FINAL
+            // SSE event. We also surface cached_tokens here so the LLM Usage panel reflects automatic prefix-cache hits for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek/etc. exactly the same way Claude's explicit cache_control hits are tracked.
             if let usage = json["usage"] as? [String: Any] {
                 streamInputTokens = usage["prompt_tokens"] as? Int ?? streamInputTokens
                 streamOutputTokens = usage["completion_tokens"] as? Int ?? streamOutputTokens

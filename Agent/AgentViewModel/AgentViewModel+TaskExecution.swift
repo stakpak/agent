@@ -55,12 +55,8 @@ extension AgentViewModel {
         // Use ChatHistoryStore for LLM context (summaries for older tasks, full messages for recent)
         let historyContext = ChatHistoryStore.shared.buildLLMContext()
         var (provider, modelName, isVision) = resolveInitialProviderConfig()
-        // Defer the "🧠 provider/model" log line until AFTER triage has run
-        // and we know we're actually going to the cloud LLM. Logging it
-        // up-front (the previous behavior) made the activity log misleading
-        // when Apple AI handled the request locally — users saw both
-        // "🧠 Z.ai/glm-5.1" and "🍎 Opened Photo Booth and took a photo"
-        // for the same task even though the cloud LLM never ran.
+        // Defer the "🧠 provider/model" log line until AFTER triage has run and we know we're actually going to the
+        // cloud LLM. Logging it up-front (the previous behavior) made the activity log misleading when Apple AI handled the request locally — users saw both "🧠 Z.ai/glm-5.1" and "🍎 Opened Photo Booth and took a photo" for the same task even though the cloud LLM never ran.
         let cloudModelLogLine = "🧠 \(provider.displayName) / \(modelName)\(isVision ? " (vision)" : "")"
 
         let mt = maxTokens
@@ -109,20 +105,15 @@ extension AgentViewModel {
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
 
-        // Triage: direct commands, Apple AI conversation, accessibility agent,
-        // or pass through to LLM. The axDispatch closure is what Apple AI's
-        // Tool calls invoke when it decides to fire the accessibility tool —
-        // we route it through the same executeNativeTool path the cloud LLM
-        // uses, so the AX action goes through every existing safety check.
+        // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM. The axDispatch
+        // closure is what Apple AI's Tool calls invoke when it decides to fire the accessibility tool — we route it through the same executeNativeTool path the cloud LLM uses, so the AX action goes through every existing safety check.
         let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
             guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            // Resolve app name via SDEF catalog. If not found, falls back through
-            // AccessibilityService.resolveBundleId → NSRunningApplications.
-            // "Safari" → SDEF → com.apple.Safari, "Photo Booth" → fallback,
-            // "com.apple.Safari" → passthrough.
+            // Resolve app name via SDEF catalog. If not found, falls back through AccessibilityService.resolveBundleId
+            // → NSRunningApplications. "Safari" → SDEF → com.apple.Safari, "Photo Booth" → fallback, "com.apple.Safari" → passthrough.
             if let rawApp = args.app {
                 let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
                 input["appBundleId"] = resolved
@@ -153,9 +144,8 @@ extension AgentViewModel {
         var unbuiltEditCount = 0 // build enforcement — nudge after edit without build
         var consecutiveBuildFailures = 0 // error budget — stop after 5
         var stuckFiles: [String: Int] = [:] // stuck detection — skip after 5 failures per file
-        // Full system prompt + full tool descriptions on every turn. The earlier
-        // condensed-prompt + compactTools optimization saved ~4K tokens/turn but the
-        // user prefers the LLM having maximum context every iteration over the savings.
+        // Full system prompt + full tool descriptions on every turn. The earlier condensed-prompt + compactTools
+        // optimization saved ~4K tokens/turn but the user prefers the LLM having maximum context every iteration over the savings.
         let userName = NSFullUserName()
         let userHome = NSHomeDirectory()
         _ = userName; _ = userHome // kept for any future per-task prompt customization
@@ -165,9 +155,8 @@ extension AgentViewModel {
         taskLoop: while !Task.isCancelled {
             iterations += 1
 
-            // No prompt tiering and no mode auto-switching: every turn sends the
-            // full system prompt with full tool descriptions, filtered only by the
-            // user's UI toggles in ToolPreferencesService.
+            // No prompt tiering and no mode auto-switching: every turn sends the full system prompt with full tool
+            // descriptions, filtered only by the user's UI toggles in ToolPreferencesService.
 
             // Token-aware context compaction — replaces fixed iteration-based triggers
             if iterations > 1 {

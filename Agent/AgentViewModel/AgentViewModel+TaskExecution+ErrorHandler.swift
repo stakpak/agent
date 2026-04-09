@@ -21,10 +21,8 @@ extension AgentViewModel {
         case fallbackRequested(provider: APIProvider, modelName: String, isVision: Bool)
     }
 
-    /// Which LLM service a given task-loop iteration is talking to.
-    /// Used only so the caller can tell `handleTaskLoopError` which of
-    /// claude/openAICompatible/ollama/foundationModelService was active
-    /// without having to ship the whole service quartet across the call.
+    /// / Which LLM service a given task-loop iteration is talking to. / Used only so the caller can tell
+    /// `handleTaskLoopError` which of / claude/openAICompatible/ollama/foundationModelService was active / without having to ship the whole service quartet across the call.
     enum ActiveLLMService {
         case claude
         case openAICompatible
@@ -33,10 +31,8 @@ extension AgentViewModel {
         case none
     }
 
-    /// Handles an error from LLM streaming: context-overflow pruning, stale connection
-    /// retries, timeouts (with Ollama health-check/restart), 429 rate-limits,
-    /// recoverable AgentErrors, network loss, and fallback-chain switching.
-    /// Mutates `messages` and `timeoutRetryCount` inout. Returns TaskLoopErrorOutcome.
+    /// / Handles an error from LLM streaming: context-overflow pruning, stale connection / retries, timeouts (with
+    /// Ollama health-check/restart), 429 rate-limits, / recoverable AgentErrors, network loss, and fallback-chain switching. / Mutates `messages` and `timeoutRetryCount` inout. Returns TaskLoopErrorOutcome.
     func handleTaskLoopError(
         _ error: Error,
         activeService: ActiveLLMService,
@@ -185,10 +181,8 @@ extension AgentViewModel {
                     flushLog()
                 }
 
-                // Retry budget exhausted on the same provider — try fallback chain
-                // BEFORE giving up. Without this, every timeout/exhaustion would
-                // skip past the fallback entirely and the user would never see it
-                // trigger.
+                // Retry budget exhausted on the same provider — try fallback chain BEFORE giving up. Without this,
+                // every timeout/exhaustion would skip past the fallback entirely and the user would never see it trigger.
                 if let fallback = await tryFallbackChain(reason: "\(errorSource) timeout after \(maxTimeoutRetries) retries") {
                     timeoutRetryCount = 0
                     return fallback
@@ -208,13 +202,8 @@ extension AgentViewModel {
                 return .breakLoop
             }
         } else if let agentErr = error as? AgentError, agentErr.isRateLimited, timeoutRetryCount < maxTimeoutRetries {
-            // 429 rate-limit / "service overloaded" — exponential
-            // backoff up to 60s. Z.ai returns this with body code
-            // 1305 ("service may be temporarily overloaded"); OpenAI
-            // returns 429 with a Retry-After header. Either way the
-            // server is asking for a longer wait than the generic
-            // 10-second recoverable retry below — bumping each
-            // attempt by 15s up to a 60s ceiling.
+            // 429 rate-limit / "service overloaded" — exponential backoff up to 60s. Z.ai returns this with body code
+            // 1305 ("service may be temporarily overloaded"); OpenAI returns 429 with a Retry-After header. Either way the server is asking for a longer wait than the generic 10-second recoverable retry below — bumping each attempt by 15s up to a 60s ceiling.
             timeoutRetryCount += 1
             let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
             appendLog(
@@ -298,11 +287,8 @@ extension AgentViewModel {
         }
     }
 
-    /// Shared helper used by every error branch in handleTaskLoopError. Records
-    /// a failure with FallbackChainService and, if the threshold is reached and
-    /// a fallback entry is available, returns the .fallbackRequested outcome
-    /// for the caller to act on. Returns nil if no fallback should fire (chain
-    /// disabled, threshold not yet reached, or no more entries).
+    /// / Shared helper used by every error branch in handleTaskLoopError. Records / a failure with FallbackChainService
+    /// and, if the threshold is reached and / a fallback entry is available, returns the .fallbackRequested outcome / for the caller to act on. Returns nil if no fallback should fire (chain / disabled, threshold not yet reached, or no more entries).
     private func tryFallbackChain(reason: String) async -> TaskLoopErrorOutcome? {
         guard let fallback = FallbackChainService.shared.recordFailure() else { return nil }
         appendLog("🔄 Fallback triggered (\(reason))")

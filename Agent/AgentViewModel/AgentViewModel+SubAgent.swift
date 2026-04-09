@@ -165,12 +165,8 @@ extension AgentViewModel {
         ollama?.temperature = temperatureForProvider(provider)
         openAICompatible?.temperature = temperatureForProvider(provider)
 
-        // Sub-agent tool groups — configurable by parent, defaults to Core+Work+Code.
-        // Deliberately NOT including Tool.Group.subAgents in the default, so a
-        // spawned child cannot recursively spawn grandchildren without explicit
-        // parent opt-in. The maxSubAgents=3 cap is enforced per-parent, so
-        // recursive spawning would silently blow past it. Parents that need
-        // multi-level orchestration can pass agent.toolGroups explicitly.
+        // Sub-agent tool groups — configurable by parent, defaults to Core+Work+Code. Deliberately NOT including
+        // Tool.Group.subAgents in the default, so a spawned child cannot recursively spawn grandchildren without explicit parent opt-in. The maxSubAgents=3 cap is enforced per-parent, so recursive spawning would silently blow past it. Parents that need multi-level orchestration can pass agent.toolGroups explicitly.
         let activeGroups: Set<String> = agent.toolGroups ?? [Tool.Group.core, Tool.Group.work, Tool.Group.code]
 
         var messages: [[String: Any]] = [

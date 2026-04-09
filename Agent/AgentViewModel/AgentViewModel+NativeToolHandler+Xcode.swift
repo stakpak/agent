@@ -18,10 +18,8 @@ extension AgentViewModel {
         // MARK: - Xcode Tools
         case "xcode_build":
             let projectPath = input["project_path"] as? String ?? ""
-            // Background mode: spawn a fresh script tab and run xcodebuild there in a
-            // detached Task. The calling LLM gets an immediate "started in background"
-            // tool_result and continues; build progress streams to the spawned tab.
-            // Same pattern as run_agent — mirrors agent_script(action:"run").
+            // Background mode: spawn a fresh script tab and run xcodebuild there in a detached Task. The calling LLM
+            // gets an immediate "started in background" tool_result and continues; build progress streams to the spawned tab. Same pattern as run_agent — mirrors agent_script(action:"run").
             if input["background"] as? Bool == true {
                 let label = projectPath.isEmpty ? "Build" : ((projectPath as NSString).lastPathComponent as NSString).deletingPathExtension
                 let spawnedTab = openScriptTab(scriptName: "xcode_build:\(label)", selectTab: false)
@@ -213,9 +211,8 @@ extension AgentViewModel {
             let query = input["query"] as? String ?? ""
             guard !query.isEmpty else { return "Error: query is required" }
             return await Self.performWebSearchForTask(query: query, apiKey: tavilyAPIKey, provider: selectedProvider)
-        // lookup_sdef — supports single bundle ID, "list", or comma-separated
-        // / array of bundle IDs for batch lookup (e.g. Safari + System Events
-        // in one call when scripting a multi-app workflow).
+        // lookup_sdef — supports single bundle ID, "list", or comma-separated / array of bundle IDs for batch lookup
+        // (e.g. Safari + System Events in one call when scripting a multi-app workflow).
         case "lookup_sdef":
             let bundleIDInput = input["bundle_id"] as? String ?? ""
             let bundleIDArray = input["bundle_id"] as? [String]
@@ -257,10 +254,8 @@ extension AgentViewModel {
                 return SDEFService.shared.summary(for: bundleID)
             }
 
-            // Multiple bundle IDs — concatenate summaries with clear headers.
-            // class_name doesn't make sense across multiple apps, so it's
-            // ignored in batch mode (warn the LLM in the output so the next
-            // call narrows correctly).
+            // Multiple bundle IDs — concatenate summaries with clear headers. class_name doesn't make sense across
+            // multiple apps, so it's ignored in batch mode (warn the LLM in the output so the next call narrows correctly).
             if bundleIDs.isEmpty {
                 return "Error: bundle_id required (single ID, comma-separated list, array, or 'list' to enumerate the catalog)"
             }

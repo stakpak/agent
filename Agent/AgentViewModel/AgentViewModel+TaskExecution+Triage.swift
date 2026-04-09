@@ -10,21 +10,15 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Outcome of triage result processing.
-    /// - `completed`: the triage handler fully finished the task; caller should
-    ///   return from executeTask immediately without touching cleanup.
-    /// - `fallThroughToLLM`: triage did not fully handle the prompt; caller
-    ///   should proceed into the cloud-LLM while-loop.
+    /// / Outcome of triage result processing. / - `completed`: the triage handler fully finished the task; caller
+    /// should / return from executeTask immediately without touching cleanup. / - `fallThroughToLLM`: triage did not fully handle the prompt; caller / should proceed into the cloud-LLM while-loop.
     enum TriageOutcome {
         case completed
         case fallThroughToLLM
     }
 
-    /// Processes the result of `AppleIntelligenceMediator.triagePrompt`, mirroring the
-    /// original inline switch: direct commands, Apple AI answers, accessibility-tool
-    /// handoffs, and passthrough. Mutates `messages`, `completionSummary`, and
-    /// `commandsRun` inout where needed and performs all side effects
-    /// (history, logging, progress updates) exactly as the original inline code did.
+    /// / Processes the result of `AppleIntelligenceMediator.triagePrompt`, mirroring the / original inline switch:
+    /// direct commands, Apple AI answers, accessibility-tool / handoffs, and passthrough. Mutates `messages`, `completionSummary`, and / `commandsRun` inout where needed and performs all side effects / (history, logging, progress updates) exactly as the original inline code did.
     func handleTriageOutcome(
         _ triageResult: AppleIntelligenceMediator.TriageResult,
         prompt: String,
@@ -180,9 +174,8 @@ extension AgentViewModel {
             isThinking = false
             return .completed
         case .accessibilityHandled(let summary):
-            // Apple AI ran accessibility tool(s) and produced a summary.
-            // Tool calls went through axDispatch → executeNativeTool (already logged).
-            // Nil result → .passThrough → cloud LLM, so we only reach here on success.
+            // Apple AI ran accessibility tool(s) and produced a summary. Tool calls went through axDispatch →
+            // executeNativeTool (already logged). Nil result → .passThrough → cloud LLM, so we only reach here on success.
             rawLLMOutput = summary
             displayedLLMOutput = summary
             dripDisplayIndex = summary.count
@@ -204,9 +197,8 @@ extension AgentViewModel {
             isThinking = false
             return .completed
         case .passThrough:
-            // Apple AI didn't handle the request — log the cloud LLM
-            // model now so the user sees which provider is actually
-            // doing the work.
+            // Apple AI didn't handle the request — log the cloud LLM model now so the user sees which provider is
+            // actually doing the work.
             appendLog(cloudModelLogLine)
             flushLog()
             return .fallThroughToLLM

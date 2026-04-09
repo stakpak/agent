@@ -3,9 +3,8 @@ import Foundation
 import ScriptingBridge
 import XcodeScriptingBridge
 
-/// Xcode automation via ScriptingBridge — build, run, list/select projects, grant permission.
-/// Modeled after xcf's best patterns: file:line:col error format, code snippets, build-before-run.
-/// Silences ScriptingBridge "invalid reuse" errors instead of crashing.
+/// / Xcode automation via ScriptingBridge — build, run, list/select projects, grant permission. / Modeled after xcf's
+/// best patterns: file:line:col error format, code snippets, build-before-run. / Silences ScriptingBridge "invalid reuse" errors instead of crashing.
 private class SBApplicationDelegateIgnore: NSObject, SBApplicationDelegate {
     func eventDidFail(_ event: UnsafePointer<AppleEvent>, withError error: any Error) -> Any? {
         return nil // Suppress error, return nil to caller

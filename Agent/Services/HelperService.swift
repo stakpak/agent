@@ -2,10 +2,8 @@ import AgentAudit
 import AppKit
 import ServiceManagement
 
-// MARK: - SMAppService Safe Wrapper for Daemon
-/// Safely wraps SMAppService daemon operations to prevent crashes from malformed/missing plists.
-/// The crash happens inside Objective-C code that Swift can't catch, so we verify
-/// the plist exists BEFORE calling SMAppService methods.
+// MARK: - SMAppService Safe Wrapper for Daemon / Safely wraps SMAppService daemon operations to prevent crashes from
+// malformed/missing plists. / The crash happens inside Objective-C code that Swift can't catch, so we verify / the plist exists BEFORE calling SMAppService methods.
 enum SafeSMAppServiceDaemon {
     /// The plist filename for daemon
     static let daemonPlistName = AppConstants.helperPlist
@@ -42,9 +40,8 @@ enum SafeSMAppServiceDaemon {
 
     /// Create daemon service ONLY if plist is valid
     static func createDaemon() -> SMAppService? {
-        // Note: For daemons, SMAppService may manage registration state internally
-        // We check existence but still allow creation for already-registered daemons
-        // CRITICAL: Only create if plist exists and is valid to prevent ObjC crash
+        // Note: For daemons, SMAppService may manage registration state internally We check existence but still allow
+        // creation for already-registered daemons CRITICAL: Only create if plist exists and is valid to prevent ObjC crash
         guard daemonPlistExists() else { return nil }
         return SMAppService.daemon(plistName: daemonPlistName)
     }
@@ -193,10 +190,8 @@ final class HelperService {
             }
         }
         AuditLog.log(.launchDaemon, "execute: \(command.prefix(100))")
-        // Hard local guardrail — refuse catastrophic commands before they
-        // cross the XPC boundary into the privileged daemon. The daemon runs
-        // as root, so this is the LAST place we can stop a destructive
-        // command from doing maximum damage.
+        // Hard local guardrail — refuse catastrophic commands before they cross the XPC boundary into the privileged
+        // daemon. The daemon runs as root, so this is the LAST place we can stop a destructive command from doing maximum damage.
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.launchDaemon, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -224,10 +219,8 @@ final class HelperService {
         } else {
             dir = (workingDirectory as NSString).expandingTildeInPath
         }
-        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the
-        // root daemon's command runs in the right directory AND has the
-        // project folder env var available, matching the agent script and
-        // user-launch-agent contracts.
+        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the root daemon's command runs in the right
+        // directory AND has the project folder env var available, matching the agent script and user-launch-agent contracts.
         let fullCommand: String
         if !dir.isEmpty && !command.hasPrefix("cd ") {
             let escaped = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -235,20 +228,14 @@ final class HelperService {
         } else {
             fullCommand = command
         }
-        // Honor the user's zsh/bash toggle. The daemon always invokes /bin/zsh
-        // (XPC protocol stays unchanged) but if the user picked a different
-        // shell, we wrap the command with `exec <shell> -c '...'` so the outer
-        // zsh process is replaced by the chosen shell. Defaults to no wrapping
-        // when /bin/zsh is selected (most common case, zero overhead).
+        // Honor the user's zsh/bash toggle. The daemon always invokes /bin/zsh (XPC protocol stays unchanged) but if
+        // the user picked a different shell, we wrap the command with `exec <shell> -c '...'` so the outer zsh process is replaced by the chosen shell. Defaults to no wrapping when /bin/zsh is selected (most common case, zero overhead).
         let wrapped = Self.wrapForShell(fullCommand, shellPath: AppConstants.shellPath)
         return await executeViaXPC(script: wrapped, workingDirectory: dir, outputHandler: handler)
     }
 
-    /// Wrap a command with `exec <shell> -c '...'` when the user has chosen a
-    /// shell other than /bin/zsh (the daemon's default). Single quotes inside
-    /// the command are escaped using the standard `'\''` pattern so the
-    /// wrapping survives any shell metacharacter — including the `!` in
-    /// `Agent!.app` paths and arbitrary user content.
+    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a / shell other than /bin/zsh (the
+    /// daemon's default). Single quotes inside / the command are escaped using the standard `'\''` pattern so the / wrapping survives any shell metacharacter — including the `!` in / `Agent!.app` paths and arbitrary user content.
     private static func wrapForShell(_ command: String, shellPath: String) -> String {
         guard shellPath != "/bin/zsh", !shellPath.isEmpty else { return command }
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")

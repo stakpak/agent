@@ -2,10 +2,8 @@ import AgentAudit
 import AppKit
 import ServiceManagement
 
-// MARK: - SMAppService Safe Wrapper
-/// Safely wraps SMAppService operations to prevent crashes from malformed/missing plists.
-/// The crash happens inside Objective-C code that Swift can't catch, so we verify
-/// the plist exists BEFORE calling SMAppService methods.
+// MARK: - SMAppService Safe Wrapper / Safely wraps SMAppService operations to prevent crashes from malformed/missing
+// plists. / The crash happens inside Objective-C code that Swift can't catch, so we verify / the plist exists BEFORE calling SMAppService methods.
 enum SafeSMAppService {
     /// The plist filename for user agent
     static let userAgentPlistName = AppConstants.userPlist
@@ -221,11 +219,8 @@ final class UserService {
         } else {
             dir = (workingDirectory as NSString).expandingTildeInPath
         }
-        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the
-        // command runs in the right directory AND has the project folder env
-        // var available the same way agent scripts do. The export is sent
-        // through the XPC boundary as part of the command string — no XPC
-        // protocol change required.
+        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the command runs in the right directory AND
+        // has the project folder env var available the same way agent scripts do. The export is sent through the XPC boundary as part of the command string — no XPC protocol change required.
         let fullCommand: String
         if !dir.isEmpty && !command.hasPrefix("cd ") {
             let escaped = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -233,18 +228,14 @@ final class UserService {
         } else {
             fullCommand = command
         }
-        // Honor the user's zsh/bash toggle. The Launch Agent always invokes
-        // /bin/zsh (XPC protocol stays unchanged) but if the user picked a
-        // different shell, we wrap the command with `exec <shell> -c '...'`
-        // so the outer zsh process is replaced by the chosen shell. Defaults
-        // to no wrapping when /bin/zsh is selected.
+        // Honor the user's zsh/bash toggle. The Launch Agent always invokes /bin/zsh (XPC protocol stays unchanged) but
+        // if the user picked a different shell, we wrap the command with `exec <shell> -c '...'` so the outer zsh process is replaced by the chosen shell. Defaults to no wrapping when /bin/zsh is selected.
         let wrapped = Self.wrapForShell(fullCommand, shellPath: AppConstants.shellPath)
         return await executeViaXPC(script: wrapped, workingDirectory: dir, outputHandler: handler)
     }
 
-    /// Wrap a command with `exec <shell> -c '...'` when the user has chosen a
-    /// shell other than /bin/zsh. Single-quote escape pattern survives `!`
-    /// and every shell metacharacter.
+    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a / shell other than /bin/zsh.
+    /// Single-quote escape pattern survives `!` / and every shell metacharacter.
     private static func wrapForShell(_ command: String, shellPath: String) -> String {
         guard shellPath != "/bin/zsh", !shellPath.isEmpty else { return command }
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")

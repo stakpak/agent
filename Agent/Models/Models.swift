@@ -80,10 +80,8 @@ enum AgentError: Error, LocalizedError {
         case .serviceUnavailable, .xpcError:
             return true
         case .apiError(let code, _) where code >= 500 || code == 429:
-            // 5xx = server error (Anthropic 529 overloaded, OpenAI 502/503)
-            // 429 = rate limit / overloaded — Z.ai returns this with code 1305
-            //       "service may be temporarily overloaded, please try again later"
-            // Both are transient and retryable with backoff.
+            // 5xx = server error (Anthropic 529 overloaded, OpenAI 502/503) 429 = rate limit / overloaded — Z.ai
+            // returns this with code 1305 "service may be temporarily overloaded, please try again later" Both are transient and retryable with backoff.
             return true
         default:
             return false
@@ -91,11 +89,8 @@ enum AgentError: Error, LocalizedError {
     }
 
     var isRateLimited: Bool {
-        // 429 = standard HTTP rate limit (OpenAI, Z.ai, Mistral, Grok, etc.)
-        // 529 = Anthropic's "Overloaded" status — same intent as 429, used
-        //       when Claude is at capacity. Treat both as rate-limited so the
-        //       loop's exponential-backoff branch fires instead of the
-        //       generic 10-second recoverable retry.
+        // 429 = standard HTTP rate limit (OpenAI, Z.ai, Mistral, Grok, etc.) 529 = Anthropic's "Overloaded" status —
+        // same intent as 429, used when Claude is at capacity. Treat both as rate-limited so the loop's exponential-backoff branch fires instead of the generic 10-second recoverable retry.
         if case .apiError(let code, _) = self, code == 429 || code == 529 {
             return true
         }

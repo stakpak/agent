@@ -493,10 +493,8 @@ struct ContentView: View {
                     }
                 }
 
-                // Up/Down arrow for prompt history (per-tab or main)
-                // Only navigate history for short, single-line input;
-                // let arrows move the cursor in longer/multi-line text.
-                // Always allow history navigation when already browsing history.
+                // Up/Down arrow for prompt history (per-tab or main) Only navigate history for short, single-line
+                // input; let arrows move the cursor in longer/multi-line text. Always allow history navigation when already browsing history.
                 if event.keyCode == 126 || event.keyCode == 125 {
                     let text: String
                     let browsingHistory: Bool

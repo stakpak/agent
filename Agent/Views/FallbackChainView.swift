@@ -220,9 +220,8 @@ struct FallbackChainView: View {
         return clean
     }
 
-    /// Default model for a provider — uses the user's currently-selected model for that
-    /// provider (read from the ViewModel), falling back to the first dynamically-fetched
-    /// model. Never hardcoded — model strings change frequently across provider updates.
+    /// / Default model for a provider — uses the user's currently-selected model for that / provider (read from the
+    /// ViewModel), falling back to the first dynamically-fetched / model. Never hardcoded — model strings change frequently across provider updates.
     private func defaultModel(for provider: APIProvider) -> String {
         // Prefer the model the user is actively using for that provider
         switch provider {

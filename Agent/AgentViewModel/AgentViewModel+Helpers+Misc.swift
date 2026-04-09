@@ -107,9 +107,8 @@ extension AgentViewModel {
         return nil
     }
 
-    /// Extract user-directory paths from a shell command for preflight validation.
-    /// Catches typos like "/Users/foo/Documets/..." before running the command.
-    /// Resolve project folder to a directory (strip filename if path points to a file).
+    /// / Extract user-directory paths from a shell command for preflight validation. / Catches typos like
+    /// "/Users/foo/Documets/..." before running the command. / Resolve project folder to a directory (strip filename if path points to a file).
     static func resolvedWorkingDirectory(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
         var isDir: ObjCBool = false

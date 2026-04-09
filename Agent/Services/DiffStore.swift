@@ -12,10 +12,8 @@ enum DiffError: LocalizedError {
     }
 }
 
-/// In-memory store for diff results keyed by UUID.
-/// Allows `create_diff` to return a compact UUID that `apply_diff` can reference
-/// instead of requiring the LLM to echo the entire diff text back.
-/// Also tracks applied diffs per file for UUID-based undo.
+/// / In-memory store for diff results keyed by UUID. / Allows `create_diff` to return a compact UUID that `apply_diff`
+/// can reference / instead of requiring the LLM to echo the entire diff text back. / Also tracks applied diffs per file for UUID-based undo.
 @MainActor
 final class DiffStore {
     static let shared = DiffStore()

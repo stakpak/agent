@@ -7,10 +7,8 @@ struct ToolsView: View {
     @Bindable var prefs = ToolPreferencesService.shared
     @State private var collapsedGroups: Set<String> = []
 
-    // Group definitions — use actual consolidated tool names from AgentTools.Name.
-    // Sub-agents (spawn_agent + tell_agent) live in their own group; previously
-    // spawn was in Work and tell was in Core, which split a coherent feature
-    // across two toggles for no reason.
+    // Group definitions — use actual consolidated tool names from AgentTools.Name. Sub-agents (spawn_agent +
+    // tell_agent) live in their own group; previously spawn was in Work and tell was in Core, which split a coherent feature across two toggles for no reason.
     static let groups: [String: (filter: (AgentTools.ToolDef) -> Bool, icon: String)] = [
         Tool.Group.core: ({ [
             Tool.done, Tool.tools, Tool.search, Tool.folder, Tool.mem,

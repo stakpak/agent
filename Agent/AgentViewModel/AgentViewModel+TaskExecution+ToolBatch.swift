@@ -10,13 +10,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Executes a set of pending tool calls from a single LLM turn.
-    ///
-    /// Consecutive read-only tools are partitioned into parallel batches that
-    /// pre-execute common shell reads off the main actor via a TaskGroup; the
-    /// results are stashed into `Self.precomputedResults` so the subsequent
-    /// `dispatchTool` calls return instantly. Write/mutating tools serialize.
-    /// Appends the tool results to `toolResults` via inout.
+    /// / Executes a set of pending tool calls from a single LLM turn. / / Consecutive read-only tools are partitioned
+    /// into parallel batches that / pre-execute common shell reads off the main actor via a TaskGroup; the / results are stashed into `Self.precomputedResults` so the subsequent / `dispatchTool` calls return instantly. Write/mutating tools serialize. / Appends the tool results to `toolResults` via inout.
     func executePendingToolBatches(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         toolResults: inout [[String: Any]]
@@ -110,12 +105,8 @@ extension AgentViewModel {
         }
     }
 
-    /// Vision verification: auto-screenshot after UI actions so the LLM can see the result.
-    /// OPT-IN via `visionAutoScreenshotEnabled` (Settings → Vision Auto-Screenshot).
-    /// Default OFF because it (1) hogs the main thread on every UI iteration,
-    /// (2) bloats every prompt with a base64 image even for non-vision models,
-    /// and (3) the next accessibility(find_element) query usually tells the LLM
-    /// what happened just as well, without the screenshot cost.
+    /// / Vision verification: auto-screenshot after UI actions so the LLM can see the result. / OPT-IN via
+    /// `visionAutoScreenshotEnabled` (Settings → Vision Auto-Screenshot). / Default OFF because it (1) hogs the main thread on every UI iteration, / (2) bloats every prompt with a base64 image even for non-vision models, / and (3) the next accessibility(find_element) query usually tells the LLM / what happened just as well, without the screenshot cost.
     func runVisionAutoScreenshotIfNeeded(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         isVision: Bool,

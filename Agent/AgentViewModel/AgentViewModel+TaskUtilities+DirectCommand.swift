@@ -86,11 +86,8 @@ extension AgentViewModel {
                 log(err)
                 return err
             }
-            // Skip compilation if dylib is up to date.
-            // MUST run via executeTCC (in-process) so swift build inherits the
-            // main app's TCC grants for ~/Documents access. The Launch Agent
-            // path (userService.execute) runs in a separate TCC context that
-            // can't getcwd() inside ~/Documents/AgentScript/agents/.
+            // Skip compilation if dylib is up to date. MUST run via executeTCC (in-process) so swift build inherits the
+            // main app's TCC grants for ~/Documents access. The Launch Agent path (userService.execute) runs in a separate TCC context that can't getcwd() inside ~/Documents/AgentScript/agents/.
             if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: name) }) {
                 log("🦾 Compiling: \(name)")
                 flush()

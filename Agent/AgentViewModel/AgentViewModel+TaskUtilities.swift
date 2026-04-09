@@ -13,9 +13,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Read project-specific instructions from config files in the project folder.
-    /// Checks: .agent.md, AGENT.md, .claude/CLAUDE.md, .claude/rules/*.md
-    /// Supports @include directives: @path, @./relative, @~/home, @/absolute
+    /// / Read project-specific instructions from config files in the project folder. / Checks: .agent.md, AGENT.md,
+    /// .claude/CLAUDE.md, .claude/rules/*.md / Supports @include directives: @path, @./relative, @~/home, @/absolute
     nonisolated static func readProjectConfig(projectFolder: String) -> String {
         guard !projectFolder.isEmpty else { return "" }
         let fm = FileManager.default
@@ -213,9 +212,8 @@ extension AgentViewModel {
 
     // MARK: - Message Pruning
 
-    /// Prune old messages to reduce token usage on long tasks.
-    /// Keeps the first user message and the most recent messages.
-    /// Middle messages are summarized into a compact text block.
+    /// / Prune old messages to reduce token usage on long tasks. / Keeps the first user message and the most recent
+    /// messages. / Middle messages are summarized into a compact text block.
     static func pruneMessages(_ messages: inout [[String: Any]], keepRecent: Int = 6) {
         guard messages.count > keepRecent + 4 else { return }
 
@@ -272,13 +270,8 @@ extension AgentViewModel {
 
     // MARK: - Conversational Reply Detection
 
-    /// Determines if an LLM text response (with no tool calls) is a valid conversational reply
-    /// that should be accepted immediately, rather than nudging the LLM to use tools.
-    ///
-    /// On iteration 1, the LLM has seen the user's prompt fresh — if it chose text over tools,
-    /// it's almost certainly a conversational reply (greeting, answer, explanation).
-    /// After iteration 1, the LLM has already been given tool results and is mid-task,
-    /// so a text-only response more likely means it forgot to call tools.
+    /// / Determines if an LLM text response (with no tool calls) is a valid conversational reply / that should be
+    /// accepted immediately, rather than nudging the LLM to use tools. / / On iteration 1, the LLM has seen the user's prompt fresh — if it chose text over tools, / it's almost certainly a conversational reply (greeting, answer, explanation). / After iteration 1, the LLM has already been given tool results and is mid-task, / so a text-only response more likely means it forgot to call tools.
     static func isConversationalReply(_ text: String, iteration: Int) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }

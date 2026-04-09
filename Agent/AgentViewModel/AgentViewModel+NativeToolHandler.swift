@@ -78,11 +78,8 @@ extension AgentViewModel {
         let role = input["role"] as? String
         let title = input["title"] as? String
         let value = input["value"] as? String
-        // Resolve app name → bundle ID. Read-only queries use lookupBundleId
-        // (NO auto-launch); write actions use resolveBundleId (auto-launches if
-        // not running, since you can't click a button on an app that isn't up).
-        // This prevents speculative reads from silently opening apps the user
-        // never asked for — most visibly the "Photo Booth keeps opening" bug.
+        // Resolve app name → bundle ID. Read-only queries use lookupBundleId (NO auto-launch); write actions use
+        // resolveBundleId (auto-launches if not running, since you can't click a button on an app that isn't up). This prevents speculative reads from silently opening apps the user never asked for — most visibly the "Photo Booth keeps opening" bug.
         let appNameOrId = input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String
         let app = Self.readOnlyAxActions.contains(action)
             ? ax.lookupBundleId(appNameOrId)
@@ -122,9 +119,8 @@ extension AgentViewModel {
                 appBundleId: app,
                 verify: input["verify"] as? Bool ?? true)
         case "click", "click_element":
-            // AXorcist-only. Coordinate-based click is not supported — provide
-            // role/title/value (and ideally appBundleId) so the click goes through
-            // AXorcist's element-finder.
+            // AXorcist-only. Coordinate-based click is not supported — provide role/title/value (and ideally
+            // appBundleId) so the click goes through AXorcist's element-finder.
             return ax.clickElement(
                 role: role, title: title, value: value,
                 appBundleId: app,
@@ -136,9 +132,8 @@ extension AgentViewModel {
             return ax.scrollToElement(
                 role: role, title: title, appBundleId: app)
         case "press_key":
-            // press_key is no longer supported — AXorcist doesn't drive raw key
-            // events and the InputDriver path was removed. Use clickElement for
-            // buttons or clickMenuItem for keyboard-shortcut menu commands.
+            // press_key is no longer supported — AXorcist doesn't drive raw key events and the InputDriver path was
+            // removed. Use clickElement for buttons or clickMenuItem for keyboard-shortcut menu commands.
             return """
                 Error: press_key is removed. Find the relevant button \
                 via accessibility(action:"click_element", \
@@ -157,9 +152,8 @@ extension AgentViewModel {
                 role:"AXSlider", ...).
                 """
         case "screenshot":
-            // All three paths are async — they dispatch screencapture to a
-            // background queue so the main thread stays responsive while the
-            // ~100ms screencapture process runs.
+            // All three paths are async — they dispatch screencapture to a background queue so the main thread stays
+            // responsive while the ~100ms screencapture process runs.
             let w = (input["width"] as? Double).map { CGFloat($0) }
             let h = (input["height"] as? Double).map { CGFloat($0) }
             if let wid = input["windowId"] as? Int, wid > 0 {
@@ -248,10 +242,8 @@ extension AgentViewModel {
                 pb.setString(text, forType: .string)
                 return "Copied to clipboard: \(text.prefix(100))"
             case "paste":
-                // Cmd+V via AppleScript System Events. The old path used
-                // AXorcist InputDriver hotkey which is gone. NSAppleScript runs
-                // in-process with TCC and produces a real synthesized keystroke
-                // without going through CGEvent directly.
+                // Cmd+V via AppleScript System Events. The old path used AXorcist InputDriver hotkey which is gone.
+                // NSAppleScript runs in-process with TCC and produces a real synthesized keystroke without going through CGEvent directly.
                 let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
                 var asErr: NSDictionary?
                 if let script = NSAppleScript(source: pasteScript) {

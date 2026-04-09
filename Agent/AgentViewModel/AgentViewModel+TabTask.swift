@@ -173,10 +173,8 @@ extension AgentViewModel {
         var stuckFiles: [String: Int] = [:] // Edit failure count per file (for nudge)
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
-        // Full system prompt + full tool descriptions on every turn — no condensed
-        // prompt, no compactTools, no mode auto-switching. The LLM always sees the
-        // complete context and the complete tool list (filtered only by the user's
-        // UI toggles in ToolPreferencesService).
+        // Full system prompt + full tool descriptions on every turn — no condensed prompt, no compactTools, no mode
+        // auto-switching. The LLM always sees the complete context and the complete tool list (filtered only by the user's UI toggles in ToolPreferencesService).
 
         mainLoop: while !Task.isCancelled {
             iterations += 1

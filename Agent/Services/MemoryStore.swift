@@ -61,11 +61,8 @@ struct MemoryEntry: Identifiable {
     }
 }
 
-/// Persistent user memory system with typed, per-topic files.
-/// Backward compatible with the legacy flat memory.md file.
-/// Directory: ~/Documents/AgentScript/memory/
-/// Index: ~/Documents/AgentScript/memory/MEMORY.md
-/// Legacy: ~/Documents/AgentScript/memory.md (migrated on first access)
+/// / Persistent user memory system with typed, per-topic files. / Backward compatible with the legacy flat memory.md
+/// file. / Directory: ~/Documents/AgentScript/memory/ / Index: ~/Documents/AgentScript/memory/MEMORY.md / Legacy: ~/Documents/AgentScript/memory.md (migrated on first access)
 @MainActor
 final class MemoryStore {
     static let shared = MemoryStore()

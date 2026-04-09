@@ -1,9 +1,5 @@
-//
-//  AgentViewModel+TaskExecution+AboutSelf.swift
-//  Agent
-//
-//  AboutSelf tool implementation - provides information about Agent's capabilities
-//
+// AgentViewModel+TaskExecution+AboutSelf.swift Agent AboutSelf tool implementation - provides information about Agent's
+// capabilities
 
 import Foundation
 import FoundationModels

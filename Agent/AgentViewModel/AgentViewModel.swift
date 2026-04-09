@@ -54,11 +54,8 @@ final class AgentViewModel {
     var autoScaffoldEnabled: Bool = UserDefaults.standard.bool(forKey: "codingAutoScaffold") {
         didSet { UserDefaults.standard.set(autoScaffoldEnabled, forKey: "codingAutoScaffold") }
     }
-    /// Vision auto-screenshot: after every UI action, capture a verification screenshot
-    /// and inject it into the next tool_results. Default OFF — it hogs the main thread
-    /// (screencapture is synchronous-ish), bloats every iteration's prompt with a base64
-    /// image even when the LLM doesn't have vision, and the next AX query usually tells
-    /// the LLM what happened anyway. Opt-in for vision-heavy debugging only.
+    /// / Vision auto-screenshot: after every UI action, capture a verification screenshot / and inject it into the next
+    /// tool_results. Default OFF — it hogs the main thread / (screencapture is synchronous-ish), bloats every iteration's prompt with a base64 / image even when the LLM doesn't have vision, and the next AX query usually tells / the LLM what happened anyway. Opt-in for vision-heavy debugging only.
     var visionAutoScreenshotEnabled: Bool = UserDefaults.standard.bool(forKey: "visionAutoScreenshot") {
         didSet { UserDefaults.standard.set(visionAutoScreenshotEnabled, forKey: "visionAutoScreenshot") }
     }
@@ -74,9 +71,8 @@ final class AgentViewModel {
     var thinkingOutputExpanded: Bool = UserDefaults.standard.object(forKey: "thinkingOutputExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(thinkingOutputExpanded, forKey: "thinkingOutputExpanded") }
     }
-    /// Expanded state of the Steps (tool calls) disclosure inside the LLM
-    /// Output HUD on the main tab. Persisted across launches and across
-    /// Cmd+B hide/show cycles so newly arriving steps don't collapse the list.
+    /// / Expanded state of the Steps (tool calls) disclosure inside the LLM / Output HUD on the main tab. Persisted
+    /// across launches and across / Cmd+B hide/show cycles so newly arriving steps don't collapse the list.
     var toolStepsExpanded: Bool = UserDefaults.standard.object(forKey: "toolStepsExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(toolStepsExpanded, forKey: "toolStepsExpanded") }
     }
@@ -149,10 +145,8 @@ final class AgentViewModel {
     var selectedProvider: APIProvider = {
         let rawValue = UserDefaults.standard.string(forKey: "agentProvider") ?? "ollama"
         let provider = APIProvider(rawValue: rawValue) ?? .ollama
-        // foundationModel is NEVER a valid main-task provider — it's only used
-        // by AppleIntelligenceMediator for triage/summary/AX intent and by the
-        // Tier 1 token compression path. The selectableProviders list excludes
-        // it, so any stored value falls back to ollama.
+        // foundationModel is NEVER a valid main-task provider — it's only used by AppleIntelligenceMediator for
+        // triage/summary/AX intent and by the Tier 1 token compression path. The selectableProviders list excludes it, so any stored value falls back to ollama.
         return APIProvider.selectableProviders.contains(provider) ? provider : .ollama
     }() {
         didSet {
@@ -686,9 +680,8 @@ final class AgentViewModel {
         Task.detached { [scriptService = self.scriptService] in
             scriptService.ensurePackage()
             scriptService.rebuildAllMetadata()
-            // After ensurePackage, refresh upstream-bundled scripts when Agent! has been
-            // upgraded since the last sync. User-authored scripts are never touched, and
-            // any modified bundled script is backed up to .Trash before replacement.
+            // After ensurePackage, refresh upstream-bundled scripts when Agent! has been upgraded since the last sync.
+            // User-authored scripts are never touched, and any modified bundled script is backed up to .Trash before replacement.
             await scriptService.syncBundledScriptsFromRemote()
             let names = Set(scriptService.listScripts().map { $0.name.lowercased() })
             await MainActor.run { AppleIntelligenceMediator.knownAgentNames = names }

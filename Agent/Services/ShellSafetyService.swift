@@ -1,8 +1,7 @@
 import Foundation
 
-/// Hard local guardrail for shell commands — runs BEFORE every execution surface
-/// and rejects catastrophic commands without dispatching them. Primary defense;
-/// LLM system prompts are backstops, not the enforcement layer.
+/// / Hard local guardrail for shell commands — runs BEFORE every execution surface / and rejects catastrophic commands
+/// without dispatching them. Primary defense; / LLM system prompts are backstops, not the enforcement layer.
 enum ShellSafetyService {
 
     struct Verdict {
@@ -21,14 +20,11 @@ enum ShellSafetyService {
         }
     }
 
-    /// Inspect a shell command and return whether it's safe to dispatch.
-    /// Splits compound commands on shell separators (`;`, `&&`, `||`, `|`,
-    /// newline) and checks each segment independently — so `ls; rm -rf /`
-    /// is blocked even though the first half is harmless.
+    /// / Inspect a shell command and return whether it's safe to dispatch. / Splits compound commands on shell
+    /// separators (`;`, `&&`, `||`, `|`, / newline) and checks each segment independently — so `ls; rm -rf /` / is blocked even though the first half is harmless.
     static func check(_ command: String) -> Verdict {
-        // Whole-command checks (fork bomb relies on `;` and `|` which are
-        // exactly what splitOnShellSeparators tears apart, so it has to run
-        // BEFORE splitting).
+        // Whole-command checks (fork bomb relies on `;` and `|` which are exactly what splitOnShellSeparators tears
+        // apart, so it has to run BEFORE splitting).
         let forkVerdict = checkForkBomb(command)
         if !forkVerdict.allowed { return forkVerdict }
 
@@ -75,11 +71,8 @@ enum ShellSafetyService {
 
     // MARK: - Rule: dangerous rm
 
-    /// Tokenized rm check. We collect every flag (combined like `-rf`,
-    /// separated like `-r -f`, or long-form like `--recursive --force`) and
-    /// every non-flag positional arg, then refuse the command if it has both
-    /// recursive AND force flags AND any positional that resolves to a
-    /// dangerous target.
+    /// / Tokenized rm check. We collect every flag (combined like `-rf`, / separated like `-r -f`, or long-form like
+    /// `--recursive --force`) and / every non-flag positional arg, then refuse the command if it has both / recursive AND force flags AND any positional that resolves to a / dangerous target.
     private static func checkDangerousRm(tokens: [String]) -> Verdict? {
         guard let rmIdx = tokens.firstIndex(of: "rm") else { return nil }
         var hasR = false
@@ -123,9 +116,8 @@ enum ShellSafetyService {
         return nil
     }
 
-    /// Returns a reason string when the path is too broad to ever be a
-    /// reasonable target for `rm -rf`. Returns nil for safe targets so the
-    /// caller can keep checking the rest of the positionals.
+    /// / Returns a reason string when the path is too broad to ever be a / reasonable target for `rm -rf`. Returns nil
+    /// for safe targets so the / caller can keep checking the rest of the positionals.
     private static func dangerousRmTargetReason(_ target: String) -> String? {
         // Strip surrounding quotes the tokenizer left intact.
         var t = target
@@ -274,9 +266,8 @@ enum ShellSafetyService {
 
     // MARK: - Rule: redirect to disk device
 
-    /// Catches `> /dev/disk2` or `cat foo > /dev/sda` even when the rest of
-    /// the command is a different binary. Done as a regex on the raw segment
-    /// because the redirect operator can sit anywhere.
+    /// / Catches `> /dev/disk2` or `cat foo > /dev/sda` even when the rest of / the command is a different binary. Done
+    /// as a regex on the raw segment / because the redirect operator can sit anywhere.
     private static func checkRedirectToDisk(_ command: String) -> Verdict {
         let pattern = #">+\s*/dev/(?:r?disk[0-9]|sd[a-z]|hd[a-z]|nvme[0-9])"#
         if command.range(of: pattern, options: .regularExpression) != nil {

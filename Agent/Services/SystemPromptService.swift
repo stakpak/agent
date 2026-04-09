@@ -2,9 +2,8 @@ import Foundation
 import AgentAudit
 import AgentTools
 
-/// Manages editable system prompt files stored at ~/Documents/AgentScript/system/.
-/// On first access, copies the default prompts from AgentTools to disk.
-/// At runtime, services read the on-disk prompts (with {userName}/{userHome} substitution).
+/// / Manages editable system prompt files stored at ~/Documents/AgentScript/system/. / On first access, copies the
+/// default prompts from AgentTools to disk. / At runtime, services read the on-disk prompts (with {userName}/{userHome} substitution).
 @MainActor
 final class SystemPromptService {
     static let shared = SystemPromptService()
@@ -48,13 +47,8 @@ final class SystemPromptService {
     /// Bump this when system prompt content changes to force re-sync of saved prompts.
     private static let promptRevision = "85"
 
-    /// Anti-hallucination rule appended to every system prompt (full + compact).
-    /// Triggered by an observed real-world failure: the in-app Agent produced a
-    /// confident, structured "gap analysis" of its own codebase right after the
-    /// 10-consecutive-reads guard fired, citing tools and files it had never
-    /// actually read. The lesson: when evidence runs out, models default to
-    /// confabulating polished prose rather than admitting "I don't know yet."
-    /// This rule forbids that move explicitly.
+    /// / Anti-hallucination rule appended to every system prompt (full + compact). / Triggered by an observed
+    /// real-world failure: the in-app Agent produced a / confident, structured "gap analysis" of its own codebase right after the / 10-consecutive-reads guard fired, citing tools and files it had never / actually read. The lesson: when evidence runs out, models default to / confabulating polished prose rather than admitting "I don't know yet." / This rule forbids that move explicitly.
     static let antiHallucinationRules = """
 
     ANTI-HALLUCINATION (HIGHEST PRIORITY — overrides any other rule):
@@ -82,10 +76,8 @@ final class SystemPromptService {
     and report the ambiguity.
     """
 
-    /// Wrap an AgentTools-provided base prompt with the anti-hallucination
-    /// rules. Used by both the on-disk default-prompt seeding and by the local
-    /// endpoint code paths in ClaudeService / OpenAICompatibleService that
-    /// bypass the on-disk path.
+    /// / Wrap an AgentTools-provided base prompt with the anti-hallucination / rules. Used by both the on-disk
+    /// default-prompt seeding and by the local / endpoint code paths in ClaudeService / OpenAICompatibleService that / bypass the on-disk path.
     static func wrapWithRules(_ base: String) -> String {
         return base + "\n" + antiHallucinationRules
     }
@@ -176,9 +168,8 @@ final class SystemPromptService {
         }
         let content = Self.stripVersionLine(template)
         let folder = projectFolder.isEmpty ? userHome : projectFolder
-        // Live shell name from the user's toggle (zsh/bash) — re-reads on every
-        // prompt fetch so flipping the toggle in Options updates the LLM context
-        // on the next iteration without rewriting the template file.
+        // Live shell name from the user's toggle (zsh/bash) — re-reads on every prompt fetch so flipping the toggle in
+        // Options updates the LLM context on the next iteration without rewriting the template file.
         let shellName = (AppConstants.shellPath as NSString).lastPathComponent
         return content
             .replacingOccurrences(of: "{userName}", with: userName)

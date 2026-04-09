@@ -16,11 +16,8 @@ extension AgentViewModel {
         case normal(hasToolUse: Bool, toolResults: [[String: Any]])
     }
 
-    /// Process the tool_use blocks in an LLM streaming response. Extracted
-    /// from the legacy monolithic executeTabTask loop body.
-    ///
-    /// Mutates the per-task tracking state (`commandsRun`, `recentToolCalls`,
-    /// `stuckFiles`, `filesEditedThisTask`) in place.
+    /// / Process the tool_use blocks in an LLM streaming response. Extracted / from the legacy monolithic
+    /// executeTabTask loop body. / / Mutates the per-task tracking state (`commandsRun`, `recentToolCalls`, / `stuckFiles`, `filesEditedThisTask`) in place.
     func processTabResponseContent(
         tab: ScriptTab,
         content: [[String: Any]],
@@ -49,9 +46,8 @@ extension AgentViewModel {
 
                 commandsRun.append(name)
 
-                // Plans are encouraged but never required. Track edited files for
-                // task summary purposes. No mid-stream blocking — the LLM decides
-                // whether to plan up front.
+                // Plans are encouraged but never required. Track edited files for task summary purposes. No mid-stream
+                // blocking — the LLM decides whether to plan up front.
                 let editTools: Set<String> = [
                     "write_file",
                     "edit_file",
@@ -64,10 +60,8 @@ extension AgentViewModel {
                     filesEditedThisTask.insert(filePath)
                 }
 
-                // Loop detection — block only after 20 IDENTICAL read calls
-                // (same file_path AND same offset AND same limit). Different
-                // offset/limit on the same file does NOT count toward the limit;
-                // a write to anything resets the counter for the whole tab.
+                // Loop detection — block only after 20 IDENTICAL read calls (same file_path AND same offset AND same
+                // limit). Different offset/limit on the same file does NOT count toward the limit; a write to anything resets the counter for the whole tab.
                 let isRead = name == "read_file" || (name == "file_manager" && (input["action"] as? String) == "read")
                 let isWrite = name == "write_file" || name == "edit_file"
                     || name == "create_diff" || name == "apply_diff"
@@ -112,9 +106,8 @@ extension AgentViewModel {
 
                 if name == "task_complete" {
                     completionSummary = input["summary"] as? String ?? "Done"
-                    // Show task complete in the LLM Output HUD so the user sees the result.
-                    // Append to rawLLMOutput and let the drip task pick up the new chars
-                    // naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
+                    // Show task complete in the LLM Output HUD so the user sees the result. Append to rawLLMOutput and
+                    // let the drip task pick up the new chars naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
                     let trimmedRaw = tab.rawLLMOutput.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmedRaw.isEmpty {
                         tab.rawLLMOutput = "✅ \(completionSummary)"
@@ -137,9 +130,8 @@ extension AgentViewModel {
                 }
                 if let toolResult = result.toolResult {
                     toolResults.append(toolResult)
-                    // Stuck-file nudge: if this was an edit tool and the result
-                    // looks like a failure, increment the per-file failure count.
-                    // At 3 failures, append an actionable recovery nudge.
+                    // Stuck-file nudge: if this was an edit tool and the result looks like a failure, increment the
+                    // per-file failure count. At 3 failures, append an actionable recovery nudge.
                     appendStuckFileNudgeIfNeeded(
                         tab: tab,
                         name: name,

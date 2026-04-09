@@ -18,11 +18,8 @@ extension AgentViewModel {
     /// Perform web search using the appropriate API based on provider.
     /// This delegates to the implementation in AgentViewModel+WebSearch.swift.
     nonisolated static func performWebSearchForTask(query: String, apiKey: String, provider: APIProvider) async -> String {
-        // Fallback chain — each step tries a more universal backend:
-        // 1. Ollama+key → Ollama Web Search
-        // 2. Z.AI/BigModel+key → Z.AI search-prime
-        // 3. Tavily key → Tavily
-        // 4. DuckDuckGo HTML scrape (no key, always available)
+        // Fallback chain — each step tries a more universal backend: 1. Ollama+key → Ollama Web Search 2.
+        // Z.AI/BigModel+key → Z.AI search-prime 3. Tavily key → Tavily 4. DuckDuckGo HTML scrape (no key, always available)
         if provider == .ollama || provider == .localOllama {
             if let ollamaKey = KeychainService.shared.getOllamaAPIKey(), !ollamaKey.isEmpty {
                 let ollamaResult = await performOllamaWebSearchInternal(query: query, apiKey: ollamaKey)
@@ -31,9 +28,8 @@ extension AgentViewModel {
                 }
             }
         }
-        // Z.AI / BigModel providers: try native web_search API first. Returns
-        // structured results like Tavily. Not all accounts include it, so fall
-        // through on error.
+        // Z.AI / BigModel providers: try native web_search API first. Returns structured results like Tavily. Not all
+        // accounts include it, so fall through on error.
         if provider == .zAI || provider == .bigModel {
             if let zKey = KeychainService.shared.getZAIAPIKey(), !zKey.isEmpty {
                 let zResult = await performZAIWebSearchInternal(query: query, apiKey: zKey)
@@ -161,11 +157,8 @@ extension AgentViewModel {
         }
     }
 
-    /// Parse the HTML result page returned by html.duckduckgo.com. Each
-    /// result row exposes a `result__a` anchor for the title+URL and a
-    /// `result__snippet` element for the description. The href is wrapped
-    /// in DDG's click-tracker (`/l/?uddg=ENCODED_URL`) so we extract and
-    /// decode the `uddg` query parameter to get the real destination.
+    /// / Parse the HTML result page returned by html.duckduckgo.com. Each / result row exposes a `result__a` anchor for
+    /// the title+URL and a / `result__snippet` element for the description. The href is wrapped / in DDG's click-tracker (`/l/?uddg=ENCODED_URL`) so we extract and / decode the `uddg` query parameter to get the real destination.
     nonisolated private static func parseDuckDuckGoHTML(_ html: String, limit: Int) -> [(title: String, url: String, snippet: String)] {
         // Match: <a class="result__a" href="HREF" ... >TITLE</a>
         let titlePattern = #"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#
@@ -201,9 +194,8 @@ extension AgentViewModel {
         return results
     }
 
-    /// DDG wraps every outbound link in `/l/?uddg=ENCODED_REAL_URL&rut=...`.
-    /// Pull the `uddg` parameter and percent-decode it to recover the real
-    /// destination. Falls back to the raw href if there's no `uddg` param.
+    /// / DDG wraps every outbound link in `/l/?uddg=ENCODED_REAL_URL&rut=...`. / Pull the `uddg` parameter and
+    /// percent-decode it to recover the real / destination. Falls back to the raw href if there's no `uddg` param.
     nonisolated private static func decodeDuckDuckGoHref(_ href: String) -> String {
         let normalized = href.hasPrefix("//") ? "https:" + href : href
         guard let comps = URLComponents(string: normalized) else { return href }
@@ -213,9 +205,8 @@ extension AgentViewModel {
         return normalized
     }
 
-    /// Lightweight HTML tag stripper for DDG result text. Result rows
-    /// contain `<b>` highlighting and stray entities — strip the markup
-    /// and decode the common entities so the LLM gets clean text.
+    /// / Lightweight HTML tag stripper for DDG result text. Result rows / contain `<b>` highlighting and stray entities
+    /// — strip the markup / and decode the common entities so the LLM gets clean text.
     nonisolated private static func stripHTMLTags(_ s: String) -> String {
         var out = s.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
         out = out

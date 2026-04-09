@@ -10,22 +10,16 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Result of parsing a single LLM response turn's content blocks.
-    /// - `taskCompleted`: the LLM issued a `task_complete` tool call; caller
-    ///   should `return` immediately from executeTask (all completion side
-    ///   effects — history, chat store, reply — have already been performed).
-    /// - `continueProcessing`: caller should continue with tool batch dispatch.
+    /// / Result of parsing a single LLM response turn's content blocks. / - `taskCompleted`: the LLM issued a
+    /// `task_complete` tool call; caller / should `return` immediately from executeTask (all completion side / effects — history, chat store, reply — have already been performed). / - `continueProcessing`: caller should continue with tool batch dispatch.
     struct ResponseParseResult {
         var hasToolUse: Bool
         var pendingTools: [(toolId: String, name: String, input: [String: Any])]
         var taskCompleted: Bool
     }
 
-    /// Walks the LLM response content blocks, logging server-side web search
-    /// activity, collecting tool_use calls into `pendingTools`, and handling
-    /// the terminal `task_complete` tool call inline (history, reply, etc.).
-    /// Mirrors the original inline `for block in response.content` loop exactly.
-    /// Mutates `filesEditedThisTask` and `completionSummary` inout.
+    /// / Walks the LLM response content blocks, logging server-side web search / activity, collecting tool_use calls
+    /// into `pendingTools`, and handling / the terminal `task_complete` tool call inline (history, reply, etc.). / Mirrors the original inline `for block in response.content` loop exactly. / Mutates `filesEditedThisTask` and `completionSummary` inout.
     func parseLLMResponseContent(
         _ responseContent: [[String: Any]],
         prompt: String,
@@ -73,9 +67,8 @@ extension AgentViewModel {
                 // Expand consolidated CRUDL tools into legacy tool names
                 (name, input) = Self.expandConsolidatedTool(name: name, input: input)
 
-                // Plans are encouraged but never required. Track edited files for
-                // task summary purposes. No mid-stream blocking — the LLM decides
-                // whether to plan up front.
+                // Plans are encouraged but never required. Track edited files for task summary purposes. No mid-stream
+                // blocking — the LLM decides whether to plan up front.
                 let editTools: Set<String> = [
                     "write_file",
                     "edit_file",
@@ -96,9 +89,8 @@ extension AgentViewModel {
                         if !lastText.isEmpty { summary = String(lastText.prefix(300)) }
                     }
                     completionSummary = summary
-                    // Show task complete in the LLM Output HUD so the user sees the result.
-                    // Append to rawLLMOutput and let the drip task pick up the new chars
-                    // naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
+                    // Show task complete in the LLM Output HUD so the user sees the result. Append to rawLLMOutput and
+                    // let the drip task pick up the new chars naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
                     let trimmedRaw = rawLLMOutput.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmedRaw.isEmpty {
                         rawLLMOutput = "✅ \(summary)"
@@ -145,10 +137,8 @@ extension AgentViewModel {
         return ResponseParseResult(hasToolUse: hasToolUse, pendingTools: pendingTools, taskCompleted: false)
     }
 
-    /// Post-tool-dispatch handling: append the assistant turn to the
-    /// conversation, append tool results on the user turn, and detect whether
-    /// the model implicitly signaled completion via free-text. Returns `true`
-    /// if the outer task loop should `break`.
+    /// / Post-tool-dispatch handling: append the assistant turn to the / conversation, append tool results on the user
+    /// turn, and detect whether / the model implicitly signaled completion via free-text. Returns `true` / if the outer task loop should `break`.
     func finalizeTurnAndDetectCompletion(
         responseContent: [[String: Any]],
         hasToolUse: Bool,

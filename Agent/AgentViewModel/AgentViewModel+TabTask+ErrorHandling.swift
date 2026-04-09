@@ -8,26 +8,20 @@ import AgentLLM
 
 extension AgentViewModel {
 
-    /// Action the caller should take in response to a thrown error during the
-    /// tab task LLM loop. Mirrors the `continue`/`break`/fallback behavior of
-    /// the legacy monolithic executeTabTask catch block.
+    /// / Action the caller should take in response to a thrown error during the / tab task LLM loop. Mirrors the
+    /// `continue`/`break`/fallback behavior of / the legacy monolithic executeTabTask catch block.
     enum TabTaskErrorAction {
         /// Retry the current iteration (equivalent to `continue`)
         case retry
         /// Give up and exit the LLM loop (equivalent to `break`)
         case giveUp
-        /// Fallback chain recorded a failure; caller should reset
-        /// timeoutRetryCount and continue. If a provider/model pair is
-        /// attached, the caller should also swap providers and rebuild
-        /// services, then log "Now using ...". Mirrors the legacy behavior
-        /// where a fallback-record reset+continue even when the provider
-        /// raw value failed to decode.
+        /// / Fallback chain recorded a failure; caller should reset / timeoutRetryCount and continue. If a
+        /// provider/model pair is / attached, the caller should also swap providers and rebuild / services, then log "Now using ...". Mirrors the legacy behavior / where a fallback-record reset+continue even when the provider / raw value failed to decode.
         case fallback(APIProvider?, String?)
     }
 
-    /// Handle an error thrown from the streaming LLM call. Applies the same
-    /// timeout/rate-limit/network/fallback logic the legacy executeTabTask
-    /// catch block used.
+    /// / Handle an error thrown from the streaming LLM call. Applies the same / timeout/rate-limit/network/fallback
+    /// logic the legacy executeTabTask / catch block used.
     func handleTabTaskError(
         tab: ScriptTab,
         error: Error,
@@ -151,12 +145,8 @@ extension AgentViewModel {
                 return .giveUp
             }
         } else if let agentErr = error as? AgentError, agentErr.isRateLimited, timeoutRetryCount < maxTimeoutRetries {
-            // 429 rate-limit / "service overloaded" — exponential
-            // backoff up to 60s, matching the main task loop in
-            // AgentViewModel+TaskExecution.swift. Z.ai returns this
-            // with body code 1305 ("service may be temporarily
-            // overloaded"); the previous one-shot 30s retry gave
-            // up too quickly when the service stayed congested.
+            // 429 rate-limit / "service overloaded" — exponential backoff up to 60s, matching the main task loop in
+            // AgentViewModel+TaskExecution.swift. Z.ai returns this with body code 1305 ("service may be temporarily overloaded"); the previous one-shot 30s retry gave up too quickly when the service stayed congested.
             timeoutRetryCount += 1
             let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
             tab.appendLog(
@@ -218,14 +208,12 @@ extension AgentViewModel {
                 tab.appendLog("🔄 Switching to fallback: \(fallback.displayName)")
                 tab.flush()
                 if let fbProvider = APIProvider(rawValue: fallback.provider) {
-                    // Caller is responsible for rebuilding services, resetting
-                    // timeoutRetryCount, and logging "Now using ..." AFTER the
-                    // rebuild — matches the legacy executeTabTask order.
+                    // Caller is responsible for rebuilding services, resetting timeoutRetryCount, and logging "Now
+                    // using ..." AFTER the rebuild — matches the legacy executeTabTask order.
                     return .fallback(fbProvider, fallback.model)
                 }
-                // Fallback was recorded but the provider raw value failed to
-                // decode. Legacy behavior still reset the counter and did a
-                // `continue` in this case — preserve that.
+                // Fallback was recorded but the provider raw value failed to decode. Legacy behavior still reset the
+                // counter and did a `continue` in this case — preserve that.
                 return .fallback(nil, nil)
             }
             // Non-recoverable error — don't retry (400 bad request, auth errors, etc.)

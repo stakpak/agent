@@ -3,9 +3,8 @@ import Foundation
 extension CodingService {
     // MARK: - Split File
 
-    /// Split a Swift file into separate files.
-    /// Modes: "declarations" (default) splits by top-level types/extensions.
-    ///        "handlers" extracts `if name == "..."` tool handler blocks into separate functions.
+    /// / Split a Swift file into separate files. / Modes: "declarations" (default) splits by top-level
+    /// types/extensions. / "handlers" extracts `if name == "..."` tool handler blocks into separate functions.
     static func splitFile(path: String, mode: String = "declarations") -> String {
         let expanded = (path as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
@@ -288,9 +287,8 @@ extension CodingService {
         return clean.isEmpty ? "Part" : clean
     }
 
-    /// Split the children of an extension/class into separate declarations.
-    /// Each child func/enum/struct/class/var block at brace depth 1 becomes its own
-    /// extension file with the parent wrapper preserved.
+    /// / Split the children of an extension/class into separate declarations. / Each child func/enum/struct/class/var
+    /// block at brace depth 1 becomes its own / extension file with the parent wrapper preserved.
     private static func splitExtensionChildren(lines: [String], extensionHeader: String) -> [(
         name: String,
         startLine: Int,
@@ -448,9 +446,8 @@ extension CodingService {
 
     // MARK: - Split Tool Handlers
 
-    /// Extract `if name == "tool_name" { ... }` blocks from a large function
-    /// into separate `handle_toolName()` functions, and replace the original
-    /// if-blocks with calls to the new functions.
+    /// / Extract `if name == "tool_name" { ... }` blocks from a large function / into separate `handle_toolName()`
+    /// functions, and replace the original / if-blocks with calls to the new functions.
     private static func splitToolHandlers(source: String, path: String) -> String {
         let lines = source.components(separatedBy: "\n")
         let baseName = (path as NSString).lastPathComponent.replacingOccurrences(of: ".swift", with: "")

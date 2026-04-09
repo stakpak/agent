@@ -1,9 +1,4 @@
-//
-//  AgentViewModel+MessageTypes.swift
-//  Agent
-//
-//  Extracted types for Messages monitoring functionality
-//
+//  AgentViewModel+MessageTypes.swift Agent  Extracted types for Messages monitoring functionality 
 
 import Foundation
 

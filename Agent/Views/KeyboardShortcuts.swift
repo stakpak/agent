@@ -1,9 +1,4 @@
-//
-//  KeyboardShortcuts.swift
-//  Agent
-//
-//  Keyboard shortcut handlers for ContentView
-//
+//  KeyboardShortcuts.swift Agent  Keyboard shortcut handlers for ContentView 
 
 import Foundation
 

@@ -2,9 +2,8 @@ import AgentLLM
 import FoundationModels
 import Foundation
 
-/// On-device language model provider using Apple's Foundation Models framework.
-/// Text-only conversation mode — no tool execution. Main LLM handles all tools.
-/// Requires macOS 26.0+ with Apple Intelligence enabled.
+/// / On-device language model provider using Apple's Foundation Models framework. / Text-only conversation mode — no
+/// tool execution. Main LLM handles all tools. / Requires macOS 26.0+ with Apple Intelligence enabled.
 @MainActor
 final class FoundationModelService {
     let historyContext: String

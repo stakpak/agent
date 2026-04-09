@@ -23,9 +23,8 @@ struct ThinkingIndicatorView: View {
             else { viewModel.thinkingOutputExpanded = newValue }
         }
     }
-    /// Live LLM Output HUD height — synced from/to the tab (or main viewModel) on appear and on change.
-    /// Using @State here keeps the Binding identity stable across renders, which avoids drip
-    /// stuttering caused by closure-based bindings creating new identities each frame.
+    /// / Live LLM Output HUD height — synced from/to the tab (or main viewModel) on appear and on change. / Using
+    /// @State here keeps the Binding identity stable across renders, which avoids drip / stuttering caused by closure-based bindings creating new identities each frame.
     @State private var outputHeight: CGFloat = 80
     @State private var dots = ""
     @State private var tick = 0
@@ -350,9 +349,8 @@ struct ThinkingIndicatorView: View {
             else { viewModel.llmOutputHeight = Double(newHeight) }
         }
         .onChange(of: tab?.isLLMRunning) { oldValue, newValue in
-            // Only fire on actual transitions, not tab swaps. The auto-expand of the
-            // chevron + dismiss is handled at the run-start sites in executeTabTask
-            // so it doesn't get applied to the wrong tab during a swap.
+            // Only fire on actual transitions, not tab swaps. The auto-expand of the chevron + dismiss is handled at
+            // the run-start sites in executeTabTask so it doesn't get applied to the wrong tab during a swap.
             guard let tab, oldValue != newValue else { return }
             if newValue == true {
                 tab.taskStartDate = Date()
@@ -560,10 +558,8 @@ private struct LLMOutputBox: View {
         return result
     }
 
-    /// Maximum height: leave room for header, status bar, and input area.
-    /// IMPORTANT: keyWindow/mainWindow return nil when the app deactivates — must
-    /// fall back to our own visible window, NOT NSScreen, otherwise the cap balloons
-    /// to screen size and the view fills the entire window on focus loss.
+    /// / Maximum height: leave room for header, status bar, and input area. / IMPORTANT: keyWindow/mainWindow return
+    /// nil when the app deactivates — must / fall back to our own visible window, NOT NSScreen, otherwise the cap balloons / to screen size and the view fills the entire window on focus loss.
     private var maxHeight: CGFloat {
         let windowH = NSApp.keyWindow?.frame.height
             ?? NSApp.mainWindow?.frame.height
@@ -708,13 +704,8 @@ private struct ContentHeightKey: PreferenceKey {
 
 // MARK: - Tool Steps View
 
-/// Collapsible list of tool invocations for the current task.
-///
-/// `isExpanded` is a Binding (not local @State) so the disclosure state
-/// survives the view being torn down and rebuilt — which happens whenever
-/// the user toggles the LLM HUD with Cmd+B, switches tabs, or when steps
-/// transition from empty → non-empty between LLM iterations. Without this,
-/// every newly arriving step would collapse the list.
+/// / Collapsible list of tool invocations for the current task. / / `isExpanded` is a Binding (not local @State) so the
+/// disclosure state / survives the view being torn down and rebuilt — which happens whenever / the user toggles the LLM HUD with Cmd+B, switches tabs, or when steps / transition from empty → non-empty between LLM iterations. Without this, / every newly arriving step would collapse the list.
 struct ToolStepsView: View {
     let steps: [AgentViewModel.ToolStep]
     @Binding var isExpanded: Bool

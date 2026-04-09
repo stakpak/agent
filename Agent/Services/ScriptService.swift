@@ -234,10 +234,8 @@ final class ScriptService: @unchecked Sendable {
         }
     }
 
-      // MARK: - Git clone
-      // AgentScripts (→ ~/Documents/AgentScript/agents/Sources/) and
-      // AgentEventBridges (→ ~/Documents/AgentScript/bridges/Sources/)
-      // are cloned from their GitHub repos on first use, not bundled at build.
+      // MARK: - Git clone AgentScripts (→ ~/Documents/AgentScript/agents/Sources/) and AgentEventBridges (→
+      // ~/Documents/AgentScript/bridges/Sources/) are cloned from their GitHub repos on first use, not bundled at build.
 
     /// Clone AgentScripts repo to ~/Documents/AgentScript/agents/
     private func cloneScriptsRepo() {

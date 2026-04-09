@@ -1,9 +1,4 @@
-//
-//  TaskExecution+Selenium.swift
-//  Agent
-//
-//  Selenium WebDriver tool handlers for TaskExecution
-//
+//  TaskExecution+Selenium.swift Agent  Selenium WebDriver tool handlers for TaskExecution 
 
 import Foundation
 

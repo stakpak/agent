@@ -1,9 +1,4 @@
-//
-//  SearchBarView.swift
-//  Agent
-//
-//  Extracted from ContentView.swift
-//
+//  SearchBarView.swift Agent  Extracted from ContentView.swift 
 
 import SwiftUI
 

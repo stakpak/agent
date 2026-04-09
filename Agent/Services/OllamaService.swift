@@ -781,10 +781,8 @@ final class OllamaService {
         return earliest
     }
 
-    /// Parse DeepSeek-style tool calls from text using special token markers.
-    /// V3.1 format: <｜tool▁call▁begin｜>function_name<｜tool▁sep｜>{"arg":"val"}<｜tool▁call▁end｜>
-    /// Also handles: <｜tool▁call▁begin｜>{"name":"...","parameters":{...}}<｜tool▁call▁end｜>
-    /// Unicode variants with fullwidth ｜ and half-width | are both supported.
+    /// / Parse DeepSeek-style tool calls from text using special token markers. / V3.1 format:
+    /// <｜tool▁call▁begin｜>function_name<｜tool▁sep｜>{"arg":"val"}<｜tool▁call▁end｜> / Also handles: <｜tool▁call▁begin｜>{"name":"...","parameters":{...}}<｜tool▁call▁end｜> / Unicode variants with fullwidth ｜ and half-width | are both supported.
     nonisolated static func extractDeepSeekToolCalls(from text: String) -> [(name: String, input: [String: Any])]? {
         // Normalize: DeepSeek uses fullwidth ｜ (U+FF5C) and ▁ (U+2581) in tokens
         let normalized = text
@@ -841,11 +839,8 @@ final class OllamaService {
         return results.isEmpty ? nil : results
     }
 
-    /// Parse DeepSeek V3.2 DSML-style tool calls from text.
-    /// V3.2 emits: <｜DSML｜function_calls><｜DSML｜invoke name="tool">
-    ///   <｜DSML｜parameter name="key" string="true">value</｜DSML｜parameter>
-    /// </｜DSML｜invoke></｜DSML｜function_calls>
-    /// Ollama strips the ｜DSML｜ tokens, leaving plain XML-like tags.
+    /// / Parse DeepSeek V3.2 DSML-style tool calls from text. / V3.2 emits: <｜DSML｜function_calls><｜DSML｜invoke
+    /// name="tool"> / <｜DSML｜parameter name="key" string="true">value</｜DSML｜parameter> / </｜DSML｜invoke></｜DSML｜function_calls> / Ollama strips the ｜DSML｜ tokens, leaving plain XML-like tags.
     nonisolated static func extractDSMLToolCalls(from text: String) -> [(name: String, input: [String: Any])]? {
         // Strip any remaining DSML tokens
         let cleaned = text

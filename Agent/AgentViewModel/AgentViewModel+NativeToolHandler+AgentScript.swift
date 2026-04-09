@@ -27,16 +27,13 @@ extension AgentViewModel {
                 return "Error: script '\(scriptName)' not found. Recovery: call agent_script(action:\"list\") to see available scripts, or agent_script(action:\"pull\", name:\"\(scriptName)\") if you expected an upstream script."
             }
 
-            // Dedup: close any existing background tab for this script before
-            // spawning a fresh one. Matches the user-direct runAgentDirect
-            // behavior — repeated runs replace rather than pile up duplicate
-            // tabs with the same scriptName. Skip main tabs.
+            // Dedup: close any existing background tab for this script before spawning a fresh one. Matches the
+            // user-direct runAgentDirect behavior — repeated runs replace rather than pile up duplicate tabs with the same scriptName. Skip main tabs.
             if let existing = scriptTabs.first(where: { $0.scriptName == scriptName && !$0.isMainTab }) {
                 closeScriptTab(id: existing.id)
             }
-            // Spawn a fresh ScriptTab so the calling main task is not blocked.
-            // The script runs in a detached Task and streams output to the
-            // spawned tab; this handler returns immediately.
+            // Spawn a fresh ScriptTab so the calling main task is not blocked. The script runs in a detached Task and
+            // streams output to the spawned tab; this handler returns immediately.
             let spawnedTab = openScriptTab(scriptName: scriptName, selectTab: false)
             spawnedTab.projectFolder = projectFolder
             spawnedTab.isRunning = true
@@ -48,9 +45,8 @@ extension AgentViewModel {
             Task { [weak self, weak spawnedTab] in
                 guard let self, let spawnedTab else { return }
 
-                // Compile only if needed. MUST run via executeTCC (in-process)
-                // so swift build inherits the main app's TCC grants for
-                // ~/Documents access.
+                // Compile only if needed. MUST run via executeTCC (in-process) so swift build inherits the main app's
+                // TCC grants for ~/Documents access.
                 if await Self.offMain({ [ss = self.scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
                     await MainActor.run {
                         spawnedTab.appendLog("🦾 Compiling: \(scriptName)")

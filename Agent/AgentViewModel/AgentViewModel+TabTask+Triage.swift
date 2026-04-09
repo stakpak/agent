@@ -12,11 +12,8 @@ import AgentD1F
 
 extension AgentViewModel {
 
-    /// Outcome of pre-LLM triage for a tab task. When `.passThrough` the caller
-    /// should fall through to the cloud LLM loop; when `.done` the task has
-    /// already been handled and the caller should return immediately. When
-    /// `.llmWithContext` the caller should pass the provided context string
-    /// through to the LLM as an additional user message.
+    /// / Outcome of pre-LLM triage for a tab task. When `.passThrough` the caller / should fall through to the cloud
+    /// LLM loop; when `.done` the task has / already been handled and the caller should return immediately. When / `.llmWithContext` the caller should pass the provided context string / through to the LLM as an additional user message.
     enum TabTaskTriageOutcome {
         case done
         case passThrough
@@ -30,22 +27,16 @@ extension AgentViewModel {
         prompt: String,
         completionSummary: inout String
     ) async -> TabTaskTriageOutcome {
-        // Triage: direct commands, Apple AI conversation, accessibility agent,
-        // or pass through to LLM. The axDispatch closure routes Apple AI's
-        // tool calls through the same executeNativeTool path the cloud LLM
-        // uses. If Apple AI fails, is unavailable, or doesn't call the tool,
-        // runAccessibilityAgent returns nil → triage returns .passThrough →
-        // we fall through to the cloud LLM loop below.
+        // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM. The axDispatch
+        // closure routes Apple AI's tool calls through the same executeNativeTool path the cloud LLM uses. If Apple AI fails, is unavailable, or doesn't call the tool, runAccessibilityAgent returns nil → triage returns .passThrough → we fall through to the cloud LLM loop below.
         let mediator = AppleIntelligenceMediator.shared
         let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
             guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            // SDEF catalog is the canonical source — see TaskExecution.swift
-            // for the full rationale. Falls through to the runtime
-            // NSRunningApplications scan in handleAccessibilityAction for
-            // apps not in the SDEF list (Photo Booth, etc.).
+            // SDEF catalog is the canonical source — see TaskExecution.swift for the full rationale. Falls through to
+            // the runtime NSRunningApplications scan in handleAccessibilityAction for apps not in the SDEF list (Photo Booth, etc.).
             if let rawApp = args.app {
                 let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
                 input["appBundleId"] = resolved
@@ -159,9 +150,8 @@ extension AgentViewModel {
             tab.isLLMThinking = false
             return .done
         case .accessibilityHandled(let summary):
-            // Apple AI ran accessibility tool(s) and produced a summary.
-            // Tool calls went through axDispatch → executeNativeTool (already logged).
-            // If Apple AI never called the tool or any call failed, we get nil → .passThrough → cloud LLM.
+            // Apple AI ran accessibility tool(s) and produced a summary. Tool calls went through axDispatch →
+            // executeNativeTool (already logged). If Apple AI never called the tool or any call failed, we get nil → .passThrough → cloud LLM.
             tab.rawLLMOutput = summary
             tab.displayedLLMOutput = summary
             tab.dripDisplayIndex = summary.count

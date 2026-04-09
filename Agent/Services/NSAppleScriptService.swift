@@ -1,9 +1,8 @@
 import AgentAudit
 import Foundation
 
-/// Executes AppleScript code in-process via NSAppleScript.
-/// Runs in the Agent app process, inheriting ALL TCC grants (Automation, Accessibility, ScreenRecording).
-/// Use SDEFService to look up correct terminology before building scripts.
+/// / Executes AppleScript code in-process via NSAppleScript. / Runs in the Agent app process, inheriting ALL TCC grants
+/// (Automation, Accessibility, ScreenRecording). / Use SDEFService to look up correct terminology before building scripts.
 final class NSAppleScriptService: @unchecked Sendable {
     static let shared = NSAppleScriptService()
 

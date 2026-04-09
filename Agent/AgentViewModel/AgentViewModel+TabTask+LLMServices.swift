@@ -9,9 +9,8 @@ import AgentLLM
 
 extension AgentViewModel {
 
-    /// Container for the LLM service instances used by a tab task run.
-    /// Only one of claude/openAICompatible/ollama/foundationModel is non-nil
-    /// at a time (matching the legacy if-else chain in executeTabTask).
+    /// / Container for the LLM service instances used by a tab task run. / Only one of
+    /// claude/openAICompatible/ollama/foundationModel is non-nil / at a time (matching the legacy if-else chain in executeTabTask).
     struct TabLLMServices {
         var claude: ClaudeService?
         var openAICompatible: OpenAICompatibleService?
@@ -19,9 +18,8 @@ extension AgentViewModel {
         var foundationModel: FoundationModelService?
     }
 
-    /// Build the tab's system history context string used as the LLM's
-    /// history context argument. Mirrors the inline block in the legacy
-    /// monolithic executeTabTask.
+    /// / Build the tab's system history context string used as the LLM's / history context argument. Mirrors the inline
+    /// block in the legacy / monolithic executeTabTask.
     func buildTabHistoryContext(tab: ScriptTab) -> String {
         // Build tab context from the existing log (cap at 8K characters)
         let tabContext = String(tab.activityLog.suffix(8000))
@@ -64,9 +62,8 @@ extension AgentViewModel {
         """
     }
 
-    /// Build the initial message list for a tab task run. Applies the
-    /// assistant-trailing strip, optional direct command context injection,
-    /// and attached image handling.
+    /// / Build the initial message list for a tab task run. Applies the / assistant-trailing strip, optional direct
+    /// command context injection, / and attached image handling.
     func buildTabInitialMessages(
         tab: ScriptTab,
         prompt: String,
@@ -76,9 +73,8 @@ extension AgentViewModel {
         // Build on existing conversation or start fresh
         var messages: [[String: Any]] = tab.llmMessages
 
-        // Remove trailing assistant messages — Ollama requires the last message
-        // to be user or tool role. Strip any assistant messages at the end
-        // (orphaned tool calls or plain text from a previous session/restart).
+        // Remove trailing assistant messages — Ollama requires the last message to be user or tool role. Strip any
+        // assistant messages at the end (orphaned tool calls or plain text from a previous session/restart).
         while let last = messages.last, last["role"] as? String == "assistant" {
             messages.removeLast()
         }
@@ -123,9 +119,8 @@ extension AgentViewModel {
         return messages
     }
 
-    /// Build LLM service instances for the given provider/model. Called at task
-    /// start and again when the fallback chain swaps providers mid-task.
-    /// Mirrors the legacy `buildLLMServices` nested closure.
+    /// / Build LLM service instances for the given provider/model. Called at task / start and again when the fallback
+    /// chain swaps providers mid-task. / Mirrors the legacy `buildLLMServices` nested closure.
     func buildTabLLMServices(
         provider: APIProvider,
         modelId: String,

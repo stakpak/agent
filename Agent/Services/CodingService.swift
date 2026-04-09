@@ -160,9 +160,8 @@ enum CodingService {
 
     // MARK: - Edit File (d1f-powered string replacement)
 
-    /// Replace exact text in a file with d1f-verified diff/apply pipeline:
-    /// read → locate match (exact → fuzzy → context) → compute replacement →
-    /// build d1f diff → verify round-trip → write → return .ai preview.
+    /// / Replace exact text in a file with d1f-verified diff/apply pipeline: / read → locate match (exact → fuzzy →
+    /// context) → compute replacement → / build d1f diff → verify round-trip → write → return .ai preview.
     static func editFile(path: String, oldString: String, newString: String, replaceAll: Bool, context: String? = nil) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
@@ -198,10 +197,8 @@ enum CodingService {
                 matchRange = range
                 matchNote = " (fuzzy whitespace match)"
             } else {
-                // Build a recovery message that INCLUDES the current file content
-                // around where the model probably tried to edit. The model now has
-                // fresh content in the same response and can self-correct without
-                // an extra read round-trip.
+                // Build a recovery message that INCLUDES the current file content around where the model probably tried
+                // to edit. The model now has fresh content in the same response and can self-correct without an extra read round-trip.
                 let trimmed = needle.trimmingCharacters(in: .whitespacesAndNewlines)
                 let firstLine = needle.components(separatedBy: "\n")
                     .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
@@ -270,11 +267,8 @@ enum CodingService {
             return "Error: internal — no match range computed for non-replaceAll edit"
         }
 
-        // 3a. No-op detection: if the substring replacement produced identical
-        //     content, the edit is a no-op. This catches the case where the LLM
-        //     thinks it's fixing something but old_string and new_string are
-        //     equivalent after fuzzy matching, OR the matched range already
-        //     contains the target text. Don't touch disk and tell the LLM clearly.
+        // 3a. No-op detection: if the substring replacement produced identical content, the edit is a no-op. This
+        // catches the case where the LLM thinks it's fixing something but old_string and new_string are equivalent after fuzzy matching, OR the matched range already contains the target text. Don't touch disk and tell the LLM clearly.
         if updated == original {
             return
                 "Warning: edit is a no-op — applying old_string→new_string "
@@ -294,9 +288,8 @@ enum CodingService {
             includeMetadata: true
         )
 
-        // 5. Round-trip the diff through applyDiff to confirm it produces exactly
-        //    what we computed via direct substring replacement. Catches any
-        //    diff-library edge cases before we touch disk.
+        // 5. Round-trip the diff through applyDiff to confirm it produces exactly what we computed via direct substring
+        // replacement. Catches any diff-library edge cases before we touch disk.
         let applied: String
         do {
             applied = try MultiLineDiff.applyDiff(to: original, diff: diff)
@@ -333,12 +326,8 @@ enum CodingService {
         return result
     }
 
-    /// Fuzzy line-by-line match with multiple normalization passes.
-    /// Pass 1: tabs→spaces + strip trailing whitespace.
-    /// Pass 2: trim all leading/trailing whitespace per line (catches indentation mismatches).
-    /// Also strips leading/trailing blank lines from target before matching.
-    /// Edit failure recovery: anchors on firstLine of old_string, falls back to
-    /// trimmed match, falls back to file head. Returns ~10 lines max.
+    /// / Fuzzy line-by-line match with multiple normalization passes. / Pass 1: tabs→spaces + strip trailing
+    /// whitespace. / Pass 2: trim all leading/trailing whitespace per line (catches indentation mismatches). / Also strips leading/trailing blank lines from target before matching. / Edit failure recovery: anchors on firstLine of old_string, falls back to / trimmed match, falls back to file head. Returns ~10 lines max.
     static func findEditFailureContext(in content: String, firstLine: String?, trimmedNeedle: String) -> String {
         let lines = content.components(separatedBy: "\n")
         let contextLines = 10

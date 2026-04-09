@@ -121,10 +121,8 @@ extension AgentViewModel {
         return protected.contains { expanded.hasPrefix(home + $0) }
     }
 
-    /// Normalize a workingDirectory to an actual directory path. If the caller
-    /// accidentally passed a file path (e.g. project_folder set to a `.swift`
-    /// file by mistake), strip the filename so Process() / XPC don't crash with
-    /// "Not a directory" when they try to chdir into it. Empty stays empty.
+    /// / Normalize a workingDirectory to an actual directory path. If the caller / accidentally passed a file path
+    /// (e.g. project_folder set to a `.swift` / file by mistake), strip the filename so Process() / XPC don't crash with / "Not a directory" when they try to chdir into it. Empty stays empty.
     nonisolated static func normalizeWorkingDirectory(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
         var isDir: ObjCBool = false
@@ -138,11 +136,8 @@ extension AgentViewModel {
     /// (Automation, Accessibility, ScreenRecording).
     nonisolated static func executeTCC(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
         let workingDirectory = normalizeWorkingDirectory(workingDirectory)
-        // Hard local guardrail — refuses catastrophic commands like
-        // `rm -rf /` BEFORE the Process is even constructed. The verdict
-        // string is shaped to be informative to the LLM, so it understands
-        // why the command was rejected and can pick a narrower target on
-        // the retry instead of looping the same broken request.
+        // Hard local guardrail — refuses catastrophic commands like `rm -rf /` BEFORE the Process is even constructed.
+        // The verdict string is shaped to be informative to the LLM, so it understands why the command was rejected and can pick a narrower target on the retry instead of looping the same broken request.
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.shell, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -160,9 +155,8 @@ extension AgentViewModel {
 
                 var env = ProcessInfo.processInfo.environment
                 env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
-                // Export the project folder so shell commands can read $AGENT_PROJECT_FOLDER
-                // the same way agent scripts do. Falls back to $HOME when no working dir
-                // is provided so the var is ALWAYS defined.
+                // Export the project folder so shell commands can read $AGENT_PROJECT_FOLDER the same way agent scripts
+                // do. Falls back to $HOME when no working dir is provided so the var is ALWAYS defined.
                 env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
                     ? FileManager.default.homeDirectoryForCurrentUser.path
                     : workingDirectory
@@ -275,9 +269,8 @@ extension AgentViewModel {
         command.contains("osascript") || command.contains("/usr/bin/osascript")
     }
 
-    /// Returns true if the command needs TCC permissions (must run in-process).
-    /// The Launch Agent and Daemon are separate processes with separate bundle IDs
-    /// and typically NO TCC grants. Add new keywords for any TCC-touching binary.
+    /// / Returns true if the command needs TCC permissions (must run in-process). / The Launch Agent and Daemon are
+    /// separate processes with separate bundle IDs / and typically NO TCC grants. Add new keywords for any TCC-touching binary.
     nonisolated static func needsTCCPermissions(_ command: String) -> Bool {
         let lower = command.lowercased()
         return lower.contains("osascript")           // AppleScript / JXA CLI

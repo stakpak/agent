@@ -21,9 +21,8 @@ struct FallbackEntry: Codable, Identifiable {
     }
 }
 
-/// Manages a user-configured fallback chain for overnight unattended runs.
-/// When the primary provider/model fails N times, automatically switches to the next.
-/// Persisted to UserDefaults.
+/// / Manages a user-configured fallback chain for overnight unattended runs. / When the primary provider/model fails N
+/// times, automatically switches to the next. / Persisted to UserDefaults.
 @MainActor
 @Observable
 final class FallbackChainService {
@@ -83,10 +82,8 @@ final class FallbackChainService {
 
     // MARK: - Fallback Logic
 
-    /// Record a successful API call — resets failure count AND chain position so the
-    /// next call goes back to the primary provider. This allows the chain to recover
-    /// from a transient failure (e.g., temporary rate limit) instead of being stuck
-    /// on the fallback provider for the rest of the session.
+    /// / Record a successful API call — resets failure count AND chain position so the / next call goes back to the
+    /// primary provider. This allows the chain to recover / from a transient failure (e.g., temporary rate limit) instead of being stuck / on the fallback provider for the rest of the session.
     func recordSuccess() {
         consecutiveFailures = 0
         currentIndex = -1
