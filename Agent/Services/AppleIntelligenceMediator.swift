@@ -584,28 +584,11 @@ final class AppleIntelligenceMediator: ObservableObject {
         return verbs.contains { lower.contains($0) }
     }
 
-    /// Run Apple AI as a small tool-calling agent over the user's request,
-    /// giving it ONE tool: the consolidated accessibility tool. Apple AI
-    /// decides whether to call it (possibly multiple times for multi-step
-    /// requests like "take a photo using Photo Booth") and the framework
-    /// dispatches each call through the injected `dispatch` closure.
-    ///
-    /// This replaces the previous manual line-prefixed parser. The big wins:
-    ///   1. Apple AI can chain multiple tool calls in one shot (open_app
-    ///      then click_element, etc.) — the manual parser only returned
-    ///      one intent.
-    ///   2. The schema is enforced by FoundationModels via @Generable, so
-    ///      we get type-safe arguments instead of grepping line:value.
-    ///   3. No more prompt-engineering brittleness around output format.
-    ///
-    /// Returns the agent's final text response on success, or nil if Apple
-    /// AI didn't call the tool, the call failed, or the session timed out.
-    /// On nil, the caller falls through to the cloud LLM.
-    ///
-    /// `dispatch` is injected by the caller (AgentViewModel) because the
-    /// mediator deliberately doesn't import AgentAccess or hold a reference
-    /// to the view model. Each call to `dispatch` is what actually fires
-    /// `executeNativeTool("accessibility", input:)` on the view model.
+    /// Run Apple AI as a tool-calling agent with one tool: consolidated accessibility.
+    /// Replaces the old manual line-prefixed parser — Apple AI can chain multiple tool
+    /// calls, gets type-safe arguments via @Generable, and needs no prompt format hacks.
+    /// Returns final text on success, or nil (falls through to cloud LLM) if the tool
+    /// wasn't called, failed, or timed out.
     func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
 
@@ -634,18 +617,9 @@ final class AppleIntelligenceMediator: ObservableObject {
             return result
         }
 
-        // Apple AI's on-device model has a ~4096-token context window.
-        // The framework injects the Tool description, the @Generable
-        // schema, the user prompt, and any tool results on every turn,
-        // so instructions must be TERSE.
-        //
-        // The "Known apps" list is built dynamically from the SDEF catalog
-        // (Agent/SDEFs/*.json) via SDEFService.availableAppNames(). Adding
-        // a new SDEF JSON automatically extends what Apple AI knows about
-        // — no hardcoding in this prompt. Apps not in the catalog (Photo
-        // Booth, etc.) still work because the dispatch closure falls back
-        // to AccessibilityService's NSRunningApplications scan, and Apple
-        // AI is told to just use the natural name in that case.
+        // Apple AI's on-device model has a ~4096-token context window, so
+        // instructions must be terse. Known apps come from SDEFService, and
+        // unknown apps fall back to AccessibilityService's NSRunningApplications scan.
         let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
         let instructions = Instructions("""
         You automate Mac UI via the accessibility tool. Use the EXACT natural app \
@@ -804,23 +778,13 @@ final class AppleIntelligenceMediator: ObservableObject {
 }
 
 // MARK: - Accessibility Tool for Apple Intelligence
-//
-// FoundationModels-native tool definition that lets Apple AI call the Mac
-// accessibility API directly. The framework handles schema validation,
-// argument coercion, and the agent loop — we just provide the dispatch
-// closure that routes args to the AgentViewModel's executeNativeTool path.
+// FoundationModels-native tool — framework handles schema/validation/agent loop.
+// We just provide the dispatch closure routing to AgentViewModel.executeNativeTool.
 
-/// Generable arguments for the accessibility tool. The @Generable macro
-/// derives ConvertibleFromGeneratedContent + the GenerationSchema that
-/// FoundationModels uses to constrain Apple AI's tool call output.
-///
-/// Field-naming note: `app` (not `appBundleId`) so the small on-device
-/// model is encouraged to use natural app names like "Photo Booth" or
-/// "photobooth". The dispatch closure routes the value through
-/// AccessibilityService.resolveBundleId() which knows how to map names,
-/// no-space variants, and bundle IDs to a real bundle ID. This is the
-/// "stop hardcoding, let Apple AI infer" fix — we trust the OS resolver
-/// to do the work instead of forcing Apple AI to memorize bundle IDs.
+/// Generable arguments for the accessibility tool. @Generable derives
+/// ConvertibleFromGeneratedContent + GenerationSchema for Apple AI.
+/// `app` uses natural names (e.g. "Photo Booth"); dispatch resolves via
+/// AccessibilityService.resolveBundleId().
 @Generable
 struct AccessibilityArgs: Sendable {
     @Guide(description: "The accessibility action: click_element, type_into_element, scroll_to_element, open_app, or find_element")
@@ -841,15 +805,10 @@ struct AccessibilityArgs: Sendable {
     let text: String?
 }
 
-/// FoundationModels Tool conformance. Apple AI's session uses this to
-/// decide whether and how to call the accessibility action. The dispatch
-/// closure is captured so the actual tool execution stays on the
-/// AgentViewModel side (which holds the executeNativeTool routing).
-///
-/// Fully qualified as `FoundationModels.Tool` because the local
-/// `Agent/Models/ToolNames.swift` defines an enum named `Tool` that would
-/// otherwise win in this scope and produce "inheritance from non-protocol
-/// type 'Tool'" at this declaration.
+/// FoundationModels Tool conformance. Dispatch closure is injected by
+/// AppleIntelligenceMediator.runAccessibilityAgent so the tool doesn't
+/// need to know about AgentViewModel. Fully qualified as
+/// `FoundationModels.Tool` to avoid collision with local `Tool` enum.
 struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
 
