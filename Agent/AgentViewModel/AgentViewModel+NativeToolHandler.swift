@@ -27,9 +27,7 @@ extension AgentViewModel {
         // Prefix-matched tools
         if let result = await handleWebTool(name: name, input: input) { return result }
         if let result = await handleSeleniumTool(name: name, input: input) { return result }
-        // Saved-script CRUDL tools (list/save/delete/run for AppleScript and JXA).
-        // expandConsolidatedTool maps applescript(action:list) → list_apple_scripts (etc.),
-        // and those leaf names live in handleSavedScriptTool, not the main switch below.
+        // Saved-script CRUDL tools. expandConsolidatedTool maps applescript(action:list) → list_apple_scripts etc. Leaf names live in handleSavedScriptTool, not the main switch.
         let savedScriptNames: Set<String> = [
             "list_apple_scripts", "run_apple_script", "save_apple_script", "delete_apple_script",
             "list_javascript", "run_javascript", "save_javascript", "delete_javascript",
@@ -37,8 +35,7 @@ extension AgentViewModel {
         if savedScriptNames.contains(name) {
             return await handleSavedScriptTool(name: name, input: input)
         }
-        // ax_ accessibility tools — already expanded, handle directly via the accessibility switch below
-        // (expandConsolidatedTool maps accessibility(action:X) → ax_X, so ax_ names arrive here already expanded)
+        // ax_ accessibility tools — already expanded. expandConsolidatedTool maps accessibility(action:X) → ax_X, so ax_ names arrive here already expanded.
 
         // Route to per-category helpers. Each returns `nil` if it doesn't
         // recognize the tool so the dispatcher can fall through to the next.
@@ -60,10 +57,7 @@ extension AgentViewModel {
         return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled — no matching handler found."
     }
 
-    /// Read-only accessibility actions that should NOT auto-launch the target
-    /// app. These are queries — they should fail gracefully if the app isn't
-    /// running, NOT silently spawn it. Anything not in this set is treated as
-    /// a write/action and gets the resolveBundleId auto-launch behavior.
+    /// Read-only accessibility actions that should NOT auto-launch the target app. These are queries — they should fail gracefully if the app isn't running, NOT silently spawn it.
     private static let readOnlyAxActions: Set<String> = [
         "list_windows",
         "inspect_element",
@@ -285,10 +279,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Clean an HTML string down to readable text. Strips script/style/noscript blocks
-    /// (with their contents), HTML comments, all remaining tags, decodes common entities,
-    /// and collapses whitespace. Drops obvious garbage lines (CSS variables, JSON config,
-    /// minified JS).
+    /// Clean HTML to readable text. Strips script/style/noscript blocks (with content), HTML comments, tags, decodes entities, collapses whitespace, drops garbage lines.
     nonisolated static func cleanHTML(_ html: String) -> String {
         var s = html
         // Remove script/style/noscript/svg blocks WITH their content

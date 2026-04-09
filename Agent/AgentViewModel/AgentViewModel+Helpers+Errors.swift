@@ -6,38 +6,29 @@ import AgentMCP
 
 extension AgentViewModel {
 
-    /// Auto-inject SDEF dictionary into failed AppleScript results. When the LLM
-    /// guesses wrong command/property names, we extract `tell application "X"`,
-    /// look up X's SDEF, and prepend it so the next attempt is informed. Companion
-    /// to the system-prompt rule to call lookup_sdef first. Skips if no tell
-    /// clause found, X isn't in the catalog, or TCC error detected (those need
-    /// System Settings, not a vocabulary dump).
+    /// Auto-inject SDEF dictionary into failed AppleScript results. Extracts `tell application "X"`,
+    /// looks up X's SDEF, and prepends it. Skips if no tell clause, X not in catalog, or TCC error.
     static func enrichAppleScriptFailure(source: String, output: String) -> String {
         // TCC permission errors need System Settings, not a vocabulary dump.
         if let tcc = Self.detectTCCError(output) {
             Self.openTCCPaneIfNeeded(tcc)
             return Self.formatTCCError(originalOutput: output, kind: tcc)
         }
-        // Vocabulary error path — match `tell application "X"` clauses and inject
-        // every SDEF. Multi-app scripts are common (Safari + System Events, etc.).
+        // Match `tell application "X"` clauses and inject each SDEF.
         let pattern = #"tell\s+application\s+(?:id\s+)?"([^"]+)""#
         let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: true)
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "AppleScript")
     }
 
-    /// Auto-inject SDEF dictionary into failed JXA results. JXA uses the same
-    /// scripting dictionaries as AppleScript but with JS syntax. Extracts
-    /// `Application("X")` names, resolves via SDEFService (accepts names and
-    /// bundle IDs), and prepends canonical terms. Skips if no app reference
-    /// found, not in catalog, or SDEFService returns nothing.
+    /// Auto-inject SDEF into failed JXA results. Extracts `Application("X")` names,
+    /// resolves via SDEFService, and prepends canonical terms. Skips if not found.
     static func enrichJXAFailure(source: String, output: String) -> String {
         // TCC errors take priority — the dictionary won't fix a missing permission.
         if let tcc = Self.detectTCCError(output) {
             Self.openTCCPaneIfNeeded(tcc)
             return Self.formatTCCError(originalOutput: output, kind: tcc)
         }
-        // Match: Application("X") | Application('X'). Collect ALL distinct
-        // references (multi-app JXA is common). Skip currentApplication().
+        // Match Application("X") references, skip currentApplication().
         let pattern = #"Application\s*\(\s*['"]([^'"]+)['"]\s*\)"#
         let appNames = Self.collectAppReferences(source: source, pattern: pattern, caseInsensitive: false)
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "JXA")
