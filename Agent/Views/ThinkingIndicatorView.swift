@@ -667,21 +667,23 @@ private struct LLMOutputBox: View {
                         .onEnded { _ in dragStartHeight = 0 }
                 )
         }
+        // CursorOverride MUST come BEFORE .background(termBg) so it sits
+        // behind the visible background but still in front of the activity
+        // log NSTextView underneath. .background layers stack
+        // outside-in: each .background goes BEHIND the previous one in the
+        // AppKit z-order. The CursorOverride needs to be ABOVE the activity
+        // log (so its cursor rect wins) but BEHIND the SwiftUI HUD content
+        // (so clicks pass through to buttons/text view naturally).
+        //
+        // We don't override hitTest to nil — that would skip the view from
+        // cursor rect lookup. Instead, .background placement is what makes
+        // clicks pass through (the SwiftUI content is rendered IN FRONT).
+        .background {
+            CursorOverride(cursor: .arrow)
+        }
         .background(termBg)
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(termBorder, lineWidth: 1))
-        // Force the arrow cursor for the WHOLE HUD by laying an AppKit
-        // CursorOverride view over it. This is the only reliable way —
-        // SwiftUI's .onHover/.onContinuousHover with NSCursor.set() loses to
-        // the activity log NSTextView's registered I-beam cursor rects
-        // underneath. CursorOverride registers its own arrow cursor rect at
-        // the AppKit layer which actually competes with (and wins over) the
-        // I-beam below. Hit-testing passes through so buttons/drag handles
-        // above the overlay still work normally.
-        .overlay {
-            CursorOverride(cursor: .arrow)
-                .allowsHitTesting(false)
-        }
         .task {
             // Blink cursor at ~2Hz — always running, seamless streaming→idle
             while !Task.isCancelled {

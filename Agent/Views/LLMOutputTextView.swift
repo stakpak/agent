@@ -57,10 +57,13 @@ struct CursorOverride: NSViewRepresentable {
             cursor.set()
         }
 
-        // Transparent to clicks — SwiftUI views ABOVE this overlay (the
-        // dismiss button, drag handle, scroll wheel events on the inner
-        // text view) still receive mouse events normally.
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        // IMPORTANT: do NOT override hitTest to return nil. AppKit cursor rect
+        // lookup uses the same hit-testing mechanism as mouse events — if
+        // hitTest returns nil, the view is skipped for cursor rect resolution
+        // too. We rely on this view being placed in `.background` (BEHIND the
+        // SwiftUI content) so clicks naturally land on the SwiftUI views in
+        // front of us, while cursor rect lookup walks front-to-back through
+        // the AppKit hierarchy and finds our arrow rect.
     }
 }
 
