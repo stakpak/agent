@@ -60,14 +60,39 @@ extension AgentViewModel {
         return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled — no matching handler found."
     }
 
+    /// Read-only accessibility actions that should NOT auto-launch the target
+    /// app. These are queries — they should fail gracefully if the app isn't
+    /// running, NOT silently spawn it. Anything not in this set is treated as
+    /// a write/action and gets the resolveBundleId auto-launch behavior.
+    private static let readOnlyAxActions: Set<String> = [
+        "list_windows",
+        "inspect_element",
+        "get_properties",
+        "find_element",
+        "get_children",
+        "get_focused_element",
+        "get_window_frame",
+        "screenshot",
+        "wait_for_element",
+        "wait",
+        "highlight_element"
+    ]
+
     /// Direct accessibility dispatch — no recursion through executeNativeTool
     private func handleAccessibilityAction(action: String, input: [String: Any]) async -> String {
         let ax = AgentAccess.AccessibilityService.shared
         let role = input["role"] as? String
         let title = input["title"] as? String
         let value = input["value"] as? String
-        // Resolve app name → bundle ID: "Photo Booth" → "com.apple.PhotoBooth", "photobooth" → "com.apple.PhotoBooth"
-        let app = ax.resolveBundleId(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
+        // Resolve app name → bundle ID. Read-only queries use lookupBundleId
+        // (NO auto-launch); write actions use resolveBundleId (auto-launches if
+        // not running, since you can't click a button on an app that isn't up).
+        // This prevents speculative reads from silently opening apps the user
+        // never asked for — most visibly the "Photo Booth keeps opening" bug.
+        let appNameOrId = input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String
+        let app = Self.readOnlyAxActions.contains(action)
+            ? ax.lookupBundleId(appNameOrId)
+            : ax.resolveBundleId(appNameOrId)
         let x = (input["x"] as? Double).map { CGFloat($0) }
         let y = (input["y"] as? Double).map { CGFloat($0) }
 
