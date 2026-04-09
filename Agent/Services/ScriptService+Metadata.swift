@@ -202,9 +202,8 @@ extension ScriptService {
         return filtered.sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
-    /// Restore the most recent backup of `name` (or a specific backup filename) into
-    /// Sources/Scripts/. Refuses to overwrite an existing live script — caller must
-    /// delete it first (which itself creates a fresh backup).
+      /// Restore the most recent backup of `name` into Sources/Scripts/.
+      /// Refuses to overwrite an existing live script — caller must delete first.
     func restoreScript(name: String, backupFilename: String? = nil) -> String {
         AuditLog.log(.agentScript, "restoreScript: \(name) backup=\(backupFilename ?? "latest")")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
@@ -248,9 +247,8 @@ extension ScriptService {
         }
     }
 
-    /// Copy a script to the trash with a timestamp suffix before deletion. Best-effort:
-    /// failures are logged but don't block the delete (the audit log captures the loss).
-    /// Returns the backup path on success, nil on failure.
+      /// Copy a script to the trash with a timestamp suffix before deletion.
+      /// Best-effort — failures are logged but don't block the delete.
     @discardableResult
     private func backupScriptToTrash(_ scriptFile: URL, scriptName: String) -> URL? {
         let fm = FileManager.default
@@ -274,24 +272,9 @@ extension ScriptService {
     private static let bundledCatalogAPIURL =
         "https://api.github.com/repos/macOS26/AgentScripts/contents/Agent/agents/Sources/Scripts"
 
-    /// On app launch, refresh upstream-bundled scripts if Agent! has been upgraded
-    /// since the last sync. Strategy:
-    ///
-    /// 1. **Version-gated** — runs only when `CFBundleShortVersionString` differs
-    ///    from `lastSyncedAgentVersion`. Cold launches without an upgrade are no-ops.
-    /// 2. **Catalog-driven** — fetches the GitHub contents API for the upstream
-    ///    Scripts directory. Only files that appear in that catalog are considered
-    ///    "bundled". Anything else is user-authored and never touched.
-    /// 3. **SHA-comparison** — uses the git blob SHA from the contents API and
-    ///    computes the equivalent for each local file. Files with matching SHAs
-    ///    are skipped without re-downloading.
-    /// 4. **Backed up before replacing** — every replacement first copies the local
-    ///    file to `.Trash/<name>-<timestamp>.swift` so the user's edits remain
-    ///    recoverable via `agent_script(action:"restore", name:"X")`.
-    /// 5. **Silent on failure** — every error path logs to AuditLog and returns
-    ///    without throwing. App launch never blocks on this.
-    /// 6. **Locally absent → leave alone** — if the user deleted a bundled script,
-    ///    we don't auto-resurrect it. They can `pull` it explicitly.
+    /// Refresh upstream-bundled scripts on app launch when version changes.
+    /// Version-gated, catalog-driven, SHA-compared, backed up before replacing,
+    /// silent on failure, and never auto-resurrects locally-deleted scripts.
     func syncBundledScriptsFromRemote() async {
         AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: start")
         // Include both short version and build number so a TestFlight build bump
