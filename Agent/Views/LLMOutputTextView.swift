@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 import AgentTerminalNeo
 
-/// NSTextView with no-op scrollRangeToVisible (we drive scroll manually via
-/// snapToEnd) and arrow cursor instead of I-beam. Selection still works.
+/// NSTextView with no-op scrollRangeToVisible (we drive scroll manually) and arrow cursor. Selection still works.
 final class FollowTextView: NSTextView {
     private var arrowTrackingArea: NSTrackingArea?
 
@@ -33,9 +32,7 @@ final class FollowTextView: NSTextView {
     }
 }
 
-  /// NSScrollView subclass that fires callbacks on user scroll and hover enter/exit.
-  /// Intercepts scrollWheel directly so auto-follow disables on the very first event,
-  /// avoiding lag from boundsDidChangeNotification.
+  /// NSScrollView subclass that fires callbacks on scroll/hover. Intercepts scrollWheel directly so auto-follow disables immediately.
 final class FollowScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
@@ -70,15 +67,11 @@ final class FollowScrollView: NSScrollView {
     }
 }
 
-/// Local NSScrollView/NSTextView wrapper for the LLM Output HUD.
-/// Renders via TerminalNeoRenderer. Scroll policy: `autoFollowDisabled`
-/// is single truth (set on scroll/hover, cleared on hover-exit-at-bottom
-/// or shrink). Jitter: incremental append, no implicit animations, cursor
-/// blink via setAttributes on one char.
+/// Local NSScrollView/NSTextView wrapper for the LLM Output HUD. Renders via TerminalNeoRenderer.
+/// autoFollowDisabled is single truth. Jitter: incremental append, no animations, cursor blink via setAttributes.
 struct LLMOutputTextView: NSViewRepresentable {
     let text: String
-    /// True while streaming — when false, mouse-exit won't force snap-to-bottom;
-    /// the view stays where the user parked it.
+    /// True while streaming — when false, mouse-exit won't force snap-to-bottom; the view stays where the user parked it.
     var isStreaming: Bool = false
     var onContentHeight: ((CGFloat) -> Void)?
 
@@ -103,9 +96,7 @@ struct LLMOutputTextView: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
 
         textView.isEditable = false
-        // Selection enabled — user can click+drag to select text and Cmd+C to
-        // copy. The arrow cursor (instead of I-beam) is forced via the
-        // FollowTextView class overrides on cursorUpdate + resetCursorRects.
+        // Selection enabled — click+drag to select, Cmd+C to copy. Arrow cursor forced via FollowTextView overrides.
         textView.isSelectable = true
         textView.backgroundColor = .clear
         textView.drawsBackground = false
@@ -131,11 +122,7 @@ struct LLMOutputTextView: NSViewRepresentable {
         scrollView.onUserScroll = { [weak coord] in
             coord?.autoFollowDisabled = true
         }
-        // Hover over the scroll view disables auto-follow. On mouse-exit while
-        // streaming, re-enable auto-follow AND force a snap to the bottom so
-        // the view catches up to whatever streamed in while the user was
-        // hovering. When the operation is done, leave the view exactly where
-        // the user parked it — don't yank them back to the bottom.
+        // Hover disables auto-follow. On mouse-exit while streaming, re-enable + snap to bottom. When done, leave view where parked.
         scrollView.onHoverChange = { [weak coord] hovering in
             guard let coord else { return }
             coord.isHovering = hovering
@@ -147,8 +134,7 @@ struct LLMOutputTextView: NSViewRepresentable {
                     coord.snapToEnd(tv, force: true)
                 }
             }
-            // else: operation is done — leave autoFollowDisabled as-is and
-            // don't snap. The user's scroll position is preserved.
+            // Operation done — leave autoFollowDisabled as-is, don't snap. User's scroll position preserved.
         }
 
         return scrollView
@@ -160,9 +146,7 @@ struct LLMOutputTextView: NSViewRepresentable {
         coord.isStreaming = isStreaming
         guard let tv = coord.textView, let storage = tv.textStorage else { return }
 
-        // Decompose the input into "real content" + "cursor state". Upstream
-        // (ThinkingIndicatorView) appends "█" when the blink is on, " " when
-        // the blink is off, and nothing while inside a markdown table.
+        // Decompose input into "real content" + "cursor state". Upstream appends "█"/" " for blink on/off.
         let cursorVisible = text.hasSuffix("█")
         let hasCursor = cursorVisible || text.hasSuffix(" ")
         let contentText = hasCursor ? String(text.dropLast()) : text
@@ -191,12 +175,7 @@ struct LLMOutputTextView: NSViewRepresentable {
             CATransaction.setDisableActions(true)
 
             if isAppend && !coord.needsTableRender {
-                // FAST PATH: incremental append. Strip the previous cursor
-                // glyph from storage, append only the NEW content delta, then
-                // append a fresh "█" cursor glyph. The cursor's foreground
-                // color is set to clear when blink-off and green when blink-on
-                // — never replaced once it's there, so the next blink can use
-                // setAttributes() instead of replaceCharacters().
+                // FAST PATH: strip previous cursor glyph, append new content delta, then append fresh "█" cursor. Color switches via setAttributes, not replaceCharacters.
                 let attrLen = storage.length
                 if attrLen > 0 {
                     let lastChar = storage.string.suffix(1)
@@ -219,9 +198,7 @@ struct LLMOutputTextView: NSViewRepresentable {
                 }
                 storage.endEditing()
             } else {
-                // SLOW PATH: full markdown re-render. Render contentText
-                // (without cursor) so the renderer doesn't try to style the
-                // cursor glyph; then append the cursor as a separate run.
+                // SLOW PATH: full markdown re-render of contentText (no cursor), then append cursor as separate run.
                 storage.beginEditing()
                 storage.setAttributedString(TerminalNeoRenderer.render(contentText))
                 if hasCursor {
@@ -241,18 +218,12 @@ struct LLMOutputTextView: NSViewRepresentable {
                 coord.needsTableRender = true
             }
 
-            // Follow-bottom: only scroll when the hard switch says we may.
-            // If the user has scrolled away or is hovering, autoFollowDisabled
-            // is true and we leave the clip view origin alone — the appended
-            // content extends the document below their view naturally.
+            // Follow-bottom: only scroll when autoFollowDisabled is false. Content extends below naturally when user scrolls away.
             if !coord.autoFollowDisabled {
                 coord.snapToEnd(tv)
             }
         } else {
-            // Cursor blink — only the color changes, not the character. Previous
-            // replaceCharacters("█" ↔ " ") re-laid-out the last line every 500ms.
-            // setAttributes on one char with a color change only triggers a
-            // foreground-color redraw — surrounding text stays pixel-stable.
+            // Cursor blink — only color changes via setAttributes, no replaceCharacters. Surrounding text stays pixel-stable.
             guard !coord.needsTableRender, hasCursor else { return }
             let attrLen = storage.length
             guard attrLen > 0 else { return }
@@ -276,22 +247,14 @@ struct LLMOutputTextView: NSViewRepresentable {
         var onContentHeight: ((CGFloat) -> Void)?
         var lastContentLength: Int = 0
         var lastReportedHeight: CGFloat = 0
-        /// Latched on once we see a markdown table — stays on so we keep doing
-        /// full re-renders instead of incremental appends (tables can't be
-        /// extended by simple character append).
+        /// Latched once we see a markdown table — stays on so we keep doing full re-renders instead of incremental appends.
         var needsTableRender: Bool = false
 
-        /// HARD SWITCH. When true, no auto-follow regardless of position.
-        /// Set true on: scrollWheel/trackpad event, hover-enter.
-        /// Cleared on: hover-exit while at bottom, text shrink (new task),
-        /// or user scrolling back to the bottom while not hovering.
+        /// HARD SWITCH. When true, no auto-follow regardless of position. Set on scroll/hover-enter; cleared on hover-exit-at-bottom or scrolling back to bottom.
         var autoFollowDisabled: Bool = false
         /// Mouse currently hovering over the scroll view.
         var isHovering: Bool = false
-        /// Mirror of LLMOutputTextView.isStreaming, refreshed on every
-        /// updateNSView. The mouse-exit handler reads this to decide whether
-        /// to force-snap to the bottom (only while streaming) or leave the
-        /// view exactly where the user parked it (after the run is done).
+        /// Mirror of isStreaming. Mouse-exit uses this to decide: force-snap while streaming, or leave parked when done.
         var isStreaming: Bool = false
         /// Suppresses bounds-tracking during our own programmatic scrolls.
         var isProgrammaticScroll: Bool = false
@@ -310,8 +273,7 @@ struct LLMOutputTextView: NSViewRepresentable {
                     guard let self, !self.scrollThrottled, let scrollView else { return }
                     guard !self.isProgrammaticScroll else { return }
                     guard let textView = scrollView.documentView as? NSTextView else { return }
-                    // Re-enable auto-follow only when the user has manually
-                    // scrolled all the way back to the bottom AND isn't hovering.
+                    // Re-enable auto-follow only when scrolled to bottom AND not hovering.
                     if !self.isHovering && self.isAtBottom(textView) {
                         self.autoFollowDisabled = false
                     }
@@ -347,9 +309,7 @@ struct LLMOutputTextView: NSViewRepresentable {
             return scrollView.bounds.contains(pointInView)
         }
 
-    /// Scroll to bottom. If streaming and cursor is hovering, skip (user is reading).
-    /// `force: true` bypasses hover check — used by mouse-exit handler to catch up.
-    /// Brackets with isProgrammaticScroll so bounds observer doesn't misread it.
+    /// Scroll to bottom. Skips if hovering during stream. `force` bypasses hover check. Brackets with isProgrammaticScroll.
         func snapToEnd(_ textView: NSTextView, force: Bool = false) {
             guard let scrollView = textView.enclosingScrollView else { return }
             if !force && isMouseInside(scrollView) {
