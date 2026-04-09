@@ -2,6 +2,68 @@ import SwiftUI
 import AppKit
 import AgentTerminalNeo
 
+/// Invisible NSView-backed overlay that registers an arrow cursor rect at the
+/// AppKit layer. SwiftUI's `.onContinuousHover { NSCursor.arrow.set() }` is too
+/// weak — `set()` only holds until the next cursor rect kicks in, and the
+/// activity log NSTextView underneath has its own I-beam cursor rects that
+/// immediately re-take the cursor as soon as the mouse moves a pixel.
+///
+/// This overlay is invisible (no drawing), passes hit-testing through to
+/// SwiftUI views above (so buttons still work), but registers BOTH a
+/// classic cursor rect AND a tracking-area .cursorUpdate handler so the OS
+/// actually consults this view when computing the cursor over its bounds.
+/// The cursor rect competes with (and wins over) any underlying NSTextView
+/// I-beam because cursor rect lookup walks front-to-back through the view
+/// hierarchy.
+struct CursorOverride: NSViewRepresentable {
+    let cursor: NSCursor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = CursorOverrideView()
+        view.cursor = cursor
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let view = nsView as? CursorOverrideView {
+            view.cursor = cursor
+            view.window?.invalidateCursorRects(for: view)
+        }
+    }
+
+    final class CursorOverrideView: NSView {
+        var cursor: NSCursor = .arrow
+        private var trackingArea: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let area = trackingArea { removeTrackingArea(area) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func resetCursorRects() {
+            discardCursorRects()
+            addCursorRect(bounds, cursor: cursor)
+        }
+
+        override func cursorUpdate(with event: NSEvent) {
+            cursor.set()
+        }
+
+        // Transparent to clicks — SwiftUI views ABOVE this overlay (the
+        // dismiss button, drag handle, scroll wheel events on the inner
+        // text view) still receive mouse events normally.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
 /// NSTextView subclass whose scrollRangeToVisible is a no-op. Stock NSTextView
 /// implicitly scrolls the new range into view on every text mutation
 /// (storage.append, replaceCharacters, etc.) — that's the source of the

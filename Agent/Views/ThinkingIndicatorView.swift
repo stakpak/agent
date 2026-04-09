@@ -670,18 +670,17 @@ private struct LLMOutputBox: View {
         .background(termBg)
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(termBorder, lineWidth: 1))
-        // Capture mouse events for the WHOLE HUD so the activity log NSTextView
-        // underneath doesn't bleed its I-beam cursor through transparent SwiftUI
-        // areas (steps list, header, padding). Force the arrow cursor while the
-        // pointer is anywhere inside the HUD bounds.
-        .contentShape(Rectangle())
-        .onContinuousHover { phase in
-            switch phase {
-            case .active:
-                NSCursor.arrow.set()
-            case .ended:
-                break
-            }
+        // Force the arrow cursor for the WHOLE HUD by laying an AppKit
+        // CursorOverride view over it. This is the only reliable way —
+        // SwiftUI's .onHover/.onContinuousHover with NSCursor.set() loses to
+        // the activity log NSTextView's registered I-beam cursor rects
+        // underneath. CursorOverride registers its own arrow cursor rect at
+        // the AppKit layer which actually competes with (and wins over) the
+        // I-beam below. Hit-testing passes through so buttons/drag handles
+        // above the overlay still work normally.
+        .overlay {
+            CursorOverride(cursor: .arrow)
+                .allowsHitTesting(false)
         }
         .task {
             // Blink cursor at ~2Hz — always running, seamless streaming→idle
