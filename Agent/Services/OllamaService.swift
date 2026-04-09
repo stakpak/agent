@@ -16,12 +16,7 @@ final class OllamaService {
     let contextSize: Int
 
     // MARK: - Rate Limit Tracking
-    //
-    // Local Ollama daemon doesn't rate-limit, but Ollama Cloud / Pro / Max
-    // can return 429. When that happens we capture Retry-After and pad the
-    // next request to avoid immediately re-triggering. Per-provider dict so
-    // Ollama and Local Ollama track independently. Mirrors the pattern in
-    // OpenAICompatibleService and ClaudeService.
+    // Local daemon doesn't rate-limit, but Ollama Cloud/Pro/Max can return 429. Capture Retry-After and pad the next request. Per-provider dict for independent tracking.
     private static var retryAfterUntil: [APIProvider: CFAbsoluteTime] = [:]
 
     /// Wait if needed to respect Retry-After backoff from a previous 429.
@@ -38,9 +33,7 @@ final class OllamaService {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse a Retry-After header. Integer seconds per RFC 7231 §7.1.3.
-    /// Returns 0 if missing/unparseable; caller falls back to a default.
-    /// Capped at 5 minutes against absurdly large values.
+    /// Parse Retry-After header. Integer seconds per RFC 7231. Returns 0 if missing; capped at 5 min.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -232,9 +225,7 @@ final class OllamaService {
             "messages": chatMessages,
             "tools": tools(activeGroups: activeGroups, compact: compactTools),
             "stream": false,
-            // Keep the model resident in VRAM for 30 min after each call so the KV cache
-            // survives between Agent's loop iterations. Default is 5 min, which drops
-            // the cache during any user pause and forces a full prefill on resume.
+            // Keep model in VRAM 30 min after each call so KV cache survives between loop iterations (default 5 min drops it).
             "keep_alive": "30m"
         ]
 
@@ -248,10 +239,7 @@ final class OllamaService {
             body["options"] = opts
         }
 
-        // .sortedKeys for byte-stable JSON. Even on local Ollama (where the
-        // KV cache hits via slot reuse rather than prefix matching), keeping
-        // the bytes deterministic costs nothing and makes request bodies
-        // diffable for debugging cache issues.
+        // .sortedKeys for byte-stable JSON — makes request bodies diffable for debugging, no cost on local Ollama.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
@@ -407,9 +395,7 @@ final class OllamaService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // Ollama Cloud / Pro / Max can return 429 under heavy load.
-            // Local Ollama doesn't rate-limit but if it ever does, the
-            // same path handles it. Default to 30s if Retry-After is missing.
+            // Ollama Cloud/Pro/Max can return 429. Local doesn't rate-limit but same path handles it. Default 30s if Retry-After missing.
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -670,9 +656,7 @@ final class OllamaService {
                     continue // Keep buffering — might be XML tag
                 }
 
-                // If buffer ends with (or contains) a known tool name, hold it back
-                // because the '{' with arguments may arrive in the next chunk.
-                // But don't hold forever — flush if buffer grows too large without a '{'.
+                // If buffer ends with a known tool name, hold it back — the '{' with arguments may arrive in the next chunk. Flush if buffer grows too large without '{'.
                 if pendingBuffer.count < 300 {
                     var containsToolName = false
                     for toolName in AgentTools.toolNames {
