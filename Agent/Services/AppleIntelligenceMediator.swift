@@ -3,16 +3,11 @@ import FoundationModels
 import SwiftUI
 
 
-/// Apple Intelligence mediator that rephrases user requests to help the LLM understand them better.
-/// Acts as a middleman only — never refuses, blocks, or judges requests.
-///
-/// Flow indicators:
-/// - [AI → User]: Annotation only visible to the user
-/// - [AI → LLM]: Rephrased context sent to the LLM
-/// - [AI → Both]: Information relevant to both parties
-///
-/// Context window: Maintains last task prompt, last Apple AI message, and last LLM summary
-/// so Apple Intelligence has context when a new task starts.
+/// Apple Intelligence mediator that rephrases user requests to help the LLM understand.
+/// Acts as a middleman only — never refuses, blocks, or judges.
+/// [AI → User]: annotation only for user. [AI → LLM]: rephrased context.
+/// [AI → Both]: info for both. Context: last task prompt, last Apple AI message,
+/// last LLM summary.
 @MainActor
 final class AppleIntelligenceMediator: ObservableObject {
     static let shared = AppleIntelligenceMediator()

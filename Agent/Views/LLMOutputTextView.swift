@@ -352,10 +352,9 @@ struct LLMOutputTextView: NSViewRepresentable {
             return scrollView.bounds.contains(pointInView)
         }
 
-        /// Instant scroll to end, driving clip view directly. Brackets with
-        /// isProgrammaticScroll so bounds observer doesn't misread it.
-        /// Skips snap if mouse is hovering over the scroll view (user is reading).
-        /// `force: true` bypasses hover check — used by mouse-exit handler.
+    /// Scroll to bottom. If streaming and cursor is hovering, skip (user is reading).
+    /// `force: true` bypasses hover check — used by mouse-exit handler to catch up.
+    /// Brackets with isProgrammaticScroll so bounds observer doesn't misread it.
         func snapToEnd(_ textView: NSTextView, force: Bool = false) {
             guard let scrollView = textView.enclosingScrollView else { return }
             if !force && isMouseInside(scrollView) {
