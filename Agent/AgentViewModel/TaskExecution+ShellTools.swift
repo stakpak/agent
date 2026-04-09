@@ -275,20 +275,9 @@ extension AgentViewModel {
         command.contains("osascript") || command.contains("/usr/bin/osascript")
     }
 
-    /// Returns true if the command needs TCC permissions (run in Agent process).
-    ///
-    /// THE HARD RULE — anything that touches macOS TCC MUST run in-process.
-    /// The Launch Agent and Launch Daemon are SEPARATE processes with
-    /// SEPARATE bundle IDs and SEPARATE TCC grants (typically NONE). The
-    /// user's "allow Agent! to send keystrokes" / "allow Agent! to control
-    /// Music" / etc. lives on the main app's bundle ID and DOES NOT
-    /// propagate to subprocesses with different bundle IDs.
-    ///
-    /// Add new keywords here whenever the LLM finds a way to invoke a
-    /// TCC-touching binary the existing list doesn't catch. Better to
-    /// over-route (a few extra in-process executions) than to send
-    /// AppleScript through the root daemon and confuse the LLM with a
-    /// "not authorized" failure.
+    /// Returns true if the command needs TCC permissions (must run in-process).
+    /// The Launch Agent and Daemon are separate processes with separate bundle IDs
+    /// and typically NO TCC grants. Add new keywords for any TCC-touching binary.
     nonisolated static func needsTCCPermissions(_ command: String) -> Bool {
         let lower = command.lowercased()
         return lower.contains("osascript")           // AppleScript / JXA CLI
