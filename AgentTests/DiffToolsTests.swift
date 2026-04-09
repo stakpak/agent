@@ -27,10 +27,7 @@ import AgentD1F
         try String(contentsOfFile: path, encoding: .utf8)
     }
 
-    // =========================================================================
-    // MARK: - Scenario 1: AI calls create_diff then apply_diff (2-step review)
-    // =========================================================================
-    // AI: read_file → sees lines → create_diff with line range → reviews preview → apply_diff with diff_id
+        // MARK: - Scenario 1: create_diff then apply_diff (2-step review)
 
     @Test("Scenario 1: create_diff + apply_diff with line range and UUID")
     func createThenApplyWithUUID() throws {
@@ -91,10 +88,7 @@ import AgentD1F
         #expect(final.contains("import Foundation"), "Header should remain")
     }
 
-    // =========================================================================
-    // MARK: - Scenario 2: AI calls diff_and_apply (1-step edit)
-    // =========================================================================
-    // AI: read_file → sees lines → diff_and_apply with line range + destination
+    // MARK: - Scenario 2: apply_diff with inline edit
 
     @Test("Scenario 2: diff_and_apply with line range — same steps as create+apply")
     func diffAndApplyLineRange() throws {

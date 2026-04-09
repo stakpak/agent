@@ -118,9 +118,8 @@ extension AgentViewModel {
             } else {
                 return "Error: step number is required for plan_mode update"
             }
-            // Be permissive about step indexing. Steps are 1-based, but LLMs frequently
-            // send 0 (zero-indexed thinking). Treat 0 as 1 instead of erroring out.
-            // Negative numbers still error.
+            // Be permissive about step indexing.
+            // Steps are 1-based, but LLMs frequently send 0 (zero-indexed thinking). Treat 0 as 1 instead of erroring out...
             guard rawStep >= 0 else {
                 return "Error: step number must be ≥ 0 (steps are 1-based; 0 is accepted as a synonym for 1)"
             }

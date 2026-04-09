@@ -116,9 +116,8 @@ extension AgentViewModel {
     /// nil for vocabulary or other errors.
     static func detectTCCError(_ output: String) -> TCCRequirement? {
         let lower = output.lowercased()
-        // Accessibility — most common, fired by `keystroke`, `key code`,
-        // and AX click attempts via System Events when Agent! isn't on the
-        // Accessibility allow list.
+        // Accessibility — most common, fired by `keystroke`, `key code`, and AX click attempts via System
+        // Events when Agent! isn't on the Accessibility allow list.
         if lower.contains("not allowed to send keystrokes")
             || lower.contains("not allowed assistive access")
             || lower.contains("assistive access is")
