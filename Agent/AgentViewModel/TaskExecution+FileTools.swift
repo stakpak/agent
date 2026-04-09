@@ -75,11 +75,8 @@ extension AgentViewModel {
                 Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
 
-            // Cap file output at 50K chars for LLM context. 50K covers ~95% of Swift
-            // source files in one read — eliminates the chunked re-read storm where
-            // the LLM repeatedly calls read_file with offset/limit just to see the
-            // whole file. Each chunked read is a different cache key, so the dedup
-            // cache can't help; raising the cap is what actually reduces redundant reads.
+            // Cap file output at 50K chars for LLM context. 50K covers ~95% of Swift source files in one read — eliminates the chunked re-read storm where the LLM repeatedly calls read_file
+            // with offset/limit just to see the whole file. Each chunked read is a different cache key, so the dedup cache can't help; raising the cap is what actually reduces redundant reads.
             let capped = LogLimits.trim(
                 output,
                 cap: LogLimits.readFileChars,
@@ -150,20 +147,11 @@ extension AgentViewModel {
                 context: context
             ) }
 
+            Self.invalidateFileReadCache(path: expandedEdit)
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
-                Self.invalidateFileReadCache(path: expandedEdit)
-
-                // Skip the full D1F dump — the CodingService output already
-                // contains the success message with what changed.
-            } else {
-                // Edit failed — invalidate the read cache so the next read goes to disk
-                // fresh. The error message itself includes a snippet of current content,
-                // so the model can self-correct without an extra round-trip, but we still
-                // wipe the cache in case the model does call read_file again.
-                Self.invalidateFileReadCache(path: expandedEdit)
             }
-            appendLog(output)
+            appendLog(output.components(separatedBy: "\n").first ?? output)
             // Log edit to journal
             let afterEdit = try? String(contentsOfFile: expandedEdit, encoding: .utf8)
             FileChangeJournal.shared.log(
@@ -253,12 +241,8 @@ extension AgentViewModel {
                 } else {
                     throw DiffError.invalidDiff
                 }
-                // No truncation guard. d1f's structural verification + the
-                // applyDiff round-trip already catch malformed diffs. Legitimate
-                // refactors that delete most of a section were getting blocked,
-                // and undo_edit is always available if the LLM produces something
-                // bad — we'd rather trust the model and give the user undo than
-                // second-guess every shrink with a length heuristic.
+                // No truncation guard. d1f's structural verification + the applyDiff round-trip already catch malformed diffs. Legitimate refactors that delete most of a section were getting
+                // blocked, and undo_edit is always available if the LLM produces something bad — we'd rather trust the model and give the user undo than second-guess every shrink with a length heuristic.
                 try patched.write(to: URL(fileURLWithPath: expandedPath), atomically: true, encoding: .utf8)
                 // Track the apply for UUID-based undo
                 if let uuid = UUID(uuidString: diffIdStr) {
@@ -406,9 +390,8 @@ extension AgentViewModel {
             )
             let diffId = DiffStore.shared.store(diff: diff, source: source)
 
-            // Step 3: Apply diff (same as apply_diff). No truncation guard —
-            // d1f's structural verification + applyDiff already catch malformed
-            // diffs, and undo_edit is always available for recovery.
+            // Step 3: Apply diff (same as apply_diff). No truncation guard — d1f's structural
+            // verification + applyDiff already catch malformed diffs, and undo_edit is always available for recovery.
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 

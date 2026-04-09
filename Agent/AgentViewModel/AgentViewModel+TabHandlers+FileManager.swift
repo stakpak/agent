@@ -107,15 +107,13 @@ extension AgentViewModel {
                 replaceAll: replaceAll,
                 context: context
             ) }
-            // Always invalidate the read cache after edit_file — on success the file
-            // changed; on failure we want the next read_file to fetch fresh in case
-            // the model's context has stale content (which is usually why the edit
-            // failed in the first place).
+            // Always invalidate the read cache after edit_file — on success the file changed; on failure we want the next read_file
+            // to fetch fresh in case the model's context has stale content (which is usually why the edit failed in the first place).
             Self.invalidateFileReadCache(path: expandedPath)
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
             }
-            tab.appendLog(output)
+            tab.appendLog(output.components(separatedBy: "\n").first ?? output)
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output],
@@ -280,9 +278,8 @@ extension AgentViewModel {
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
-                // No truncation guard — d1f's structural verification + applyDiff
-                // already catch malformed diffs, and undo_edit is always available
-                // for recovery if the LLM produces something bad.
+                // No truncation guard — d1f's structural verification + applyDiff already catch malformed
+                // diffs, and undo_edit is always available for recovery if the LLM produces something bad.
 
                 // Splice back into full file if line range
                 let finalContent: String
