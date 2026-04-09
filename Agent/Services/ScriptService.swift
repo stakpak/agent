@@ -11,9 +11,8 @@ final class ScriptService: @unchecked Sendable {
     private var sourcesDir: URL { Self.agentsDir.appendingPathComponent("Sources") }
     var scriptsDir: URL { sourcesDir.appendingPathComponent("Scripts") }
 
-    /// Static accessor for the scripts directory — used by the consolidated tool
-    /// dispatcher to resolve `agent_script(action:"edit", name:"X")` into a full
-    /// `file_path` without instantiating ScriptService.
+      /// Static accessor for the scripts directory — used by the consolidated tool
+      /// dispatcher to resolve `agent_script(action:"edit")` into a full file_path.
     static var scriptsDirURL: URL { agentsDir.appendingPathComponent("Sources/Scripts") }
 
     /// Directory for saved AppleScript files
@@ -48,19 +47,16 @@ final class ScriptService: @unchecked Sendable {
     private static let scriptsRepoURL = "https://github.com/macOS26/AgentScripts.git"
     private static let bridgesRepoURL = "https://github.com/macOS26/AgentEventBridges.git"
 
-    /// Pinned AgentScripts release tag. Bump when a new AgentScripts release ships
-    /// (e.g. when adding new bundled scripts or fixing bugs in existing ones).
-    /// Pull/sync URLs derive from this — every user fetches the same immutable
-    /// snapshot, NOT main HEAD which can drift.
+      /// Pinned AgentScripts release tag. Bump when a new release ships.
+      /// Pull/sync URLs use this tag — users get an immutable snapshot, not main HEAD.
     static let scriptsRelease = "1.0.5"
 
     /// Pinned AgentEventBridges release tag. Same rationale as scriptsRelease — every
     /// user clones the same immutable bridges snapshot rather than main HEAD.
     static let bridgesRelease = "1.1.0"
 
-    /// Raw GitHub URL prefix for pulling individual script files (single-file recovery
-    /// without a full clone). Path inside the repo: Agent/agents/Sources/Scripts/<name>.swift
-    /// Uses the pinned release tag so the URL is immutable across users.
+      /// Raw GitHub URL prefix for pulling individual script files (single-file recovery
+      /// without a full clone). Uses pinned release tag for immutability.
     static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/AgentScripts/refs/tags/\(scriptsRelease)/Agent/agents/Sources/Scripts"
 
     /// Installed location: ~/Documents/AgentScript/bridges/
