@@ -154,13 +154,8 @@ extension AgentViewModel {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
                 Self.invalidateFileReadCache(path: expandedEdit)
 
-                // D1F preview from old → new (fast, no extra file read)
-                let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
-                var d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
-                if d1f.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    d1f = "❌ " + oldString + "\n" + "✅ " + newString
-                }
-                appendLog(d1f)
+                // Skip the full D1F dump — the CodingService output already
+                // contains the success message with what changed.
             } else {
                 // Edit failed — invalidate the read cache so the next read goes to disk
                 // fresh. The error message itself includes a snippet of current content,
