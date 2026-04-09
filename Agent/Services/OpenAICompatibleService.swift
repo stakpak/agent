@@ -458,14 +458,9 @@ final class OpenAICompatibleService {
             }
         }
 
-        // .sortedKeys produces byte-stable JSON regardless of Swift dictionary
-        // iteration order. Required for the automatic prefix cache on every
-        // OpenAI-format provider (OpenAI, Z.ai, Grok, Mistral, DeepSeek, Qwen,
-        // Gemini, BigModel, Hugging Face) to actually hit. sanitizeSchema and
-        // compactProperties build new dictionaries on every call, and Swift's
-        // dict iteration order isn't guaranteed stable across rebuilds.
-        // Without sortedKeys, two semantically-identical requests can produce
-        // different byte streams and silently miss the cache.
+          // .sortedKeys for byte-stable JSON — required for prefix cache hits
+          // across OpenAI-format providers. Without it, semantically-identical
+          // requests produce different byte streams and silently miss the cache.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL, provider: provider)
     }
@@ -527,11 +522,9 @@ final class OpenAICompatibleService {
             throw AgentError.invalidResponse
         }
         guard httpResponse.statusCode == 200 else {
-            // On 429, parse Retry-After header (if present) and seed
-            // retryAfterUntil so the next call's enforceRateLimit waits
-            // the right amount. If the header is missing or unparseable,
-            // default to 30 seconds (Z.ai returns 429 with body code 1305
-            // and no Retry-After header — 30s is a safe baseline).
+              // On 429, parse Retry-After header — seed retryAfterUntil so the
+              // next call's enforceRateLimit waits the right amount. Default 30s
+              // if header missing (Z.ai returns 429 with no Retry-After).
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -653,21 +646,10 @@ final class OpenAICompatibleService {
         return (contentBlocks, stopReason, inTok, outTok)
     }
 
-    /// Pull cached-prompt-token counts out of an OpenAI-format `usage` object
-    /// and forward them to TokenUsageStore so the LLM Usage panel shows the
-    /// hit rate for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/etc. — every
-    /// modern OpenAI-compatible provider does AUTOMATIC prefix caching now,
-    /// and the only way we know whether our byte-stable prefix is actually
-    /// hitting the cache is by reading these fields back.
-    ///
-    /// Two shapes are accepted:
-    ///   - OpenAI standard:   usage.prompt_tokens_details.cached_tokens
-    ///   - DeepSeek variant:  usage.prompt_cache_hit_tokens
-    ///
-    /// Both map to the existing recordCacheMetrics(read:creation:) sink.
-    /// "creation" stays 0 for OpenAI-format providers because they don't
-    /// distinguish a "cache write" event the way Anthropic does — they just
-    /// report how many input tokens were served from cache on this request.
+    /// Pull cached-prompt-token counts from OpenAI-format `usage` and forward to
+    /// TokenUsageStore. Accepts OpenAI standard (prompt_tokens_details.cached_tokens)
+    /// and DeepSeek variant (prompt_cache_hit_tokens). Creation = 0 since
+    /// OpenAI-format providers don't distinguish cache write events like Anthropic.
     nonisolated private static func recordCacheHits(from usage: [String: Any]?) {
         guard let usage else { return }
         var cached = 0
