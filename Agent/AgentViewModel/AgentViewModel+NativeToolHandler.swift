@@ -189,10 +189,12 @@ extension AgentViewModel {
                 appBundleId: app,
                 timeout: input["timeout"] as? Double ?? 10)
         case "manage_app":
+            let manageAction = input["sub_action"] as? String
+                ?? { let a = input["action"] as? String ?? "list"; return a == "manage_app" ? "list" : a }()
             return ax.manageApp(
-                action: input["action"] as? String ?? "list",
+                action: manageAction,
                 bundleId: input["bundleId"] as? String,
-                name: input["name"] as? String)
+                name: input["name"] as? String ?? input["app"] as? String)
         case "set_window_frame":
             let sw = (input["width"] as? Double).map { CGFloat($0) }
             let sh = (input["height"] as? Double).map { CGFloat($0) }

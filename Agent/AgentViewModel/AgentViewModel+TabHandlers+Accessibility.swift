@@ -525,9 +525,10 @@ extension AgentViewModel {
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
 
         case "ax_manage_app":
-            let action = input["action"] as? String ?? "list"
+            let action = input["sub_action"] as? String
+                ?? { let a = input["action"] as? String ?? "list"; return a == "manage_app" ? "list" : a }()
             let bundleId = input["bundleId"] as? String
-            let appName = input["name"] as? String
+            let appName = input["name"] as? String ?? input["app"] as? String
             tab.appendLog("📱 \(action)...")
             tab.flush()
             let output =
