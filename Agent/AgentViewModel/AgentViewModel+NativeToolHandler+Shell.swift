@@ -58,14 +58,9 @@ extension AgentViewModel {
             return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
         case "execute_daemon_command":
             let command = input["command"] as? String ?? ""
-            // TCC GUARD — even though this tool is "run as root", any
-            // command that needs TCC permissions (osascript, screencapture,
-            // accessibility, automation, etc.) MUST run in-process where
-            // Agent! holds the user's TCC grants. The Launch Daemon runs
-            // as root with NO TCC, so an `osascript -e 'tell ...'` from
-            // there would fail with a confusing permission error. Reroute
-            // to executeTCCStreaming silently and tell the user via the
-            // log so the model can see what happened.
+            // TCC GUARD — TCC-touching commands (osascript, screencapture, etc.)
+            // MUST run in-process where Agent! holds TCC grants. Launch Daemon
+            // has no TCC. Reroute to executeTCCStreaming and log it.
             if Self.needsTCCPermissions(command) {
                 appendLog("🔧 $ (rerouted to in-process for TCC) \(Self.collapseHeredocs(command))")
                 flushLog()

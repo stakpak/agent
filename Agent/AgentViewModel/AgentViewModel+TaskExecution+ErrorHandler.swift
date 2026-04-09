@@ -33,14 +33,10 @@ extension AgentViewModel {
         case none
     }
 
-    /// Handles an error thrown by any of the LLM streaming calls. Mirrors the
-    /// original inline catch block exactly: context-overflow pruning, stale
-    /// connection retries, timeouts (with Ollama health-check/restart), 429
-    /// rate-limits, recoverable AgentErrors, network connection loss, and
-    /// fallback-chain switching.
-    ///
-    /// Mutates `messages` and `timeoutRetryCount` inout. Returns a
-    /// `TaskLoopErrorOutcome` describing what the caller should do next.
+    /// Handles an error from LLM streaming: context-overflow pruning, stale connection
+    /// retries, timeouts (with Ollama health-check/restart), 429 rate-limits,
+    /// recoverable AgentErrors, network loss, and fallback-chain switching.
+    /// Mutates `messages` and `timeoutRetryCount` inout. Returns TaskLoopErrorOutcome.
     func handleTaskLoopError(
         _ error: Error,
         activeService: ActiveLLMService,

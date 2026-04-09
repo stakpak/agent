@@ -158,14 +158,9 @@ extension AgentViewModel {
         startMainTask(task)
     }
 
-    /// Start executing a task on the main tab (not queued).
-    ///
-    /// Critical: if a previous main task is still alive (e.g., user clicked Stop
-    /// then immediately started a new task while the old one was still draining
-    /// its retry loop or in-flight HTTP request), we MUST wait for it to fully
-    /// terminate before starting the new one. Otherwise both loops run
-    /// concurrently and write to the SAME `activityLog`, producing nonsense like
-    /// "Z.ai 429 retry" log lines while the new task is using Ollama.
+    /// Start executing a task on the main tab. If a previous task is still draining
+    /// (retry loop or in-flight HTTP), waits for it to fully terminate first — otherwise
+    /// both loops write to the same activityLog producing garbled output.
     private func startMainTask(_ task: String) {
         let previousTask = runningTask
         runningTask = Task {
