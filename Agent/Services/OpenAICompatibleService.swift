@@ -404,19 +404,12 @@ final class OpenAICompatibleService {
         Self.lastRequestTime[provider] = CFAbsoluteTimeGetCurrent()
     }
 
-    /// Record a Retry-After value from a 429 response. Stays @MainActor
-    /// because retryAfterUntil is a per-class static dict shared across
-    /// every OpenAICompatibleService instance and the class itself is
-    /// @MainActor. Callers from nonisolated contexts (the static request
-    /// methods) await a hop via Task { @MainActor in ... }.
+    /// Record Retry-After from 429. @MainActor because retryAfterUntil is a per-class static dict; nonisolated callers hop via Task { @MainActor in ... }.
     static func recordRetryAfter(_ seconds: Double, for provider: APIProvider) {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse a Retry-After header value. Header is either an integer
-    /// (seconds to wait) per RFC 7231 §7.1.3, or an HTTP-date — we only
-    /// honor the integer form. Returns 0 if the header is missing or
-    /// unparseable; caller should fall back to a sensible default.
+    /// Parse Retry-After header. Integer seconds per RFC 7231. Returns 0 if missing/unparseable; capped at 5 min.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -453,9 +446,7 @@ final class OpenAICompatibleService {
             }
         }
 
-          // .sortedKeys for byte-stable JSON — required for prefix cache hits
-          // across OpenAI-format providers. Without it, semantically-identical
-          // requests produce different byte streams and silently miss the cache.
+          // .sortedKeys for byte-stable JSON — required for prefix cache hits. Without it, semantically-identical requests produce different byte streams and miss the cache.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL, provider: provider)
     }
@@ -517,9 +508,7 @@ final class OpenAICompatibleService {
             throw AgentError.invalidResponse
         }
         guard httpResponse.statusCode == 200 else {
-              // On 429, parse Retry-After header — seed retryAfterUntil so the
-              // next call's enforceRateLimit waits the right amount. Default 30s
-              // if header missing (Z.ai returns 429 with no Retry-After).
+              // On 429, parse Retry-After — seed retryAfterUntil so next call's enforceRateLimit waits the right amount. Default 30s if header missing (Z.ai returns 429 with no Retry-After).
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -641,10 +630,7 @@ final class OpenAICompatibleService {
         return (contentBlocks, stopReason, inTok, outTok)
     }
 
-    /// Pull cached-prompt-token counts from OpenAI-format `usage` and forward to
-    /// TokenUsageStore. Accepts OpenAI standard (prompt_tokens_details.cached_tokens)
-    /// and DeepSeek variant (prompt_cache_hit_tokens). Creation = 0 since
-    /// OpenAI-format providers don't distinguish cache write events like Anthropic.
+    /// Pull cached-prompt-token counts from OpenAI-format `usage` and forward to TokenUsageStore. Accepts OpenAI standard (prompt_tokens_details.cached_tokens) and DeepSeek variant (prompt_cache_hit_tokens). Creation = 0 since OpenAI-format providers don't distinguish cache write events.
     nonisolated private static func recordCacheHits(from usage: [String: Any]?) {
         guard let usage else { return }
         var cached = 0
@@ -681,10 +667,7 @@ final class OpenAICompatibleService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // On 429, parse Retry-After header — see performRequest for the
-            // full rationale. Recording it here means even if the loop's
-            // exponential backoff is shorter than the server's recommended
-            // wait, the next call's enforceRateLimit will pad it out.
+            // On 429, parse Retry-After header — recording here means even if exponential backoff is shorter, next call's enforceRateLimit pads it out.
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
