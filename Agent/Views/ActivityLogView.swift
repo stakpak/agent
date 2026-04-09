@@ -32,20 +32,11 @@ final class ArrowCursorTextView: NSTextView {
     }
 }
 
-/// NSTextView-backed activity log — avoids SwiftUI Text layout storms on large/streaming content.
-/// Detects image/HTML file paths in log output and shows clickable links that open in Preview/Browser.
-/// Optimized for smooth streaming with incremental updates and debouncing.
-///
-/// Rendering, scroll tracking, search, markdown, and the per-tab text-storage
-/// cache all live on `Coordinator`. Methods are split across:
-///   - `ActivityLogView+Update.swift` — the main `performRender` pipeline
-///   - `ActivityLogView+Scroll.swift` — scroll helpers
-///   - `ActivityLogView+Search.swift` — search highlighting
-///   - `ActivityLogView+Markdown.swift` — top-level build (links + trim banner)
-///   - `ActivityLogView+MarkdownBlock.swift` — fences, headers, bullets, tables
-///   - `ActivityLogView+MarkdownInline.swift` — bold/italic, link detection
-///   - `ActivityLogView+Cache.swift` — per-tab NSTextStorage cache
-///   - `ActivityLogView+Rendering.swift` — attachment cells + shared regex patterns
+/// NSTextView-backed activity log — avoids SwiftUI Text layout storms.
+/// Detects image/HTML paths and shows clickable links. Optimized for streaming.
+/// Rendering, scroll, search, markdown, and cache live on `Coordinator`, split across:
+/// ActivityLogView+Update.swift, +Scroll, +Search, +Markdown, +MarkdownBlock,
+/// +MarkdownInline, +Cache, +Rendering.
 struct ActivityLogView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     let text: String
