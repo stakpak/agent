@@ -70,13 +70,15 @@ enum LLMProviderSetup {
         temperature: 0.7
     )
 
-    // BigModel.cn — China mainland mirror of Z.ai, same model lineup
+    // BigModel.cn — China mainland mirror of Z.ai, same dual-API structure
     static let bigModel = LLMProviderConfig(
         id: "bigModel", displayName: "BigModel",
         kind: .cloudAPI, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
-            chatURL: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            modelsURL: "https://open.bigmodel.cn/api/paas/v4/models"
+            chatURL: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+            modelsURL: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+            visionChatURL: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            visionModelsURL: "https://open.bigmodel.cn/api/paas/v4/models"
         ),
         capabilities: [.streaming, .tools, .systemPrompt, .vision],
         temperature: 0.7
