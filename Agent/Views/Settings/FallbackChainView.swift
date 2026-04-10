@@ -128,21 +128,20 @@ struct FallbackChainView: View {
                     }
 
                     Picker("", selection: $selectedModel) {
-                        let models = modelsForProvider(selectedProvider)
+                        let models = modelOptionsForProvider(selectedProvider)
                         if models.isEmpty {
-                            // Show default as only option until models load
                             let def = defaultModel(for: selectedProvider)
                             Text(shortModel(def)).tag(def)
                         } else {
-                            ForEach(models, id: \.self) { model in
+                            ForEach(models, id: \.id) { model in
                                 HStack(spacing: 4) {
-                                    Text(shortModel(model))
-                                    if model.hasSuffix(":v") {
+                                    Text(shortModel(model.display))
+                                    if model.id.hasSuffix(":v") {
                                         Image(systemName: "eye")
                                             .foregroundStyle(.blue)
                                             .font(.caption2)
                                     }
-                                }.tag(model)
+                                }.tag(model.id)
                             }
                         }
                     }
@@ -191,24 +190,32 @@ struct FallbackChainView: View {
         .frame(width: 380)
     }
 
-    /// Get available models for a provider from the ViewModel's fetched lists.
-    private func modelsForProvider(_ provider: APIProvider) -> [String] {
+    /// (id, display) pairs for the model picker. `id` is stored/sent to API,
+    /// `display` is shown in the UI (e.g. Z.ai coding models show `-Code` suffix).
+    private func modelOptionsForProvider(_ provider: APIProvider) -> [(id: String, display: String)] {
+        func oai(_ list: [AgentViewModel.OpenAIModelInfo]) -> [(id: String, display: String)] {
+            list.map { ($0.id, $0.name) }
+        }
         switch provider {
-        case .claude: return viewModel.availableClaudeModels.map(\.id)
-        case .openAI: return viewModel.openAIModels.map(\.id)
-        case .ollama: return viewModel.ollamaModels.map(\.name)
-        case .localOllama: return viewModel.localOllamaModels.map(\.name)
-        case .deepSeek: return viewModel.deepSeekModels.map(\.id)
-        case .huggingFace: return viewModel.huggingFaceModels.map(\.id)
-        case .vLLM: return viewModel.vLLMModels.map(\.id)
-        case .lmStudio: return viewModel.lmStudioModels.map(\.id)
-        case .zAI: return viewModel.zAIModels.map(\.id)
-        case .qwen: return viewModel.qwenModels.map(\.id)
-        case .gemini: return viewModel.geminiModels.map(\.id)
-        case .grok: return viewModel.grokModels.map(\.id)
-        case .mistral: return viewModel.mistralModels.map(\.id)
+        case .claude: return viewModel.availableClaudeModels.map { ($0.id, $0.formattedDisplayName) }
+        case .openAI: return oai(viewModel.openAIModels)
+        case .ollama: return viewModel.ollamaModels.map { ($0.name, $0.name) }
+        case .localOllama: return viewModel.localOllamaModels.map { ($0.name, $0.name) }
+        case .deepSeek: return oai(viewModel.deepSeekModels)
+        case .huggingFace: return oai(viewModel.huggingFaceModels)
+        case .vLLM: return oai(viewModel.vLLMModels)
+        case .lmStudio: return oai(viewModel.lmStudioModels)
+        case .zAI: return oai(viewModel.zAIModels)
+        case .qwen: return oai(viewModel.qwenModels)
+        case .gemini: return oai(viewModel.geminiModels)
+        case .grok: return oai(viewModel.grokModels)
+        case .mistral: return oai(viewModel.mistralModels)
         default: return []
         }
+    }
+
+    private func modelsForProvider(_ provider: APIProvider) -> [String] {
+        modelOptionsForProvider(provider).map(\.id)
     }
 
     private func shortModel(_ model: String) -> String {
