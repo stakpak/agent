@@ -9,6 +9,7 @@ use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 
 pub mod acp;
 pub mod agent;
+pub mod ak;
 pub mod auth;
 pub mod auto_update;
 pub mod autopilot;
@@ -181,6 +182,15 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+
+    /// Local persistent agent knowledge store
+    #[command(
+        subcommand,
+        about = "Persistent knowledge store operations",
+        long_about = ak::AK_LONG_ABOUT,
+        after_help = ak::AK_AFTER_HELP
+    )]
+    Ak(ak::AkCommands),
     /// Update Stakpak Agent to the latest version
     Update,
 
@@ -253,6 +263,7 @@ impl Commands {
                 | Commands::Autopilot(_)
                 | Commands::Up { .. }
                 | Commands::Down { .. }
+                | Commands::Ak(_)
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -494,6 +505,9 @@ impl Commands {
             }
             Commands::Browser { args } => {
                 browser::run_browser(args).await?;
+            }
+            Commands::Ak(command) => {
+                command.run()?;
             }
             Commands::Update => {
                 auto_update::run_auto_update(false).await?;

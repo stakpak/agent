@@ -23,6 +23,7 @@ stakpak-tui = { workspace = true }
 stakpak-shared = { workspace = true, features = ["sqlite"] }
 stakpak-server = { workspace = true }
 stakpak-gateway = { workspace = true }
+stakpak-ak = { workspace = true }
 stakai = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }

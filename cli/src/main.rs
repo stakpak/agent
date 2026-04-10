@@ -1025,4 +1025,76 @@ mod tests {
             .requires_auth()
         );
     }
+
+    #[test]
+    fn cli_parses_ak_skill_command() {
+        let parsed = Cli::try_parse_from(["stakpak", "ak", "skill", "usage"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Some(Commands::Ak(commands::ak::AkCommands::Skill { name })) => {
+                    assert_eq!(name, "usage");
+                }
+                _ => panic!("Expected ak skill command"),
+            }
+        }
+    }
+
+    #[test]
+    fn ak_command_does_not_require_auth() {
+        assert!(!Commands::Ak(commands::ak::AkCommands::Tree).requires_auth());
+    }
+
+    #[test]
+    fn ak_cat_requires_at_least_one_path() {
+        let parsed = Cli::try_parse_from(["stakpak", "ak", "cat"]);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn ak_help_explains_llm_first_operational_guidance() {
+        let result = Cli::try_parse_from(["stakpak", "ak", "--help"]);
+        let error = match result {
+            Ok(_) => panic!("help output should exit via clap error"),
+            Err(error) => error,
+        };
+        let help = error.to_string();
+
+        assert!(help.contains("default store root: ~/.stakpak/knowledge"));
+        assert!(help.contains("override: AK_STORE"));
+        assert!(help.contains("paths are relative to the store root"));
+        assert!(help.contains("use `peek` before `cat` to save tokens"));
+        assert!(help.contains("prefer `ls --json` for programmatic use"));
+    }
+
+    #[test]
+    fn ak_write_help_explains_create_only_and_force_semantics() {
+        let result = Cli::try_parse_from(["stakpak", "ak", "write", "--help"]);
+        let error = match result {
+            Ok(_) => panic!("help output should exit via clap error"),
+            Err(error) => error,
+        };
+        let help = error.to_string();
+
+        assert!(help.contains("Create only"));
+        assert!(help.contains("fails if the destination already exists"));
+        assert!(help.contains("use `--force` to overwrite intentionally"));
+        assert!(help.contains("reads content from stdin by default"));
+        assert!(help.contains("--file"));
+    }
+
+    #[test]
+    fn ak_ls_help_explains_json_preference_for_agents() {
+        let result = Cli::try_parse_from(["stakpak", "ak", "ls", "--help"]);
+        let error = match result {
+            Ok(_) => panic!("help output should exit via clap error"),
+            Err(error) => error,
+        };
+        let help = error.to_string();
+
+        assert!(help.contains("one directory at a time"));
+        assert!(help.contains("frontmatter"));
+        assert!(help.contains("prefer `--json` when another tool or agent will parse the output"));
+    }
 }
