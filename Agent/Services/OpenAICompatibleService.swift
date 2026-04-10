@@ -41,10 +41,13 @@ final class OpenAICompatibleService {
     // MARK: - Rate Limiting
     /// Per-provider last request timestamp for rate limiting.
     private static var lastRequestTime: [APIProvider: CFAbsoluteTime] = [:]
-    /// Minimum seconds between requests per provider. Empty = no throttle.
     private static let rateLimitSeconds: [APIProvider: Double] = [:]
-    /// Dynamic backoff from Retry-After header (overrides static limit until it expires).
     private static var retryAfterUntil: [APIProvider: CFAbsoluteTime] = [:]
+
+    /// Clear stale 429 backoff for a provider so a new task doesn't inherit it.
+    static func clearRetryAfter(for provider: APIProvider) {
+        retryAfterUntil.removeValue(forKey: provider)
+    }
 
     init(
         apiKey: String, model: String, baseURL: String,
