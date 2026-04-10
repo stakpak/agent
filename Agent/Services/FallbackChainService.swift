@@ -32,7 +32,7 @@ final class FallbackChainService {
     private static let udEnabledKey = "agent.fallbackEnabled"
 
     /// Max consecutive failures before falling to next provider.
-    static let maxFailuresBeforeFallback = 3
+    static let maxFailuresBeforeFallback = 2
 
     /// The ordered fallback chain. Entry 0 is tried after the primary fails.
     private(set) var chain: [FallbackEntry] = [] {
