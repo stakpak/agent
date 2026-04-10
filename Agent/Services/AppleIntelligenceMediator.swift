@@ -552,11 +552,20 @@ final class AppleIntelligenceMediator: ObservableObject {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard lower.count > 3, lower.count < 240 else { return false }
 
-        // Shell commands that start with "open" but target paths, not apps
+        // "open" followed by path-like or file-like words → LLM territory, not accessibility
         if lower.hasPrefix("open ") {
             let arg = String(lower.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             if arg.hasPrefix(".") || arg.hasPrefix("/") || arg.hasPrefix("~") { return false }
+            let fileWords = ["path", "file", "folder", "directory", "dir ", "dmg", "zip", "app ",
+                             "the path", "the file", "the folder", "the dir", "the dmg",
+                             "build", "export", "output", "log", "project"]
+            if fileWords.contains(where: { arg.hasPrefix($0) }) { return false }
         }
+
+        // "have the llm" / "have the model" / "use the llm" → user explicitly wants cloud LLM
+        let llmOverrides = ["have the llm", "use the llm", "have the model", "let the llm",
+                            "ask the llm", "have llm", "use llm", "have ai", "not working"]
+        if llmOverrides.contains(where: { lower.contains($0) }) { return false }
 
         // Shell-like patterns: ls, cd, git, grep, cat, etc.
         let shellPrefixes = [
