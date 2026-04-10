@@ -91,4 +91,25 @@ extension AgentViewModel {
     func fetchModelsForSelectedProviderIfNeeded() {
         fetchModelsIfNeeded(for: selectedProvider)
     }
+
+    /// When the user changes the global provider via Settings, push it into the
+    /// active tab's LLMConfig so the tab remembers its own provider+model.
+    func syncProviderToActiveTab() {
+        guard let tabId = selectedTabId, let tab = tab(for: tabId), tab.isMainTab else { return }
+        let model = globalModelForProvider(selectedProvider)
+        tab.llmConfig = LLMConfig(provider: selectedProvider, model: model, displayName: tab.scriptName)
+        persistScriptTabs()
+    }
+
+    /// When the user switches tabs, restore the global provider/model from that
+    /// tab's saved LLMConfig so the Settings popup shows the right provider.
+    func restoreProviderFromActiveTab() {
+        guard let tabId = selectedTabId,
+              let tab = tab(for: tabId),
+              let config = tab.llmConfig else { return }
+        // Suppress the didSet re-sync by checking if already correct
+        if selectedProvider != config.provider {
+            selectedProvider = config.provider
+        }
+    }
 }

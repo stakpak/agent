@@ -145,18 +145,17 @@ final class AgentViewModel {
     var selectedProvider: APIProvider = {
         let rawValue = UserDefaults.standard.string(forKey: "agentProvider") ?? "ollama"
         let provider = APIProvider(rawValue: rawValue) ?? .ollama
-        // foundationModel is NEVER a valid main-task provider — it's only used by AppleIntelligenceMediator for
-        // triage/summary/AX intent and by the Tier 1 token compression path. The selectableProviders list excludes it, so any stored value falls back to ollama.
         return APIProvider.selectableProviders.contains(provider) ? provider : .ollama
     }() {
         didSet {
-            // Ensure foundationModel can never be stored as selected provider
             guard APIProvider.selectableProviders.contains(selectedProvider) else {
                 selectedProvider = .ollama
                 return
             }
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: "agentProvider")
             fetchModelsForSelectedProviderIfNeeded()
+            // Sync to the active tab's LLMConfig so each tab remembers its own provider
+            syncProviderToActiveTab()
         }
     }
 
@@ -546,7 +545,9 @@ final class AgentViewModel {
     var scriptTabs: [ScriptTab] = [] {
         didSet { rebuildTabIndex() }
     }
-    var selectedTabId: UUID? // nil = Main tab
+    var selectedTabId: UUID? { // nil = Main tab
+        didSet { restoreProviderFromActiveTab() }
+    }
 
     /// O(1) tab lookup by UUID
     private var tabsByID: [UUID: ScriptTab] = [:]
