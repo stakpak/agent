@@ -92,7 +92,7 @@ struct NewMainTabSheet: View {
                 models: viewModel.openAIModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingOpenAIModels,
-                fetch: { viewModel.fetchOpenAIModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .openAI, force: true) }
             )
 
         case .deepSeek:
@@ -100,7 +100,7 @@ struct NewMainTabSheet: View {
                 models: viewModel.deepSeekModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingDeepSeekModels,
-                fetch: { viewModel.fetchDeepSeekModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .deepSeek, force: true) }
             )
 
         case .huggingFace:
@@ -108,21 +108,21 @@ struct NewMainTabSheet: View {
                 models: viewModel.huggingFaceModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingHuggingFaceModels,
-                fetch: { viewModel.fetchHuggingFaceModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .huggingFace, force: true) }
             )
 
         case .ollama:
-            ollamaModelPicker(models: viewModel.ollamaModels, fetch: { viewModel.fetchOllamaModels() })
+            ollamaModelPicker(models: viewModel.ollamaModels, fetch: { viewModel.fetchModelsIfNeeded(for: .ollama, force: true) })
 
         case .localOllama:
-            ollamaModelPicker(models: viewModel.localOllamaModels, fetch: { viewModel.fetchLocalOllamaModels() })
+            ollamaModelPicker(models: viewModel.localOllamaModels, fetch: { viewModel.fetchModelsIfNeeded(for: .localOllama, force: true) })
 
         case .vLLM:
             modelPickerWithFetch(
                 models: viewModel.vLLMModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingVLLMModels,
-                fetch: { viewModel.fetchVLLMModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .vLLM, force: true) }
             )
 
         case .lmStudio:
@@ -130,7 +130,7 @@ struct NewMainTabSheet: View {
                 models: viewModel.lmStudioModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingLMStudioModels,
-                fetch: { viewModel.fetchLMStudioModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .lmStudio, force: true) }
             )
 
         case .zAI:
@@ -138,7 +138,7 @@ struct NewMainTabSheet: View {
                 models: viewModel.zAIModels,
                 fallbackBinding: $selectedModelId,
                 isFetching: viewModel.isFetchingZAIModels,
-                fetch: { viewModel.fetchZAIModels() }
+                fetch: { viewModel.fetchModelsIfNeeded(for: .zAI, force: true) }
             )
 
         case .bigModel:
@@ -296,43 +296,6 @@ struct NewMainTabSheet: View {
     }
 
     private func ensureModelsLoaded(for provider: APIProvider) {
-        switch provider {
-        case .claude:
-            if viewModel.availableClaudeModels.isEmpty {
-                Task { await viewModel.fetchClaudeModels() }
-            }
-        case .openAI:
-            if viewModel.openAIModels.isEmpty { viewModel.fetchOpenAIModels() }
-        case .deepSeek:
-            if viewModel.deepSeekModels.isEmpty { viewModel.fetchDeepSeekModels() }
-        case .huggingFace:
-            if viewModel.huggingFaceModels.isEmpty { viewModel.fetchHuggingFaceModels() }
-        case .ollama:
-            if viewModel.ollamaModels.isEmpty { viewModel.fetchOllamaModels() }
-        case .localOllama:
-            if viewModel.localOllamaModels.isEmpty { viewModel.fetchLocalOllamaModels() }
-        case .vLLM:
-            if viewModel.vLLMModels.isEmpty { viewModel.fetchVLLMModels() }
-        case .lmStudio:
-            if viewModel.lmStudioModels.isEmpty { viewModel.fetchLMStudioModels() }
-        case .zAI:
-            if viewModel.zAIModels.isEmpty { viewModel.fetchZAIModels() }
-        case .bigModel:
-            break
-        case .qwen:
-            break
-        case .gemini:
-            if viewModel.geminiModels.isEmpty { viewModel.fetchGeminiModels() }
-        case .grok:
-            if viewModel.grokModels.isEmpty { viewModel.fetchGrokModels() }
-        case .mistral:
-            if viewModel.mistralModels.isEmpty { viewModel.fetchMistralModels() }
-        case .codestral:
-            break
-        case .vibe:
-            break
-        case .foundationModel:
-            break
-        }
+        viewModel.fetchModelsIfNeeded(for: provider)
     }
 }

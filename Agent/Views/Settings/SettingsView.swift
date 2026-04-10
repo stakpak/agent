@@ -100,7 +100,7 @@ struct SettingsView: View {
                             }
 
                             Button {
-                                viewModel.fetchOpenAIModels()
+                                viewModel.fetchModelsIfNeeded(for: .openAI, force: true)
                             } label: {
                                 if viewModel.isFetchingOpenAIModels {
                                     ProgressView()
@@ -243,7 +243,7 @@ struct SettingsView: View {
                             }
 
                             Button {
-                                viewModel.fetchZAIModels()
+                                viewModel.fetchModelsIfNeeded(for: .zAI, force: true)
                             } label: {
                                 if viewModel.isFetchingZAIModels {
                                     ProgressView()
@@ -561,7 +561,7 @@ struct SettingsView: View {
                             }
 
                             Button {
-                                viewModel.fetchOllamaModels()
+                                viewModel.fetchModelsIfNeeded(for: .ollama, force: true)
                             } label: {
                                 if viewModel.isFetchingModels {
                                     ProgressView()
