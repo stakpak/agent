@@ -550,16 +550,26 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Cheap pre-filter: does this prompt look like a UI automation request? False negatives fall through to cloud LLM (no harm).
     static func looksLikeAccessibilityRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        // Long prompts rarely single-shot UI commands; typical AX requests are short imperatives.
         guard lower.count > 3, lower.count < 240 else { return false }
-        // Each verb has a trailing space so we don't false-match prefixes
-        // (e.g. "take" matches "take a photo" but not "taken").
+
+        // Shell commands that start with "open" but target paths, not apps
+        if lower.hasPrefix("open ") {
+            let arg = String(lower.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            if arg.hasPrefix(".") || arg.hasPrefix("/") || arg.hasPrefix("~") { return false }
+        }
+
+        // Shell-like patterns: ls, cd, git, grep, cat, etc.
+        let shellPrefixes = [
+            "ls ", "ls\n", "cd ", "git ", "grep ", "cat ", "find ", "mkdir ",
+            "rm ", "cp ", "mv ", "chmod ", "chown ", "brew ", "npm ", "pip ",
+            "swift ", "xcodebuild ", "xcrun ", "make ", "cargo ", "rustc ",
+        ]
+        if shellPrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
+
         let verbs = [
-            // Original AX-named verbs
             "click ", "tap ", "press ", "type ", "select ", "scroll ",
             "open ", "find ", "show me ", "hide ", "activate ", "minimize ",
             "close ", "switch to ", "focus ", "save ", "quit ",
-            // Mac-natural verbs people actually say
             "take ", "launch ", "start ", "stop ", "record ", "play ",
             "pause ", "send ", "visit ", "go to ", "navigate ", "search ",
             "check ", "toggle ", "enable ", "disable ", "choose ", "pick ",
