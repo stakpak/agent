@@ -70,15 +70,11 @@ extension AgentViewModel {
             }
 
             let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Don't appendLog — the streaming callback already displayed the output.
+            // Only build the tool_result for the LLM.
             var batchOutput = output.isEmpty ? "(no output)" : output
             if result.status != 0 { batchOutput += "\nexit code: \(result.status)" }
-
-            let truncated = LogLimits.trim(
-                batchOutput,
-                cap: LogLimits.batchOutputChars,
-                suffix: "Batch output truncated."
-            )
-            tab.appendLog(truncated)
+            let truncated = LogLimits.trim(batchOutput, cap: LogLimits.batchOutputChars, suffix: "Batch output truncated.")
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": truncated],

@@ -44,6 +44,9 @@ extension AgentViewModel {
             return result.output.isEmpty ? "(no output)" : result.output
         case "git_branch":
             let branchName = input["name"] as? String ?? ""
+            guard !branchName.isEmpty else {
+                return "Error: branch name is empty. Recovery: pass name:\"my-branch\"."
+            }
             let checkout = input["checkout"] as? Bool ?? false
             let dir = CodingService.resolveDir(pf.isEmpty ? nil : pf)
             let cmd = CodingService.buildGitBranchCommand(path: pf.isEmpty ? nil : pf, name: branchName, checkout: checkout)

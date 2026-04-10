@@ -178,6 +178,12 @@ extension AgentViewModel {
             let path = input["path"] as? String
             let branchName = input["name"] as? String ?? ""
             let checkout = input["checkout"] as? Bool ?? true
+            guard !branchName.isEmpty else {
+                let err = "Error: branch name is empty. Recovery: pass name:\"my-branch\" to git(action:\"branch\", name:\"...\")."
+                appendLog(err)
+                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
+                return true
+            }
             if let pathErr = Self.checkPath(path) {
                 appendLog(pathErr)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": pathErr])
