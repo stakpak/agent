@@ -205,9 +205,15 @@ extension AgentViewModel {
             // 429 rate-limit / "service overloaded" — exponential backoff up to 60s. Z.ai returns this with body code
             // 1305 ("service may be temporarily overloaded"); OpenAI returns 429 with a Retry-After header. Either way the server is asking for a longer wait than the generic 10-second recoverable retry below — bumping each attempt by 15s up to a 60s ceiling.
             timeoutRetryCount += 1
-            let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
             let apiBody: String
             if case .apiError(_, let msg) = error as? AgentError { apiBody = msg } else { apiBody = errMsg }
+            if timeoutRetryCount >= 3 {
+                if let fallback = await tryFallbackChain(reason: "429 after \(timeoutRetryCount) attempts") {
+                    timeoutRetryCount = 0
+                    return fallback
+                }
+            }
+            let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
             appendLog(
                 """
                 ⏳ \(errorSource) 429: \(apiBody.prefix(200))
