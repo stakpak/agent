@@ -616,29 +616,40 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Apple AI's ~4096-token window requires terse instructions. Known apps from SDEFService; unknowns fall back to NSRunningApplications scan.
         let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You automate Mac UI via the accessibility tool. Use the EXACT natural app \
-        name the user said in their request — bundle ID resolution happens \
-        automatically. NEVER substitute a different app name than what the user asked \
-        for. After tool calls succeed, reply with 1 sentence.
+        You have 3 tools: accessibility (UI clicks/types), applescript (Finder/app automation), shell (CLI commands).
 
-        Roles: AXButton, AXTextField, AXLink, AXMenuItem, AXCheckBox, AXImage, AXWebArea
+        TOOL SELECTION:
+        - open a FILE or FOLDER by path → shell(command:"open /path/to/thing")
+        - Finder operations (reveal, move, copy) → applescript
+        - click buttons, type text, open apps by name → accessibility
+        - ls, git, find, any CLI → shell
 
-        Apps Agent knows about (use these names exactly when applicable): \(knownApps)
+        ACCESSIBILITY: Use the EXACT app name from the user's request. \
+        Roles: AXButton, AXTextField, AXLink, AXMenuItem. \
+        Known apps: \(knownApps)
 
-        For apps not in that list, use whatever name the user gave you verbatim.
+        APPLESCRIPT: tell application "Finder" to open POSIX file "/path"
 
-        Multi-step example — when the user says "open Calculator and click 5":
-          1. open_app(app="Calculator")
-          2. click_element(role="AXButton", title="5", app="Calculator")
-          Reply: "Opened Calculator and clicked 5."
+        SHELL: open /path, ls, git status, etc.
 
-        The example app above is illustrative ONLY. Use the SAME app the user named \
-        in the actual request — do NOT pattern-match to apps from this prompt.
-
-        If the request isn't Mac UI automation, reply briefly without calling the tool.
+        Reply with 1 sentence after tool calls succeed.
         """)
 
-        let session = LanguageModelSession(model: .default, tools: [tool], instructions: instructions)
+        let scriptTool = AppleScriptAppleTool { source in
+            tracker.markCalled()
+            let result = await MainActor.run { NSAppleScriptService.shared.execute(source: source) }
+            if !result.success { tracker.markFailed() }
+            return result.output
+        }
+
+        let shellTool = ShellAppleTool { command in
+            tracker.markCalled()
+            let result = await AgentViewModel.executeTCC(command: command)
+            if result.status != 0 { tracker.markFailed() }
+            return result.output.isEmpty ? "(exit \(result.status))" : result.output
+        }
+
+        let session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
 
         // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
         let timeoutSeconds: TimeInterval = 15
@@ -803,7 +814,48 @@ struct AccessibilityArgs: Sendable {
     let text: String?
 }
 
-/// FoundationModels Tool conformance. Dispatch closure injected by runAccessibilityAgent; no AgentViewModel dependency.
+// MARK: - AppleScript Tool for Apple AI
+
+@Generable
+struct AppleScriptArgs: Sendable {
+    @Guide(description: "AppleScript source code to execute. Use for Finder operations, file opens, app scripting.")
+    let source: String
+}
+
+@Generable
+struct ShellArgs: Sendable {
+    @Guide(description: "Shell command to run. Use for: open /path, ls, find, git, etc.")
+    let command: String
+}
+
+struct ShellAppleTool: FoundationModels.Tool {
+    typealias Output = String
+    let name = "shell"
+    let description = "Run a shell command in-process. Use for: open /path/to/file, ls, find, git status, etc. " +
+        "Prefer this for opening files/folders by path (open /path) and any CLI operation."
+
+    let dispatch: @Sendable (String) async -> String
+
+    func call(arguments: ShellArgs) async throws -> String {
+        return await dispatch(arguments.command)
+    }
+}
+
+struct AppleScriptAppleTool: FoundationModels.Tool {
+    typealias Output = String
+    let name = "applescript"
+    let description = "Run AppleScript for Finder ops, file/folder opens, app automation. " +
+        "Use: tell application \"Finder\" to open POSIX file \"/path\". " +
+        "Use: tell application \"Finder\" to reveal POSIX file \"/path\". " +
+        "Prefer this over accessibility for opening files/folders by path."
+
+    let dispatch: @Sendable (String) async -> String
+
+    func call(arguments: AppleScriptArgs) async throws -> String {
+        return await dispatch(arguments.source)
+    }
+}
+
 struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
 
