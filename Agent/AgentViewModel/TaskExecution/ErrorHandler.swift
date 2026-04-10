@@ -207,11 +207,11 @@ extension AgentViewModel {
             timeoutRetryCount += 1
             let apiBody: String
             if case .apiError(_, let msg) = error as? AgentError { apiBody = msg } else { apiBody = errMsg }
-            if timeoutRetryCount >= 3 {
-                if let fallback = await tryFallbackChain(reason: "429 after \(timeoutRetryCount) attempts") {
-                    timeoutRetryCount = 0
-                    return fallback
-                }
+            // Record every 429 with the fallback chain — it fires once its
+            // own threshold is met (3 total failures across the task).
+            if let fallback = await tryFallbackChain(reason: "429 (\(timeoutRetryCount))") {
+                timeoutRetryCount = 0
+                return fallback
             }
             let retryDelay: TimeInterval = 10
             appendLog(
