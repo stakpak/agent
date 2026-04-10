@@ -48,25 +48,15 @@ extension AgentViewModel {
                 )
             }
 
-            // Log each step before running so the user sees the plan
-            for (idx, cmd) in commands.enumerated() {
-                tab.appendLog("🔧 [\(idx + 1)/\(commands.count)] $ \(Self.collapseHeredocs(cmd))")
-            }
+            tab.appendLog("🔧 batch_commands (\(commands.count) steps)")
             tab.flush()
-
-            // Build the single-process script. After each command, print a unique delimiter line followed by the exit
-            // code so the parser can split per-step. Using printf (not echo) to guarantee the format isn't mangled by aliases.
-            let delim = "===AGENT_BATCH_STEP_\(UUID().uuidString.prefix(8))==="
-            var script = ""
-            for cmd in commands {
-                script += "\(cmd)\n"
-                script += "printf '\\n%s:%d\\n' '\(delim)' $?\n"
-            }
 
             guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
 
-            // executeForTab handles the cd-prepend + TCC routing internally; passing
-            // the full multi-line script lets every step run in the same shell process.
+            // Run the whole batch as a single script — no per-step delimiters.
+            // Per-step splitting broke multiline constructs (for/case/esac/done)
+            // and leaked ===AGENT_BATCH_STEP=== markers into the activity log.
+            let script = commands.joined(separator: "\n")
             let needsTCC = Self.needsTCCPermissions(script)
             let result: (status: Int32, output: String)
             if needsTCC {
@@ -79,43 +69,16 @@ extension AgentViewModel {
                 result = await Self.executeTCC(command: prefixed)
             }
 
-            // Split the aggregated output on the delimiter and attribute per-step.
-            var batchOutput = ""
-            var remaining = result.output
-            for (idx, cmd) in commands.enumerated() {
-                if let range = remaining.range(of: "\(delim):") {
-                    let stepOutput = String(remaining[remaining.startIndex..<range.lowerBound])
-                    let afterDelim = remaining[range.upperBound...]
-                    let nlIdx = afterDelim.firstIndex(of: "\n") ?? afterDelim.endIndex
-                    let rc = Int(afterDelim[afterDelim.startIndex..<nlIdx]) ?? 0
+            let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            var batchOutput = output.isEmpty ? "(no output)" : output
+            if result.status != 0 { batchOutput += "\nexit code: \(result.status)" }
 
-                    let trimmed = stepOutput.trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
-                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
-                    if rc != 0 { batchOutput += "exit code: \(rc)\n" }
-                    batchOutput += (trimmed.isEmpty ? "(no output)" : trimmed) + "\n\n"
-
-                    remaining = nlIdx < afterDelim.endIndex
-                        ? String(afterDelim[afterDelim.index(after: nlIdx)...])
-                        : ""
-                } else {
-                    // Bash bailed out before this step printed its delimiter (syntax
-                    // error in an earlier command, exit, etc.). Show whatever's left.
-                    batchOutput += "[\(idx + 1)] $ \(cmd)\n"
-                    if remaining.isEmpty {
-                        batchOutput += "(no output — batch aborted before this step ran)\n\n"
-                    } else {
-                        batchOutput += "(batch aborted, trailing output below)\n\(remaining)\n\n"
-                        remaining = ""
-                    }
-                }
-            }
-
-            // Truncate if batch output is too large
             let truncated = LogLimits.trim(
                 batchOutput,
                 cap: LogLimits.batchOutputChars,
                 suffix: "Batch output truncated."
             )
+            tab.appendLog(truncated)
             tab.flush()
             return TabToolResult(
                 toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": truncated],
