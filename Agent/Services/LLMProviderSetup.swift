@@ -57,14 +57,15 @@ enum LLMProviderSetup {
         capabilities: [.streaming, .tools, .systemPrompt]
     )
 
+    // TEMP: all Z.ai models use coding endpoint (user's Coding Plan supports vision too)
     static let zAI = LLMProviderConfig(
         id: "zAI", displayName: "Z.ai",
         kind: .cloudAPI, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
             chatURL: "https://api.z.ai/api/coding/paas/v4/chat/completions",
             modelsURL: "https://api.z.ai/api/coding/paas/v4/models",
-            visionChatURL: "https://api.z.ai/api/paas/v4/chat/completions",
-            visionModelsURL: "https://api.z.ai/api/paas/v4/models"
+            visionChatURL: "https://api.z.ai/api/coding/paas/v4/chat/completions",
+            visionModelsURL: "https://api.z.ai/api/coding/paas/v4/models"
         ),
         capabilities: [.streaming, .tools, .systemPrompt, .vision],
         temperature: 0.7
