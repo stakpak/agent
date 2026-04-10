@@ -213,7 +213,7 @@ extension AgentViewModel {
                     return fallback
                 }
             }
-            let retryDelay = TimeInterval(min(15 * timeoutRetryCount, 60))
+            let retryDelay: TimeInterval = 10
             appendLog(
                 """
                 ⏳ \(errorSource) 429: \(apiBody.prefix(200))
