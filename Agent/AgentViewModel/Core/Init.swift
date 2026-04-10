@@ -88,41 +88,7 @@ extension AgentViewModel {
 
     // MARK: - Provider selection dispatch
 
-    /// Kick off model-list fetches for the current provider if needed. Called from
-    /// `selectedProvider.didSet` so the UI populates the model menu lazily.
     func fetchModelsForSelectedProviderIfNeeded() {
-        if selectedProvider == .ollama && ollamaModels.isEmpty {
-            fetchOllamaModels()
-        }
-        if selectedProvider == .localOllama && localOllamaModels.isEmpty {
-            fetchLocalOllamaModels()
-        }
-        if selectedProvider == .claude && availableClaudeModels.isEmpty {
-            Task { await fetchClaudeModels() }
-        }
-        if selectedProvider == .openAI && openAIModels.isEmpty {
-            fetchOpenAIModels()
-        }
-        if selectedProvider == .deepSeek && deepSeekModels.isEmpty {
-            fetchDeepSeekModels()
-        }
-        if selectedProvider == .huggingFace && huggingFaceModels.isEmpty {
-            fetchHuggingFaceModels()
-        }
-        if selectedProvider == .vLLM && vLLMModels.isEmpty {
-            fetchVLLMModels()
-        }
-        if selectedProvider == .lmStudio && lmStudioModels.isEmpty {
-            fetchLMStudioModels()
-        }
-        if selectedProvider == .zAI && zAIModels.isEmpty {
-            fetchZAIModels()
-        }
-        if selectedProvider == .gemini && geminiModels.isEmpty {
-            fetchGeminiModels()
-        }
-        if selectedProvider == .grok && grokModels.isEmpty {
-            fetchGrokModels()
-        }
+        fetchModelsIfNeeded(for: selectedProvider)
     }
 }

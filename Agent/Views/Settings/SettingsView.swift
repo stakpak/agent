@@ -877,25 +877,7 @@ struct SettingsView: View {
     }
 
     private func refreshModelsForCurrentProvider() {
-        switch viewModel.selectedProvider {
-        case .openAI: viewModel.fetchOpenAIModels()
-        case .deepSeek: viewModel.fetchDeepSeekModels()
-        case .huggingFace: viewModel.fetchHuggingFaceModels()
-        case .ollama: viewModel.fetchOllamaModels()
-        case .localOllama: viewModel.fetchLocalOllamaModels()
-        case .vLLM: viewModel.fetchVLLMModels()
-        case .lmStudio: viewModel.fetchLMStudioModels()
-        case .zAI: viewModel.fetchZAIModels()
-        case .bigModel: break
-        case .qwen: viewModel.fetchQwenModels()
-        case .gemini: viewModel.fetchGeminiModels()
-        case .grok: viewModel.fetchGrokModels()
-        case .mistral: viewModel.fetchMistralModels()
-        case .codestral: viewModel.fetchCodestralModels()
-        case .vibe: viewModel.fetchVibeModels()
-        case .claude: Task { await viewModel.fetchClaudeModels() }
-        case .foundationModel: break
-        }
+        viewModel.fetchModelsIfNeeded(for: viewModel.selectedProvider, force: true)
     }
 }
 

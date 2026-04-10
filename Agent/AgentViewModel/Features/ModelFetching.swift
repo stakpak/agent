@@ -758,23 +758,25 @@ extension AgentViewModel {
     }
 
     /// Trigger model fetch for a provider if its list is empty.
-    func fetchModelsIfNeeded(for provider: APIProvider) {
+    /// Single model-list refresh for any provider. `force: true` skips the empty check.
+    func fetchModelsIfNeeded(for provider: APIProvider, force: Bool = false) {
         switch provider {
-        case .claude: if availableClaudeModels.isEmpty { Task { await fetchClaudeModels() } }
-        case .openAI: if openAIModels.isEmpty { fetchOpenAIModels() }
-        case .ollama: if ollamaModels.isEmpty { fetchOllamaModels() }
-        case .localOllama: if localOllamaModels.isEmpty { fetchLocalOllamaModels() }
-        case .deepSeek: if deepSeekModels.isEmpty { fetchDeepSeekModels() }
-        case .huggingFace: if huggingFaceModels.isEmpty { fetchHuggingFaceModels() }
-        case .vLLM: if vLLMModels.isEmpty { fetchVLLMModels() }
-        case .lmStudio: if lmStudioModels.isEmpty { fetchLMStudioModels() }
-        case .zAI: if zAIModels.isEmpty { fetchZAIModels() }
-        case .qwen: if qwenModels.isEmpty { fetchQwenModels() }
-        case .gemini: if geminiModels.isEmpty { fetchGeminiModels() }
-        case .grok: if grokModels.isEmpty { fetchGrokModels() }
-        case .mistral: if mistralModels.isEmpty { fetchMistralModels() }
-        case .codestral: if mistralModels.isEmpty { fetchCodestralModels() }
-        case .vibe: if mistralModels.isEmpty { fetchVibeModels() }
+        case .claude: if force || availableClaudeModels.isEmpty { Task { await fetchClaudeModels() } }
+        case .openAI: if force || openAIModels.isEmpty { fetchOpenAIModels() }
+        case .ollama: if force || ollamaModels.isEmpty { fetchOllamaModels() }
+        case .localOllama: if force || localOllamaModels.isEmpty { fetchLocalOllamaModels() }
+        case .deepSeek: if force || deepSeekModels.isEmpty { fetchDeepSeekModels() }
+        case .huggingFace: if force || huggingFaceModels.isEmpty { fetchHuggingFaceModels() }
+        case .vLLM: if force || vLLMModels.isEmpty { fetchVLLMModels() }
+        case .lmStudio: if force || lmStudioModels.isEmpty { fetchLMStudioModels() }
+        case .zAI: if force || zAIModels.isEmpty { fetchZAIModels() }
+        case .qwen: if force || qwenModels.isEmpty { fetchQwenModels() }
+        case .gemini: if force || geminiModels.isEmpty { fetchGeminiModels() }
+        case .grok: if force || grokModels.isEmpty { fetchGrokModels() }
+        case .mistral: if force || mistralModels.isEmpty { fetchMistralModels() }
+        case .codestral: if force || codestralModels.isEmpty { fetchCodestralModels() }
+        case .vibe: if force || vibeModels.isEmpty { fetchVibeModels() }
+        case .bigModel: break
         default: break
         }
     }
