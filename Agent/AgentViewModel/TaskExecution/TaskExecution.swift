@@ -57,7 +57,10 @@ extension AgentViewModel {
         var (provider, modelName, isVision) = resolveInitialProviderConfig()
         // Defer the "🧠 provider/model" log line until AFTER triage has run and we know we're actually going to the
         // cloud LLM. Logging it up-front (the previous behavior) made the activity log misleading when Apple AI handled the request locally — users saw both "🧠 Z.ai/glm-5.1" and "🍎 Opened Photo Booth and took a photo" for the same task even though the cloud LLM never ran.
-        let cloudModelLogLine = "🧠 \(provider.displayName) / \(modelName)\(isVision ? " (vision)" : "")"
+        let displayModel = modelDisplayName(provider: provider, modelId: modelName)
+        let apiURL = chatURLForProvider(provider)
+        let isCoding = apiURL.contains("/coding/")
+        let cloudModelLogLine = "🧠 \(provider.displayName) / \(displayModel)\(isCoding ? " (code)" : "")\(isVision ? " (vision)" : "")"
 
         let mt = maxTokens
         var services = buildLLMServiceBundle(

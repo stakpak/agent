@@ -51,8 +51,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/macOS26/AgentLLM.git",
       "state": {
-        "revision": "4bcd668ae68787ee2ff373fb85023353bb497106",
-        "version": "1.0.0"
+        "revision": "f2629bf456af5fd14b0664d71be6b7699bc005b7",
+        "version": "1.0.1"
       }
     },
     {

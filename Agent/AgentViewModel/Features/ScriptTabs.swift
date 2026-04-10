@@ -102,19 +102,12 @@ extension AgentViewModel {
     }
 
     /// Return the chat URL for the given provider from the LLM registry (single source of truth).
-    /// Z.ai and BigModel swap to coding endpoint for non-vision models.
+    /// Pick the right chat URL — code or vision — based on the model's :v suffix.
     func chatURLForProvider(_ provider: APIProvider) -> String {
-        guard let url = LLMRegistry.shared.provider(provider.rawValue)?.endpoint.chatURL else { return "" }
-        // Z.ai/BigModel: coding endpoint for text models, general endpoint for vision models
-        // Non-coding (vision) models are tagged with ":v" suffix in their stored ID
-        if provider == .zAI || provider == .bigModel {
-            let raw = provider == .zAI ? zAIModel : bigModelModel
-            let isVisionModel = raw.hasSuffix(":v")
-            if !isVisionModel {
-                return url.replacingOccurrences(of: "/api/paas/", with: "/api/coding/paas/")
-            }
-        }
-        return url
+        guard let endpoint = LLMRegistry.shared.provider(provider.rawValue)?.endpoint else { return "" }
+        let raw = provider == .zAI ? zAIModel : (provider == .bigModel ? bigModelModel : "")
+        let isVision = raw.hasSuffix(":v")
+        return endpoint.resolvedChatURL(isVision: isVision)
     }
 
     /// Return a human-readable display name for a model ID given its provider.
