@@ -2,8 +2,7 @@ import AgentAudit
 import Foundation
 import AgentMCP
 
-/// / Service for managing MCP server connections / Acts as a bridge between the UI (MCPServersView) and the underlying
-/// MCP client / The MCPClient is imported from the AgentMCP package
+/// Service for managing MCP server connections.
 @MainActor @Observable
 final class MCPService: @unchecked Sendable {
     static let shared = MCPService()
@@ -217,8 +216,7 @@ final class MCPService: @unchecked Sendable {
 
     // MARK: - PATH Resolution
 
-    /// Resolve a bare command name to its full path via common directories.
-    /// macOS apps don't inherit the user's shell PATH, so "uvx" won't be found.
+    /// Resolve bare command to full path (macOS apps lack shell PATH).
     private static func resolveCommand(_ command: String) -> String {
         guard !command.contains("/") else { return command }
         let home = FileManager.default.homeDirectoryForCurrentUser.path

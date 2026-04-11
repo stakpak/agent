@@ -10,8 +10,7 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Overnight coding guardrails — track runaway loops and nudge/stop: / 1) Read guard: nudge at 5, snap-out at 25.
-    /// 2) Build enforcement: nudge at 3 unbuilt edits. / 3) Error budget: stop at 5 consecutive build failures. 4) Stuck-file: nudge at 3, give-up at 6. / Returns true only when error budget triggers (caller should break the task loop).
+    /// Overnight coding guardrails — track runaway loops and nudge/stop. Returns true when error budget triggers.
     func runOvernightCodingGuards(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         toolResults: inout [[String: Any]],
@@ -51,12 +50,7 @@ extension AgentViewModel {
             let hadEdit = pendingTools.contains { editTools.contains($0.name) }
             let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
 
-            // 1. Read guard — nudge at 5, hard snap-out at 25. Wording forces two legitimate moves: narrow to a single
-            // fact and act, or call done() and report unknowns. No confabulation from partial reads.
-            // Read guard removed — LLMs need freedom to research entire projects
-            // without being interrupted. The snap-out was counter-productive:
-            // models worked around it by making dummy edits, and legitimate
-            // deep-dive analysis tasks were blocked at 25 reads.
+              // Read guard removed — LLMs need freedom to research entire projects without interruption.
             if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
 
             // 2. Build enforcement — only for Xcode projects
@@ -92,8 +86,7 @@ extension AgentViewModel {
             }
             if consecutiveBuildFailures >= 5 { return true }
 
-            // 4. Stuck detection — track edit failures per file. Fires at 3 failures with an actionable nudge (re-read
-            // fresh, copy bytes exactly), then again at 6 with a "skip and move on" message. Lowered from 5 because users were cancelling tasks at 3-4 repeated failures, well before the old threshold fired.
+            // Stuck detection — track edit failures per file. Nudge at 3, give up at 6.
             for tool in pendingTools where editTools.contains(tool.name) {
                 guard let path = tool.input["file_path"] as? String ?? tool.input["path"] as? String else { continue }
                 let output = toolResults.last?["content"] as? String ?? ""

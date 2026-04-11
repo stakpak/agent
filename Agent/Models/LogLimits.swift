@@ -1,13 +1,11 @@
 import Foundation
 
-/// / Central caps + trim helper for LLM-bound tool-result data. / Different caps per site on purpose (read_file allows
-/// more than per-tool-result slots). / Unification is on the trim function and banner format, not cap values. / NOTE: For LLM-bound data only. Activity-log display trimming is in ScriptTab.trimLog.
+/// Central caps + trim helper for LLM-bound tool-result data.
 enum LogLimits {
 
     // MARK: - Named caps
 
-    /// `read_file` tool output cap (file content sent to LLM).
-    /// Covers ~95% of Swift source files in a single read.
+    /// File content cap — covers ~95% of Swift files in one read.
     static let readFileChars = 50_000
 
     /// Per-tool-result cap when packaging results into a user message.
@@ -23,8 +21,7 @@ enum LogLimits {
     /// `web_fetch` cleaned HTML cap.
     static let webFetchChars = 8_000
 
-    /// / Short summary/excerpt cap — used for sub-agent result snapshots and / per-message compression input. Small
-    /// enough that an LLM can summarize / it cheaply, large enough to preserve meaningful context.
+    /// Short summary cap for sub-agent snapshots and compression.
     static let summaryChars = 2_000
 
     /// Outbound iMessage reply cap. iMessage tolerates ~65 KB but carriers
@@ -37,8 +34,7 @@ enum LogLimits {
 
     // MARK: - Shared trim helper
 
-    /// / Trim `text` to `cap` chars with a trailing truncation banner. / If under cap, returns unchanged. Otherwise:
-    /// prefix + banner like / "... [truncated — N chars total, M lines. suffix]"
+    /// Trim text to cap chars with a truncation banner if over.
     static func trim(
         _ text: String,
         cap: Int,

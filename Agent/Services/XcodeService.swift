@@ -3,8 +3,7 @@ import Foundation
 import ScriptingBridge
 import XcodeScriptingBridge
 
-/// / Xcode automation via ScriptingBridge — build, run, list/select projects, grant permission. / Modeled after xcf's
-/// best patterns: file:line:col error format, code snippets, build-before-run. / Silences ScriptingBridge "invalid reuse" errors instead of crashing.
+/// Xcode automation via ScriptingBridge — build, run, list/select projects, grant permission.
 private class SBApplicationDelegateIgnore: NSObject, SBApplicationDelegate {
     func eventDidFail(_ event: UnsafePointer<AppleEvent>, withError error: any Error) -> Any? {
         return nil // Suppress error, return nil to caller
@@ -24,9 +23,7 @@ final class XcodeService: @unchecked Sendable {
 
     // MARK: - Grant Permission
 
-    /// Grant Automation permission by running a lightweight AppleScript via osascript.
-    /// This triggers the macOS permission dialog so ScriptingBridge can control Xcode.
-    /// Uses a no-op command (get name) instead of a full build to avoid side effects.
+      /// Grant Automation permission via lightweight osascript no-op (get name).
     nonisolated func grantPermission() -> String {
         let script = """
         tell application "Xcode"

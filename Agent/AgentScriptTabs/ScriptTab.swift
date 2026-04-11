@@ -63,8 +63,7 @@ final class ScriptTab: Identifiable {
     var thinkingDismissed: Bool = true
     var thinkingExpanded: Bool = false
     var thinkingOutputExpanded: Bool = false
-    /// / Expanded state of the Steps (tool calls) disclosure inside the / LLM Output HUD. Persisted across Cmd+B
-    /// hide/show cycles and step / count changes — without this, SwiftUI tears down ToolStepsView and / resets its local @State, collapsing it every time a step is added / or the HUD is toggled.
+    /// Expanded state for tool steps disclosure (persists across toggles).
     var toolStepsExpanded: Bool = false
     /// User's drag-resized height for the LLM Output HUD on this tab. Persisted across tab switches.
     var llmOutputHeight: Double = 80

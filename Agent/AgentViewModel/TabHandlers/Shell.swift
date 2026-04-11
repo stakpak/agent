@@ -53,9 +53,7 @@ extension AgentViewModel {
 
             guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
 
-            // Run the whole batch as a single script — no per-step delimiters.
-            // Per-step splitting broke multiline constructs (for/case/esac/done)
-            // and leaked ===AGENT_BATCH_STEP=== markers into the activity log.
+              // Single script — per-step splitting broke multiline constructs and leaked markers.
             let script = commands.joined(separator: "\n")
             let needsTCC = Self.needsTCCPermissions(script)
             let result: (status: Int32, output: String)

@@ -48,11 +48,7 @@ enum DaemonCore {
         if !workingDirectory.isEmpty {
             env["PWD"] = workingDirectory
         }
-        // Defense-in-depth: HelperService.execute / UserService.execute already
-        // prepend `export AGENT_PROJECT_FOLDER='dir'; cd 'dir' && ` to the
-        // script string so the env var is set inside the shell. Setting it on
-        // process.environment as well covers any future call site that talks
-        // to DaemonCore directly without that prepend.
+          // Defense-in-depth: set AGENT_PROJECT_FOLDER on process.environment too.
         env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
             ? FileManager.default.homeDirectoryForCurrentUser.path
             : workingDirectory
