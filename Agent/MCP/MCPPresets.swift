@@ -12,5 +12,12 @@ struct MCPPreset: Identifiable {
 enum MCPPresets {
     /// / Curated MCP server presets. Currently empty — the Z.AI Web Search preset / was removed 2026-04-08 because
     /// Z.AI's MCP server returns truncated tools/list / JSON (unbalanced braces, mid-character cutoff). Use `web_search` tool via / Settings → Z.AI API key instead (see performZAIWebSearchInternal). / Re-enable only after Z.AI fixes their MCP server.
-    static let all: [MCPPreset] = []
+    static let all: [MCPPreset] = [
+        MCPPreset(id: "xcf", menuLabel: "xcf.ai — Xcode Build & Run") {
+            MCPServerConfig(
+                name: "xcf",
+                command: "/Applications/xcf.app/Contents/MacOS/xcf server"
+            )
+        },
+    ]
 }
