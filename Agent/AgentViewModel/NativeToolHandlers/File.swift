@@ -114,7 +114,7 @@ extension AgentViewModel {
             let rawDir = input["path"] as? String ?? pf
             let displayDir = CodingService.trimHome(rawDir)
             let findCmd =
-                "find . -maxdepth 8 -type f -name \(pat)"
+                "find . -maxdepth 8 \\( -type f -o -type d \\) -name \(pat)"
                 + " ! -path '*/.*' ! -path '*/.build/*'"
                 + " ! -path '*/.git/*' ! -path '*/.swiftpm/*'"
                 + " ! -name '.DS_Store' ! -name '*.xcuserstate'"
