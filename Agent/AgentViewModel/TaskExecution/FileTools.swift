@@ -151,7 +151,11 @@ extension AgentViewModel {
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
                 let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
-                let d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
+                var d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
+                if let meta = diff.metadata, let start = meta.sourceStartLine {
+                    d1f += "\n📍 line \(start + 1)"
+                    if let total = meta.sourceTotalLines { d1f += " of \(total)" }
+                }
                 if !d1f.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     appendLog(d1f)
                 }
