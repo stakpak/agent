@@ -65,7 +65,25 @@ extension AgentViewModel {
         return lines.prefix(count).joined(separator: "\n") + "\n..."
     }
 
-    /// Wrap text in a markdown code fence with language tag for syntax highlighting.
+    /// Prepend line numbers to D1F diff output. ❌ lines track source, ✅ lines track destination.
+    static func numberDiffLines(_ d1f: String, startLine: Int) -> String {
+        var srcLine = startLine
+        var dstLine = startLine
+        return d1f.components(separatedBy: "\n").map { line in
+            if line.hasPrefix("❌") {
+                let n = srcLine; srcLine += 1
+                return "\(n) \(line)"
+            } else if line.hasPrefix("✅") {
+                let n = dstLine; dstLine += 1
+                return "\(n) \(line)"
+            } else if line.hasPrefix("📎") {
+                let n = srcLine; srcLine += 1; dstLine += 1
+                return "\(n) \(line)"
+            }
+            return line
+        }.joined(separator: "\n")
+    }
+
     static func codeFence(_ text: String, language: String = "") -> String {
         "```\(language)\n\(text.trimmingCharacters(in: .newlines))\n```"
     }

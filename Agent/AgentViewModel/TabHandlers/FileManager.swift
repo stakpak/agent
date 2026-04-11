@@ -113,13 +113,11 @@ extension AgentViewModel {
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
                 let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
-                var d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
-                if let meta = diff.metadata, let start = meta.sourceStartLine {
-                    d1f += "\n📍 line \(start + 1)"
-                    if let total = meta.sourceTotalLines { d1f += " of \(total)" }
-                }
+                let d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
                 if !d1f.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    tab.appendLog(d1f)
+                    let startLine = (diff.metadata?.sourceStartLine ?? 0) + 1
+                    let numbered = Self.numberDiffLines(d1f, startLine: startLine)
+                    tab.appendLog(numbered)
                 }
             }
             let outLines = output.components(separatedBy: "\n")
