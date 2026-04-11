@@ -23,7 +23,7 @@ enum CodingService {
 
       /// Walk up from `originalPath` to find nearest existing ancestor directory, then
       /// search up to 4 levels deep for matching basenames. Capped at `maxResults`.
-    private static func findFilesByBasename(originalPath: String, maxResults: Int) -> [String] {
+    static func findFilesByBasename(originalPath: String, maxResults: Int) -> [String] {
         let basename = (originalPath as NSString).lastPathComponent
         guard !basename.isEmpty else { return [] }
         let fm = FileManager.default

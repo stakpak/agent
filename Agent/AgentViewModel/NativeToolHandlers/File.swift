@@ -35,8 +35,11 @@ extension AgentViewModel {
                 CodingService.readFile(path: path, offset: offset, limit: limit)
             }
         case "write_file":
-            let path = input["file_path"] as? String ?? ""
+            var path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else { return "Error: file_path is required for write_file. Recovery: pass file_path:\"/path/to/file\"." }
+            if !path.hasPrefix("/") && !path.hasPrefix("~") && !pf.isEmpty {
+                path = (pf as NSString).appendingPathComponent(path)
+            }
             let content = input["content"] as? String ?? ""
             guard !content.isEmpty else { return "Error: content is required for write_file (empty content would truncate the file). Recovery: pass content:\"...\"." }
             let tabID = selectedTabId ?? Self.mainTabID
@@ -48,18 +51,31 @@ extension AgentViewModel {
         // MARK: edit_file — delegate to CodingService.editFile (d1f-powered with line-ending normalization, fuzzy
         // whitespace match, context disambiguation, and round-trip verification). The duplicate edit_file logic that lived here had none of those safeguards and was the source of most "old_string not found" errors when the LLM had a slightly-stale snapshot of the file.
         case "edit_file":
-            let path = input["file_path"] as? String ?? ""
+            var path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else { return "Error: file_path is required for edit_file" }
+            // Resolve relative paths against project folder
+            if !path.hasPrefix("/") && !path.hasPrefix("~") && !pf.isEmpty {
+                path = (pf as NSString).appendingPathComponent(path)
+            }
+            let expanded = (path as NSString).expandingTildeInPath
+            // Basename search if file not found — same as read_file
+            if !FileManager.default.fileExists(atPath: expanded) {
+                let candidates = CodingService.findFilesByBasename(originalPath: expanded, maxResults: 5)
+                if !candidates.isEmpty {
+                    let list = candidates.map { "  \($0)" }.joined(separator: "\n")
+                    return "Error: file not found: \(path)\nFound:\n\(list)\nRecovery: re-call with the correct path."
+                }
+                return "Error: file not found: \(path). Recovery: use file(action:\"list\") to find the file."
+            }
             let old = input["old_string"] as? String ?? ""
             guard !old.isEmpty else { return "Error: old_string is required for edit_file. Recovery: read the file first, copy the exact text to replace." }
             let new = input["new_string"] as? String ?? ""
             let replaceAll = input["replace_all"] as? Bool ?? false
             let context = input["context"] as? String
-            // Back up before editing so undo_edit can restore
             let tabID = selectedTabId ?? Self.mainTabID
-            FileBackupService.shared.backup(filePath: path, tabID: tabID)
+            FileBackupService.shared.backup(filePath: expanded, tabID: tabID)
             return await Self.offMain {
-                CodingService.editFile(path: path, oldString: old, newString: new, replaceAll: replaceAll, context: context)
+                CodingService.editFile(path: expanded, oldString: old, newString: new, replaceAll: replaceAll, context: context)
             }
         // MARK: create_diff
         case "create_diff":
