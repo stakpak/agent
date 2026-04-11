@@ -150,6 +150,11 @@ extension AgentViewModel {
             Self.invalidateFileReadCache(path: expandedEdit)
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
+                let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
+                let d1f = MultiLineDiff.displayDiff(diff: diff, source: oldString, format: .ai)
+                if !d1f.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    appendLog(d1f)
+                }
             }
             let outLines = output.components(separatedBy: "\n")
             let status = outLines.first ?? output
