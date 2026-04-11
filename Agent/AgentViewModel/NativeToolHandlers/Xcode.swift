@@ -149,10 +149,10 @@ extension AgentViewModel {
             return await Self.offMain { XcodeService.shared.getVersionInfo() }
         case "xcode_analyze":
             let fp = input["file_path"] as? String ?? ""
-            guard !fp.isEmpty else { return "Error: file_path is required for analyze" }
+            guard !fp.isEmpty else { return "Error: file_path is required for analyze. Recovery: pass the Swift file path, or use file(action:\"list\", pattern:\"*.swift\") to find files." }
             guard let data = FileManager.default.contents(atPath: fp),
                   let content = String(data: data, encoding: .utf8) else {
-                return "Error: could not read \(fp)"
+                return "Error: could not read \(fp). Recovery: use file(action:\"list\") to verify the path."
             }
             // Basic Swift analysis — check for common issues
             let lines = content.components(separatedBy: "\n")
@@ -170,17 +170,17 @@ extension AgentViewModel {
             return issues.isEmpty ? "No issues found in \(fp) (\(lines.count) lines)" : issues.joined(separator: "\n")
         case "xcode_snippet":
             let fp = input["file_path"] as? String ?? ""
-            guard !fp.isEmpty else { return "Error: file_path is required for snippet" }
+            guard !fp.isEmpty else { return "Error: file_path is required for snippet. Recovery: pass the file path, or use file(action:\"list\") to find files." }
             guard let data = FileManager.default.contents(atPath: fp),
                   let content = String(data: data, encoding: .utf8) else {
-                return "Error: could not read \(fp)"
+                return "Error: could not read \(fp). Recovery: use file(action:\"list\") to verify the path."
             }
             let lines = content.components(separatedBy: "\n")
             let s = (input["start_line"] as? Int ?? 1)
             let e = (input["end_line"] as? Int ?? lines.count)
             let start = max(s - 1, 0)
             let end = min(e, lines.count)
-            guard start < end else { return "Error: invalid line range \(s)-\(e)" }
+            guard start < end else { return "Error: invalid line range \(s)-\(e) (file has \(lines.count) lines). Recovery: use file(action:\"read\", file_path:\"\(fp)\") to see line count." }
             let ext = (fp as NSString).pathExtension
             let snippet = lines[start..<end].enumerated().map { "\(start + $0 + 1)\t\($1)" }.joined(separator: "\n")
             return "```\(ext)\n\(snippet)\n```"

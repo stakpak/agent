@@ -251,7 +251,7 @@ extension AgentViewModel {
                 let httpResponse = response as? HTTPURLResponse
                 let statusCode = httpResponse?.statusCode ?? 0
                 guard (200..<400).contains(statusCode) else {
-                    return "Error: HTTP \(statusCode) for \(urlStr)"
+                    return "Error: HTTP \(statusCode) for \(urlStr). Recovery: URL may be down or require auth. Try a different URL or check manually."
                 }
                 let raw = String(data: data, encoding: .utf8) ?? "(binary data, \(data.count) bytes)"
                 let cleaned = Self.cleanHTML(raw)

@@ -43,7 +43,7 @@ extension AgentViewModel {
             let url = URL(fileURLWithPath: path)
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             do { try content.write(to: url, atomically: true, encoding: .utf8); return "Wrote \(path)" }
-            catch { return "Error: \(error.localizedDescription)" }
+            catch { return "Error writing \(path): \(error.localizedDescription). Recovery: check path is writable or use file(action:\"list\") to verify the directory." }
         // MARK: edit_file — delegate to CodingService.editFile (d1f-powered with line-ending normalization, fuzzy
         // whitespace match, context disambiguation, and round-trip verification). The duplicate edit_file logic that lived here had none of those safeguards and was the source of most "old_string not found" errors when the LLM had a slightly-stale snapshot of the file.
         case "edit_file":
@@ -81,7 +81,7 @@ extension AgentViewModel {
             let asciiDiff = input["diff"] as? String ?? ""
             let expanded = (path as NSString).expandingTildeInPath
             guard let data = FileManager.default.contents(atPath: expanded),
-                  let source = String(data: data, encoding: .utf8) else { return "Error: cannot read \(path)" }
+                  let source = String(data: data, encoding: .utf8) else { return "Error: cannot read \(path). Recovery: use file(action:\"list\") to verify the file exists." }
             do {
                 let patched: String
                 if let uuid = UUID(uuidString: diffIdStr),
@@ -96,7 +96,7 @@ extension AgentViewModel {
                 let verifyDiff = MultiLineDiff.createAndDisplayDiff(source: source, destination: patched, format: .ai)
                 return "Applied diff to \(path)\n\n\(verifyDiff)"
             } catch {
-                return "Error applying diff: \(error.localizedDescription)"
+                return "Error applying diff: \(error.localizedDescription). Recovery: re-read the file and create a new diff."
             }
         // List/search files (via User LaunchAgent - no TCC required)
         case "list_files":
@@ -157,7 +157,7 @@ extension AgentViewModel {
             return raw.isEmpty ? "Directory not found or empty" : "[project folder: \(displayDir)]\n\(raw)"
         case "mkdir":
             let rawPath = input["path"] as? String ?? ""
-            guard !rawPath.isEmpty else { return "Error: path is required" }
+            guard !rawPath.isEmpty else { return "Error: path is required for mkdir. Recovery: pass path:\"/dir/to/create\"." }
             let stripped = rawPath.hasPrefix("./") ? String(rawPath.dropFirst(2)) : rawPath
             let resolved = stripped.hasPrefix("/") || stripped.hasPrefix("~")
                 ? (stripped as NSString).expandingTildeInPath
