@@ -234,7 +234,8 @@ extension AgentViewModel {
             return result.status == 0 ? "Project '\(name)' created at \(path)/\(name) (template: \(template))" : result.output
         case "web_fetch":
             let urlStr = input["url"] as? String ?? ""
-            guard let url = URL(string: urlStr) else { return "Error: invalid URL '\(urlStr)'" }
+            guard !urlStr.isEmpty else { return "Error: url is required for web_fetch. Recovery: pass url:\"https://example.com\"." }
+            guard let url = URL(string: urlStr) else { return "Error: invalid URL '\(urlStr)'. Recovery: must start with http:// or https://." }
             appendLog("🌐 Fetch: \(urlStr)")
             flushLog()
             do {

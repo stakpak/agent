@@ -19,6 +19,7 @@ extension AgentViewModel {
         // Shell commands
         case "execute_agent_command", "run_shell_script":
             let command = input["command"] as? String ?? ""
+            guard !command.isEmpty else { return "Error: command is required. Recovery: pass command:\"ls -la\" or any shell command." }
             if let suggestion = Self.suggestTool(command) { return suggestion }
             if let pathErr = Self.preflightCommand(command) { return pathErr }
             appendLog("🔧 $ \(Self.collapseHeredocs(command))")
@@ -57,6 +58,7 @@ extension AgentViewModel {
             return result.output.isEmpty ? "(no output, exit \(result.status))" : result.output
         case "execute_daemon_command":
             let command = input["command"] as? String ?? ""
+            guard !command.isEmpty else { return "Error: command is required. Recovery: pass command:\"whoami\" or any shell command." }
             // TCC GUARD — TCC-touching commands (osascript, screencapture, etc.) MUST run in-process where Agent! holds
             // TCC grants. Launch Daemon has no TCC. Reroute to executeTCCStreaming and log it.
             if Self.needsTCCPermissions(command) {

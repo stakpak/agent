@@ -36,8 +36,9 @@ extension AgentViewModel {
             }
         case "write_file":
             let path = input["file_path"] as? String ?? ""
+            guard !path.isEmpty else { return "Error: file_path is required for write_file. Recovery: pass file_path:\"/path/to/file\"." }
             let content = input["content"] as? String ?? ""
-            // Back up before overwriting
+            guard !content.isEmpty else { return "Error: content is required for write_file (empty content would truncate the file). Recovery: pass content:\"...\"." }
             let tabID = selectedTabId ?? Self.mainTabID
             FileBackupService.shared.backup(filePath: path, tabID: tabID)
             let url = URL(fileURLWithPath: path)
@@ -50,6 +51,7 @@ extension AgentViewModel {
             let path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else { return "Error: file_path is required for edit_file" }
             let old = input["old_string"] as? String ?? ""
+            guard !old.isEmpty else { return "Error: old_string is required for edit_file. Recovery: read the file first, copy the exact text to replace." }
             let new = input["new_string"] as? String ?? ""
             let replaceAll = input["replace_all"] as? Bool ?? false
             let context = input["context"] as? String
