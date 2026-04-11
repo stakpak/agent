@@ -24,22 +24,13 @@ final class XcodeService: @unchecked Sendable {
 
     // MARK: - Grant Permission
 
-    /// Grant Automation permission by running a trivial AppleScript via osascript.
+    /// Grant Automation permission by running a lightweight AppleScript via osascript.
     /// This triggers the macOS permission dialog so ScriptingBridge can control Xcode.
+    /// Uses a no-op command (get name) instead of a full build to avoid side effects.
     nonisolated func grantPermission() -> String {
         let script = """
         tell application "Xcode"
-            set xcDoc to first document
-            tell xcDoc
-                set buildResult to build
-                repeat
-                    if completed of buildResult is true then
-                        exit repeat
-                    end if
-                    delay 0.5
-                end repeat
-                return "Xcode Automation permission has been granted"
-            end tell
+            return name
         end tell
         """
 
