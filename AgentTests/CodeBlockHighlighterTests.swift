@@ -578,11 +578,7 @@ struct CodeBlockHighlighterTests {
         let result = CodeBlockHighlighter.highlightActivityLogLine(line: code, font: defaultFont)
         
         #expect(result != nil)
-        // Path segments should have different colors
-        // Home prefix (/Users/toddbruss/) dim
-        // Top dir (Documents/) green
-        // Middle dirs cyan
-        // Filename blue bold
+        // Path segments: home prefix dim, top dir green, middle dirs cyan, filename blue bold
         #expect(hasColor(result!, for: "/Users/toddbruss/Documents/file.swift"))
     }
     

@@ -145,10 +145,7 @@ import AgentD1F
         #expect(final.contains("</html>"), "Footer should remain")
     }
 
-    // =========================================================================
     // MARK: - Scenario 3: AI undoes a diff by UUID
-    // =========================================================================
-    // AI: diff_and_apply → gets diff_id → undo_edit with diff_id
 
     @Test("Scenario 3: undo_edit by diff_id using D1F createUndoDiff")
     func undoByDiffId() throws {
@@ -191,9 +188,7 @@ import AgentD1F
         #expect(readFile(file) == original, "File should be restored to original")
     }
 
-    // =========================================================================
     // MARK: - Scenario 4: AI makes multiple edits, undoes the last one
-    // =========================================================================
 
     @Test("Scenario 4: two diff_and_apply edits, undo last one")
     func multipleEditsUndoLast() throws {
@@ -248,9 +243,7 @@ import AgentD1F
         #expect(final.contains("padding: 0"), "Second edit should be undone")
     }
 
-    // =========================================================================
     // MARK: - Scenario 5: Truncation safety rejects bad diffs
-    // =========================================================================
 
     @Test("Scenario 5: apply_diff rejects diff that would truncate file")
     func truncationSafetyCheck() throws {
@@ -278,9 +271,7 @@ import AgentD1F
         #expect(readFile(file) == original, "File should remain unchanged")
     }
 
-    // =========================================================================
     // MARK: - Scenario 6: diff_and_apply inserting more lines than replaced
-    // =========================================================================
 
     @Test("Scenario 6: diff_and_apply replaces 1 line with 3 lines")
     func diffAndApplyInsertLines() throws {
@@ -312,9 +303,7 @@ import AgentD1F
         #expect(final.contains("}"), "Closing brace intact")
     }
 
-    // =========================================================================
     // MARK: - Scenario 7: D1F preview output for all tools
-    // =========================================================================
 
     @Test("Scenario 7: all tools produce D1F ASCII preview")
     func allToolsShowPreview() throws {
@@ -345,9 +334,7 @@ import AgentD1F
         #expect(!preview3.isEmpty, "undo should produce D1F preview")
     }
 
-    // =========================================================================
     // MARK: - Scenario 8: DiffStore UUID lifecycle
-    // =========================================================================
 
     @Test("Scenario 8: DiffStore stores, retrieves, tracks applies, and clears")
     func diffStoreLifecycle() {
@@ -377,9 +364,7 @@ import AgentD1F
         #expect(DiffStore.shared.lastEdit(for: file) == nil)
     }
 
-    // =========================================================================
     // MARK: - Scenario 9: Full file diff_and_apply (no line range)
-    // =========================================================================
 
     @Test("Scenario 9: diff_and_apply without line range replaces entire file")
     func diffAndApplyFullFile() throws {
@@ -406,9 +391,7 @@ import AgentD1F
         #expect(verified)
     }
 
-    // =========================================================================
     // MARK: - Scenario 10: SHA verification catches corruption
-    // =========================================================================
 
     @Test("Scenario 10: verifyDiff confirms integrity")
     func shaVerification() {
