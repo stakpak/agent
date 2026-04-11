@@ -258,7 +258,11 @@ extension AgentViewModel {
 
         // Fallback: route through executeNativeTool
         let output = await executeNativeTool(name, input: input)
-        appendLog(output)
+        // Shell commands already streamed output via appendRawOutput — skip the duplicate log.
+        let shellTools: Set<String> = ["execute_agent_command", "run_shell_script", "execute_daemon_command"]
+        if !shellTools.contains(name) {
+            appendLog(output)
+        }
         flushLog()
         toolResults.append(["type": "tool_result", "tool_use_id": ctx.toolId, "content": output])
 
