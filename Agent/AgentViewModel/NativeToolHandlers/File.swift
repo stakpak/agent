@@ -104,13 +104,8 @@ extension AgentViewModel {
         case "list_files":
             let rawPat = input["pattern"] as? String ?? "*.swift"
             // Reject wildcard-only patterns — too broad, suggest specific extension
-            if rawPat == "*" || rawPat == "*.*" {
-                return """
-                    Error: pattern '*' is too broad. \
-                    Use a file extension like '*.swift', '*.json', \
-                    '*.py', or '*.txt'. \
-                    Example: list_files(pattern: "*.swift")
-                    """
+            if rawPat == "*" || rawPat == "*.*" || rawPat.isEmpty {
+                return "Error: pattern too broad. Recovery: use an extension like pattern:\"*.swift\" or pattern:\"*.xcodeproj\". For directories use read_dir."
             }
             let pat = CodingService.shellEscape(rawPat)
             let rawDir = input["path"] as? String ?? pf

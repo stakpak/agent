@@ -54,7 +54,7 @@ extension AgentViewModel {
             axInput["action"] = axAction
             return await handleAccessibilityAction(action: axAction, input: axInput)
         }
-        return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled — no matching handler found."
+        return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled. Recovery: call list_tools to see available tools, or check spelling."
     }
 
     /// Read-only accessibility actions that should NOT auto-launch the target app. These are queries — they should fail gracefully if the app isn't running, NOT silently spawn it.
