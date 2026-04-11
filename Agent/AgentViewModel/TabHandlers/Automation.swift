@@ -1,7 +1,6 @@
 @preconcurrency import Foundation
 import AgentMCP
 import AgentD1F
-import Cocoa
 
 extension AgentViewModel {
 
