@@ -26,6 +26,7 @@ fn detect_format(path: &Path) -> FileFormat {
 pub struct McpConfigFile {
     #[serde(rename = "mcpServers")]
     pub servers: BTreeMap<String, McpServerEntry>,
+    #[serde(skip)]
     pub format: Option<FileFormat>,
 }
 
@@ -199,6 +200,7 @@ pub fn load_config(path: &Path) -> Result<McpConfigFile, String> {
 
 pub fn load_config_from_str(content: &str) -> Result<McpConfigFile, String> {
     let toml_result: Result<McpConfigFile, _> = toml::from_str(content);
+
     if let Ok(cfg) = toml_result {
         return Ok(cfg);
     }

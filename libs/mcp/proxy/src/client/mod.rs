@@ -274,6 +274,41 @@ fn substitute_env_vars(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::sync::Mutex;
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original_value: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original_value = env::var(key).ok();
+            unsafe {
+                env::set_var(key, value);
+            }
+            Self {
+                key,
+                original_value,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original_value {
+                Some(val) => unsafe {
+                    env::set_var(self.key, val);
+                },
+                None => unsafe {
+                    env::remove_var(self.key);
+                },
+            }
+        }
+    }
 
     #[test]
     fn test_substitute_no_vars() {
@@ -300,7 +335,9 @@ mod tests {
 
     #[test]
     fn test_substitute_known_var() {
-        unsafe { std::env::set_var("TEST_MCP_SUBSTITUTE", "secret_value") };
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = EnvVarGuard::set("TEST_MCP_SUBSTITUTE", "secret_value");
+
         assert_eq!(substitute_env_vars("$TEST_MCP_SUBSTITUTE"), "secret_value");
         assert_eq!(
             substitute_env_vars("${TEST_MCP_SUBSTITUTE}"),
@@ -310,7 +347,8 @@ mod tests {
 
     #[test]
     fn test_substitute_var_in_middle() {
-        unsafe { std::env::set_var("TEST_MCP_KEY", "abc123") };
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = EnvVarGuard::set("TEST_MCP_KEY", "abc123");
         assert_eq!(
             substitute_env_vars("prefix_${TEST_MCP_KEY}_suffix"),
             "prefix_abc123_suffix"
@@ -319,8 +357,9 @@ mod tests {
 
     #[test]
     fn test_substitute_multiple_vars() {
-        unsafe { std::env::set_var("TEST_MCP_A", "one") };
-        unsafe { std::env::set_var("TEST_MCP_B", "two") };
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard_a = EnvVarGuard::set("TEST_MCP_A", "one");
+        let _env_guard_b = EnvVarGuard::set("TEST_MCP_B", "two");
         assert_eq!(
             substitute_env_vars("$TEST_MCP_A and $TEST_MCP_B"),
             "one and two"
@@ -380,7 +419,8 @@ args = ["-y", "my-server"]
 
     #[test]
     fn test_env_substitution_in_config() {
-        unsafe { std::env::set_var("TEST_MCP_TOKEN", "my-token-value") };
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = EnvVarGuard::set("TEST_MCP_TOKEN", "my-token-value");
         let toml_str = r#"
 [mcpServers.github]
 command = "npx"

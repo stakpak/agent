@@ -173,8 +173,10 @@ impl McpCommands {
                 config_file,
             } => {
                 let entry = if let Some(json_str) = json {
-                    serde_json::from_str::<McpServerEntry>(&json_str)
-                        .map_err(|e| format!("Invalid JSON config: {e}"))?
+                    let mut entry = serde_json::from_str::<McpServerEntry>(&json_str)
+                        .map_err(|e| format!("Invalid JSON config: {e}"))?;
+                    entry.set_disabled(disabled);
+                    entry
                 } else if let Some(url) = url {
                     let headers = parse_key_values(&headers)?;
                     McpServerEntry::UrlBased {
