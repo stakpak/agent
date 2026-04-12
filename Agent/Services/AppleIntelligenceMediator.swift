@@ -567,6 +567,17 @@ final class AppleIntelligenceMediator: ObservableObject {
                             "ask the llm", "have llm", "use llm", "have ai", "not working"]
         if llmOverrides.contains(where: { lower.contains($0) }) { return false }
 
+        // File paths → coding/shell task, not accessibility
+        if lower.contains("/users/") || lower.contains("/applications/")
+            || lower.contains("/volumes/") || lower.contains("/tmp/")
+            || lower.contains("~/") || message.contains("\"/" )
+        { return false }
+
+        // File/build keywords → coding task
+        let codingWords = ["dmg", ".app", ".swift", ".py", ".js", ".ts", "xcodebuild",
+                           "agent script", "agentscript", "compile", "package", "spm"]
+        if codingWords.contains(where: { lower.contains($0) }) { return false }
+
         // Shell-like patterns: ls, cd, git, grep, cat, etc.
         let shellPrefixes = [
             "ls ", "ls\n", "cd ", "git ", "grep ", "cat ", "find ", "mkdir ",
