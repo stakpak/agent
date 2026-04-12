@@ -1,6 +1,6 @@
 
 <div align="center">
-   <p><i></i>Our Founder! of this stealth startup is battling Cancer. Your Stars and Forks mean the World and are greatly appreciated.</i></p>
+   <p><i>Our Founder! of this stealth startup is battling Cancer. Your Stars and Forks mean the World and are greatly appreciated.</i></p>
 <img width="256" height="256" alt="Agent! icon" src="https://github.com/user-attachments/assets/7a452184-6b31-49fa-9b24-d450d2889f66" />
 
 # 🦾 Agent! for macOS 26.4+
