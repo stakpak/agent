@@ -114,21 +114,21 @@ The Agent! header contains **15 buttons** for quick access to settings, monitors
 
 | # | Icon | Name | What it does |
 |---|------|------|--------------|
-| 1 | ⚙️ `gearshape.2` | **Services** | Toggle the Launch Agent / Launch Daemon, manage project folder, scan command output |
-| 2 | 💬 `message.fill` | **Messages Monitor** | Toggle iMessage monitoring on/off — green when active. Opens the recipients list and approval UI |
-| 3 | ✋ `hand.raised` | **Accessibility** | Open the Accessibility settings sheet (permission status, axorcist diagnostics) |
-| 4 | 🖥️ `server.rack` | **MCP Servers** | Add/remove/configure MCP (Model Context Protocol) servers — extends Agent! with `mcp_*` tools |
-| 5 | </> `chevron.left.forwardslash.chevron.right` | **Coding Preferences** | Toggle auto-verify, visual tests, auto-PR, auto-scaffold. Green when any are on |
-| 6 | 🔧 `wrench.and.screwdriver` | **Tools** | Per-provider tool toggles. Enable/disable individual built-in and MCP tools |
-| 7 | 🧠 `cpu` | **LLM Settings** | Pick AI provider, model, API key, base URL. Pulses when a task is running |
-| 8 | 🧬 `brain.fill` / `brain` | **Apple Intelligence** | Configure FoundationModels (on-device Apple AI). Filled when available |
-| 9 | 🎛️ `slider.horizontal.3` | **Agent Options** | Temperature, max iterations, vision auto-screenshot, plan-mode encouragement, etc. |
-| 10 | 🔄 `arrow.triangle.2.circlepath` | **Fallback Chain** | Configure provider fallback order — Agent! retries with the next provider when one fails |
-| 11 | 🔲 `viewfinder` | **HUD** | Toggle the green-CRT scanline overlay on the LLM Output view |
-| 12 | 📊 `chart.bar.fill` | **LLM Usage** | Per-model token usage and cost tracking. Green when there's recorded usage |
-| 13 | ↩️ `arrow.uturn.backward.circle` | **Rollback** | Time-Machine-style file backup browser. Restore any previous version of any file Agent! edited |
-| 14 | 🕐 `clock.arrow.circlepath` | **History** | Past prompts, errors, and task summaries for the active tab. Re-run a previous prompt with one click |
-| 15 | 🗑️ `trash` | **Clear Log** | Delete the activity log for the active tab (or all task history when no tab is selected). Confirms first |
+| 1 | ⚙️ | **Services** | Toggle the Launch Agent / Launch Daemon, manage project folder, scan command output |
+| 2 | 💬 | **Messages Monitor** | Toggle iMessage monitoring on/off — green when active. Opens the recipients list and approval UI |
+| 3 | ✋ | **Accessibility** | Open the Accessibility settings sheet (permission status, axorcist diagnostics) |
+| 4 | 🖥️ | **MCP Servers** | Add/remove/configure MCP (Model Context Protocol) servers — extends Agent! with `mcp_*` tools |
+| 5 | </> | **Coding Preferences** | Toggle auto-verify, visual tests, auto-PR, auto-scaffold. Green when any are on |
+| 6 | 🔧 | **Tools** | Per-provider tool toggles. Enable/disable individual built-in and MCP tools |
+| 7 | 🧠 | **LLM Settings** | Pick AI provider, model, API key, base URL. Pulses when a task is running |
+| 8 | 🧬 | **Apple Intelligence** | Configure FoundationModels (on-device Apple AI). Filled when available |
+| 9 | 🎛️ | **Agent Options** | Temperature, max iterations, vision auto-screenshot, plan-mode encouragement, etc. |
+| 10 | 🔄 | **Fallback Chain** | Configure provider fallback order — Agent! retries with the next provider when one fails |
+| 11 | 🔲 | **HUD** | Toggle the green-CRT scanline overlay on the LLM Output view |
+| 12 | 📊 | **LLM Usage** | Per-model token usage and cost tracking. Green when there's recorded usage |
+| 13 | ↩️ | **Rollback** | Time-Machine-style file backup browser. Restore any previous version of any file Agent! edited |
+| 14 | 🕐 | **History** | Past prompts, errors, and task summaries for the active tab. Re-run a previous prompt with one click |
+| 15 | 🗑️ | **Clear Log** | Delete the activity log for the active tab (or all task history when no tab is selected). Confirms first |
 
 ---
 
