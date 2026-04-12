@@ -65,7 +65,7 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
 >
 > 💡 **Z.ai is still the recommended starting point** if you don't have an account anywhere yet — fastest signup, GLM-5.1 is the default model, no infrastructure to provision.
 >
-> ⚠️ **Running GLM locally is "free" only if you already own the hardware.** GLM-5 (744B, 40B active MoE) and GLM-5.1 (754B MoE) are massive models — to run one well you need an M2/M3/M4 Ultra Mac Studio with 128GB+ unified memory, or a Linux box with 80GB+ VRAM. If you're buying that hardware just to run a local LLM, the cloud APIs above are dramatically cheaper.
+> ⚠️ **Running GLM locally?** Only **GLM-4.7-Turbo** (32B) runs well on consumer hardware — M2/M3/M4 Mac with 64-128GB unified memory via Ollama. GLM-5 (744B MoE) and GLM-5.1 (754B MoE) are cloud-only at ~1.6TB full weight — use the Z.ai or BigModel APIs for those.
 
 
 ## What Can It Do?
