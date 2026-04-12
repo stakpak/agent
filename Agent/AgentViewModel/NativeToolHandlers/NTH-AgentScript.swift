@@ -35,7 +35,6 @@ extension AgentViewModel {
             // Spawn a fresh ScriptTab so the calling main task is not blocked. The script runs in a detached Task and
             // streams output to the spawned tab; this handler returns immediately.
             let spawnedTab = openScriptTab(scriptName: scriptName, selectTab: false)
-            spawnedTab.projectFolder = projectFolder
             spawnedTab.isRunning = true
             spawnedTab.appendLog("🦾 Spawned from main task")
             spawnedTab.flush()

@@ -13,8 +13,10 @@ extension AgentViewModel {
         {
             tab.parentTabId = parent.id
         }
-        // Inherit project folder from current context (resolve to directory, not file)
-        tab.projectFolder = Self.resolvedWorkingDirectory(self.projectFolder)
+        // Inherit project folder from the currently selected tab (parent), falling back to global
+        let parentFolder = selectedTabId.flatMap { self.tab(for: $0) }?.projectFolder ?? ""
+        let sourceFolder = parentFolder.isEmpty ? self.projectFolder : parentFolder
+        tab.projectFolder = Self.resolvedWorkingDirectory(sourceFolder)
         scriptTabs.append(tab)
         if selectTab { selectedTabId = tab.id }
         persistScriptTabs()
@@ -32,8 +34,10 @@ extension AgentViewModel {
             numberedConfig.displayName = "\(baseName) \(existingCount + 1)"
         }
         let tab = ScriptTab(llmConfig: numberedConfig)
-        // Inherit project folder from main tab (resolve to directory, not file)
-        tab.projectFolder = Self.resolvedWorkingDirectory(self.projectFolder)
+        // Inherit project folder from the currently selected tab, falling back to global
+        let parentFolder = selectedTabId.flatMap { self.tab(for: $0) }?.projectFolder ?? ""
+        let sourceFolder = parentFolder.isEmpty ? self.projectFolder : parentFolder
+        tab.projectFolder = Self.resolvedWorkingDirectory(sourceFolder)
         scriptTabs.append(tab)
         selectedTabId = tab.id
         persistScriptTabs()

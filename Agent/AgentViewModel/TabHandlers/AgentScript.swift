@@ -166,8 +166,7 @@ extension AgentViewModel {
             // Spawn a fresh ScriptTab for the run so the calling LLM tab is not blocked. The script runs in a detached
             // Task and streams output to the spawned tab; the calling tool returns immediately.
             let spawnedTab = openScriptTab(scriptName: scriptName, selectTab: false)
-            // Inherit caller's project folder explicitly (openScriptTab uses self.projectFolder, which may not match
-            // the calling tab when tabs have diverged).
+            // Inherit caller's project folder explicitly (the calling tab may not be the selected tab).
             spawnedTab.projectFolder = tab.projectFolder
             spawnedTab.isRunning = true
             spawnedTab.appendLog("🦾 Spawned from \(tab.scriptName)")
