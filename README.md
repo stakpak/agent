@@ -289,6 +289,21 @@ These are the canonical tool names defined in `AgentTools.Name.*` and exposed to
 - **You're in control.** Agent! shows everything it does and logs every action.
 - **Built on Apple's security model.** macOS permissions protect your system.
 
+### Defense Layers
+
+| Layer | What it does |
+|---|---|
+| **Shell Safety Service** | Hard-blocks catastrophic commands (`rm -rf /`, `rm -rf ~`, `dd` to `/dev/disk`, fork bombs, `--no-preserve-root`) before the Process is even constructed. Cannot be bypassed by the LLM. |
+| **TCC In-Process Routing** | 17-keyword detector routes AppleScript, osascript, JXA, screencapture, accessibility, Shortcuts, and ScriptingBridge commands to run in-process where Agent! holds TCC grants — never through the Launch Agent/Daemon (separate bundle IDs = no TCC). |
+| **File Backup on Every Edit** | `FileBackupService` auto-snapshots every file before `write_file`, `edit_file`, and `diff_apply`. Recoverable via `file(action:"restore")` or the Rollback UI. 1-week TTL. |
+| **Agent Script .Trash** | `delete_agent` copies the script to `~/Documents/AgentScript/agents/.Trash/` before removal. Recoverable via `agent_script(action:"restore")`. |
+| **Working Directory Normalization** | Every shell execution path (`executeTCC`, `UserService`, `HelperService`) normalizes the working directory — if a file path is accidentally passed as cwd, it strips to the parent directory instead of crashing with "Not a directory". |
+| **Task Drain-Before-Start** | Starting a new task awaits the previous task's full termination before beginning — prevents orphaned retry loops from mixing log output across providers. |
+| **Fallback Chain** | When the primary LLM fails (429, timeout, network), Agent! auto-switches to the next provider in the user-configured chain after 2 failures. |
+| **Actionable Errors** | Every tool error includes a `Recovery:` hint telling the LLM exactly what to try next — no dead-end error messages that waste turns. |
+| **Read Cache Invalidation** | File read cache is invalidated on both successful edits AND failed edits, so the LLM always gets fresh content on the next read. |
+| **Basename Search** | When `read_file` or `edit_file` gets a wrong path, Agent! searches nearby directories for files with the same name and returns the correct paths inline — the LLM self-corrects in one turn. |
+
 ---
 
 ## Keyboard Shortcuts
