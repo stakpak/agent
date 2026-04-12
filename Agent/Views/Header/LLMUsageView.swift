@@ -58,6 +58,7 @@ struct LLMUsageView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .frame(width: 120, alignment: .leading)
+                            .help(store.modelProvider[model].map { "Provider: \($0)\nModel: \(model)" } ?? model)
 
                             VStack(alignment: .leading, spacing: 4) {
                                 // Input bar

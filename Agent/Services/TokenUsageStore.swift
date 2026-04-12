@@ -188,17 +188,21 @@ final class TokenUsageStore {
     /// Per-model usage for the current session.
     private(set) var modelUsage: [String: ModelUsage] = [:]
 
+    /// Provider name per model key (for tooltip display).
+    private(set) var modelProvider: [String: String] = [:]
+
     /// Lines of code added/removed in the current task.
     private(set) var taskLinesAdded: Int = 0
     private(set) var taskLinesRemoved: Int = 0
 
     /// Record usage for a specific model.
-    func recordModelUsage(model: String, input: Int, output: Int) {
+    func recordModelUsage(model: String, input: Int, output: Int, provider: String? = nil) {
         var usage = modelUsage[model, default: ModelUsage()]
         usage.inputTokens += input
         usage.outputTokens += output
         usage.callCount += 1
         modelUsage[model] = usage
+        if let provider { modelProvider[model] = provider }
     }
 
     /// Record lines changed from a diff/edit.
@@ -216,6 +220,7 @@ final class TokenUsageStore {
     /// Reset session-level model usage.
     func resetModelUsage() {
         modelUsage.removeAll()
+        modelProvider.removeAll()
     }
 
     // MARK: - Per-Provider Cost Rates (USD per 1M tokens)
