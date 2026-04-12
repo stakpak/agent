@@ -1,6 +1,7 @@
 
 <div align="center">
-   <p>🎗️ Our Founder! of this project is battling cancer. Your <b>Stars</b> and <b>Forks</b> are appreciated. 🎗️</p><br>
+   <p>🎗️ Our Founder! of this project is battling cancer. Your <b>Stars</b> and <b>Forks</b> are appreciated. 🎗️</p>
+   <p><a href="https://www.paypal.com/ncp/payment/3DTH3S7XARK98"><img src="https://img.shields.io/badge/Tip_Jar-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="Tip Jar" /></a> Donations are greatly appreciated!</p><br>
 <img width="256" height="256" alt="Agent! icon" src="https://github.com/user-attachments/assets/7a452184-6b31-49fa-9b24-d450d2889f66" />
 
 # 🦾 Agent! for macOS 26.4+
