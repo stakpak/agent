@@ -36,25 +36,6 @@ extension AgentViewModel {
             }
             let offset = input["offset"] as? Int
             let limit = input["limit"] as? Int
-            let expandedRead = (filePath as NSString).expandingTildeInPath
-            let cacheKey = Self.fileReadCacheKey(path: expandedRead, offset: offset, limit: limit)
-
-            // Mtime-based dedup: if we've read this exact range and the file hasn't changed,
-            // return a stub WITHOUT doing disk I/O. The earlier tool_result is still in context.
-            if let cached = Self.taskFileReadCache[cacheKey],
-               let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let currentMtime = attrs[.modificationDate] as? Date,
-               cached.mtime == currentMtime
-            {
-                let stub =
-                        "File unchanged since last read (\(cached.outputCharCount) chars). "
-                        + "The content from the earlier Read tool_result in this "
-                        + "conversation is still current — refer to that instead "
-                        + "of re-reading."
-                appendLog("📖 (unchanged) \(filePath)")
-                toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": stub])
-                return true
-            }
 
             appendLog("📖 Read: \(filePath)")
             let output = await Self.offMain { CodingService.readFile(path: filePath, offset: offset, limit: limit) }
@@ -66,13 +47,6 @@ extension AgentViewModel {
                 appendLog(suggestion)
                 toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": suggestion])
                 return true
-            }
-
-            // Store mtime + size in cache so the next read of the same range can short-circuit
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let mtime = attrs[.modificationDate] as? Date
-            {
-                Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
             }
 
             // Cap file output at 50K chars for LLM context. 50K covers ~95% of Swift source files in one read — eliminates the chunked re-read storm where the LLM repeatedly calls read_file
@@ -104,7 +78,6 @@ extension AgentViewModel {
                 afterContent: content,
                 tool: "write_file"
             )
-            Self.invalidateFileReadCache(path: expandedWrite)
             appendLog(output)
             let lang = Self.langFromPath(filePath)
             appendLog(Self.codeFence(Self.preview(content, lines: readFilePreviewLines), language: lang))
@@ -147,7 +120,6 @@ extension AgentViewModel {
                 context: context
             ) }
 
-            Self.invalidateFileReadCache(path: expandedEdit)
             if !output.hasPrefix("Error") {
                 DiffStore.shared.recordEdit(filePath: expandedEdit, originalContent: originalContent)
                 let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)

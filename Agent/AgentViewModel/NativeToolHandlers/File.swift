@@ -270,7 +270,6 @@ extension AgentViewModel {
                     return "Error: backup '\(explicit)' not found for \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(fp)\") to see available backups."
                 }
                 if FileBackupService.shared.restore(backupPath: match.backup, to: expanded) {
-                    Self.invalidateFileReadCache(path: expanded)
                     return "Restored \(fileName) from \(explicit)."
                 }
                 return "Error: failed to restore from \(explicit). Recovery: try a different backup via file(action:\"list_backups\", file_path:\"\(fp)\")."
@@ -279,7 +278,6 @@ extension AgentViewModel {
                 return "Error: no backups found for \(fileName). Recovery: file backups are tab-scoped and 1-week TTL — try undo_edit if the change was very recent, or git checkout if the file is in a repo."
             }
             if FileBackupService.shared.restore(backupPath: latest.backup, to: expanded) {
-                Self.invalidateFileReadCache(path: expanded)
                 return "Restored \(fileName) from latest backup (\(latest.date))."
             }
             return "Error: failed to restore latest backup of \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(fp)\") to see other backups, or use undo_edit if recent."

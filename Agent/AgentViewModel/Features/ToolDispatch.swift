@@ -122,34 +122,9 @@ extension AgentViewModel {
     /// Cache for read-only tool results within a task. Cleared on new task.
     @MainActor static var toolResultCache: [String: String] = [:]
 
-    /// Per-read cache entry: tracks file mtime + range so we can short-circuit re-reads
-    /// without doing disk I/O. Modeled after Claude Code's FileStateCache.
-    struct FileReadCacheEntry {
-        let mtime: Date
-        let outputCharCount: Int
-    }
-
-    /// Cache of file mtime + range — detects unchanged files to return stub instead of full content.
-    /// Key format: "path:offset:limit" so different ranges don't collide.
-    @MainActor static var taskFileReadCache: [String: FileReadCacheEntry] = [:]
-
-    /// Build cache key for read_file dedup. Include offset/limit so partial reads don't collide.
-    @MainActor static func fileReadCacheKey(path: String, offset: Int?, limit: Int?) -> String {
-        "\(path):\(offset ?? -1):\(limit ?? -1)"
-    }
-
-    /// / Drop every cache entry for the given file path (any offset/limit). Call this / after any successful
-    /// write/edit/diff_apply so the next read is guaranteed to / hit disk fresh — mtime alone has 1-second filesystem resolution and can lie / when a write happens in the same second as a prior read.
-    @MainActor static func invalidateFileReadCache(path: String) {
-        let expanded = (path as NSString).expandingTildeInPath
-        let prefix = "\(expanded):"
-        taskFileReadCache = taskFileReadCache.filter { !$0.key.hasPrefix(prefix) }
-    }
-
     /// Clear tool result cache — call at start of each task.
     @MainActor static func clearToolCache() {
         toolResultCache.removeAll()
-        taskFileReadCache.removeAll()
     }
 
     /// Build cache key from tool name + input.

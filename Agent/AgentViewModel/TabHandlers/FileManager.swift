@@ -22,36 +22,8 @@ extension AgentViewModel {
             let filePath = input["file_path"] as? String ?? ""
             let offset = input["offset"] as? Int
             let limit = input["limit"] as? Int
-            let expandedRead = (filePath as NSString).expandingTildeInPath
-            let cacheKey = Self.fileReadCacheKey(path: expandedRead, offset: offset, limit: limit)
-
-            // Mtime-based dedup: skip disk I/O if same range read and file unchanged
-            if let cached = Self.taskFileReadCache[cacheKey],
-               let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let currentMtime = attrs[.modificationDate] as? Date,
-               cached.mtime == currentMtime
-            {
-                let stub =
-                    "File unchanged since last read (\(cached.outputCharCount) chars). "
-                    + "The content from the earlier Read tool_result in this "
-                    + "conversation is still current — refer to that instead "
-                    + "of re-reading."
-                tab.appendLog("📖 (unchanged) \(filePath)")
-                tab.flush()
-                return TabToolResult(
-                    toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": stub],
-                    isComplete: false
-                )
-            }
-
             tab.appendLog("📖 Read: \(filePath)")
             let output = await Self.offMain { CodingService.readFile(path: filePath, offset: offset, limit: limit) }
-            // Store mtime for next dedup check
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: expandedRead),
-               let mtime = attrs[.modificationDate] as? Date
-            {
-                Self.taskFileReadCache[cacheKey] = FileReadCacheEntry(mtime: mtime, outputCharCount: output.count)
-            }
             // Cap file output at 50K chars for LLM context — matches main task path.
             // Eliminates chunked re-read storms on Swift source files.
             let capped = LogLimits.trim(
@@ -75,7 +47,7 @@ extension AgentViewModel {
             FileBackupService.shared.backup(filePath: expandedWrite, tabID: tab.id)
             tab.appendLog("📝 Write: \(filePath)")
             let output = await Self.offMain { CodingService.writeFile(path: filePath, content: content) }
-            Self.invalidateFileReadCache(path: expandedWrite)
+
             tab.appendLog(output)
             let lang = Self.langFromPath(filePath)
             tab.appendLog(Self.codeFence(Self.preview(content, lines: readFilePreviewLines), language: lang))
@@ -109,7 +81,7 @@ extension AgentViewModel {
             ) }
             // Always invalidate the read cache after edit_file — on success the file changed; on failure we want the next read_file
             // to fetch fresh in case the model's context has stale content (which is usually why the edit failed in the first place).
-            Self.invalidateFileReadCache(path: expandedPath)
+
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
                 let diff = MultiLineDiff.createDiff(source: oldString, destination: newString, includeMetadata: true)
@@ -196,7 +168,7 @@ extension AgentViewModel {
                     throw DiffError.invalidDiff
                 }
                 try patched.write(to: URL(fileURLWithPath: expandedPath), atomically: true, encoding: .utf8)
-                Self.invalidateFileReadCache(path: expandedPath)
+    
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: source)
                 let verifyResult = MultiLineDiff.createDiff(source: source, destination: patched, includeMetadata: true)
                 let verified = MultiLineDiff.verifyDiff(verifyResult)
@@ -418,7 +390,6 @@ extension AgentViewModel {
             if let explicit = backupName {
                 if let match = backups.first(where: { ($0.backup as NSString).lastPathComponent == explicit }) {
                     if FileBackupService.shared.restore(backupPath: match.backup, to: expanded) {
-                        Self.invalidateFileReadCache(path: expanded)
                         output = "Restored \(fileName) from \(explicit)."
                     } else {
                         output = "Error: failed to restore from \(explicit). Recovery: call file(action:\"list_backups\", file_path:\"\(filePath)\") to verify the backup still exists."
@@ -428,7 +399,6 @@ extension AgentViewModel {
                 }
             } else if let latest = backups.first {
                 if FileBackupService.shared.restore(backupPath: latest.backup, to: expanded) {
-                    Self.invalidateFileReadCache(path: expanded)
                     output = "Restored \(fileName) from latest backup (\(latest.date))."
                 } else {
                     output = "Error: failed to restore latest backup of \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(filePath)\") to inspect backups, or use undo_edit if recent."
