@@ -1,6 +1,6 @@
 
 <div align="center">
-   <p>Our Founder! of this project is battling Cancer. Your <b>Stars</b> and <b>Forks</b> mean the World and are greatly appreciated.</p><br>
+   <p>Our Founder! of this project is battling cancer. Your <b>Stars</b> and <b>Forks</b> mean the World and are greatly appreciated.</p><br>
 <img width="256" height="256" alt="Agent! icon" src="https://github.com/user-attachments/assets/7a452184-6b31-49fa-9b24-d450d2889f66" />
 
 # 🦾 Agent! for macOS 26.4+
