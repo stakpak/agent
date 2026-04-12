@@ -369,10 +369,6 @@ async fn main() {
                             .with_endpoint(config.api_endpoint.clone()),
                     );
                 }
-                // Pass unified model as smart_model for AgentClient compatibility
-                if let Some(model) = &config.model {
-                    client_config = client_config.with_smart_model(model.clone());
-                }
 
                 let client: Arc<dyn AgentProvider> =
                     Arc::new(AgentClient::new(client_config).await.unwrap_or_else(|e| {
