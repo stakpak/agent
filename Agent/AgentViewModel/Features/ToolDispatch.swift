@@ -119,19 +119,8 @@ extension AgentViewModel {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// Cache for read-only tool results within a task. Cleared on new task.
-    @MainActor static var toolResultCache: [String: String] = [:]
-
-    /// Clear tool result cache — call at start of each task.
+    /// Clear tool caches — call at start of each task.
     @MainActor static func clearToolCache() {
-        toolResultCache.removeAll()
-    }
-
-    /// Build cache key from tool name + input.
-    private static func cacheKey(name: String, input: [String: Any]) -> String {
-        let inputStr = (try? JSONSerialization.data(withJSONObject: input, options: .sortedKeys))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        return "\(name):\(inputStr)"
     }
 
     /// Dispatch a tool call by name. Returns the handler result.
@@ -167,17 +156,6 @@ extension AgentViewModel {
             toolResults.append(["type": "tool_result", "tool_use_id": ctx.toolId, "content": msg])
             finishStep(.error)
             return .alreadyAppended
-        }
-
-        // Cache hit for read-only tools — return cached result instantly
-        if Self.readOnlyTools.contains(name) {
-            let key = Self.cacheKey(name: name, input: input)
-            if let cached = Self.toolResultCache[key] {
-                appendLog("(cached)")
-                toolResults.append(["type": "tool_result", "tool_use_id": ctx.toolId, "content": cached])
-                finishStep()
-                return .handled(cached)
-            }
         }
 
         // MCP tools (mcp_ServerName_toolName) — checked first by prefix
@@ -240,12 +218,6 @@ extension AgentViewModel {
         }
         flushLog()
         toolResults.append(["type": "tool_result", "tool_use_id": ctx.toolId, "content": output])
-
-        // Cache read-only tool results for reuse within this task
-        if Self.readOnlyTools.contains(name) {
-            let key = Self.cacheKey(name: name, input: input)
-            Self.toolResultCache[key] = output
-        }
 
         finishStep()
         return .handled(output)

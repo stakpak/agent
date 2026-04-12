@@ -169,7 +169,6 @@ extension AgentViewModel {
         var iterations = 0
         var textOnlyCount = 0
         var timeoutRetryCount = 0
-        var recentToolCalls: [String] = [] // Track recent tool calls to detect loops
         var stuckFiles: [String: Int] = [:] // Edit failure count per file (for nudge)
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
@@ -286,7 +285,6 @@ extension AgentViewModel {
                     tab: tab,
                     content: response.content,
                     commandsRun: &commandsRun,
-                    recentToolCalls: &recentToolCalls,
                     stuckFiles: &stuckFiles,
                     filesEditedThisTask: &filesEditedThisTask,
                     completionSummary: &completionSummary

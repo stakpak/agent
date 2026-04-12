@@ -11,7 +11,14 @@ import Cocoa
 
 extension AgentViewModel {
 
-    func executeTask(_ prompt: String) async {
+    func executeTask(_ rawPrompt: String) async {
+        // Strip ! or !apple prefix (bypasses Apple AI triage)
+        var prompt = rawPrompt
+        if prompt.hasPrefix("\u{F8FF}") {
+            prompt = String(prompt.dropFirst()).trimmingCharacters(in: .whitespaces)
+        } else if prompt.lowercased().hasPrefix("!apple ") {
+            prompt = String(prompt.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+        }
         isRunning = true
         userWasActive = false
         rootWasActive = false
@@ -108,31 +115,36 @@ extension AgentViewModel {
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
 
-        // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM. The axDispatch
-        // closure is what Apple AI's Tool calls invoke when it decides to fire the accessibility tool — we route it through the same executeNativeTool path the cloud LLM uses, so the AX action goes through every existing safety check.
-        let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
-            guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
-            var input: [String: Any] = ["action": args.action]
-            if let role = args.role { input["role"] = role }
-            if let title = args.title { input["title"] = title }
-            // Resolve app name via SDEF catalog. If not found, falls back through AccessibilityService.resolveBundleId
-            // → NSRunningApplications. "Safari" → SDEF → com.apple.Safari, "Photo Booth" → fallback, "com.apple.Safari" → passthrough.
-            if let rawApp = args.app {
-                let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
-                input["appBundleId"] = resolved
-                input["app"] = resolved
+        // ! or !apple prefix bypasses Apple AI triage — sends prompt straight to cloud LLM
+        let appleBypass = rawPrompt.hasPrefix("\u{F8FF}") || rawPrompt.lowercased().hasPrefix("!apple ")
+        if appleBypass {
+            appendLog("⏭ Apple AI bypassed")
+            appendLog(cloudModelLogLine)
+            flushLog()
+        } else {
+            // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM.
+            let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
+                guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
+                var input: [String: Any] = ["action": args.action]
+                if let role = args.role { input["role"] = role }
+                if let title = args.title { input["title"] = title }
+                if let rawApp = args.app {
+                    let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
+                    input["appBundleId"] = resolved
+                    input["app"] = resolved
+                }
+                if let text = args.text { input["text"] = text }
+                return await self.executeNativeTool("accessibility", input: input)
             }
-            if let text = args.text { input["text"] = text }
-            return await self.executeNativeTool("accessibility", input: input)
+            let triageOutcome = await handleTriageOutcome(
+                triageResult,
+                prompt: prompt,
+                cloudModelLogLine: cloudModelLogLine,
+                messages: &messages,
+                completionSummary: &completionSummary
+            )
+            if case .completed = triageOutcome { return }
         }
-        let triageOutcome = await handleTriageOutcome(
-            triageResult,
-            prompt: prompt,
-            cloudModelLogLine: cloudModelLogLine,
-            messages: &messages,
-            completionSummary: &completionSummary
-        )
-        if case .completed = triageOutcome { return }
 
         // Apple Intelligence context injection removed — was confusing LLMs at task start
         // Apple AI still runs on task_complete to summarize results for the user

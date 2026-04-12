@@ -16,13 +16,12 @@ extension AgentViewModel {
         case normal(hasToolUse: Bool, toolResults: [[String: Any]])
     }
 
-    /// / Process the tool_use blocks in an LLM streaming response. Extracted / from the legacy monolithic
-    /// executeTabTask loop body. / / Mutates the per-task tracking state (`commandsRun`, `recentToolCalls`, / `stuckFiles`, `filesEditedThisTask`) in place.
+    /// Process the tool_use blocks in an LLM streaming response. Extracted from the legacy monolithic
+    /// executeTabTask loop body. Mutates the per-task tracking state (`commandsRun`, `stuckFiles`, `filesEditedThisTask`) in place.
     func processTabResponseContent(
         tab: ScriptTab,
         content: [[String: Any]],
         commandsRun: inout [String],
-        recentToolCalls: inout [String],
         stuckFiles: inout [String: Int],
         filesEditedThisTask: inout Set<String>,
         completionSummary: inout String
@@ -58,50 +57,6 @@ extension AgentViewModel {
                 ]
                 if editTools.contains(name), let filePath = input["file_path"] as? String, !filePath.isEmpty {
                     filesEditedThisTask.insert(filePath)
-                }
-
-                // Loop detection — block only after 20 IDENTICAL read calls (same file_path AND same offset AND same
-                // limit). Different offset/limit on the same file does NOT count toward the limit; a write to anything resets the counter for the whole tab.
-                let isRead = name == "read_file" || (name == "file_manager" && (input["action"] as? String) == "read")
-                let isWrite = name == "write_file" || name == "edit_file"
-                    || name == "create_diff" || name == "apply_diff"
-                    || name == "diff_and_apply"
-                    ||
-                    (
-                        name == "file_manager" && ["write", "edit", "diff_apply", "create", "apply"]
-                            .contains(input["action"] as? String ?? "")
-                    )
-                if isWrite { recentToolCalls.removeAll() }
-                if isRead {
-                    let fp = input["file_path"] as? String ?? input["path"] as? String ?? ""
-                    let offset = input["offset"] as? Int ?? 0
-                    let limit = input["limit"] as? Int ?? 0
-                    let callKey = "\(name):\(fp):\(offset):\(limit)"
-                    let dupeLimit = 20
-                    let dupeCount = recentToolCalls.filter { $0 == callKey }.count
-                    if dupeCount >= dupeLimit {
-                        tab
-                            .appendLog(
-                                """
-                                ⚠️ Already read \((fp as NSString).lastPathComponent) \
-                                \(dupeLimit) times with the same offset/limit — skipping
-                                """
-                            )
-                        tab.flush()
-                        toolResults.append([
-                            "type": "tool_result",
-                            "tool_use_id": toolId,
-                            "content": """
-                                Error: You already read this file \
-                                \(dupeLimit) times with the SAME offset \
-                                and limit. The content has not changed. \
-                                Use the content you already have, or read \
-                                a DIFFERENT range of the file.
-                                """
-                        ])
-                        continue
-                    }
-                    recentToolCalls.append(callKey)
                 }
 
                 if name == "task_complete" {
