@@ -41,9 +41,24 @@ A native macOS AI agent that controls your apps, writes code, automates workflow
    git clone https://github.com/toddbruss/Agent.git
    cd Agent
    ```
+
+#### Option A: Build with Xcode (Apple Developer account)
 2. **Open `Agent.xcodeproj` in Xcode.**
 3. **Build and Run the `Agent` target.**
 4. **Approve the Helper Tool:** When prompted, authorize the privileged daemon to allow root-level command execution.
+
+#### Option B: Build without an Apple Developer account
+2. **Run the build script** (requires only Xcode Command Line Tools):
+   ```bash
+   ./build.sh              # Debug build
+   ./build.sh Release      # Release build
+   ```
+3. The app lands in `build/DerivedData/Build/Products/Debug/Agent!.app`
+4. **Run it:** `open "build/DerivedData/Build/Products/Debug/Agent!.app"`
+
+> ⚠️ Without a developer account the app is ad-hoc signed. The Launch Agent/Daemon helpers won't register (SMAppService needs a team ID), but the LLM loop, all tools, accessibility, AppleScript, shell, and MCP all work.
+
+#### Then:
 5. **Configure your AI Provider:** Go to Settings and enter your API key or select a local provider like Ollama.
 
 > 💡 **Cheapest cloud path?** **GLM-5.1** (the latest) is now available on **all four** of the cheap cloud providers — **Ollama**, **Hugging Face**, **Z.ai**, and **BigModel**. Pennies per million tokens vs Claude/GPT pricing. Pick whichever you already have an account with; pricing is competitive across all of them.
