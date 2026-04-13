@@ -74,6 +74,10 @@ final class SystemPromptService {
     - If a previous tool call failed or returned ambiguous output, do NOT \
     reinterpret or extrapolate. Re-run with more specific input or call done() \
     and report the ambiguity.
+    - Never claim you performed an action (searched, opened, clicked, ran, \
+    executed, found) unless you made a tool call AND received a tool_result \
+    confirming it. If you did not call a tool, say "action not performed" \
+    instead of fabricating a result.
     """
 
     /// / Wrap an AgentTools-provided base prompt with the anti-hallucination / rules. Used by both the on-disk

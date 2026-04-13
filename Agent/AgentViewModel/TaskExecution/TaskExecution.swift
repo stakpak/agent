@@ -273,6 +273,23 @@ extension AgentViewModel {
                 let hasToolUse = parseResult.hasToolUse
                 let pendingTools = parseResult.pendingTools
 
+                // App-layer action verification: if the LLM returned text claiming
+                // it performed actions but made zero tool calls, inject a correction.
+                if !hasToolUse && pendingTools.isEmpty {
+                    let llmText = (response.content.compactMap { $0["text"] as? String }).joined()
+                    let lower = llmText.lowercased()
+                    let actionClaims = ["i searched", "i opened", "i clicked", "i ran ", "i executed",
+                                        "i found the", "i read the file", "i checked the", "i listed"]
+                    if actionClaims.contains(where: { lower.contains($0) }) {
+                        appendLog("⚠️ action not performed — LLM claimed action without a tool call")
+                        toolResults.append([
+                            "type": "tool_result",
+                            "tool_use_id": "action_not_performed",
+                            "content": "action not performed — you claimed to perform an action but made no tool call. Use the appropriate tool or say you cannot do it."
+                        ])
+                    }
+                }
+
                 // Execute pending tools — partition into read/write batches
                 // Consecutive read-only tools run in parallel; write tools serialize
                 await executePendingToolBatches(
