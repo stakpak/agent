@@ -599,7 +599,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
-    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> String? {
+    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void) async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
 
         // Thread-safe boxes to track tool-call/error state across the Sendable closure.
@@ -607,18 +607,25 @@ final class AppleIntelligenceMediator: ObservableObject {
             private let lock = NSLock()
             private var _called = false
             private var _failed = false
+            private var _outputs: [String] = []
             var called: Bool { lock.lock(); defer { lock.unlock() }; return _called }
             var failed: Bool { lock.lock(); defer { lock.unlock() }; return _failed }
+            var outputs: [String] { lock.lock(); defer { lock.unlock() }; return _outputs }
             func markCalled() { lock.lock(); _called = true; lock.unlock() }
             func markFailed() { lock.lock(); _failed = true; lock.unlock() }
+            func recordOutput(_ s: String) { lock.lock(); _outputs.append(s); lock.unlock() }
         }
         let tracker = CallTracker()
 
         let tool = AccessibilityAppleTool { args in
             tracker.markCalled()
+            await appendLog("🍎 accessibility(\(args.action), app: \(args.app ?? "–"), title: \(args.title ?? "–"))")
             let result = await dispatch(args)
+            tracker.recordOutput(result)
+            await appendLog("🍎 → \(String(result.prefix(300)))")
             let lower = result.lowercased()
-            if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false") {
+            if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false")
+                || lower.contains("no element") || lower.contains("timed out") || lower.contains("not running") {
                 tracker.markFailed()
             }
             return result
@@ -648,16 +655,23 @@ final class AppleIntelligenceMediator: ObservableObject {
 
         let scriptTool = AppleScriptAppleTool { source in
             tracker.markCalled()
+            await appendLog("🍎 applescript: \(String(source.prefix(300)))")
             let result = await MainActor.run { NSAppleScriptService.shared.execute(source: source) }
+            tracker.recordOutput(result.output)
+            await appendLog("🍎 → \(result.success ? "ok" : "FAIL") \(String(result.output.prefix(300)))")
             if !result.success { tracker.markFailed() }
             return result.output
         }
 
         let shellTool = ShellAppleTool { command in
             tracker.markCalled()
+            await appendLog("🍎 shell: \(String(command.prefix(300)))")
             let result = await AgentViewModel.executeTCC(command: command)
+            let output = result.output.isEmpty ? "(exit \(result.status))" : result.output
+            tracker.recordOutput(output)
+            await appendLog("🍎 → exit=\(result.status) \(String(output.prefix(300)))")
             if result.status != 0 { tracker.markFailed() }
-            return result.output.isEmpty ? "(exit \(result.status))" : result.output
+            return output
         }
 
         let session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
@@ -706,7 +720,7 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
     /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
-    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String) async -> TriageResult {
+    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void) async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
             return .directCommand(cmd) // Caller executes the tool
@@ -715,7 +729,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
         // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
-            if let result = await runAccessibilityAgent(message, dispatch: axDispatch) {
+            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, appendLog: appendLog) {
                 return .accessibilityHandled(result)
             }
         }

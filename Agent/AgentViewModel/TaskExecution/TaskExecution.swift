@@ -123,7 +123,7 @@ extension AgentViewModel {
             flushLog()
         } else {
             // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM.
-            let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
+            let triageResult = await mediator.triagePrompt(prompt, axDispatch: { [weak self] args in
                 guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
                 var input: [String: Any] = ["action": args.action]
                 if let role = args.role { input["role"] = role }
@@ -135,7 +135,7 @@ extension AgentViewModel {
                 }
                 if let text = args.text { input["text"] = text }
                 return await self.executeNativeTool("accessibility", input: input)
-            }
+            }, appendLog: { [weak self] msg in self?.appendLog(msg) })
             let triageOutcome = await handleTriageOutcome(
                 triageResult,
                 prompt: prompt,

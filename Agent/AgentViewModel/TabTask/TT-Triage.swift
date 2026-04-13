@@ -30,13 +30,11 @@ extension AgentViewModel {
         // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM. The axDispatch
         // closure routes Apple AI's tool calls through the same executeNativeTool path the cloud LLM uses. If Apple AI fails, is unavailable, or doesn't call the tool, runAccessibilityAgent returns nil → triage returns .passThrough → we fall through to the cloud LLM loop below.
         let mediator = AppleIntelligenceMediator.shared
-        let triageResult = await mediator.triagePrompt(prompt) { [weak self] args in
+        let triageResult = await mediator.triagePrompt(prompt, axDispatch: { [weak self] args in
             guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
             var input: [String: Any] = ["action": args.action]
             if let role = args.role { input["role"] = role }
             if let title = args.title { input["title"] = title }
-            // SDEF catalog is the canonical source — see TaskExecution.swift for the full rationale. Falls through to
-            // the runtime NSRunningApplications scan in handleAccessibilityAction for apps not in the SDEF list (Photo Booth, etc.).
             if let rawApp = args.app {
                 let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
                 input["appBundleId"] = resolved
@@ -44,7 +42,7 @@ extension AgentViewModel {
             }
             if let text = args.text { input["text"] = text }
             return await self.executeNativeTool("accessibility", input: input)
-        }
+        }, appendLog: { [weak self] msg in self?.appendLog(msg); self?.flushLog() })
         switch triageResult {
         case .directCommand(let cmd):
             if cmd.name == "run_agent" {
