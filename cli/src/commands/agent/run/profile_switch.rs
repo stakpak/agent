@@ -41,10 +41,6 @@ pub async fn validate_profile_switch(
         let client = AgentClient::new(AgentClientConfig {
             stakpak,
             providers: new_config.get_llm_provider_config(),
-            // Pass unified model as smart_model for AgentClient compatibility
-            smart_model: new_config.model.clone(),
-            eco_model: None,
-            recovery_model: None,
             store_path: None,
             hook_registry: None,
         })

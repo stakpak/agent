@@ -371,10 +371,6 @@ pub async fn run_interactive(
                         .with_endpoint(api_endpoint_for_client.clone()),
                 );
             }
-            // Pass unified model as smart_model for AgentClient compatibility
-            if let Some(model) = &ctx_clone.model {
-                client_config = client_config.with_smart_model(model.clone());
-            }
 
             let client: Arc<dyn AgentProvider> = Arc::new(
                 AgentClient::new(client_config)
@@ -1647,10 +1643,6 @@ pub async fn run_interactive(
                         .with_endpoint(new_config.api_endpoint.clone()),
                 );
             }
-            // Pass unified model as smart_model for AgentClient compatibility
-            if let Some(model) = &new_config.model {
-                new_client_config = new_client_config.with_smart_model(model.clone());
-            }
 
             let client: Box<dyn AgentProvider> = Box::new(
                 AgentClient::new(new_client_config)
@@ -1717,10 +1709,6 @@ pub async fn run_interactive(
             final_client_config = final_client_config.with_stakpak(
                 stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
             );
-        }
-        // Pass unified model as smart_model for AgentClient compatibility
-        if let Some(model) = &ctx.model {
-            final_client_config = final_client_config.with_smart_model(model.clone());
         }
 
         let client: Box<dyn AgentProvider> = Box::new(

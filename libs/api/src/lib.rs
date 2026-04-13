@@ -17,9 +17,7 @@ pub mod stakpak;
 pub mod storage;
 
 // Re-export unified AgentClient as the primary client
-pub use client::{
-    AgentClient, AgentClientConfig, DEFAULT_STAKPAK_ENDPOINT, ModelOptions, StakpakConfig,
-};
+pub use client::{AgentClient, AgentClientConfig, DEFAULT_STAKPAK_ENDPOINT, StakpakConfig};
 
 // Re-export Model types from stakai
 pub use stakai::{Model, ModelCost, ModelLimit};
