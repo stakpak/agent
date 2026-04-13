@@ -211,6 +211,9 @@ final class XcodeService: @unchecked Sendable {
             return "Error: Project must be within your home directory"
         }
 
+        // Persist selection so bump_version/get_version use the right project
+        UserDefaults.standard.set(selected, forKey: "xcodeSelectedProjectPath")
+
         return selected
     }
 
@@ -578,12 +581,39 @@ final class XcodeService: @unchecked Sendable {
 
     /// Resolve the pbxproj path for the currently selected project.
     private nonisolated func selectedPbxprojPath() -> String? {
+        // 1. Use the path saved by selectProject()
+        if let saved = UserDefaults.standard.string(forKey: "xcodeSelectedProjectPath"),
+           !saved.isEmpty {
+            // saved path is the .xcodeproj or .xcworkspace directory
+            let pbx = (saved as NSString).appendingPathComponent("project.pbxproj")
+            if FileManager.default.fileExists(atPath: pbx) { return pbx }
+            // Could be an .xcworkspace — look for an .xcodeproj inside
+            if saved.hasSuffix(".xcworkspace") {
+                let contents = (try? FileManager.default.contentsOfDirectory(atPath: saved)) ?? []
+                if let proj = contents.first(where: { $0.hasSuffix(".xcodeproj") }) {
+                    let pbx2 = ((saved as NSString).appendingPathComponent(proj) as NSString).appendingPathComponent("project.pbxproj")
+                    if FileManager.default.fileExists(atPath: pbx2) { return pbx2 }
+                }
+            }
+        }
+
+        // 2. Fallback: use AGENT_PROJECT_FOLDER env var to find the .xcodeproj
+        if let projectFolder = ProcessInfo.processInfo.environment["AGENT_PROJECT_FOLDER"],
+           !projectFolder.isEmpty {
+            let contents = (try? FileManager.default.contentsOfDirectory(atPath: projectFolder)) ?? []
+            // Prefer .xcodeproj
+            if let proj = contents.first(where: { $0.hasSuffix(".xcodeproj") }) {
+                let pbx = ((projectFolder as NSString).appendingPathComponent(proj) as NSString).appendingPathComponent("project.pbxproj")
+                if FileManager.default.fileExists(atPath: pbx) { return pbx }
+            }
+        }
+
+        // 3. Last resort: ask Xcode for open documents
         guard let app = xcodeApp() else { return nil }
         guard let docs = app.documents?() as? [XcodeDocument], !docs.isEmpty else { return nil }
         let selectedIdx = UserDefaults.standard.integer(forKey: "xcodeSelectedProject")
         let idx = (selectedIdx > 0 && selectedIdx <= docs.count) ? selectedIdx - 1 : 0
         guard let path = docs[idx].path, !path.isEmpty else { return nil }
-        // path is the .xcodeproj directory
         return (path as NSString).appendingPathComponent("project.pbxproj")
     }
 }
