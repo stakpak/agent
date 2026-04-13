@@ -1,3 +1,20 @@
+@preconcurrency import Foundation
+import AgentMCP
+import AgentD1F
+import Cocoa
+
+extension AgentViewModel {
+
+    /// Handle AgentScript tool calls for tab tasks.
+    func handleTabAgentScriptTool(
+        tab: ScriptTab, name: String, input: [String: Any], toolId: String
+    ) async -> TabToolResult {
+
+        switch name {
+
+        case "run_agent":
+            let scriptName = input["name"] as? String ?? ""
+            let arguments = input["arguments"] as? String ?? ""
             if tab.isMainTab {
                 // ── Main tab: spawn a separate background tab so main tab stays free ──
                 // Dedup: close any existing background tab for this script before spawning a fresh one.
@@ -16,6 +33,14 @@
                     guard let self, let spawnedTab else { return }
 
                     if await Self.offMain({ [ss = self.scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
+                        guard let compileCmd = await Self.offMain({ [ss = self.scriptService] in ss.compileCommand(name: scriptName) }) else {
+                            await MainActor.run {
+                                spawnedTab.appendLog("❌ Could not build compile command for \(scriptName)")
+                                spawnedTab.isRunning = false
+                                spawnedTab.flush()
+                            }
+                            return
+                        }
                         await MainActor.run {
                             spawnedTab.appendLog("🦾 Compiling: \(scriptName)")
                             spawnedTab.flush()
@@ -88,6 +113,16 @@
 
                 // Compile if needed
                 if await Self.offMain({ [ss = scriptService] in !ss.isDylibCurrent(name: scriptName) }) {
+                    guard let compileCmd = await Self.offMain({ [ss = scriptService] in ss.compileCommand(name: scriptName) }) else {
+                        tab.appendLog("❌ Could not build compile command for \(scriptName)")
+                        tab.isRunning = false
+                        tab.flush()
+                        let errOutput = "❌ Could not build compile command for \(scriptName)"
+                        return TabToolResult(
+                            toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": errOutput],
+                            isComplete: false
+                        )
+                    }
                     tab.appendLog("🦾 Compiling: \(scriptName)")
                     tab.flush()
                     let compileResult = await Self.executeTCC(command: compileCmd)
@@ -141,3 +176,11 @@
                     isComplete: false
                 )
             }
+
+        default:
+            let output = await executeNativeTool(name, input: input)
+            tab.appendLog(output); tab.flush()
+            return tabResult(output, toolId: toolId)
+        }
+    }
+}
