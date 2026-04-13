@@ -695,12 +695,12 @@ final class AppleIntelligenceMediator: ObservableObject {
 
             // If Apple AI didn't actually call the tool, it just chatted — fall through to cloud LLM.
             guard tracker.called else {
-                await appendLog("🍎 ⏭ No tool called — forwarding to LLM")
+                appendLog("🍎 ⏭ No tool called — forwarding to LLM")
                 return nil
             }
             // If any tool call failed, fall through — never claim success without real execution.
             if tracker.failed {
-                await appendLog("🍎 ⏭ Tool failed — forwarding to LLM")
+                appendLog("🍎 ⏭ Tool failed — forwarding to LLM")
                 return nil
             }
             // Verify tool outputs contain real evidence of work, not just empty/exit-0 responses.
@@ -712,7 +712,7 @@ final class AppleIntelligenceMediator: ObservableObject {
                 return true
             }
             if !hasSubstantiveOutput {
-                await appendLog("🍎 ⏭ No substantive tool output — forwarding to LLM")
+                appendLog("🍎 ⏭ No substantive tool output — forwarding to LLM")
                 return nil
             }
             // If Apple AI's response indicates refusal/inability/uncertainty, fall through.
@@ -724,18 +724,18 @@ final class AppleIntelligenceMediator: ObservableObject {
                 "DIDN'T WORK", "FAILED TO", "NO RESULT", "TRY AGAIN"
             ]
             if refusalPhrases.contains(where: { upper.contains($0) }) {
-                await appendLog("🍎 ⏭ Apple AI gave up — forwarding to LLM")
+                appendLog("🍎 ⏭ Apple AI gave up — forwarding to LLM")
                 return nil
             }
             let trimmed = sanitize(content)
             guard trimmed.count >= 5 else {
-                await appendLog("🍎 ⏭ Empty response — forwarding to LLM")
+                appendLog("🍎 ⏭ Empty response — forwarding to LLM")
                 return nil
             }
-            await appendLog("🍎 ✅ \(trimmed)")
+            appendLog("🍎 ✅ \(trimmed)")
             return trimmed
         } catch {
-            await appendLog("🍎 ⏭ Timeout/error — forwarding to LLM")
+            appendLog("🍎 ⏭ Timeout/error — forwarding to LLM")
             return nil
         }
     }
