@@ -304,6 +304,7 @@ These are the canonical tool names defined in `AgentTools.Name.*` and exposed to
 | **Actionable Errors** | Every tool error includes a `Recovery:` hint telling the LLM exactly what to try next — no dead-end error messages that waste turns. |
 | **Read Cache Invalidation** | File read cache is invalidated on both successful edits AND failed edits, so the LLM always gets fresh content on the next read. |
 | **Basename Search** | When `read_file` or `edit_file` gets a wrong path, Agent! searches nearby directories for files with the same name and returns the correct paths inline — the LLM self-corrects in one turn. |
+| **Tool Execution Gating** | The LLM cannot fabricate tool results. All tool calls flow through the app's `dispatchTool()` → actual execution (XPC, shell, in-process) → real output returned as `tool_result`. The LLM only sees and summarizes outputs that actually happened. If a tool fails, the real error is returned — the LLM cannot claim success without a matching execution event. This architecture prevents the "false-action claim" pattern where an AI reports performing an action it never executed. |
 
 ---
 
