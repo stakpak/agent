@@ -62,3 +62,26 @@ The XPC boundary ensures:
 - Root operations are isolated to the daemon
 - Each XPC call is a discrete, auditable transaction
 - File permissions are restored to the user after root operations
+
+## Action Verification (action_not_performed)
+
+Agent! prevents false-action claims — where an AI reports performing an action it never executed — with three independent layers:
+
+### Layer 1: Prompt Rule
+The system prompt instructs the LLM to say "action not performed" if it did not call a tool. It may never claim to have searched, opened, clicked, ran, or found something without a matching `tool_result`.
+
+### Layer 2: App-Layer Detection
+If the LLM returns text claiming "I searched", "I opened", "I clicked", etc. but made zero tool calls in that turn, the app injects a correction `tool_result` telling the LLM to use the actual tool or admit it cannot perform the action. This is logged in the activity view as `⚠️ action not performed`.
+
+### Layer 3: Apple AI Gating
+Apple Intelligence tool calls (accessibility, applescript, shell) are logged to the activity view with the 🍎 prefix showing exactly what was called and what it returned. If Apple AI's tools produce no substantive output (empty, just an exit code, or error), the request is automatically forwarded to the cloud LLM. Apple AI can only claim task completion when its tools return real evidence of work.
+
+### Architecture
+All tool execution flows through the app's `dispatchTool()` layer — the LLM never self-reports tool results. The flow is:
+
+1. LLM returns a `tool_use` JSON block
+2. Agent!'s dispatch layer executes the tool via XPC, shell, or in-process
+3. The real output goes back as `tool_result`
+4. The LLM summarizes the real result
+
+The LLM cannot fabricate tool outputs because it never controls what `tool_result` contains — the app does.
