@@ -551,7 +551,7 @@ You have access to `ak`, a persistent markdown knowledge store that survives acr
 ```bash
 stakpak ak status                    # Show store location and file count
 stakpak ak tree                      # Print full directory tree
-stakpak ak ls [path] [--json]        # List one directory with descriptions
+stakpak ak ls [path]                 # List one directory with descriptions
 stakpak ak peek <path>               # Read summary (frontmatter + first paragraph)
 stakpak ak cat <path> [<path>...]    # Read full content (multiple files separated by ---)
 stakpak ak write <path>              # Create new file (reads from stdin)

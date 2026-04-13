@@ -18,7 +18,6 @@ Recommended read flow:
 - peek <path>: preview frontmatter + first paragraph
 - cat <path>...: read full content
 - use `peek` before `cat` to save tokens
-- prefer `ls --json` for programmatic use
 
 Write behavior:
 - `write` creates a new file
@@ -28,7 +27,6 @@ Write behavior:
 pub const AK_AFTER_HELP: &str = "Examples:
   stakpak ak tree
   stakpak ak ls services/
-  stakpak ak ls --json services/
   stakpak ak peek services/rate-limits.md
   stakpak ak cat services/rate-limits.md services/auth-flow.md
   echo 'Rate limit is 1000/min' | stakpak ak write services/rate-limits.md
@@ -101,21 +99,11 @@ This is the best starting point when you want to understand the overall structur
         about = "List one directory with one-line file descriptions",
         long_about = "List one directory at a time.
 
-Directories are shown first. File descriptions are extracted from frontmatter or the first non-empty body line.
-
-prefer `--json` when another tool or agent will parse the output"
+Directories are shown first. File descriptions are extracted from frontmatter or the first non-empty body line."
     )]
     Ls {
         /// Relative directory path inside the knowledge store. Omit to list the store root
         path: Option<String>,
-
-        /// Output the listing as structured JSON
-        #[arg(
-            long,
-            default_value_t = false,
-            help = "Print a JSON array with name, is_dir, and description fields. Prefer this when another tool or agent will parse the output"
-        )]
-        json: bool,
     },
 
     #[command(
@@ -194,19 +182,12 @@ impl AkCommands {
                     backend.tree().map_err(|error| error.to_string())?.print()
                 );
             }
-            Self::Ls { path, json } => {
+            Self::Ls { path } => {
                 let path = path.unwrap_or_default();
                 let entries = search
                     .list_with_descriptions(&path)
                     .map_err(|error| error.to_string())?;
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&entries).map_err(|error| error.to_string())?
-                    );
-                } else {
-                    print_entries(&entries);
-                }
+                print_entries(&entries);
             }
             Self::Peek { path } => {
                 println!("{}", search.peek(&path).map_err(|error| error.to_string())?);

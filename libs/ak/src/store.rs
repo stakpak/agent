@@ -64,6 +64,13 @@ pub struct LocalFsBackend {
 }
 
 impl LocalFsBackend {
+    /// Return the store-relative version of an absolute path for use in error messages.
+    fn relative_path(&self, path: &Path) -> PathBuf {
+        path.strip_prefix(&self.root)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+
     pub fn new() -> Result<Self, Error> {
         if let Some(root) = std::env::var_os("AK_STORE") {
             return Ok(Self {
@@ -98,7 +105,7 @@ impl LocalFsBackend {
         {
             let entry = entry.map_err(|error| Error::Io(std::io::Error::other(error)))?;
             if entry.path() != self.root && entry.file_type().is_symlink() {
-                return Err(Error::UnsafePath(entry.path().to_path_buf()));
+                return Err(Error::UnsafePath(self.relative_path(entry.path())));
             }
             if entry.file_type().is_file() {
                 count += 1;
@@ -136,7 +143,7 @@ impl LocalFsBackend {
         let relative = path.strip_prefix(&self.root).map_err(|_| {
             Error::Parse(format!(
                 "path is outside the configured store root: {}",
-                path.display()
+                self.relative_path(path).display()
             ))
         })?;
 
@@ -145,14 +152,14 @@ impl LocalFsBackend {
             let Component::Normal(part) = component else {
                 return Err(Error::Parse(format!(
                     "invalid resolved store path: {}",
-                    path.display()
+                    self.relative_path(path).display()
                 )));
             };
             current.push(part);
 
             match fs::symlink_metadata(&current) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
-                    return Err(Error::UnsafePath(current));
+                    return Err(Error::UnsafePath(self.relative_path(&current)));
                 }
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -167,7 +174,7 @@ impl LocalFsBackend {
         match fs::symlink_metadata(path) {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() {
-                    Err(Error::UnsafePath(path.to_path_buf()))
+                    Err(Error::UnsafePath(self.relative_path(path)))
                 } else {
                     Ok(Some(metadata))
                 }
@@ -220,7 +227,7 @@ impl LocalFsBackend {
         }
 
         let mut children = Vec::new();
-        for child in read_sorted_children(path)? {
+        for child in read_sorted_children(path, None)? {
             children.push(Self::build_tree_node(&child.path, child.name)?);
         }
 
@@ -238,7 +245,7 @@ impl StorageBackend for LocalFsBackend {
         let target = self.resolve_path(path)?;
         self.ensure_no_symlinks_below_root(&target)?;
         if self.metadata_if_exists(&target)?.is_some() {
-            return Err(Error::AlreadyExists(target));
+            return Err(Error::AlreadyExists(self.relative_path(&target)));
         }
 
         if let Some(parent) = target.parent() {
@@ -264,7 +271,7 @@ impl StorageBackend for LocalFsBackend {
         let target = self.resolve_path(path)?;
         self.ensure_no_symlinks_below_root(&target)?;
         if self.metadata_if_exists(&target)?.is_none() {
-            return Err(Error::NotFound(target));
+            return Err(Error::NotFound(self.relative_path(&target)));
         }
         Ok(fs::read(target)?)
     }
@@ -273,7 +280,7 @@ impl StorageBackend for LocalFsBackend {
         let target = self.resolve_path(path)?;
         self.ensure_no_symlinks_below_root(&target)?;
         if self.metadata_if_exists(&target)?.is_none() {
-            return Err(Error::NotFound(target));
+            return Err(Error::NotFound(self.relative_path(&target)));
         }
         self.read_file_prefix(&target, max_bytes)
     }
@@ -283,7 +290,7 @@ impl StorageBackend for LocalFsBackend {
         self.ensure_no_symlinks_below_root(&target)?;
         let metadata = self
             .metadata_if_exists(&target)?
-            .ok_or_else(|| Error::NotFound(target.clone()))?;
+            .ok_or_else(|| Error::NotFound(self.relative_path(&target)))?;
 
         let parent = target.parent().map(Path::to_path_buf);
         if metadata.is_dir() {
@@ -303,17 +310,17 @@ impl StorageBackend for LocalFsBackend {
             return if path.is_empty() {
                 Ok(vec![])
             } else {
-                Err(Error::NotFound(target))
+                Err(Error::NotFound(self.relative_path(&target)))
             };
         };
         if !metadata.is_dir() {
             return Err(Error::Parse(format!(
                 "path is not a directory: {}",
-                target.display()
+                self.relative_path(&target).display()
             )));
         }
 
-        read_sorted_children(&target).map(|children| {
+        read_sorted_children(&target, Some(&self.root)).map(|children| {
             children
                 .into_iter()
                 .map(|child| Entry {
@@ -326,7 +333,7 @@ impl StorageBackend for LocalFsBackend {
 
     fn tree(&self) -> Result<TreeNode, Error> {
         self.ensure_no_symlinks_below_root(&self.root)?;
-        Self::build_tree_node(&self.root, self.root.display().to_string())
+        Self::build_tree_node(&self.root, ".".to_string())
     }
 
     fn exists(&self, path: &str) -> Result<bool, Error> {
@@ -346,7 +353,7 @@ struct ChildEntry {
     is_dir: bool,
 }
 
-fn read_sorted_children(path: &Path) -> Result<Vec<ChildEntry>, Error> {
+fn read_sorted_children(path: &Path, root: Option<&Path>) -> Result<Vec<ChildEntry>, Error> {
     let mut children = Vec::new();
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -358,7 +365,10 @@ fn read_sorted_children(path: &Path) -> Result<Vec<ChildEntry>, Error> {
         let file_type = entry.file_type()?;
         let child_path = entry.path();
         if file_type.is_symlink() {
-            return Err(Error::UnsafePath(child_path));
+            let display_path = root
+                .and_then(|r| child_path.strip_prefix(r).ok().map(PathBuf::from))
+                .unwrap_or_else(|| child_path.clone());
+            return Err(Error::UnsafePath(display_path));
         }
 
         children.push(ChildEntry {
@@ -533,7 +543,7 @@ mod tests {
         assert_eq!(
             tree,
             TreeNode {
-                name: backend.root().display().to_string(),
+                name: ".".to_string(),
                 is_dir: true,
                 children: vec![
                     TreeNode {
@@ -562,7 +572,7 @@ mod tests {
     #[test]
     fn tree_node_print_renders_connectors() {
         let tree = TreeNode {
-            name: "~/.stakpak/knowledge".to_string(),
+            name: ".".to_string(),
             is_dir: true,
             children: vec![
                 TreeNode {
@@ -584,7 +594,7 @@ mod tests {
 
         assert_eq!(
             tree.print(),
-            "~/.stakpak/knowledge\n├── knowledge\n│   └── rate-limits.md\n└── notes.md"
+            ".\n├── knowledge\n│   └── rate-limits.md\n└── notes.md"
         );
     }
 
@@ -671,6 +681,45 @@ mod tests {
 
         assert!(matches!(error, crate::Error::UnsafePath(_)));
         assert!(!outside.path().join("pwned.md").exists());
+    }
+
+    #[test]
+    fn create_rejects_parent_directory_traversal() {
+        let (temp_dir, backend) = backend();
+        let outside = temp_dir.path().join("outside.md");
+
+        let error = backend
+            .create("../outside.md", b"pwned")
+            .expect_err("parent traversal should fail");
+
+        assert!(matches!(error, crate::Error::Parse(_)));
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn read_rejects_parent_directory_traversal() {
+        let (temp_dir, backend) = backend();
+        let outside = temp_dir.path().join("outside.md");
+        std::fs::write(&outside, "secret").expect("write outside file");
+
+        let error = backend
+            .read("../outside.md")
+            .expect_err("parent traversal read should fail");
+
+        assert!(matches!(error, crate::Error::Parse(_)));
+    }
+
+    #[test]
+    fn list_rejects_absolute_path_traversal() {
+        let (_temp_dir, backend) = backend();
+        let absolute = backend.root().join("knowledge");
+        let absolute = absolute.to_string_lossy().to_string();
+
+        let error = backend
+            .list(&absolute)
+            .expect_err("absolute path traversal should fail");
+
+        assert!(matches!(error, crate::Error::Parse(_)));
     }
 
     #[cfg(unix)]

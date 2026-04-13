@@ -1065,7 +1065,7 @@ mod tests {
         assert!(help.contains("override: AK_STORE"));
         assert!(help.contains("paths are relative to the store root"));
         assert!(help.contains("use `peek` before `cat` to save tokens"));
-        assert!(help.contains("prefer `ls --json` for programmatic use"));
+        assert!(!help.contains("ls --json"));
     }
 
     #[test]
@@ -1085,7 +1085,7 @@ mod tests {
     }
 
     #[test]
-    fn ak_ls_help_explains_json_preference_for_agents() {
+    fn ak_ls_help_explains_directory_listing_behavior() {
         let result = Cli::try_parse_from(["stakpak", "ak", "ls", "--help"]);
         let error = match result {
             Ok(_) => panic!("help output should exit via clap error"),
@@ -1095,6 +1095,12 @@ mod tests {
 
         assert!(help.contains("one directory at a time"));
         assert!(help.contains("frontmatter"));
-        assert!(help.contains("prefer `--json` when another tool or agent will parse the output"));
+        assert!(!help.contains("--json"));
+    }
+
+    #[test]
+    fn ak_ls_rejects_json_flag() {
+        let parsed = Cli::try_parse_from(["stakpak", "ak", "ls", "--json"]);
+        assert!(parsed.is_err());
     }
 }
