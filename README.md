@@ -1,7 +1,6 @@
 
 <div align="center">
    <p>🎗️ Our Founder! of this project is battling cancer. Your <b>Stars</b> and <b>Forks</b> are appreciated. 🎗️</p>
-   <p><a href="https://www.paypal.com/ncp/payment/3DTH3S7XARK98"><img src="https://img.shields.io/badge/Tip_Jar-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="Tip Jar" /></a>
 <img width="256" height="256" alt="Agent! icon" src="https://github.com/user-attachments/assets/7a452184-6b31-49fa-9b24-d450d2889f66" />
 
 # 🦾 Agent! for macOS 26.4+
@@ -16,6 +15,7 @@
 [![GitHub Forks](https://img.shields.io/github/forks/macOS26/Agent?style=for-the-badge&logo=github&label=Forks&color=white)](https://github.com/macOS26/Agent/fork)
 [![macOS 26.4+](https://img.shields.io/badge/macOS-26.4%2B-purple?style=for-the-badge)](https://github.com/apple)
 [![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange?style=for-the-badge)](https://www.swift.org)
+<p><a href="https://www.paypal.com/ncp/payment/3DTH3S7XARK98"><img src="https://img.shields.io/badge/Tip_Jar-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="Tip Jar" /></a>
 </div>
 
 ## What's New 🚀
