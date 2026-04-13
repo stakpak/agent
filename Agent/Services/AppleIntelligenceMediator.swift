@@ -693,12 +693,29 @@ final class AppleIntelligenceMediator: ObservableObject {
                 return result
             }
 
-            // If Apple AI didn't actually call the tool, it just chatted at the user — that means it didn't recognize
-            // the request as UI automation. Fall through to the cloud LLM.
-            guard tracker.called else { return nil }
-            // If any tool call failed, fall through to the cloud LLM — never claim success without a matching execution event.
-            if tracker.failed { return nil }
-            // If Apple AI's response indicates refusal/inability/uncertainty, fall through to cloud LLM.
+            // If Apple AI didn't actually call the tool, it just chatted — fall through to cloud LLM.
+            guard tracker.called else {
+                await appendLog("🍎 ⏭ No tool called — forwarding to LLM")
+                return nil
+            }
+            // If any tool call failed, fall through — never claim success without real execution.
+            if tracker.failed {
+                await appendLog("🍎 ⏭ Tool failed — forwarding to LLM")
+                return nil
+            }
+            // Verify tool outputs contain real evidence of work, not just empty/exit-0 responses.
+            let outputs = tracker.outputs
+            let hasSubstantiveOutput = outputs.contains { output in
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Empty, just exit code, or just "ok" are not evidence of real work
+                if trimmed.isEmpty || trimmed == "(exit 0)" || trimmed.count < 3 { return false }
+                return true
+            }
+            if !hasSubstantiveOutput {
+                await appendLog("🍎 ⏭ No substantive tool output — forwarding to LLM")
+                return nil
+            }
+            // If Apple AI's response indicates refusal/inability/uncertainty, fall through.
             let upper = content.uppercased()
             let refusalPhrases = [
                 "I'M SORRY", "I'M UNABLE", "I CANNOT", "I CAN'T",
@@ -707,13 +724,18 @@ final class AppleIntelligenceMediator: ObservableObject {
                 "DIDN'T WORK", "FAILED TO", "NO RESULT", "TRY AGAIN"
             ]
             if refusalPhrases.contains(where: { upper.contains($0) }) {
+                await appendLog("🍎 ⏭ Apple AI gave up — forwarding to LLM")
                 return nil
             }
-            // Empty or too-short responses are not useful — fall through
             let trimmed = sanitize(content)
-            guard trimmed.count >= 5 else { return nil }
+            guard trimmed.count >= 5 else {
+                await appendLog("🍎 ⏭ Empty response — forwarding to LLM")
+                return nil
+            }
+            await appendLog("🍎 ✅ \(trimmed)")
             return trimmed
         } catch {
+            await appendLog("🍎 ⏭ Timeout/error — forwarding to LLM")
             return nil
         }
     }
