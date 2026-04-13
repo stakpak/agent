@@ -682,18 +682,23 @@ final class AppleIntelligenceMediator: ObservableObject {
             // If Apple AI didn't actually call the tool, it just chatted at the user — that means it didn't recognize
             // the request as UI automation. Fall through to the cloud LLM.
             guard tracker.called else { return nil }
-            // If any tool call failed, fall through to the cloud LLM with
-            // the failure context (caller handles the partial-success case).
+            // If any tool call failed, fall through to the cloud LLM — never claim success without a matching execution event.
             if tracker.failed { return nil }
-            // If Apple AI's response indicates refusal/inability, fall through to cloud LLM.
+            // If Apple AI's response indicates refusal/inability/uncertainty, fall through to cloud LLM.
             let upper = content.uppercased()
-            if upper.contains("I'M SORRY") || upper.contains("I'M UNABLE") || upper.contains("I CANNOT")
-                || upper.contains("I CAN'T") || upper.contains("NOT ABLE TO") || upper.contains("UNABLE TO PERFORM")
-                || upper.contains("ERROR WITH") || upper.contains("COULDN'T") || upper.contains("COULD NOT")
-            {
+            let refusalPhrases = [
+                "I'M SORRY", "I'M UNABLE", "I CANNOT", "I CAN'T",
+                "NOT ABLE TO", "UNABLE TO PERFORM", "ERROR WITH",
+                "COULDN'T", "COULD NOT", "I DON'T KNOW", "NOT SURE",
+                "DIDN'T WORK", "FAILED TO", "NO RESULT", "TRY AGAIN"
+            ]
+            if refusalPhrases.contains(where: { upper.contains($0) }) {
                 return nil
             }
-            return sanitize(content)
+            // Empty or too-short responses are not useful — fall through
+            let trimmed = sanitize(content)
+            guard trimmed.count >= 5 else { return nil }
+            return trimmed
         } catch {
             return nil
         }
@@ -728,10 +733,14 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
         let trimmed = sanitize(content)
         let upper = trimmed.uppercased()
-        // If Apple AI refused or gave a useless response, pass through to LLM
-        if trimmed.isEmpty || upper.contains("I CAN'T") || upper.contains("I CANNOT")
-            || upper.contains("I'M UNABLE") || upper.contains("NOT ABLE TO")
-        {
+        // If Apple AI refused, gave a useless response, or expressed uncertainty, pass through to LLM.
+        // Never let Apple AI claim completion unless the response is substantive.
+        let giveUpPhrases = [
+            "I CAN'T", "I CANNOT", "I'M UNABLE", "NOT ABLE TO",
+            "I DON'T KNOW", "NOT SURE", "I'M NOT SURE",
+            "COULDN'T", "COULD NOT", "TRY AGAIN", "NO RESULT"
+        ]
+        if trimmed.count < 5 || giveUpPhrases.contains(where: { upper.contains($0) }) {
             return .passThrough
         }
         lastAppleAIMessage = String(trimmed.prefix(200))
