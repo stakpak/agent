@@ -135,7 +135,7 @@ extension AgentViewModel {
                 }
                 if let text = args.text { input["text"] = text }
                 return await self.executeNativeTool("accessibility", input: input)
-            }, appendLog: { [weak self] msg in self?.appendLog(msg) })
+            }, appendLog: { [weak self] msg in self?.appendLog(msg) }, projectFolder: projectFolder)
             let triageOutcome = await handleTriageOutcome(
                 triageResult,
                 prompt: prompt,

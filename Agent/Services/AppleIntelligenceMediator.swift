@@ -599,7 +599,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
-    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void) async -> String? {
+    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void, projectFolder: String = "") async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
 
         // Thread-safe boxes to track tool-call/error state across the Sendable closure.
@@ -666,7 +666,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         let shellTool = ShellAppleTool { command in
             tracker.markCalled()
             await appendLog("🍎 shell: \(String(command.prefix(300)))")
-            let result = await AgentViewModel.executeTCC(command: command)
+            let result = await AgentViewModel.executeTCC(command: command, workingDirectory: projectFolder)
             let output = result.output.isEmpty ? "(exit \(result.status))" : result.output
             tracker.recordOutput(output)
             await appendLog("🍎 → exit=\(result.status) \(String(output.prefix(300)))")
@@ -742,7 +742,7 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
     /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
-    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void) async -> TriageResult {
+    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void, projectFolder: String = "") async -> TriageResult {
         // Direct commands execute without any AI — works even if Apple AI is off
         if let cmd = Self.matchDirectCommand(message) {
             return .directCommand(cmd) // Caller executes the tool
@@ -751,7 +751,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
         // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
-            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, appendLog: appendLog) {
+            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, appendLog: appendLog, projectFolder: projectFolder) {
                 return .accessibilityHandled(result)
             }
         }

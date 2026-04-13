@@ -42,7 +42,7 @@ extension AgentViewModel {
             }
             if let text = args.text { input["text"] = text }
             return await self.executeNativeTool("accessibility", input: input)
-        }, appendLog: { msg in tab.appendLog(msg); tab.flush() })
+        }, appendLog: { msg in tab.appendLog(msg); tab.flush() }, projectFolder: tab.projectFolder.isEmpty ? self.projectFolder : tab.projectFolder)
         switch triageResult {
         case .directCommand(let cmd):
             if cmd.name == "run_agent" {
