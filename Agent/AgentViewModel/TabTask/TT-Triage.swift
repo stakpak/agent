@@ -73,10 +73,10 @@ extension AgentViewModel {
         case .accessibilityHandled(let summary):
             // Apple AI ran accessibility tool(s) and produced a summary. Tool calls went through axDispatch →
             // executeNativeTool (already logged). If Apple AI never called the tool or any call failed, we get nil → .passThrough → cloud LLM.
+            // Note: AppleIntelligenceMediator already logged "🍎 ✅ <summary>" — no duplicate log here.
             tab.rawLLMOutput = summary
             tab.displayedLLMOutput = summary
             tab.dripDisplayIndex = summary.count
-            tab.appendLog("🍎 \(summary)")
             tab.flush()
             completionSummary = String(summary.prefix(200))
             history.add(
