@@ -67,7 +67,7 @@ struct FallbackChainView: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
-                                    if entry.model.hasSuffix(":v") {
+                                    if Self.isVisionModel(entry.model) {
                                         Image(systemName: "eye")
                                             .foregroundStyle(.blue)
                                             .font(.caption2)
@@ -136,7 +136,7 @@ struct FallbackChainView: View {
                             ForEach(models, id: \.id) { model in
                                 HStack(spacing: 4) {
                                     Text(shortModel(model.display))
-                                    if model.id.hasSuffix(":v") {
+                                    if Self.isVisionModel(model.id) {
                                         Image(systemName: "eye")
                                             .foregroundStyle(.blue)
                                             .font(.caption2)
@@ -252,5 +252,13 @@ struct FallbackChainView: View {
         }
         // Fall back to the first dynamically-fetched model for this provider
         return modelsForProvider(provider).first ?? ""
+    }
+
+    /// Vision model detection — same logic as SettingsView.isHFVisionModel
+    private static func isVisionModel(_ id: String) -> Bool {
+        if id.hasSuffix(":v") { return true }
+        let lower = id.lowercased()
+        let visionKeywords = ["vision", "vlm", "llava", "qwen2-vl", "qwen2.5-vl", "qwen-vl", "internvl", "cogvlm", "cogagent", "idefics", "fuyu", "kosmos", "paligemma", "phi-3.5-vision", "pixtral", "minicpm-v", "molmo", "aria", "llama-3.2-11b", "llama-3.2-90b", "smolvlm", "glm-4.1v", "gemma3"]
+        return visionKeywords.contains { lower.contains($0) }
     }
 }
