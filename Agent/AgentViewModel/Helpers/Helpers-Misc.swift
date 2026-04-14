@@ -7,6 +7,7 @@ import AgentMCP
 extension AgentViewModel {
 
     /// Generate a short name for auto-saving an AppleScript from its source.
+    /// Uses the first meaningful words from the script, capped at 40 chars.
     static func autoScriptName(from source: String) -> String {
         let clean = source
             .replacingOccurrences(of: "tell application", with: "")
@@ -64,7 +65,7 @@ extension AgentViewModel {
         return lines.prefix(count).joined(separator: "\n") + "\n..."
     }
 
-    /// Prepend line numbers to D1F diff output.
+    /// Prepend line numbers to D1F diff output. ❌ lines track source, ✅ lines track destination.
     static func numberDiffLines(_ d1f: String, startLine: Int) -> String {
         var srcLine = startLine
         var dstLine = startLine
@@ -114,7 +115,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Validate that a path exists. Returns an error string if invalid, nil if
+    /// Validate that a path exists. Returns an error string if invalid, nil if OK.
     static func checkPath(_ path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
         let expanded = (path as NSString).expandingTildeInPath
@@ -124,7 +125,8 @@ extension AgentViewModel {
         return nil
     }
 
-    /// / Extract user-directory paths from a shell command for preflight valida
+    /// / Extract user-directory paths from a shell command for preflight validation. / Catches typos like
+    /// "/Users/foo/Documets/..." before running the command. / Resolve project folder to a directory (strip filename if path points to a file).
     static func resolvedWorkingDirectory(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
         var isDir: ObjCBool = false
@@ -135,7 +137,8 @@ extension AgentViewModel {
         return path
     }
 
-    /// Prepend `cd <projectFolder> &&` so the shell runs in the right directory
+    /// Prepend `cd <projectFolder> &&` so the shell runs in the right directory.
+    /// Skips if folder is empty or command already starts with `cd `.
     static func prependWorkingDirectory(_ command: String, projectFolder: String) -> String {
         guard !projectFolder.isEmpty, !command.hasPrefix("cd ") else { return command }
         let escaped = "'" + projectFolder.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -143,6 +146,7 @@ extension AgentViewModel {
     }
 
     /// Extract the target directory from a command starting with `cd `.
+    /// Resolves relative paths against the current project folder.
     static func extractCdTarget(_ command: String, relativeTo base: String) -> String? {
         guard command.hasPrefix("cd ") else { return nil }
         let afterCd = String(command.dropFirst(3)).trimmingCharacters(in: .whitespaces)
@@ -238,7 +242,8 @@ extension AgentViewModel {
 
     // MARK: - Combine Agent Scripts
 
-    /// Merge two Swift script sources: deduplicate imports
+    /// Merge two Swift script sources: deduplicate imports, handle duplicate scriptMain
+    /// by keeping A's entry point and renaming B's body into a helper function.
     static func combineScriptSources(contentA: String, contentB: String, sourceA: String, sourceB: String) -> String {
         let linesA = contentA.components(separatedBy: "\n")
         let linesB = contentB.components(separatedBy: "\n")
@@ -269,7 +274,7 @@ extension AgentViewModel {
         let trimmedA = Array(bodyA.drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty }))
         var trimmedB = Array(bodyB.drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty }))
 
-        // Detect duplicate scriptMain in B — remove @_cdecl and rename to helpe
+        // Detect duplicate scriptMain in B — remove @_cdecl and rename to helper
         let hasMainA = trimmedA.contains(where: { $0.contains("func scriptMain") || $0.contains("func script_main") })
         let hasMainB = trimmedB.contains(where: { $0.contains("func scriptMain") || $0.contains("func script_main") })
 

@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Coordinator: Per-Tab TextStorage Cache Swapping a cached `NSTextStora
+// MARK: - Coordinator: Per-Tab TextStorage Cache Swapping a cached `NSTextStorage` on a tab switch avoids re-layout
+// entirely.
 
 extension ActivityLogView.Coordinator {
     /// Returns cached text storage if the text hasn't changed, otherwise nil
@@ -13,7 +14,8 @@ extension ActivityLogView.Coordinator {
         return cache.textStorage
     }
 
-    /// Swap to a cached NSTextStorage for instant tab switch
+    /// Swap to a cached NSTextStorage for instant tab switch (no re-layout).
+    /// Returns true if cache was used.
     func swapToCachedStorage(for tabID: UUID?, text: String, textView: NSTextView, scrollView: NSScrollView) -> Bool {
         guard let cache = tabCaches[tabID] else { return false }
         let len = (text as NSString).length

@@ -11,7 +11,7 @@ struct NewMainTabSheet: View {
 
     init(viewModel: AgentViewModel) {
         self.viewModel = viewModel
-        // Ensure we never start with foundationModel - it's not a selectable pr
+        // Ensure we never start with foundationModel - it's not a selectable provider
         let initialProvider = APIProvider.selectableProviders.contains(viewModel.selectedProvider)
             ? viewModel.selectedProvider
             : .ollama

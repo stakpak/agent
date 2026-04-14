@@ -69,7 +69,8 @@ struct HeaderToolbarButtons: View {
     @State private var showHUDOptions = false
     @ObservedObject var aiMediator = AppleIntelligenceMediator.shared
 
-    /// Fallback chain icon color: green when configured
+    /// Fallback chain icon color: green when configured (enabled + has ≥1 enabled entry),
+    /// orange when enabled but empty, gray when disabled.
     private var fallbackIconColor: Color {
         let svc = FallbackChainService.shared
         guard svc.enabled else { return .secondary }

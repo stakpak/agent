@@ -44,12 +44,12 @@ extension ActivityLogView.Coordinator {
             return
         }
 
-        // Search only the visible portion + buffer for large texts to avoid bea
+        // Search only the visible portion + buffer for large texts to avoid beach ball
         let text = storage.string
         let textLength = (text as NSString).length
         let searchNeedle = caseSensitive ? searchText : searchText.lowercased()
 
-        // For very large texts, limit search to last 60K chars (matches render
+        // For very large texts, limit search to last 60K chars (matches render cap)
         let maxSearchChars = 60_000
         let searchStart = textLength > maxSearchChars ? textLength - maxSearchChars : 0
         let searchableText = caseSensitive ? text as NSString : text.lowercased() as NSString
@@ -69,7 +69,7 @@ extension ActivityLogView.Coordinator {
 
         for (i, range) in matchRanges.enumerated() {
             let color = (i == currentMatch) ? currentColor : highlightColor
-            // Save original foreground color for this range so we can restore i
+            // Save original foreground color for this range so we can restore it later
             let originalFg = storage.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
             savedForegroundColors.append((range: range, color: originalFg))
             storage.addAttribute(.backgroundColor, value: color, range: range)

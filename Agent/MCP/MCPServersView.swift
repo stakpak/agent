@@ -1,10 +1,11 @@
 import SwiftUI
 import AgentAudit
 
-/// Identifiable wrapper for `.sheet(item:)`
+/// Identifiable wrapper for `.sheet(item:)` — drives both blank "+" Add and preset-seeded Add with a fresh UUID per instance to avoid the multi-sheet timing race.
 private struct AddSheetItem: Identifiable {
     let id = UUID()
-    /// nil → blank "Add MCP Server" form non-nil → preset-seeded form
+    /// nil → blank "Add MCP Server" form
+    /// non-nil → preset-seeded form (Z.AI Web Search, etc.)
     let seed: MCPServerConfig?
 }
 
@@ -116,7 +117,7 @@ struct MCPServersView: View {
         .frame(width: 420)
         .frame(maxHeight: 500)
         .sheet(item: $addSheetItem) { item in
-            // One sheet for both blank "+" Add and preset menu
+            // One sheet for both blank "+" Add and preset menu — `.sheet(item:)` re-evaluates body each time, reading the wrapper's seed immediately.
             MCPServerEditView(server: item.seed) { newServer in
                 if let err = registry.add(newServer) {
                     addError = err
@@ -146,7 +147,7 @@ struct MCPServersView: View {
             MCPImportView(registry: registry, isPresented: $showingImport)
         }
         .onAppear {
-            // Force toggles to re-render with correct thumb after popover appea
+            // Force toggles to re-render with correct thumb after popover appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 renderKey.toggle()
             }
@@ -168,7 +169,7 @@ struct MCPServersView: View {
 
     // MARK: - Actions
 
-    /// Connect or disconnect based on the NEW enabled state
+    /// Connect or disconnect based on the NEW enabled state (already set by the toggle binding).
     private func connectOrDisconnect(_ serverId: UUID, enable: Bool) async {
         if enable {
             guard let server = registry.servers.first(where: { $0.id == serverId }) else { return }
@@ -414,7 +415,7 @@ struct MCPServerEditView: View {
                     // HTTP fields
                     VStack(alignment: .leading, spacing: 4) {
                         Text("URL").font(.caption).foregroundStyle(.secondary)
-                        TextField("https://example.com/mcp", text: $urlText).tex
+                        TextField("https://example.com/mcp", text: $urlText).textFieldStyle(.roundedBorder)
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text("SSE Endpoint (optional)").font(.caption).foregroundStyle(.secondary)
@@ -577,7 +578,7 @@ struct MCPServerEditView: View {
         }
     }
 
-    /// Parse edited JSON back into form fields.
+    /// Parse edited JSON back into form fields. Accepts standard MCP format or bare {command, args, ...}, preserving unsupported fields for round-tripping.
     private func applyJSON(_ json: String) {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else
@@ -591,7 +592,8 @@ struct MCPServerEditView: View {
         var innerDict: [String: Any]?
 
         if let mcpServers = obj["mcpServers"] as? [String: Any] {
-            // { "mcpServers": { "name": { ... } } }
+            // { "mcpServers": { "name": { ... } } } - standard format
+            // Find the first server entry (there could be multiple, but edit view handles one at a time)
             for (key, value) in mcpServers {
                 if let serverDict = value as? [String: Any] {
                     serverName = key
@@ -603,7 +605,8 @@ struct MCPServerEditView: View {
             // Bare config: { "command": "...", "args": [...] }
             innerDict = obj
         } else {
-            // { "name": { "command": "...", ... } }
+            // { "name": { "command": "...", ... } } - single server format
+            // Filter out non-server keys like "globalShortcut"
             let knownNonServerKeys = Set(["globalShortcut"])
             for (key, value) in obj {
                 if !knownNonServerKeys.contains(key), let serverDict = value as? [String: Any] {

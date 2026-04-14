@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Stoplight: Green = running, Yellow = was green + cooling down, Red = not run
+/// Stoplight: Green = running, Yellow = was green + cooling down, Red = not running
 struct StatusDot: View {
     let isActive: Bool
     let wasActive: Bool

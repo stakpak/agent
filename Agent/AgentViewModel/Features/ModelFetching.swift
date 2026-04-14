@@ -29,7 +29,7 @@ extension AgentViewModel {
     }
 
     private static func fetchClaudeModelsFromAPI(apiKey: String) async throws -> [ClaudeModelInfo] {
-        guard let url = URL(string: "https://api.anthropic.com/v1/models") else
+        guard let url = URL(string: "https://api.anthropic.com/v1/models") else {
             throw AgentError.invalidURL
         }
 
@@ -80,7 +80,7 @@ extension AgentViewModel {
             do {
                 let models = try await Self.fetchModels(endpoint: endpoint, apiKey: apiKey)
                 ollamaModels = models.isEmpty ? Self.defaultOllamaModels : models
-                // Auto-select first model if current selection is empty or not
+                // Auto-select first model if current selection is empty or not in list
                 let names = ollamaModels.map(\.name)
                 if ollamaModel.isEmpty || (!names.isEmpty && !names.contains(ollamaModel)) {
                     ollamaModel = names.first ?? ""
@@ -247,8 +247,8 @@ extension AgentViewModel {
     }
 
     private nonisolated static func fetchHuggingFaceModelsFromAPI(apiKey: String) async throws -> [OpenAIModelInfo] {
-        // Use the router endpoint which returns inference-ready models (OpenAI-
-        guard let url = URL(string: "https://router.huggingface.co/v1/models") e
+        // Use the router endpoint which returns inference-ready models (OpenAI-compatible)
+        guard let url = URL(string: "https://router.huggingface.co/v1/models") else {
             throw AgentError.invalidURL
         }
 
@@ -262,7 +262,7 @@ extension AgentViewModel {
             throw AgentError.apiError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, message: "HuggingFace API error")
         }
 
-        // Router returns OpenAI-compatible format: {"data": [{"id": "model-id",
+        // Router returns OpenAI-compatible format: {"data": [{"id": "model-id", ...}]}
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let dataArray = json["data"] as? [[String: Any]]
         {
@@ -288,7 +288,7 @@ extension AgentViewModel {
     }
 
     private nonisolated static func fetchModels(endpoint: String, apiKey: String) async throws -> [OllamaModelInfo] {
-        let effectiveEndpoint = endpoint.isEmpty ? "http://localhost:11434/api/c
+        let effectiveEndpoint = endpoint.isEmpty ? "http://localhost:11434/api/chat" : endpoint
         guard let chatURL = URL(string: effectiveEndpoint) else { throw AgentError.invalidResponse }
         let baseDir = chatURL.deletingLastPathComponent().absoluteString
 
@@ -382,14 +382,15 @@ extension AgentViewModel {
     }
 
     private nonisolated static func fetchZAIModelsFromAPI(apiKey: String) async -> [OpenAIModelInfo] {
-        // Fetch ALL models dynamically from Z.ai's OpenAPI spec The /models end
-        let coding = (try? await fetchZAIEndpoint(apiKey: apiKey, urlString: "ht
+        // Fetch ALL models dynamically from Z.ai's OpenAPI spec
+        // The /models endpoint only returns ~7, but the spec has all model enums
+        let coding = (try? await fetchZAIEndpoint(apiKey: apiKey, urlString: "https://api.z.ai/api/coding/paas/v4/models")) ?? []
         let specModels = await fetchZAIModelsFromSpec()
 
         var seen = Set<String>()
         var result: [OpenAIModelInfo] = []
 
-        // Coding models first (no suffix — use coding endpoint, name tagged -Co
+        // Coding models first (no suffix — use coding endpoint, name tagged -Code)
         for m in coding {
             if seen.insert(m.id).inserted {
                 result.append(OpenAIModelInfo(id: m.id, name: "\(m.name)-Code"))
@@ -403,8 +404,9 @@ extension AgentViewModel {
     }
 
     /// Fetch all Z.ai model IDs from the OpenAPI spec at docs.z.ai/openapi.json
+    /// Parses enum arrays from schema definitions — fully dynamic, no hardcoding.
     private nonisolated static func fetchZAIModelsFromSpec() async -> [OpenAIModelInfo] {
-        guard let url = URL(string: "https://docs.z.ai/openapi.json") else { ret
+        guard let url = URL(string: "https://docs.z.ai/openapi.json") else { return [] }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let components = json["components"] as? [String: Any],
@@ -493,7 +495,7 @@ extension AgentViewModel {
                 do {
                     let models = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: endpoint)
                     if !models.isEmpty {
-                        // Filter to chat/reasoning models (skip embedding, tts,
+                        // Filter to chat/reasoning models (skip embedding, tts, asr, etc.)
                         let chatModels = models.filter { id in
                             let lower = id.id.lowercased()
                             let skip = [
@@ -539,7 +541,7 @@ extension AgentViewModel {
             do {
                 let models = try await Self.fetchOpenAICompatibleModels(
                     apiKey: key,
-                    endpoint: "https://generativelanguage.googleapis.com/v1beta/
+                    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/models"
                 )
                 geminiModels = models.isEmpty ? Self.defaultGeminiModels : models
                 if geminiModel.isEmpty || !geminiModels.contains(where: { $0.id == geminiModel }) {
@@ -564,7 +566,7 @@ extension AgentViewModel {
                 return
             }
             do {
-                let models = try await Self.fetchOpenAICompatibleModels(apiKey:
+                let models = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: "https://api.x.ai/v1/models")
                 grokModels = models.isEmpty ? Self.defaultGrokModels : models
                 if grokModel.isEmpty || !grokModels.contains(where: { $0.id == grokModel }) {
                     grokModel = grokModels.first?.id ?? "grok-3-mini-fast"
@@ -588,7 +590,7 @@ extension AgentViewModel {
                 return
             }
             do {
-                let models = try await Self.fetchOpenAICompatibleModels(apiKey:
+                let models = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: "https://api.mistral.ai/v1/models")
                 mistralModels = models.isEmpty ? Self.defaultMistralModels : models
                 if mistralModel.isEmpty || !mistralModels.contains(where: { $0.id == mistralModel }) {
                     mistralModel = mistralModels.first?.id ?? "mistral-large-latest"
@@ -611,7 +613,7 @@ extension AgentViewModel {
             }
             do {
                 // Codestral key works on codestral.mistral.ai/v1/models
-                let allModels = try await Self.fetchOpenAICompatibleModels(apiKe
+                let allModels = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: "https://codestral.mistral.ai/v1/models")
                 // Filter out embed models — keep only chat/completion models
                 let chatModels = allModels.filter { !$0.id.lowercased().contains("embed") }
                 let models = chatModels.isEmpty ? allModels : chatModels
@@ -636,8 +638,8 @@ extension AgentViewModel {
                 return
             }
             do {
-                let allModels = try await Self.fetchOpenAICompatibleModels(apiKe
-                // Vibe key only works with *-latest models, not dated versions
+                let allModels = try await Self.fetchOpenAICompatibleModels(apiKey: key, endpoint: "https://api.mistral.ai/v1/models")
+                // Vibe key only works with *-latest models, not dated versions like devstral-small-2507
                 let filtered = allModels.filter {
                     $0.id.lowercased().contains("devstral") && $0.id.contains("latest")
                 }
@@ -756,6 +758,7 @@ extension AgentViewModel {
     }
 
     /// Trigger model fetch for a provider if its list is empty.
+    /// Single model-list refresh for any provider. `force: true` skips the empty check.
     func fetchModelsIfNeeded(for provider: APIProvider, force: Bool = false) {
         switch provider {
         case .claude: if force || availableClaudeModels.isEmpty { Task { await fetchClaudeModels() } }

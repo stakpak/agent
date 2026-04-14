@@ -80,7 +80,7 @@ struct InputSectionView: View {
                 .lineLimit(2...16)
                 .background(GeometryReader { geo in
                     Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
-                        viewModel.inputFieldWidth = w - 14 // minus horizontal p
+                        viewModel.inputFieldWidth = w - 14 // minus horizontal padding
                     }
                 })
                 .onKeyPress(.tab) {
@@ -318,6 +318,7 @@ struct InputSectionView: View {
     }
 
     /// Handle drag-and-drop of text files into the input area.
+    /// Works regardless of whether the text field has focus.
     private func handleDrop(_ providers: [NSItemProvider], tab: ScriptTab? = nil) -> Bool {
         for provider in providers {
             // File URLs — read text content

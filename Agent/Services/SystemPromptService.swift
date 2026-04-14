@@ -2,7 +2,8 @@ import Foundation
 import AgentAudit
 import AgentTools
 
-/// / Manages editable system prompt files stored at ~/Documents/AgentScript/sys
+/// / Manages editable system prompt files stored at ~/Documents/AgentScript/system/. / On first access, copies the
+/// default prompts from AgentTools to disk. / At runtime, services read the on-disk prompts (with {userName}/{userHome} substitution).
 @MainActor
 final class SystemPromptService {
     static let shared = SystemPromptService()
@@ -17,7 +18,7 @@ final class SystemPromptService {
     /// Compact prompt file for Apple AI (Foundation Models).
     static let compactFileName = "system_prompt_compact.txt"
 
-    /// Legacy per-provider file names
+    /// Legacy per-provider file names — kept for migration cleanup only.
     private static let legacyFileNames = [
         "claude.txt", "openai.txt", "deepseek.txt", "hugging_face.txt",
         "ollama.txt", "local_ollama.txt", "vllm.txt", "lm_studio.txt",
@@ -27,7 +28,7 @@ final class SystemPromptService {
         "foundation_model_compact.txt", "shared_llm.txt",
     ]
 
-    /// For backward compatibility
+    /// For backward compatibility — maps any provider to the common file.
     static let fileNames: [APIProvider: String] = {
         var map: [APIProvider: String] = [:]
         for provider in APIProvider.allCases {
@@ -38,15 +39,16 @@ final class SystemPromptService {
 
     /// Version header prefix embedded in each prompt file.
     private static let versionPrefix = "// Agent! v"
-    /// Custom header prefix for user-edited prompts
+    /// Custom header prefix for user-edited prompts (never auto-overwritten).
     private static let customPrefix = "// Agent! custom v"
-    /// READ ONLY header prefix for locked prompts
+    /// READ ONLY header prefix for locked prompts (never auto-overwritten, even on version change).
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
-    /// Bump this when system prompt content changes to force re-sync of saved p
+    /// Bump this when system prompt content changes to force re-sync of saved prompts.
     private static let promptRevision = "85"
 
-    /// / Anti-hallucination rule appended to every system prompt (full + compac
+    /// / Anti-hallucination rule appended to every system prompt (full + compact). / Triggered by an observed
+    /// real-world failure: the in-app Agent produced a / confident, structured "gap analysis" of its own codebase right after the / 10-consecutive-reads guard fired, citing tools and files it had never / actually read. The lesson: when evidence runs out, models default to / confabulating polished prose rather than admitting "I don't know yet." / This rule forbids that move explicitly.
     static let antiHallucinationRules = """
 
     ANTI-HALLUCINATION (HIGHEST PRIORITY — overrides any other rule):
@@ -78,12 +80,13 @@ final class SystemPromptService {
     instead of fabricating a result.
     """
 
-    /// / Wrap an AgentTools-provided base prompt with anti-hallucination / rule
+    /// / Wrap an AgentTools-provided base prompt with the anti-hallucination / rules. Used by both the on-disk
+    /// default-prompt seeding and by the local / endpoint code paths in ClaudeService / OpenAICompatibleService that / bypass the on-disk path.
     static func wrapWithRules(_ base: String) -> String {
         return base + "\n" + antiHallucinationRules
     }
 
-    /// Combined version: app version + prompt revision.
+    /// Combined version: app version + prompt revision. Change in either triggers re-sync.
     private static let appVersion: String = {
         let bundleVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         return "\(bundleVersion).\(promptRevision)"
@@ -92,6 +95,7 @@ final class SystemPromptService {
     private init() {}
 
     /// Ensure the system/ directory exists and default prompts are written.
+    /// Replaces prompts when the app version changes (unless READ ONLY).
     func ensureDefaults() {
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.systemDir, withIntermediateDirectories: true)
@@ -144,7 +148,8 @@ final class SystemPromptService {
         }
     }
 
-    /// Read the on-disk prompt
+    /// Read the on-disk prompt, substituting {userName}, {userHome}, and {projectFolder}.
+    /// Strips the version comment line before returning.
     func prompt(
         for provider: APIProvider,
         userName: String,
@@ -167,7 +172,8 @@ final class SystemPromptService {
         }
         let content = Self.stripVersionLine(template)
         let folder = projectFolder.isEmpty ? userHome : projectFolder
-        // Live shell name from the user's toggle (zsh/bash)
+        // Live shell name from the user's toggle (zsh/bash) — re-reads on every prompt fetch so flipping the toggle in
+        // Options updates the LLM context on the next iteration without rewriting the template file.
         let shellName = (AppConstants.shellPath as NSString).lastPathComponent
         return content
             .replacingOccurrences(of: "{userName}", with: userName)
@@ -185,7 +191,7 @@ final class SystemPromptService {
         return text
     }
 
-    /// Read the raw template (with placeholders) for editing. Strips version li
+    /// Read the raw template (with placeholders) for editing. Strips version line.
     func rawTemplate(compact: Bool = false) -> String {
         ensureDefaults()
         let fileName = compact ? Self.compactFileName : Self.commonFileName
@@ -200,13 +206,13 @@ final class SystemPromptService {
         return rawTemplate(compact: provider == .foundationModel)
     }
 
-    /// Save an edited template back to disk
+    /// Save an edited template back to disk (prepends custom header to prevent auto-overwrite).
     func saveTemplate(_ content: String, compact: Bool = false) {
         let fileName = compact ? Self.compactFileName : Self.commonFileName
         let url = Self.systemDir.appendingPathComponent(fileName)
         let stripped = Self.stripVersionLine(content)
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isReadOnly = trimmed.hasPrefix("READ ONLY") || trimmed.hasPrefix("
+        let isReadOnly = trimmed.hasPrefix("READ ONLY") || trimmed.hasPrefix("// READ ONLY")
         let header = isReadOnly ? Self.readOnlyPrefix : Self.customPrefix
         let versioned = header + Self.appVersion + "\n" + stripped
         do {

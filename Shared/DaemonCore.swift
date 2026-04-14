@@ -11,7 +11,8 @@ final class OutputContext: @unchecked Sendable {
     }
 }
 
-/// Shared command execution logic for both AgentHelper
+/// Shared command execution logic for both AgentHelper (root) and AgentUser (user) daemons.
+/// The only differences are the XPC protocol types and Mach service name.
 enum DaemonCore {
     nonisolated(unsafe) static var runningProcesses: [String: Process] = [:]
     static let lock = NSLock()
@@ -47,7 +48,7 @@ enum DaemonCore {
         if !workingDirectory.isEmpty {
             env["PWD"] = workingDirectory
         }
-          // Defense-in-depth: set AGENT_PROJECT_FOLDER on process.environment t
+          // Defense-in-depth: set AGENT_PROJECT_FOLDER on process.environment too.
         env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
             ? FileManager.default.homeDirectoryForCurrentUser.path
             : workingDirectory

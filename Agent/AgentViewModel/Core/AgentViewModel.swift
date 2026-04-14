@@ -25,20 +25,20 @@ final class AgentViewModel {
     }()
 
     var taskInput = ""
-    /// Width of the task input field, updated by InputSectionView via GeometryR
+    /// Width of the task input field, updated by InputSectionView via GeometryReader
     var inputFieldWidth: CGFloat = 0
 
-    /// Tool steps for current task (main tab)
+    /// Tool steps for the current task (main tab) — ToolStep type is declared in AgentViewModel+Types.swift
     var toolSteps: [ToolStep] = []
 
-    // Stored property drives live UI; ChatHistoryStore persists across launches
+    // Stored property drives live UI; ChatHistoryStore persists across launches via SwiftData
     var activityLog = ""
     var isRunning = false
     var isThinking = false
 
     // MARK: - Coding Preferences (opt-in features)
 
-    /// Auto-verify: after successful build, launch app and run accessibility ch
+    /// Auto-verify: after successful build, launch app and run accessibility checks
     var autoVerifyEnabled: Bool = UserDefaults.standard.bool(forKey: "codingAutoVerify") {
         didSet { UserDefaults.standard.set(autoVerifyEnabled, forKey: "codingAutoVerify") }
     }
@@ -54,7 +54,7 @@ final class AgentViewModel {
     var autoScaffoldEnabled: Bool = UserDefaults.standard.bool(forKey: "codingAutoScaffold") {
         didSet { UserDefaults.standard.set(autoScaffoldEnabled, forKey: "codingAutoScaffold") }
     }
-    /// Auto-screenshot after UI actions (off by default
+    /// Auto-screenshot after UI actions (off by default — expensive, verbose).
     var visionAutoScreenshotEnabled: Bool = UserDefaults.standard.bool(forKey: "visionAutoScreenshot") {
         didSet { UserDefaults.standard.set(visionAutoScreenshotEnabled, forKey: "visionAutoScreenshot") }
     }
@@ -70,11 +70,12 @@ final class AgentViewModel {
     var thinkingOutputExpanded: Bool = UserDefaults.standard.object(forKey: "thinkingOutputExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(thinkingOutputExpanded, forKey: "thinkingOutputExpanded") }
     }
-    /// / Expanded state of the Steps
+    /// / Expanded state of the Steps (tool calls) disclosure inside the LLM / Output HUD on the main tab. Persisted
+    /// across launches and across / Cmd+B hide/show cycles so newly arriving steps don't collapse the list.
     var toolStepsExpanded: Bool = UserDefaults.standard.object(forKey: "toolStepsExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(toolStepsExpanded, forKey: "toolStepsExpanded") }
     }
-    /// User's drag-resized height for the LLM Output HUD on the main tab.
+    /// User's drag-resized height for the LLM Output HUD on the main tab. Persisted across launches.
     var llmOutputHeight: Double = UserDefaults.standard.object(forKey: "llmOutputHeight") as? Double ?? 80 {
         didSet { UserDefaults.standard.set(llmOutputHeight, forKey: "llmOutputHeight") }
     }
@@ -102,7 +103,7 @@ final class AgentViewModel {
     var sessionInputTokens: Int = 0
     var sessionOutputTokens: Int = 0
 
-    /// Live budget usage fraction for UI display
+    /// Live budget usage fraction for UI display (updated by task loop)
     var budgetUsedFraction: Double = 0
 
     /// Active sub-agents spawned by the current task
@@ -152,7 +153,7 @@ final class AgentViewModel {
             }
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: "agentProvider")
             fetchModelsForSelectedProviderIfNeeded()
-            // Sync to the active tab's LLMConfig so each tab remembers its own
+            // Sync to the active tab's LLMConfig so each tab remembers its own provider
             syncProviderToActiveTab()
         }
     }
@@ -219,7 +220,7 @@ final class AgentViewModel {
         didSet { KeychainService.shared.setVLLMAPIKey(vLLMAPIKey) }
     }
 
-    var vLLMEndpoint: String = UserDefaults.standard.string(forKey: "vLLMEndpoin
+    var vLLMEndpoint: String = UserDefaults.standard.string(forKey: "vLLMEndpoint") ?? "http://localhost:8000/v1/chat/completions" {
         didSet { UserDefaults.standard.set(vLLMEndpoint, forKey: "vLLMEndpoint") }
     }
 
@@ -241,7 +242,7 @@ final class AgentViewModel {
         }
     }
 
-    var lmStudioEndpoint: String = UserDefaults.standard.string(forKey: "lmStudi
+    var lmStudioEndpoint: String = UserDefaults.standard.string(forKey: "lmStudioEndpoint") ?? "http://localhost:1234/v1/chat/completions" {
         didSet { UserDefaults.standard.set(lmStudioEndpoint, forKey: "lmStudioEndpoint") }
     }
 
@@ -420,12 +421,14 @@ final class AgentViewModel {
         didSet { UserDefaults.standard.set(grokTemperature, forKey: "grokTemperature") }
     }
 
-    /// Max output tokens per provider.
+    /// Max output tokens per provider. 0 = let provider decide (omit from request).
+    /// Claude API requires max_tokens so 0 defaults to 16384 at the service level.
     var maxTokens: Int = UserDefaults.standard.object(forKey: "maxTokens") as? Int ?? 0 {
         didSet { UserDefaults.standard.set(maxTokens, forKey: "maxTokens") }
     }
 
-    /// Per-task token budget ceiling (input+output).
+    /// Per-task token budget ceiling (input+output). 0 = unlimited (default).
+    /// When set, the task loop will nudge the LLM at 90% and auto-stop at 100% or on diminishing returns.
     var tokenBudgetCeiling: Int = UserDefaults.standard.object(forKey: "tokenBudgetCeiling") as? Int ?? 0 {
         didSet { UserDefaults.standard.set(tokenBudgetCeiling, forKey: "tokenBudgetCeiling") }
     }
@@ -447,7 +450,7 @@ final class AgentViewModel {
     var isFetchingModels = false
 
     // Local Ollama settings
-    var localOllamaEndpoint: String = UserDefaults.standard.string(forKey: "loca
+    var localOllamaEndpoint: String = UserDefaults.standard.string(forKey: "localOllamaEndpoint") ?? "http://localhost:11434/api/chat" {
         didSet { UserDefaults.standard.set(localOllamaEndpoint, forKey: "localOllamaEndpoint") }
     }
 
@@ -472,7 +475,7 @@ final class AgentViewModel {
     var attachedImages: [NSImage] = []
     var attachedImagesBase64: [String] = []
 
-    /// Force vision mode for all providers
+    /// Force vision mode for all providers (for testing image sending)
     var forceVision: Bool = UserDefaults.standard.bool(forKey: "agentForceVision") {
         didSet { UserDefaults.standard.set(forceVision, forKey: "agentForceVision") }
     }
@@ -490,7 +493,7 @@ final class AgentViewModel {
     var mainTaskQueue: [String] = []
     var currentTaskPrompt: String = ""
     var currentAppleAIPrompt: String = ""
-    /// Commands run during current task
+    /// Commands run during current task — used by history, mediator, and tool handlers.
     var commandsRun: [String] = []
     @ObservationIgnored private var terminationObserver: Any?
 
@@ -510,7 +513,7 @@ final class AgentViewModel {
     var lastSeenMessageROWID: Int = 0
     /// Briefly true during each poll cycle so the StatusDot pulses on the timer
     var messagesPolling = false
-    /// Handle ID to reply to when an Agent! task completes
+    /// Handle ID to reply to when an Agent! task completes (nil = no reply needed)
     var agentReplyHandle: String?
     /// Task for periodic progress updates during long-running tasks
     var progressUpdateTask: Task<Void, Never>?
@@ -547,6 +550,7 @@ final class AgentViewModel {
 
     /// O(1) tab lookup by UUID
     private var tabsByID: [UUID: ScriptTab] = [:]
+
 
     /// The currently selected ScriptTab, or nil for main — O(1)
     var selectedTab: ScriptTab? {
@@ -607,7 +611,7 @@ final class AgentViewModel {
     @ObservationIgnored var rawLLMOutput: String = UserDefaults.standard.string(forKey: "mainRawLLMOutput") ?? "" {
         didSet { UserDefaults.standard.set(rawLLMOutput, forKey: "mainRawLLMOutput") }
     }
-    /// Character-by-character dripped version of rawLLMOutput for terminal effe
+    /// Character-by-character dripped version of rawLLMOutput for terminal effect
     var displayedLLMOutput: String = UserDefaults.standard.string(forKey: "mainRawLLMOutput") ?? ""
     var dripDisplayIndex: Int = (UserDefaults.standard.string(forKey: "mainRawLLMOutput") ?? "").count
     var dripTask: Task<Void, Never>?
@@ -640,7 +644,7 @@ final class AgentViewModel {
     var speechRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     var speechRecognitionTask: SFSpeechRecognitionTask?
     var preDictationText: String = ""
-    /// Tracks which tab was selected when dictation started
+    /// Tracks which tab was selected when dictation started, so speech goes to the correct input field
     var preDictationTabId: UUID?
 
     // MARK: - Hotword ("Agent!") Listening
@@ -652,12 +656,12 @@ final class AgentViewModel {
     var isHotwordCapturing = false
     /// Timer that fires after 5 seconds of silence to auto-submit
     var hotwordSilenceTimer: Timer?
-    /// Transcription length at last change
+    /// Transcription length at last change — used to detect silence
     var hotwordLastTranscriptionLength = 0
 
     // MARK: - Init
 
-    /// Prevents duplicate startup work when @State evaluates AgentViewModel() m
+    /// Prevents duplicate startup work when @State evaluates AgentViewModel() multiple times
     private static var _started = false
 
     init() {
@@ -672,11 +676,12 @@ final class AgentViewModel {
         activityLog = ScriptTab.trimLog(activityLog)
         CodeBlockTheme.updateAppearance()
         TerminalNeoTheme.updateAppearance()
-        // Restore ~/Documents/AgentScript/ folder and bundled resources if miss
+        // Restore ~/Documents/AgentScript/ folder and bundled resources if missing (off main thread)
         Task.detached { [scriptService = self.scriptService] in
             scriptService.ensurePackage()
             scriptService.rebuildAllMetadata()
-            // After ensurePackage, refresh upstream-bundled scripts when Agent!
+            // After ensurePackage, refresh upstream-bundled scripts when Agent! has been upgraded since the last sync.
+            // User-authored scripts are never touched, and any modified bundled script is backed up to .Trash before replacement.
             await scriptService.syncBundledScriptsFromRemote()
             let names = Set(scriptService.listScripts().map { $0.name.lowercased() })
             await MainActor.run { AppleIntelligenceMediator.knownAgentNames = names }
@@ -707,7 +712,7 @@ final class AgentViewModel {
 
         // No auto-fetch on launch — avoids wasting API calls for inactive LLMs.
 
-        // Xcode Command Line Tools check is handled by DependencyOverlay in Con
+        // Xcode Command Line Tools check is handled by DependencyOverlay in ContentView
 
         // Resume Messages monitor if it was enabled
         if messagesMonitorEnabled {

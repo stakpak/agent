@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// HUD (Heads-Up Display) options popover
+/// HUD (Heads-Up Display) options popover — Terminal Speed and Scan Lines
+/// for the LLM Output overlay. Shown via the viewfinder icon in the toolbar.
 struct HUDOptionsView: View {
     @Bindable var viewModel: AgentViewModel
 

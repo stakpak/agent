@@ -1,7 +1,7 @@
 @preconcurrency import Foundation
 import AgentTools
 
-// Web tool dispatcher
+// Web tool dispatcher — extracted from DirectCommand.swift when direct command matching was removed.
 extension AgentViewModel {
     func handleMainWebTool(name: String, input: [String: Any]) async -> String {
         let ws = WebAutomationService.shared

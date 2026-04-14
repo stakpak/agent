@@ -135,7 +135,7 @@ struct WebAutomationTests {
 
     @Test("LinkedIn login: detect email/password fields")
     func linkedInLoginFields() async {
-        // LinkedIn may redirect /login to a different page — detect whatever lo
+        // LinkedIn may redirect /login to a different page — detect whatever loads
         let loaded = await openAndVerify(
             "https://www.linkedin.com/login",
             condition: "document.readyState === 'complete' && document.title.includes('LinkedIn') ? 'true' : 'false'"

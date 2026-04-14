@@ -1,4 +1,4 @@
-//  AgentViewModel+MessageTypes.swift Agent  Extracted types for Messages m...
+//  AgentViewModel+MessageTypes.swift Agent  Extracted types for Messages monitoring functionality 
 
 import Foundation
 
@@ -15,7 +15,7 @@ extension AgentViewModel {
 
     /// Chat recipients discovered from Messages database
     struct MessageRecipient: Identifiable, Hashable {
-        let id: String // handle id (phone/email) — used as stable key for filte
+        let id: String // handle id (phone/email) — used as stable key for filtering
         let displayName: String
         let service: String // "iMessage" or "SMS"
         let fromMe: Bool // true if discovered from a sent message

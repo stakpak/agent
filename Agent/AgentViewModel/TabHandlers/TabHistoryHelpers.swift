@@ -21,7 +21,7 @@ extension AgentViewModel {
         return "Main"
     }
 
-    /// Error history for UI display
+    /// Error history for UI display — per-tab when a tab is selected, global for main
     var errorHistory: [String] {
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId),
@@ -38,7 +38,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Task summaries for UI display
+    /// Task summaries for UI display — per-tab when a tab is selected, global for main
     var taskSummaries: [String] {
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId),

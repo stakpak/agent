@@ -63,7 +63,7 @@ extension AgentViewModel {
         temperatureColor(temperatureForProvider(selectedProvider))
     }
 
-    /// Color for temperature value: 0–0.3 green
+    /// Color for temperature value: 0–0.3 green, 0.3–1.0 yellow, 1.0–1.5 orange, 1.5–2.0 red
     func temperatureColor(_ temp: Double) -> Color {
         if temp >= 1.5 { return .pink }
         if temp >= 1.0 { return .orange }

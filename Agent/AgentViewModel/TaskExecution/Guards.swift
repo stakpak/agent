@@ -10,7 +10,7 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Overnight coding guardrails
+    /// Overnight coding guardrails — track runaway loops and nudge/stop. Returns true when error budget triggers.
     func runOvernightCodingGuards(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         toolResults: inout [[String: Any]],
@@ -50,7 +50,7 @@ extension AgentViewModel {
             let hadEdit = pendingTools.contains { editTools.contains($0.name) }
             let hadBuild = pendingTools.contains { buildTools.contains($0.name) }
 
-              // Read guard removed
+              // Read guard removed — LLMs need freedom to research entire projects without interruption.
             if hadAction { consecutiveReadOnlyCount = 0 } else { consecutiveReadOnlyCount += pendingTools.count }
 
             // 2. Build enforcement — only for Xcode projects
@@ -86,7 +86,7 @@ extension AgentViewModel {
             }
             if consecutiveBuildFailures >= 5 { return true }
 
-            // Stuck detection — track edit failures per file. Nudge at 3, give
+            // Stuck detection — track edit failures per file. Nudge at 3, give up at 6.
             for tool in pendingTools where editTools.contains(tool.name) {
                 guard let path = tool.input["file_path"] as? String ?? tool.input["path"] as? String else { continue }
                 let output = toolResults.last?["content"] as? String ?? ""

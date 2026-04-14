@@ -2,7 +2,7 @@
 
 import SwiftUI
 
-/// Green banner showing current task with cancel button and optional Apple AI p
+/// Green banner showing current task with cancel button and optional Apple AI prompt
 struct TaskBannerView: View {
     let prompt: String
     let appleAIPrompt: String?

@@ -41,6 +41,7 @@ struct Skill: Identifiable {
 }
 
 /// Loads and manages reusable prompt-template skills from disk.
+/// Skills directory: ~/Documents/AgentScript/skills/
 @MainActor
 final class SkillsService {
     static let shared = SkillsService()
@@ -97,6 +98,7 @@ final class SkillsService {
         try? raw.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Delete a skill by ID.
     func delete(id: String) {
         let url = skillsDir.appendingPathComponent("\(id).md")
         try? FileManager.default.removeItem(at: url)

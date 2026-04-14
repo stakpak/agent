@@ -126,9 +126,10 @@ struct AccessibilityEnabledTests {
 
     @Test("Unknown AX ID is NOT restricted - only known IDs can be restricted")
     func unknownAxIdNotRestricted() {
-        // Unknown IDs (not in allAxIds) should not be restricted They're just n
+        // Unknown IDs (not in allAxIds) should not be restricted
+        // They're just not part of the safety system
         #expect(!settings.isAxRestricted("SomeUnknownAction"))
-        #expect(!settings.isAxEnabled("SomeUnknownAction")) // not in the system
+        #expect(!settings.isAxEnabled("SomeUnknownAction")) // not in the system at all
     }
 
     @Test("Unknown AE ID is NOT restricted - only known IDs can be restricted")
@@ -280,7 +281,7 @@ struct AccessibilityEnabledTests {
 
     @Test("UserDefaults is populated after first access for Accessibility")
     func userDefaultsPopulatedOnInitAx() {
-        // After initializing AccessibilityEnabled.shared, UserDefaults should h
+        // After initializing AccessibilityEnabled.shared, UserDefaults should have the key
         let stored = UserDefaults.standard.stringArray(forKey: axEnabledKey)
         #expect(stored != nil, "UserDefaults should have '\(axEnabledKey)' after init")
         #expect(!stored!.isEmpty, "UserDefaults array should not be empty")
@@ -288,7 +289,7 @@ struct AccessibilityEnabledTests {
 
     @Test("UserDefaults is populated after first access for AppleEvents")
     func userDefaultsPopulatedOnInitAe() {
-        // After initializing AccessibilityEnabled.shared, UserDefaults should h
+        // After initializing AccessibilityEnabled.shared, UserDefaults should have the key
         let stored = UserDefaults.standard.stringArray(forKey: aeEnabledKey)
         #expect(stored != nil, "UserDefaults should have '\(aeEnabledKey)' after init")
         #expect(!stored!.isEmpty, "UserDefaults array should not be empty")

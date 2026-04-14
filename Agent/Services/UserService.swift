@@ -2,19 +2,20 @@ import AgentAudit
 import AppKit
 import ServiceManagement
 
-// MARK: - SMAppService Safe Wrapper / Safely wraps SMAppService operations to p
+// MARK: - SMAppService Safe Wrapper / Safely wraps SMAppService operations to prevent crashes from malformed/missing
+// plists. / The crash happens inside Objective-C code that Swift can't catch, so we verify / the plist exists BEFORE calling SMAppService methods.
 enum SafeSMAppService {
     /// The plist filename for user agent
     static let userAgentPlistName = AppConstants.userPlist
 
-    /// Path to the plist inside the app bundle
+    /// Path to the plist inside the app bundle (where SMAppService reads from)
     static var bundlePlistURL: URL? {
         Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/LaunchAgents")
             .appendingPathComponent(userAgentPlistName)
     }
 
-    /// Check if the user agent plist exists and is readable inside the app bund
+    /// Check if the user agent plist exists and is readable inside the app bundle
     static func userAgentPlistExists() -> Bool {
         guard let plistURL = bundlePlistURL else { return false }
         let path = plistURL.path
@@ -39,12 +40,13 @@ enum SafeSMAppService {
 
     /// Create user agent service ONLY if plist is valid
     static func createUserAgent() -> SMAppService? {
-        // CRITICAL: Only create SMAppService if plist exists and is valid SMApp
+        // CRITICAL: Only create SMAppService if plist exists and is valid
+        // SMAppService crashes in Objective-C code if plist is malformed
         guard userAgentPlistExists() else { return nil }
         return SMAppService.agent(plistName: userAgentPlistName)
     }
 
-    /// Safely check if user agent is ready
+    /// Safely check if user agent is ready - returns false if any issue
     static func isUserAgentReady() -> Bool {
         // First verify plist exists
         guard userAgentPlistExists() else { return false }
@@ -52,7 +54,7 @@ enum SafeSMAppService {
         // Create service and check status (may still crash in ObjC)
         guard let service = createUserAgent() else { return false }
 
-        // Accessing .status could crash if plist is malformed, but we validated
+        // Accessing .status could crash if plist is malformed, but we validated above
         return service.status == .enabled
     }
 
@@ -177,7 +179,8 @@ final class UserService {
     }
 
     func execute(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
-        // Defense-in-depth: if a caller passed a file path as workingDirectory
+        // Defense-in-depth: if a caller passed a file path as workingDirectory,
+        // strip the filename so the daemon doesn't crash with "Not a directory".
         var workingDirectory = workingDirectory
         if !workingDirectory.isEmpty {
             var isDir: ObjCBool = false
@@ -187,7 +190,8 @@ final class UserService {
             }
         }
         AuditLog.log(.launchAgent, "execute: \(command.prefix(100))")
-        // Hard local guardrail — refuse catastrophic commands before they cross
+        // Hard local guardrail — refuse catastrophic commands before they
+        // cross the XPC boundary into the user-context daemon.
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.launchAgent, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -206,7 +210,7 @@ final class UserService {
             }
         }
 
-        // Always send an absolute path — relative paths resolve wrong in the da
+        // Always send an absolute path — relative paths resolve wrong in the daemon
         let dir: String
         if workingDirectory.isEmpty || workingDirectory == "." || workingDirectory == "./" {
             dir = NSHomeDirectory()
@@ -215,7 +219,8 @@ final class UserService {
         } else {
             dir = (workingDirectory as NSString).expandingTildeInPath
         }
-        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so comm
+        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the command runs in the right directory AND
+        // has the project folder env var available the same way agent scripts do. The export is sent through the XPC boundary as part of the command string — no XPC protocol change required.
         let fullCommand: String
         if !dir.isEmpty && !command.hasPrefix("cd ") {
             let escaped = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -223,26 +228,28 @@ final class UserService {
         } else {
             fullCommand = command
         }
-        // Honor the user's zsh/bash toggle.
+        // Honor the user's zsh/bash toggle. The Launch Agent always invokes /bin/zsh (XPC protocol stays unchanged) but
+        // if the user picked a different shell, we wrap the command with `exec <shell> -c '...'` so the outer zsh process is replaced by the chosen shell. Defaults to no wrapping when /bin/zsh is selected.
         let wrapped = Self.wrapForShell(fullCommand, shellPath: AppConstants.shellPath)
         return await executeViaXPC(script: wrapped, workingDirectory: dir, outputHandler: handler)
     }
 
-    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a
+    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a / shell other than /bin/zsh.
+    /// Single-quote escape pattern survives `!` / and every shell metacharacter.
     private static func wrapForShell(_ command: String, shellPath: String) -> String {
         guard shellPath != "/bin/zsh", !shellPath.isEmpty else { return command }
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
         return "exec \(shellPath) -c '\(escaped)'"
     }
 
-    /// Quick connectivity test with 5-second timeout. Returns true if XPC respo
+    /// Quick connectivity test with 5-second timeout. Returns true if XPC responds.
     func ping() async -> Bool {
         let handler = UserOutputHandler { _ in }
         let conn = makeConnection(outputHandler: handler)
         return await Self.performPing(connection: conn)
     }
 
-    /// Runs XPC ping off the main actor so continuation can be resumed from any
+    /// Runs XPC ping off the main actor so continuation can be resumed from any thread.
     private nonisolated static func performPing(connection: NSXPCConnection) async -> Bool {
         await withCheckedContinuation { continuation in
             var didResume = false
@@ -327,7 +334,7 @@ final class UserService {
                 return
             }
 
-            // Start timeout — tool must begin executing within toolStartTimeout
+            // Start timeout — tool must begin executing within toolStartTimeout seconds.
             var started = false
             let startedLock = NSLock()
             let startTimer = DispatchWorkItem {
@@ -341,7 +348,7 @@ final class UserService {
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + toolStartTimeout, execute: startTimer)
 
-            // Finish timeout — tool must complete within toolFinishTimeout seco
+            // Finish timeout — tool must complete within toolFinishTimeout seconds.
             let finishTimer = DispatchWorkItem {
                 connection.invalidate()
                 safeResume((-1, "Tool timed out after \(Int(toolFinishTimeout))s"))

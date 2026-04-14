@@ -12,7 +12,8 @@ extension AgentViewModel {
 
         switch name {
         case "batch_commands":
-            // batch_commands: runs all steps in ONE bash process so env vars
+            // batch_commands: runs all steps in ONE bash process so env vars, cwd, exports, and aliases persist across
+            // steps. Builds a single script with unique delimiters to capture per-step exit codes, then splits output.
             let tabFolder = Self.resolvedWorkingDirectory(tab.projectFolder.isEmpty ? projectFolder : tab.projectFolder)
             let rawCommands = input["commands"] as? String ?? ""
             let commands = rawCommands.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -23,7 +24,8 @@ extension AgentViewModel {
                 )
             }
 
-            // Pre-flight: check every command for tool suggestions / unsafe pat
+            // Pre-flight: check every command for tool suggestions / unsafe patterns BEFORE running anything. If any
+            // are blocked, return all the blocks at once so the LLM can fix them in a single retry instead of half-running the batch.
             var blocks = ""
             for (idx, rawCmd) in commands.enumerated() {
                 let prefixed = Self.prependWorkingDirectory(rawCmd, projectFolder: tabFolder)
@@ -51,7 +53,7 @@ extension AgentViewModel {
 
             guard !Task.isCancelled else { return TabToolResult(toolResult: nil, isComplete: false) }
 
-              // Single script — per-step splitting broke multiline constructs a
+              // Single script — per-step splitting broke multiline constructs and leaked markers.
             let script = commands.joined(separator: "\n")
             let needsTCC = Self.needsTCCPermissions(script)
             let result: (status: Int32, output: String)
@@ -66,7 +68,8 @@ extension AgentViewModel {
             }
 
             let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Don't appendLog — streaming callback already displayed output.
+            // Don't appendLog — the streaming callback already displayed the output.
+            // Only build the tool_result for the LLM.
             var batchOutput = output.isEmpty ? "(no output)" : output
             if result.status != 0 { batchOutput += "\nexit code: \(result.status)" }
             let truncated = LogLimits.trim(batchOutput, cap: LogLimits.batchOutputChars, suffix: "Batch output truncated.")
@@ -107,7 +110,7 @@ extension AgentViewModel {
                 tab.appendLog("├ [\(idx + 1)/\(tasks.count)] \(toolName)(\(brief))")
                 tab.flush()
 
-                // Dispatch through existing tab handler
+                // Dispatch through existing tab handler (suppresses sub-logging via synthetic toolId)
                 let subResult = await handleTabToolCallBody(
                     tab: tab, name: toolName, input: toolInput, toolId: "\(toolId)_\(idx)"
                 )
@@ -150,7 +153,8 @@ extension AgentViewModel {
                     isComplete: false
                 )
             }
-            // TCC commands MUST run in-process where Agent! holds user's TCC gr
+            // TCC commands MUST run in-process where Agent! holds the user's TCC grants. This check has to come BEFORE
+            // the privileged-daemon branch — otherwise an `execute_daemon_command(command:"osascript ...")` would go to the root daemon (which has zero TCC) and fail with a confusing permission error.
             let needsTCC = Self.needsTCCPermissions(command)
             let isPrivileged = (name == "execute_daemon_command") && rootEnabled && !needsTCC
             let routePrefix: String
@@ -166,7 +170,8 @@ extension AgentViewModel {
 
             let result: (status: Int32, output: String)
             if needsTCC {
-                // TCC commands → Agent process
+                // TCC commands → Agent process (inherits TCC permissions). Wins over the privileged check by design —
+                // TCC grants belong to the GUI app, not to the root daemon.
                 result = await Self.executeTCC(command: command)
             } else if isPrivileged {
                 // Root commands → LaunchDaemon via XPC

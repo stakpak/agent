@@ -7,11 +7,12 @@ import AgentSwift
 import AgentAccess
 import Cocoa
 
-// MARK: - Native Tool Handler — Misc (discovery, memory, skills, agents, web_fe
+// MARK: - Native Tool Handler — Misc (discovery, memory, skills, agents, web_fetch, task_complete)
 
 extension AgentViewModel {
 
-    /// / Handles list_tools, memory, skills, spawn_agent, ask_user, visual_test
+    /// / Handles list_tools, memory, skills, spawn_agent, ask_user, visual_test, / git_pr, create_project, web_fetch,
+    /// tell_agent, task_complete. / Returns `nil` if the name is not a misc-group tool.
     func handleMiscNativeTool(name: String, input: [String: Any]) async -> String? {
         switch name {
         // Tool discovery
@@ -113,7 +114,8 @@ extension AgentViewModel {
             let name = input["name"] as? String ?? "agent-\(subAgents.count + 1)"
             let prompt = input["prompt"] as? String ?? ""
             guard !prompt.isEmpty else { return "Error: prompt is required for spawn_agent." }
-            // Configurable tool groups: "all" or comma-separated group names. T
+            // Configurable tool groups: "all" or comma-separated group names. The legacy 'coding' / 'automation'
+            // aliases are gone with the rest of the mode system; pass explicit group names like "Core,Code,User" if you want to narrow a sub-agent's tool list.
             var toolGroups: Set<String>? = nil
             if let mode = input["tools"] as? String {
                 if mode == "all" {
@@ -144,7 +146,8 @@ extension AgentViewModel {
             appendLog("💬 \(answer)")
             flushLog()
             return "User answered: \(answer)"
-        // WebFetch — read content from any URL Visual test assertion — click el
+        // WebFetch — read content from any URL
+        // Visual test assertion — click element, verify text appears (opt-in)
         case "visual_test":
             guard visualTestsEnabled else { return "Error: Visual tests disabled. Enable in Coding Preferences." }
             let action = input["action"] as? String ?? "assert"
@@ -231,12 +234,12 @@ extension AgentViewModel {
             return result.status == 0 ? "Project '\(name)' created at \(path)/\(name) (template: \(template))" : result.output
         case "web_fetch":
             let urlStr = input["url"] as? String ?? ""
-            guard !urlStr.isEmpty else { return "Error: url is required for web_
-            guard let url = URL(string: urlStr) else { return "Error: invalid UR
+            guard !urlStr.isEmpty else { return "Error: url is required for web_fetch. Recovery: pass url:\"https://example.com\"." }
+            guard let url = URL(string: urlStr) else { return "Error: invalid URL '\(urlStr)'. Recovery: must start with http:// or https://." }
             appendLog("🌐 Fetch: \(urlStr)")
             flushLog()
             do {
-                // Use a real browser User-Agent so sites don't 403 / serve weir
+                // Use a real browser User-Agent so sites don't 403 / serve weird responses
                 var request = URLRequest(url: url)
                 request.setValue(
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -266,11 +269,12 @@ extension AgentViewModel {
             let message = input["message"] as? String ?? ""
             guard !to.isEmpty && !message.isEmpty else { return "Error: 'to' and 'message' are required." }
             return sendMessageToAgent(name: to, message: message)
-        // Task complete — signal via NativeToolContext so the task loop can det
+        // Task complete — signal via NativeToolContext so the task loop can detect it
         case "task_complete":
             let summary = input["summary"] as? String ?? "Done"
 
-            // Verification gate: if Xcode project + auto-verify + edits were ma
+            // Verification gate: if Xcode project + auto-verify + edits were made,
+            // build must pass before task_complete is allowed
             let editCommands = commandsRun.filter { $0.hasPrefix("write_file") || $0.hasPrefix("edit_file") || $0.hasPrefix("diff_apply") }
             if autoVerifyEnabled && Self.isXcodeProject(projectFolder) && !editCommands.isEmpty {
                 appendLog("🔍 Verify gate: building before allowing completion...")

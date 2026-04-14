@@ -43,7 +43,7 @@ extension AgentViewModel {
             self.flashMessagesDot()
 
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000) // poll every
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // poll every 5s
                 guard !Task.isCancelled else { break }
                 await self.pollMessages()
             }
@@ -86,7 +86,8 @@ extension AgentViewModel {
         guard let handle = agentReplyHandle else { return }
         agentReplyHandle = nil
 
-        // Strip leading "Agent!" / "Agent " from outgoing replies so receiving
+        // Strip leading "Agent!" / "Agent " from outgoing replies so the receiving Mac doesn't loop on its own command.
+        // Use the same case-insensitive prefix logic as inbound parsing. Cap via LogLimits.messageReplyChars (4K) — iMessage tolerates more but carriers split unpredictably above that.
         let reply = LogLimits.trim(Self.stripAgentPrefix(from: summary), cap: LogLimits.messageReplyChars)
         // Escape for AppleScript
         let escaped = reply
@@ -124,6 +125,7 @@ extension AgentViewModel {
     // MARK: - Progress Updates for Long-Running Tasks
 
     /// Start periodic progress updates via iMessage for long-running tasks.
+    /// Sends an update every 10 minutes with elapsed time and current status.
     func startProgressUpdates(for taskDescription: String) {
         stopProgressUpdates() // Cancel any existing updates
 
@@ -209,7 +211,8 @@ extension AgentViewModel {
     // Stored outside @MainActor so nonisolated static methods can access it
     private nonisolated static let messagesDBPath = NSHomeDirectory() + "/Library/Messages/chat.db"
 
-    /// Decode attributedBody blob
+    /// Decode attributedBody blob (typedstream/NSArchiver format).
+    /// NSUnarchiver is the only way to decode the typedstream format used by the Messages database.
     private nonisolated static func decodeAttributedBody(_ data: Data) -> NSAttributedString? {
         guard let cls = NSClassFromString("NSUnarchiver") else { return nil }
         let sel = NSSelectorFromString("unarchiveObjectWithData:")
@@ -220,19 +223,22 @@ extension AgentViewModel {
         return f(cls, sel, data as NSData) as? NSAttributedString
     }
 
-    // MARK: - "Agent!" Prefix Detection Accept "agent"/"Agent!" case-insensitiv
+    // MARK: - "Agent!" Prefix Detection Accept "agent"/"Agent!" case-insensitively, with or without trailing "!". Must
+    // be a complete word (followed by end-of-string, "!", or whitespace) so "agency"/"agentic" don't trigger.
 
-    /// True iff `text` starts with "agent" / "agent!" as a complete leading wor
+    /// True iff `text` starts with "agent" / "agent!" as a complete leading
+    /// word (case-insensitive). Followed by end-of-string, "!", or whitespace.
     nonisolated static func hasAgentPrefix(_ text: String) -> Bool {
         let lower = text.lowercased()
         guard lower.hasPrefix("agent") else { return false }
-        let after = lower.index(lower.startIndex, offsetBy: 5) // 5 = len("agent
+        let after = lower.index(lower.startIndex, offsetBy: 5) // 5 = len("agent")
         guard after < lower.endIndex else { return true } // bare "agent"
         let nextChar = lower[after]
         return nextChar == "!" || nextChar == " " || nextChar == "\t" || nextChar == "\n"
     }
 
-    /// Strip the leading "agent" / "agent!" prefix and any following whitespace
+    /// Strip the leading "agent" / "agent!" prefix and any following
+    /// whitespace. Returns `text` unchanged if no prefix is present.
     nonisolated static func stripAgentPrefix(from text: String) -> String {
         guard hasAgentPrefix(text) else { return text }
         // Skip "agent"
@@ -292,7 +298,7 @@ extension AgentViewModel {
                 if !s.isEmpty { text = s }
             }
 
-            // Fall back to decoding attributedBody blob (NSArchiver typedstream
+            // Fall back to decoding attributedBody blob (NSArchiver typedstream format)
             if text == nil, let blobPtr = sqlite3_column_blob(stmt, 2) {
                 let blobLen = Int(sqlite3_column_bytes(stmt, 2))
                 let data = Data(bytes: blobPtr, count: blobLen)
@@ -371,9 +377,9 @@ extension AgentViewModel {
         return Int(sqlite3_column_int64(stmt, 0))
     }
 
-    /// Seed the ROWID cursor so we only process messages arriving after monitor
+    /// Seed the ROWID cursor so we only process messages arriving after monitor starts.
     private func seedLastSeenROWID() async {
-        // Retry up to 3 times with a delay (macOS may need a moment to grant DB
+        // Retry up to 3 times with a delay (macOS may need a moment to grant DB access)
         for attempt in 1...3 {
             if let rowid = await Self.offMain({ Self.maxMessageROWID() }) {
                 lastSeenMessageROWID = rowid
@@ -394,7 +400,7 @@ extension AgentViewModel {
 
     // MARK: - Messages Tab
 
-    /// Find or create the dedicated Messages tab.
+    /// Find or create the dedicated Messages tab. Always uses main tab's LLM settings.
     func ensureMessagesTab() -> ScriptTab {
         if let existing = scriptTabs.first(where: { $0.isMessagesTab }) {
             return existing
@@ -409,7 +415,8 @@ extension AgentViewModel {
 
     /// Send an iMessage reply from the Messages tab after its task completes.
     func sendMessagesTabReply(_ summary: String, handle: String) {
-        // Strip leading "Agent!" / "Agent "
+        // Strip leading "Agent!" / "Agent " (case-insensitive, ! optional) so
+        // the receiving Mac doesn't loop on its own command.
         let reply = Self.stripAgentPrefix(from: summary)
         let escaped = reply.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -458,7 +465,8 @@ extension AgentViewModel {
         }
     }
 
-    /// Poll for new incoming messages; log from enabled handles, act on "Agent!
+    /// Poll for new incoming messages; log from enabled handles, act on "Agent!" prefix.
+    /// Routes messages to the dedicated Messages tab instead of the main/active tab.
     private func pollMessages() async {
         // If seed failed, try to reseed now
         if lastSeenMessageROWID == Int.max {
@@ -481,7 +489,8 @@ extension AgentViewModel {
 
             guard !row.text.isEmpty else { continue }
 
-            // Only process messages start with wake prefix.
+            // Only process messages that start with the wake prefix. Case-insensitive, exclamation mark optional
+            // (iPhone autocorrect strips "!" routinely; older Macs/contacts use lowercase "agent "). hasAgentPrefix returns true for "Agent!", "agent!", "AGENT!", "Agent ", "agent ", "AGENT " — anything where the first word is "agent" (with or without trailing punctuation).
             guard Self.hasAgentPrefix(row.text) else { continue }
 
             // Auto-discover this sender
@@ -520,7 +529,7 @@ extension AgentViewModel {
             // Select the Messages tab so the user sees it
             selectedTabId = msgTab.id
 
-            // Run the task on the Messages tab
+            // Run the task on the Messages tab (uses main tab's LLM config via resolvedLLMConfig fallback)
             msgTab.taskInput = prompt
             runTabTask(tab: msgTab)
         }

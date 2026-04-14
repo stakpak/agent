@@ -4,7 +4,7 @@ import AppKit
 extension WebAutomationService {
     // MARK: - Tab Switching
 
-    /// Switch to a browser tab by index
+    /// Switch to a browser tab by index (0-based) or by title substring
     func switchTab(browser: String? = nil, index: Int? = nil, titleContains: String? = nil) async -> String {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let script: String
@@ -228,7 +228,7 @@ extension WebAutomationService {
         return await runAppleScript(script)
     }
 
-    /// Close a browser window by index
+    /// Close a browser window by index (1-based). Defaults to front window.
     func closeWindow(browser: String? = nil, index: Int = 1) async -> String {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let script: String
@@ -270,7 +270,7 @@ extension WebAutomationService {
 
     // MARK: - Wait for Element
 
-    /// Wait for a CSS selector to appear in the page
+    /// Wait for a CSS selector to appear in the page (polls via JavaScript)
     func waitForElement(selector: String, browser: String? = nil, timeout: TimeInterval = 10) async -> String {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let escaped = Self.escapeJS(selector)
@@ -363,7 +363,8 @@ extension WebAutomationService {
 
     // MARK: - File Upload
 
-    /// Trigger file upload dialog for an <input type="file"> via accessibility
+    /// Trigger file upload dialog for an <input type="file"> via accessibility click
+    /// Note: JS cannot set file input values (browser security). This clicks the input to open the file picker.
     func triggerFileUpload(selector: String, browser: String? = nil) async -> String {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let escaped = Self.escapeJS(selector)

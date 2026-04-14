@@ -1,11 +1,11 @@
 import Foundation
 import FoundationModels
 
-/// Tracks compaction state across iterations to avoid redundant or runaway ...
+/// Tracks compaction state across iterations to avoid redundant or runaway compaction attempts.
 struct CompactionState {
-    /// Estimated tokens at which compaction should trigger
+    /// Estimated tokens at which compaction should trigger (leave buffer for response).
     var compactThreshold: Int
-    /// Consecutive compaction failures
+    /// Consecutive compaction failures — stops retrying after 3.
     var consecutiveFailures: Int = 0
     /// Whether the last compaction attempt succeeded.
     var lastCompactSucceeded: Bool = true
@@ -15,19 +15,20 @@ struct CompactionState {
     /// Max consecutive failures before circuit breaker trips.
     static let maxFailures = 3
     /// Compact when accumulated messages exceed this token estimate.
+    /// Lower = more aggressive compaction = fewer input tokens wasted.
     static let defaultThreshold = 30_000
 
     init(contextWindow: Int = 200_000) {
         self.compactThreshold = Self.defaultThreshold
     }
 
-    /// True if we should attempt compaction for the given estimated token count
+    /// True if we should attempt compaction for the given estimated token count.
     func shouldCompact(estimatedTokens: Int) -> Bool {
         guard consecutiveFailures < Self.maxFailures else { return false }
         return estimatedTokens > compactThreshold
     }
 
-    /// Record a compaction attempt result.
+    /// Record a compaction attempt result. Returns true if compaction actually reduced tokens.
     mutating func recordAttempt(tokensBefore: Int, tokensAfter: Int) -> Bool {
         tokensBeforeLastCompact = tokensBefore
         let reduced = tokensAfter < tokensBefore
@@ -45,7 +46,8 @@ struct CompactionState {
 extension AgentViewModel {
     // MARK: - Message History Compression
 
-    /// Compress old tool results
+    /// Compress old tool results — use Apple AI summary if cached, otherwise first 3 lines.
+    /// Last 4 messages keep full content. Tool calls (assistant) stay intact.
     static func compressMessages(_ messages: [[String: Any]], keepRecent: Int = 4) -> [[String: Any]] {
         guard messages.count > keepRecent + 1 else { return messages }
 
@@ -93,12 +95,12 @@ extension AgentViewModel {
         return result
     }
 
-    /// Use Apple AI to summarize long text, fall back to truncation if unavaila
+    /// Use Apple AI to summarize long text, fall back to truncation if unavailable.
     private static func summarizeOrTruncate(_ text: String) -> String {
         let key = text.hashValue
         if let cached = _summaryCache[key] { return cached }
 
-        // Fallback: truncate (Apple AI summary happens async via compressMessag
+        // Fallback: truncate (Apple AI summary happens async via compressMessagesAsync)
         let truncated = String(text.prefix(150)) + "...(truncated \(text.count) chars)"
         _summaryCache[key] = truncated
         return truncated
@@ -108,6 +110,7 @@ extension AgentViewModel {
     nonisolated(unsafe) private static var _summaryCache: [Int: String] = [:]
 
     /// Async version: summarize old messages using Apple AI before sending.
+    /// Call this before compressMessages for best results.
     static func summarizeOldMessages(_ messages: inout [[String: Any]], keepRecent: Int = 4) async {
         guard messages.count > keepRecent + 1, FoundationModelService.isAvailable else {
             return
@@ -157,7 +160,8 @@ extension AgentViewModel {
 
     // MARK: - Tiered Compaction (token-budget-aware)
 
-    /// Two-tier compaction: try Apple AI summarization first
+    /// Two-tier compaction: try Apple AI summarization first (fast), fall back to aggressive pruning.
+    /// Returns true if tokens were meaningfully reduced.
     @MainActor
     static func tieredCompact(
         _ messages: inout [[String: Any]],
@@ -176,7 +180,8 @@ extension AgentViewModel {
         // Strip images — they're huge and won't summarize well
         stripOldImages(&messages)
 
-        // Tier 1: Apple AI summarization
+        // Tier 1: Apple AI summarization (fast, on-device).
+        // Gated on tokenCompressionEnabled so users can opt out if it's slow on their device or if the summaries are ...
         if FoundationModelService.isAvailable && AppleIntelligenceMediator.shared.tokenCompressionEnabled {
             await summarizeOldMessages(&messages)
             let tokensAfterT1 = await preciseTokenCount(messages: messages)
@@ -200,7 +205,8 @@ extension AgentViewModel {
 
     // MARK: - Microcompaction (clear old tool results)
 
-    /// Clear old tool_result content to save tokens while preserving message st
+    /// Clear old tool_result content to save tokens while preserving message structure.
+    /// Keeps only the last `keepRecent` tool results intact; older ones replaced with "[cleared]".
     static func microcompact(_ messages: inout [[String: Any]], keepRecent: Int = 3) {
         // Find all tool_result indices
         var toolResultIndices: [(msgIdx: Int, blockIdx: Int)] = []
@@ -227,9 +233,10 @@ extension AgentViewModel {
         }
     }
 
-    // MARK: - Token Counting (precise via Apple AI on macOS 26.4+, fallback ~4
+    // MARK: - Token Counting (precise via Apple AI on macOS 26.4+, fallback ~4 chars/token)
 
-    /// Count tokens using Apple Intelligence's tokenCount(for:) when available
+    /// Count tokens using Apple Intelligence's tokenCount(for:) when available (macOS 26.4+),
+    /// falls back to ~4 chars per token estimate otherwise.
     @MainActor
     private static func countTokens(for text: String) async -> Int {
         if FoundationModelService.isAvailable {
@@ -242,7 +249,7 @@ extension AgentViewModel {
         return max(1, text.count / 4)
     }
 
-    /// Synchronous ~4 chars per token estimate
+    /// Synchronous ~4 chars per token estimate (used when async isn't available).
     private static func estimateTokensFallback(chars: Int) -> Int {
         max(1, chars / 4)
     }

@@ -11,7 +11,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Handles file CRUD, diff, list/search, backup/restore, symbol search, /
+    /// / Handles file CRUD, diff, list/search, backup/restore, symbol search, / and refactor_rename tool calls. Returns
+    /// `nil` if the name is not a / file-group tool so the main dispatcher can fall through.
     func handleFileNativeTool(name: String, input: [String: Any]) async -> String? {
         let pf = projectFolder
         switch name {
@@ -26,7 +27,8 @@ extension AgentViewModel {
                     what files exist if you don't know the path.
                     """
             }
-            // Delegate to CodingService.readFile which returns line-numbered ou
+            // Delegate to CodingService.readFile which returns line-numbered output and gives a clear 'file not found'
+            // error with a list-files suggestion when the path is wrong. Honors offset+limit (1-based offset).
             let offset = input["offset"] as? Int
             let limit = input["limit"] as? Int
             return await Self.offMain {
@@ -46,7 +48,8 @@ extension AgentViewModel {
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             do { try content.write(to: url, atomically: true, encoding: .utf8); return "Wrote \(path)" }
             catch { return "Error writing \(path): \(error.localizedDescription). Recovery: check path is writable or use file(action:\"list\") to verify the directory." }
-        // MARK: edit_file — delegate to CodingService.editFile (d1f-powered wit
+        // MARK: edit_file — delegate to CodingService.editFile (d1f-powered with line-ending normalization, fuzzy
+        // whitespace match, context disambiguation, and round-trip verification). The duplicate edit_file logic that lived here had none of those safeguards and was the source of most "old_string not found" errors when the LLM had a slightly-stale snapshot of the file.
         case "edit_file":
             var path = input["file_path"] as? String ?? ""
             guard !path.isEmpty else { return "Error: file_path is required for edit_file" }
@@ -116,7 +119,7 @@ extension AgentViewModel {
         // List/search files (via User LaunchAgent - no TCC required)
         case "list_files":
             let rawPat = input["pattern"] as? String ?? "*.swift"
-            // Reject wildcard-only patterns — too broad, suggest specific exten
+            // Reject wildcard-only patterns — too broad, suggest specific extension
             if rawPat == "*" || rawPat == "*.*" || rawPat.isEmpty {
                 return "Error: pattern too broad. Recovery: use an extension like pattern:\"*.swift\" or pattern:\"*.xcodeproj\". For directories use read_dir."
             }
@@ -253,7 +256,7 @@ extension AgentViewModel {
             let result = CodingService.undoEdit(path: fp, originalContent: original)
             if !result.hasPrefix("Error") { DiffStore.shared.clearEditHistory(for: expanded) }
             return result
-        // restore_file — recover the most recent FileBackupService snapshot for
+        // restore_file — recover the most recent FileBackupService snapshot for a file
         case "restore_file":
             let fp = input["file_path"] as? String ?? ""
             let backupName = input["backup"] as? String
@@ -278,7 +281,7 @@ extension AgentViewModel {
                 return "Restored \(fileName) from latest backup (\(latest.date))."
             }
             return "Error: failed to restore latest backup of \(fileName). Recovery: call file(action:\"list_backups\", file_path:\"\(fp)\") to see other backups, or use undo_edit if recent."
-        // list_file_backups — show what's in the FileBackupService TTL store fo
+        // list_file_backups — show what's in the FileBackupService TTL store for this tab
         case "list_file_backups":
             let fp = input["file_path"] as? String ?? ""
             let expanded = (fp as NSString).expandingTildeInPath

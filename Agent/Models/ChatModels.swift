@@ -9,7 +9,7 @@ final class ChatMessage {
     var timestamp: Date
     var content: String
     var isStreaming: Bool
-    /// Monotonically increasing sequence number
+    /// Monotonically increasing sequence number — guarantees insertion order when timestamps collide
     var ordinal: Int
 
     // Relationship to task - many messages belong to one task
@@ -57,7 +57,7 @@ final class ScriptTabRecord {
     var isMessagesTab: Bool // Dedicated Messages tab flag
     var projectFolder: String // Per-tab project folder
     var promptHistoryJSON: String? // JSON-encoded [String] for prompt history
-    var taskSummariesJSON: String? // JSON-encoded [String] for per-tab task sum
+    var taskSummariesJSON: String? // JSON-encoded [String] for per-tab task summaries
     var errorsJSON: String? // JSON-encoded [String] for per-tab errors
     var rawLLMOutput: String = "" // Last LLM Output text
     var lastElapsed: Double = 0 // Last thinking elapsed seconds
@@ -120,7 +120,7 @@ final class ChatHistoryStore {
     private var currentTask: ChatTask?
     /// Monotonically increasing counter for message ordering within a task
     private var nextOrdinal: Int = 0
-    /// Set to true when save has failed fatally
+    /// Set to true when save has failed fatally — prevents repeated crash attempts
     private var storeDisabled = false
 
     /// Dedicated chat history store file (SwiftData)
@@ -136,10 +136,11 @@ final class ChatHistoryStore {
         let schema = Schema([ChatMessage.self, ChatTask.self, ScriptTabRecord.self])
         let url = Self.storeURL
 
-        // Migrate: if old default.store has our tables, rename it to chat2.stor
+        // Migrate: if old default.store has our tables, rename it to chat2.store
         Self.migrateDefaultStoreToChatStore()
 
-        // Pre-validate: if store file exists but lacks required tables, delete
+        // Pre-validate: if store file exists but lacks required tables, delete it before creating the ModelContainer.
+        // This prevents ObjC NSExceptions (e.g. _PFFaultHandlerLookupRow) that Swift do/catch cannot intercept.
         if FileManager.default.fileExists(atPath: url.path) {
             if !Self.storeHasRequiredTables(at: url) {
                 AuditLog.log(.storage, "SwiftData store missing required tables — deleting for recreation")
@@ -164,7 +165,7 @@ final class ChatHistoryStore {
         }
     }
 
-    /// One-time migration: rename default.store → chat2.store if it has our tab
+    /// One-time migration: rename default.store → chat2.store if it has our tables
     private static func migrateDefaultStoreToChatStore() {
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
         let oldURL = appSupport.appendingPathComponent("default.store")
@@ -224,7 +225,8 @@ final class ChatHistoryStore {
         return task.id
     }
 
-    /// / End current task with optional summary
+    /// / End current task with optional summary — crash-safe against stale SwiftData objects. / Does NOT call
+    /// context.save() — SwiftData auto-saves, and calling save() here / triggers _PFFaultHandlerLookupRow crashes via inverse relationship maintenance / on stale/deleted objects (an ObjC NSException that Swift can't catch).
     func endCurrentTask(summary: String? = nil, cancelled: Bool = false) {
         defer { currentTask = nil }
         guard let task = currentTask else { return }
@@ -232,7 +234,7 @@ final class ChatHistoryStore {
         task.endTime = Date()
         task.summary = summary
         task.isCancelled = cancelled
-        // Don't save — SwiftData auto-saves. Explicit save crashes on stale obj
+        // Don't save — SwiftData auto-saves. Explicit save crashes on stale objects.
     }
 
     /// Get the current active task
@@ -256,7 +258,8 @@ final class ChatHistoryStore {
         context?.insert(message)
     }
 
-    /// / Save pending changes — guarded against stale/deleted managed objects.
+    /// / Save pending changes — guarded against stale/deleted managed objects. / Rolls back inserted objects whose
+    /// relationships point to deleted/faulted / targets, preventing _PFFaultHandlerLookupRow crashes during inverse / relationship maintenance (an ObjC NSException that Swift can't catch and / that CoreData's internal performBlockAndWait rethrows past ObjCTry).
     func save() {
         guard !storeDisabled, let context else { return }
         // Check if current task is still valid before saving
@@ -267,6 +270,7 @@ final class ChatHistoryStore {
         }
         guard context.hasChanges else { return }
         // Purge any inserted messages whose task relationship is stale/deleted
+        // to prevent _PFFaultHandlerLookupRow during inverse maintenance on save
         for obj in context.insertedModelsArray {
             if let msg = obj as? ChatMessage,
                let task = msg.task,
@@ -301,7 +305,8 @@ final class ChatHistoryStore {
 
             return recent.compactMap { task in
                 let sorted = task.messages.sorted {
-                    // Primary: ordinal (monotonic insertion order) Fallback: ti
+                    // Primary: ordinal (monotonic insertion order)
+                    // Fallback: timestamp (for legacy data where ordinal is 0)
                     if $0.ordinal != $1.ordinal { return $0.ordinal < $1.ordinal }
                     return $0.timestamp < $1.timestamp
                 }
@@ -314,7 +319,7 @@ final class ChatHistoryStore {
 
     // MARK: - UI Display (full messages, never summarized)
 
-    /// Build the activity log text for the UI. Always uses full messages
+    /// Build the activity log text for the UI. Always uses full messages — never summaries.
     func buildActivityLogText(maxTasks: Int = 3) -> String {
         let tasks = fetchRecentTasks(limit: maxTasks)
         var result = ""
@@ -322,10 +327,11 @@ final class ChatHistoryStore {
         for (_, messages) in tasks {
             for msg in messages {
                 if msg.isStreaming {
-                    // Streaming fragments are partial tokens
+                    // Streaming fragments are partial tokens — concatenate without extra newlines
+                    // (the final newline is stored as its own streaming message by flushStreamBuffer)
                     result += msg.content
                 } else {
-                    // Non-streaming messages (appendLog, appendRawOutput) are c
+                    // Non-streaming messages (appendLog, appendRawOutput) are complete lines
                     result += msg.content
                     if !msg.content.hasSuffix("\n") {
                         result += "\n"
@@ -339,7 +345,8 @@ final class ChatHistoryStore {
 
     // MARK: - LLM Context (uses summaries for older tasks)
 
-    /// Build a concise context string for LLM system prompt.
+    /// Build a concise context string for the LLM system prompt.
+    /// Recent tasks get full messages; older tasks use their summary if available.
     func buildLLMContext(recentFullTasks: Int = 1, maxOlderSummaries: Int = 5) -> String {
         guard let context else { return "" }
 
@@ -365,7 +372,7 @@ final class ChatHistoryStore {
             }
         }
 
-        // Most recent task(s): include full messages so the LLM has detailed co
+        // Most recent task(s): include full messages so the LLM has detailed context
         let recentTasks = allTasks.prefix(recentFullTasks).reversed()
         for task in recentTasks {
             result += "--- Recent Task ---\n"
@@ -468,7 +475,8 @@ final class ChatHistoryStore {
     func clearAll() {
         currentTask = nil
         storeDisabled = false
-        // Nuke the store files and recreate
+        // Nuke the store files and recreate — batch deletes trigger CoreData
+        // ObjC exceptions on inverse relationships that Swift can't catch
         deleteStoreFiles()
         let schema = Schema([ChatMessage.self, ChatTask.self, ScriptTabRecord.self])
         do {

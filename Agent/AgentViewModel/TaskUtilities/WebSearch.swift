@@ -6,15 +6,20 @@ import AgentMCP
 import AgentD1F
 import Cocoa
 
-// MARK: - Task : Web Search
+
+
+
+// MARK: - Task Utilities: Web Search
 
 extension AgentViewModel {
 
     // MARK: - Web Search (forwarding to WebSearch extension)
 
     /// Perform web search using the appropriate API based on provider.
+    /// This delegates to the implementation in AgentViewModel+WebSearch.swift.
     nonisolated static func performWebSearchForTask(query: String, apiKey: String, provider: APIProvider) async -> String {
-        // Fallback chain — each step tries a more universal backend: 1. Ollama+
+        // Fallback chain — each step tries a more universal backend: 1. Ollama+key → Ollama Web Search 2.
+        // Z.AI/BigModel+key → Z.AI search-prime 3. Tavily key → Tavily 4. DuckDuckGo HTML scrape (no key, always available)
         if provider == .ollama || provider == .localOllama {
             if let ollamaKey = KeychainService.shared.getOllamaAPIKey(), !ollamaKey.isEmpty {
                 let ollamaResult = await performOllamaWebSearchInternal(query: query, apiKey: ollamaKey)
@@ -23,7 +28,8 @@ extension AgentViewModel {
                 }
             }
         }
-        // Z.AI / BigModel providers: try native web_search API first. Returns s
+        // Z.AI / BigModel providers: try native web_search API first. Returns structured results like Tavily. Not all
+        // accounts include it, so fall through on error.
         if provider == .zAI || provider == .bigModel {
             if let zKey = KeychainService.shared.getZAIAPIKey(), !zKey.isEmpty {
                 let zResult = await performZAIWebSearchInternal(query: query, apiKey: zKey)
@@ -32,7 +38,8 @@ extension AgentViewModel {
                 }
             }
         }
-        // Tavily — only attempt if a key is configured.
+        // Tavily — only attempt if a key is configured. Missing key → skip,
+        // fall through to keyless DuckDuckGo instead of dead-ending.
         if !apiKey.isEmpty {
             let tavilyResult = await performTavilySearchForTask(query: query, apiKey: apiKey)
             if !tavilyResult.hasPrefix("Error:") {
@@ -43,10 +50,11 @@ extension AgentViewModel {
         return await performDuckDuckGoSearchInternal(query: query)
     }
 
-    /// Calls Z.AI's /web_search endpoint (search-prime engine).
+    /// Calls Z.AI's /web_search endpoint (search-prime engine). Returns structured
+    /// results. Used as Tavily replacement when user has a Z.AI API key configured.
     nonisolated private static func performZAIWebSearchInternal(query: String, apiKey: String) async -> String {
         guard !apiKey.isEmpty else { return "Error: Z.AI API key not set." }
-        guard let url = URL(string: "https://api.z.ai/api/paas/v4/web_search") e
+        guard let url = URL(string: "https://api.z.ai/api/paas/v4/web_search") else {
             return "Error: Invalid Z.AI search URL"
         }
         var request = URLRequest(url: url)
@@ -99,16 +107,18 @@ extension AgentViewModel {
         }
     }
 
-    /// Universal keyless web search via DuckDuckGo HTML endpoint.
+    /// Universal keyless web search via DuckDuckGo HTML endpoint. No API key needed.
+    /// Parses result rows with regex; extracts real URLs from DDG click-tracker links.
     nonisolated private static func performDuckDuckGoSearchInternal(query: String) async -> String {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return "Error: failed to encode query"
         }
-        guard let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encod
+        guard let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encoded)") else {
             return "Error: failed to build DuckDuckGo URL"
         }
         var request = URLRequest(url: url)
-        // Real browser UA — DDG serves a stripped-down or empty page to obvious
+        // Real browser UA — DDG serves a stripped-down or empty page to
+        // obvious bots. Matches the same UA the keyless web_fetch tool uses.
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/605.1.15 (KHTML, like Gecko) "
@@ -147,7 +157,8 @@ extension AgentViewModel {
         }
     }
 
-    /// / Parse HTML result page returned by html.duckduckgo.com.
+    /// / Parse the HTML result page returned by html.duckduckgo.com. Each / result row exposes a `result__a` anchor for
+    /// the title+URL and a / `result__snippet` element for the description. The href is wrapped / in DDG's click-tracker (`/l/?uddg=ENCODED_URL`) so we extract and / decode the `uddg` query parameter to get the real destination.
     nonisolated private static func parseDuckDuckGoHTML(_ html: String, limit: Int) -> [(title: String, url: String, snippet: String)] {
         // Match: <a class="result__a" href="HREF" ... >TITLE</a>
         let titlePattern = #"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#
@@ -183,7 +194,8 @@ extension AgentViewModel {
         return results
     }
 
-    /// / DDG wraps every outbound link in `/l/?uddg=ENCODED_REAL_URL&rut=...`.
+    /// / DDG wraps every outbound link in `/l/?uddg=ENCODED_REAL_URL&rut=...`. / Pull the `uddg` parameter and
+    /// percent-decode it to recover the real / destination. Falls back to the raw href if there's no `uddg` param.
     nonisolated private static func decodeDuckDuckGoHref(_ href: String) -> String {
         let normalized = href.hasPrefix("//") ? "https:" + href : href
         guard let comps = URLComponents(string: normalized) else { return href }
@@ -193,7 +205,8 @@ extension AgentViewModel {
         return normalized
     }
 
-    /// / Lightweight HTML tag stripper for DDG result text.
+    /// / Lightweight HTML tag stripper for DDG result text. Result rows / contain `<b>` highlighting and stray entities
+    /// — strip the markup / and decode the common entities so the LLM gets clean text.
     nonisolated private static func stripHTMLTags(_ s: String) -> String {
         var out = s.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
         out = out
@@ -208,7 +221,7 @@ extension AgentViewModel {
 
     nonisolated private static func performOllamaWebSearchInternal(query: String, apiKey: String) async -> String {
         guard !apiKey.isEmpty else { return "Error: Ollama API key not set. Add it in Settings." }
-        guard let url = URL(string: "https://ollama.com/api/web_search") else {
+        guard let url = URL(string: "https://ollama.com/api/web_search") else { return "Error: Invalid Ollama search URL" }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -251,7 +264,7 @@ extension AgentViewModel {
 
     nonisolated private static func performTavilySearchForTask(query: String, apiKey: String) async -> String {
         guard !apiKey.isEmpty else { return "Error: Tavily API key not set. Add it in Settings." }
-        guard let url = URL(string: "https://api.tavily.com/search") else { retu
+        guard let url = URL(string: "https://api.tavily.com/search") else { return "Error: Invalid Tavily URL" }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

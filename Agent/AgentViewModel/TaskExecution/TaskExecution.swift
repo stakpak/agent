@@ -6,6 +6,7 @@ import AgentD1F
 import AgentSwift
 import Cocoa
 
+
 // MARK: - Task Execution Loop
 
 extension AgentViewModel {
@@ -50,17 +51,19 @@ extension AgentViewModel {
         SessionStore.shared.newSession()
         FallbackChainService.shared.reset()
         Self.clearToolCache()
-        // No mode filtering — send every user-enabled tool on every turn. The L
+        // No mode filtering — send every user-enabled tool on every turn.
+        // The LLM picks what it needs; ToolPreferencesService is the only filter.
         let activeGroups: Set<String>? = nil
         let isXcode = Self.isXcodeProject(projectFolder)
         appendLog(Self.newTaskMarker)
         appendLog("👤 \(prompt)")
         flushLog()
 
-        // Use ChatHistoryStore for LLM context
+        // Use ChatHistoryStore for LLM context (summaries for older tasks, full messages for recent)
         let historyContext = ChatHistoryStore.shared.buildLLMContext()
         var (provider, modelName, isVision) = resolveInitialProviderConfig()
-        // Defer "🧠 provider/model" log line until AFTER triage has run and we k
+        // Defer the "🧠 provider/model" log line until AFTER triage has run and we know we're actually going to the
+        // cloud LLM. Logging it up-front (the previous behavior) made the activity log misleading when Apple AI handled the request locally — users saw both "🧠 Z.ai/glm-5.1" and "🍎 Opened Photo Booth and took a photo" for the same task even though the cloud LLM never ran.
         let displayModel = modelDisplayName(provider: provider, modelId: modelName)
         let apiURL = chatURLForProvider(provider)
         let isCoding = apiURL.contains("/coding/")
@@ -75,7 +78,7 @@ extension AgentViewModel {
             maxTokens: mt
         )
 
-        // Start fresh — no prior conversation context to avoid corrupted messag
+        // Start fresh — no prior conversation context to avoid corrupted messages
         var messages: [[String: Any]] = []
 
         // No agent name injection — avoid message format issues with some APIs
@@ -112,14 +115,14 @@ extension AgentViewModel {
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
 
-        // ! or !apple prefix bypasses Apple AI triage
+        // ! or !apple prefix bypasses Apple AI triage — sends prompt straight to cloud LLM
         let appleBypass = rawPrompt.hasPrefix("\u{F8FF}") || rawPrompt.lowercased().hasPrefix("!apple ")
         if appleBypass {
             appendLog("⏭ Apple AI bypassed")
             appendLog(cloudModelLogLine)
             flushLog()
         } else {
-            // Triage: direct commands
+            // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM.
             let triageResult = await mediator.triagePrompt(prompt, axDispatch: { [weak self] args in
                 guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
                 var input: [String: Any] = ["action": args.action]
@@ -147,31 +150,34 @@ extension AgentViewModel {
             if case .completed = triageOutcome { return }
         }
 
-        // Apple Intelligence context injection removed
+        // Apple Intelligence context injection removed — was confusing LLMs at task start
+        // Apple AI still runs on task_complete to summarize results for the user
 
         var iterations = 0
-        // Token budget tracker — detects diminishing returns and prevents runaw
+        // Token budget tracker — detects diminishing returns and prevents runaway costs
         var budgetTracker = TokenBudgetTracker(ceiling: tokenBudgetCeiling)
         // Context compaction state — token-aware triggers with circuit breaker
         var compactionState = CompactionState()
         // Overnight coding guards
         var consecutiveReadOnlyCount = 0 // read guard — force stop after 10
-        var unbuiltEditCount = 0 // build enforcement — nudge after edit without
+        var unbuiltEditCount = 0 // build enforcement — nudge after edit without build
         var consecutiveBuildFailures = 0 // error budget — stop after 5
-        var stuckFiles: [String: Int] = [:] // stuck detection — skip after 5 fa
-        // Full system prompt + full tool descriptions on every turn.
+        var stuckFiles: [String: Int] = [:] // stuck detection — skip after 5 failures per file
+        // Full system prompt + full tool descriptions on every turn. The earlier condensed-prompt + compactTools
+        // optimization saved ~4K tokens/turn but the user prefers the LLM having maximum context every iteration over the savings.
         let userName = NSFullUserName()
         let userHome = NSHomeDirectory()
-        _ = userName; _ = userHome // kept for any future per-task prompt custom
-        // Track unique files edited (write_file/edit_file/diff_apply/create_dif
+        _ = userName; _ = userHome // kept for any future per-task prompt customization
+        // Track unique files edited (write_file/edit_file/diff_apply/create_diff/apply_diff) for plan-mode enforcement
         var filesEditedThisTask: Set<String> = []
 
         taskLoop: while !Task.isCancelled {
             iterations += 1
 
-            // No prompt tiering and no mode auto-switching: every turn sends th
+            // No prompt tiering and no mode auto-switching: every turn sends the full system prompt with full tool
+            // descriptions, filtered only by the user's UI toggles in ToolPreferencesService.
 
-            // Token-aware context compaction — replaces fixed iteration-based t
+            // Token-aware context compaction — replaces fixed iteration-based triggers
             if iterations > 1 {
                 _ = await Self.tieredCompact(&messages, state: &compactionState) { [weak self] msg in
                     self?.appendLog(msg)
@@ -181,7 +187,8 @@ extension AgentViewModel {
 
             do {
                 isThinking = true
-                // Only auto-show overlay on the FIRST iteration. Subsequent ite
+                // Only auto-show overlay on the FIRST iteration. Subsequent iterations
+                // must respect the user's manual dismiss (Cmd+B during a running task).
                 if iterations == 1 { thinkingDismissed = false }
 
                 let sendMessages = iterations > 1 ? Self.compressMessages(messages) : messages
@@ -227,7 +234,7 @@ extension AgentViewModel {
                 } else {
                     throw AgentError.noAPIKey
                 }
-                // Track token usage — use reported counts or estimate from text
+                // Track token usage — use reported counts or estimate from text (~4 chars/token)
                 let inTok = response.inputTokens > 0 ? response.inputTokens : Self.estimateTokens(messages: messages)
                 let outTok = response.outputTokens > 0 ? response.outputTokens : Self.estimateTokens(content: response.content)
                 taskInputTokens += inTok
@@ -270,7 +277,8 @@ extension AgentViewModel {
                 let hasToolUse = parseResult.hasToolUse
                 let pendingTools = parseResult.pendingTools
 
-                // App-layer action verification: if the LLM returned text claim
+                // App-layer action verification: if the LLM returned text claiming
+                // it performed actions but made zero tool calls, inject a correction.
                 if !hasToolUse && pendingTools.isEmpty {
                     let llmText = (response.content.compactMap { $0["text"] as? String }).joined()
                     let lower = llmText.lowercased()
@@ -286,20 +294,21 @@ extension AgentViewModel {
                     }
                 }
 
-                // Execute pending tools
+                // Execute pending tools — partition into read/write batches
+                // Consecutive read-only tools run in parallel; write tools serialize
                 await executePendingToolBatches(
                     pendingTools: pendingTools,
                     toolResults: &toolResults
                 )
 
-                // Vision verification: auto-screenshot after UI actions so the
+                // Vision verification: auto-screenshot after UI actions so the LLM can see the result.
                 await runVisionAutoScreenshotIfNeeded(
                     pendingTools: pendingTools,
                     isVision: isVision,
                     toolResults: &toolResults
                 )
 
-                // Token budget checks — nudge LLM or auto-stop if budget exhaus
+                // Token budget checks — nudge LLM or auto-stop if budget exhausted / diminishing returns
                 if budgetTracker.shouldStop {
                     let reason = budgetTracker.isDiminishing ? "diminishing returns detected" : "token budget exhausted"
                     appendLog("⚠️ Auto-stopping: \(reason) (\(budgetTracker.statusDescription))")
@@ -319,7 +328,7 @@ extension AgentViewModel {
                     ])
                 }
 
-                // Cost alerting — stop if estimated cost exceeds user-configure
+                // Cost alerting — stop if estimated cost exceeds user-configured max
                 if TokenUsageStore.shared.isCostExceeded {
                     let cost = String(format: "$%.2f", TokenUsageStore.shared.sessionEstimatedCost)
                     let max = String(format: "$%.2f", TokenUsageStore.shared.maxTaskCost)
@@ -328,7 +337,7 @@ extension AgentViewModel {
                     break
                 }
 
-                // Overnight coding guards — read/build/error-budget/stuck-file
+                // Overnight coding guards — read/build/error-budget/stuck-file nudges.
                 let guardShouldBreak = runOvernightCodingGuards(
                     pendingTools: pendingTools,
                     toolResults: &toolResults,
@@ -340,7 +349,7 @@ extension AgentViewModel {
                 )
                 if guardShouldBreak { break }
 
-                // Collect completed sub-agent notifications and inject into too
+                // Collect completed sub-agent notifications and inject into tool results
                 let subAgentNotifs = collectSubAgentNotifications()
                 for notif in subAgentNotifs {
                     toolResults.append([
@@ -400,7 +409,7 @@ extension AgentViewModel {
             }
         }
 
-        // Apple Intelligence: suggest next steps after completion
+        // Apple Intelligence: suggest next steps after completion (skip for pure conversation)
         if mediator.isEnabled && mediator.showAnnotationsToUser && !completionSummary.isEmpty && !commandsRun.isEmpty {
             let context = "Task: \(prompt)\nResult: \(completionSummary)\nCommands: \(commandsRun.joined(separator: ", "))"
             if let nextSteps = await mediator.suggestNextSteps(context: context) {

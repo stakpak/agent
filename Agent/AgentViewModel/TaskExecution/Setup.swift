@@ -10,7 +10,8 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Bundled LLM services built for a single task iteration.
+    /// / Bundled LLM services built for a single task iteration. Exactly one / of these four services is non-nil after
+    /// `buildLLMServices` returns / (matching the original inline closure's invariant).
     struct LLMServiceBundle {
         var claude: ClaudeService?
         var openAICompatible: OpenAICompatibleService?
@@ -18,7 +19,8 @@ extension AgentViewModel {
         var foundationModel: FoundationModelService?
     }
 
-    /// / Resolves the initial `(provider
+    /// / Resolves the initial `(provider, modelName, isVision)` triple for a new task / from the currently-selected
+    /// provider and per-provider model/vision settings. / Matches the original inline switch exactly.
     func resolveInitialProviderConfig() -> (provider: APIProvider, modelName: String, isVision: Bool) {
         let provider = selectedProvider
         let modelName: String
@@ -80,7 +82,8 @@ extension AgentViewModel {
         return (provider, modelName, isVision)
     }
 
-    /// / Builds the LLM service bundle for a given provider/model/vision combo.
+    /// / Builds the LLM service bundle for a given provider/model/vision combo. / Called at task start and again
+    /// whenever the fallback chain swaps providers / mid-task. Mirrors the original inline `buildLLMServices` closure exactly.
     func buildLLMServiceBundle(
         provider: APIProvider,
         modelName: String,
@@ -109,7 +112,7 @@ extension AgentViewModel {
         } else {
             claude = nil
         }
-        // OpenAI-compatible service — URLs from LLMRegistry (single source of t
+        // OpenAI-compatible service — URLs from LLMRegistry (single source of truth)
         switch provider {
         case .claude, .ollama, .localOllama, .foundationModel:
             openAICompatible = nil

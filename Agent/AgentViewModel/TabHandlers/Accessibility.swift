@@ -128,7 +128,8 @@ extension AgentViewModel {
             )
 
         case "ax_type_text":
-            // AXorcist-only: typing requires an element. Routed through typeTex
+            // AXorcist-only: typing requires an element. Routed through typeTextIntoElement; the LLM must pass
+            // role/title to identify the text field. The old typeText(at:y:) coordinate path is gone.
             let text = input["text"] as? String ?? ""
             let role = input["role"] as? String
             let title = input["title"] as? String
@@ -151,7 +152,7 @@ extension AgentViewModel {
             )
 
         case "ax_click":
-            // AXorcist-only: click via element identification, never coordinate
+            // AXorcist-only: click via element identification, never coordinates.
             let role = input["role"] as? String
             let title = input["title"] as? String
             let value = input["value"] as? String
@@ -175,7 +176,8 @@ extension AgentViewModel {
             )
 
         case "ax_scroll":
-            // AXorcist-only: scroll TO an element by role/title
+            // AXorcist-only: scroll TO an element by role/title (the AXScrollArea is found and scrolled until the
+            // target is visible). Coordinate-based scroll wheel events are no longer supported.
             let role = input["role"] as? String
             let title = input["title"] as? String
             let appBundleId = AccessibilityService.shared
@@ -191,7 +193,8 @@ extension AgentViewModel {
             )
 
         case "ax_press_key":
-            // press_key removed — AXorcist doesn't drive raw key events. Use ax
+            // press_key removed — AXorcist doesn't drive raw key events. Use ax_click_element on the relevant button or
+            // ax_click_menu_item for keyboard-shortcut menu commands.
             let msg =
                 "Error: ax_press_key is removed (AXorcist doesn't drive raw key events). "
                 + "Use accessibility(action:\"click_element\", "
@@ -215,7 +218,8 @@ extension AgentViewModel {
             tab.appendLog("📸 screenshot...")
             tab.flush()
 
-            // The AgentAccess methods are now nonisolated async and dispatch sc
+            // The AgentAccess methods are now nonisolated async and dispatch screencapture to a background queue
+            // internally, so we don't need Self.offMain or MainActor.run wrappers — direct await is correct.
             let output: String
             if let wid = windowId, wid > 0 {
                 output = await AccessibilityService.shared.captureScreenshot(windowID: wid)
@@ -339,7 +343,8 @@ extension AgentViewModel {
             )
 
         case "ax_drag":
-            // ax_drag removed — coordinate-based dragging is gone with the rest
+            // ax_drag removed — coordinate-based dragging is gone with the rest of the InputDriver paths.
+            // AXorcist-based alternatives: - Window move/resize → set_window_frame - Slider value → set_properties on AXSlider with new AXValue - List reorder → typically driven by menu items / buttons
             let msg =
                 "Error: ax_drag is removed. "
                 + "Use accessibility(action:\"set_window_frame\", "

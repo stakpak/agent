@@ -9,11 +9,12 @@ final class ClaudeService {
     let model: String
     let endpointURL: URL
 
-    private static let defaultBaseURL = URL(string: "https://api.anthropic.com/v
+    private static let defaultBaseURL = URL(string: "https://api.anthropic.com/v1/messages") ?? URL(filePath: "/")
     private static let apiVersion = "2023-06-01"
     private let isLocalEndpoint: Bool
 
-    // MARK: - Rate Limit Tracking Anthropic 429/529 → capture Retry-After, pad
+    // MARK: - Rate Limit Tracking
+    // Anthropic 429/529 → capture Retry-After, pad next request. Mirrors OpenAICompatibleService pattern, separate dict for independent tracking.
     private static var retryAfterUntil: CFAbsoluteTime = 0
 
     /// Wait if needed to respect Retry-After backoff from a previous 429/529.
@@ -25,12 +26,12 @@ final class ClaudeService {
         }
     }
 
-    /// Record Retry-After from 429/529.
+    /// Record Retry-After from 429/529. @MainActor because static var is owned by this @MainActor class; called from nonisolated via `await MainActor.run`.
     static func recordRetryAfter(_ seconds: Double) {
         retryAfterUntil = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse Retry-After header.
+    /// Parse Retry-After header. Integer seconds per RFC 7231 §7.1.3. Returns 0 if missing/unparseable; capped at 5 min.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -42,7 +43,7 @@ final class ClaudeService {
     let userHome: String
     let userName: String
     let projectFolder: String
-    /// Max output tokens. 0 = use default
+    /// Max output tokens. 0 = use default (16384). Claude API requires this field.
     let maxTokens: Int
 
     init(
@@ -64,13 +65,13 @@ final class ClaudeService {
         self.projectFolder = projectFolder
     }
 
-    /// When set, overrides the full system prompt
+    /// When set, overrides the full system prompt (used for coding mode iterations 2+)
     var overrideSystemPrompt: String?
 
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLocalEndpoint {
-            // Local Claude-protocol endpoints
+            // Local Claude-protocol endpoints (LM Studio) bypass SystemPromptService — wrap with anti-hallucination rules to match other providers.
             return SystemPromptService.wrapWithRules(
                 AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
             )
@@ -92,9 +93,10 @@ final class ClaudeService {
     }
 
     func tools(activeGroups: Set<String>? = nil, compact: Bool = false) -> [[String: Any]] {
-        // No mode-based narrowing — every user-enabled tool flows through. Loca
+        // No mode-based narrowing — every user-enabled tool flows through.
+        // Local endpoints with tight context windows can disable groups via the UI.
         var t = AgentTools.claudeFormat(activeGroups: activeGroups, compact: compact, projectFolder: projectFolder)
-        // Only add native web_search for real Anthropic API
+        // Only add native web_search for real Anthropic API — remove Tavily duplicate first
         if !isLocalEndpoint {
             t.removeAll { ($0["name"] as? String) == "web_search" }
             t.append([
@@ -105,7 +107,7 @@ final class ClaudeService {
         return t
     }
 
-    /// Prepend project folder to the last user message so it's always visible i
+    /// Prepend project folder to the last user message so it's always visible in context.
     private func withFolderPrefix(_ messages: [[String: Any]]) -> [[String: Any]] {
         guard !projectFolder.isEmpty else { return messages }
         let prefix = "PROJECT FOLDER: \(projectFolder)\n"
@@ -160,7 +162,7 @@ final class ClaudeService {
             body["tools"] = toolDefs
         }
 
-        // Serialize on main actor, then offload network I/O + parsing. .sortedK
+        // Serialize on main actor, then offload network I/O + parsing. .sortedKeys produces byte-stable JSON regardless of dict iteration order — required for prefix caching to hit.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
@@ -190,7 +192,7 @@ final class ClaudeService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // 429 = rate limit, 529 = Anthropic "Overloaded".
+            // 429 = rate limit, 529 = Anthropic "Overloaded". Both include Retry-After header (integer seconds); record it so next call's enforceRateLimit pads the wait. Default 30s if header missing.
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 529 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = Self.parseRetryAfter(header)
@@ -246,7 +248,7 @@ final class ClaudeService {
             body["tools"] = toolDefs
         }
 
-        // .sortedKeys for byte-stable prefix caching — see send() for rationale
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,

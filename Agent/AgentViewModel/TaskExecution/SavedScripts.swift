@@ -1,4 +1,4 @@
-// AgentViewModel+TaskExecution+SavedScripts.swift Agent Saved scripts
+//  AgentViewModel+TaskExecution+SavedScripts.swift Agent  Saved scripts (AppleScript and JXA) management tools 
 
 import Foundation
 
@@ -6,7 +6,7 @@ import Foundation
 
 extension AgentViewModel {
 
-    /// Handles saved script management tools
+    /// Handles saved script management tools (AppleScript and JXA)
     func handleSavedScriptTool(name: String, input: [String: Any]) async -> String {
         // Saved AppleScripts
         switch name {

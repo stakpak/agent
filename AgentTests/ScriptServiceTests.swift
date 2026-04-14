@@ -22,7 +22,7 @@ struct ScriptServiceTests {
 
     @Test("Create script strips .swift suffix from name")
     func createScriptStripsSuffix() {
-        let result = service.createScript(name: "suffix_test.swift", content: "/
+        let result = service.createScript(name: "suffix_test.swift", content: "// test")
         #expect(result.contains("Created suffix_test"))
 
         let source = service.readScript(name: "suffix_test")
@@ -34,7 +34,7 @@ struct ScriptServiceTests {
     @Test("Create duplicate script returns error")
     func createDuplicateScript() {
         _ = service.createScript(name: "dup_test", content: "// first")
-        let result = service.createScript(name: "dup_test", content: "// second"
+        let result = service.createScript(name: "dup_test", content: "// second")
         #expect(result.contains("already exists"))
 
         _ = service.deleteScript(name: "dup_test")
@@ -64,7 +64,7 @@ struct ScriptServiceTests {
 
     @Test("Update nonexistent script returns error")
     func updateNonexistent() {
-        let result = service.updateScript(name: "no_such_script_\(UUID().uuidStr
+        let result = service.updateScript(name: "no_such_script_\(UUID().uuidString)", content: "// x")
         #expect(result.contains("not found"))
     }
 

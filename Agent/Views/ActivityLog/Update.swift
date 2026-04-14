@@ -6,7 +6,7 @@ import AgentTerminalNeo
 // MARK: - Coordinator: Render Pipeline
 
 extension ActivityLogView.Coordinator {
-    /// All rendering logic — runs on main thread but OUTSIDE SwiftUI's layout p
+    /// All rendering logic — runs on main thread but OUTSIDE SwiftUI's layout pass
     func performRender() {
         guard let textView = latestTextView, let scrollView = latestScrollView else {
 
@@ -72,15 +72,16 @@ extension ActivityLogView.Coordinator {
             }
             lastTabID = tabID
             clearCache()
-            // Reset lastLength to 0 so the textChanged path treats this as fres
+            // Reset lastLength to 0 so the textChanged path treats this as fresh content
             lastLength = 0
             lastRenderedText = ""
             userIsAtBottom = true
-            // Fall through to textChanged path — same scroll behavior as first
+            // Fall through to textChanged path — same scroll behavior as first load
         }
 
         if textChanged || searchCleared {
-            // Source `activityLog` is bounded at 50K by `ScriptTab.trimLog`. Wh
+            // Source `activityLog` is bounded at 50K by `ScriptTab.trimLog`. When trim happens, the front of the string
+            // shifts — the append optimization is only safe if the prefix is still intact. Compare a small window to detect shifts.
             let prefixIntact: Bool = {
                 guard lastLength > 0, !lastRenderedText.isEmpty else { return true }
                 let n = min(64, min(text.count, lastRenderedText.count))
@@ -114,7 +115,7 @@ extension ActivityLogView.Coordinator {
                         scrollView.reflectScrolledClipView(scrollView.contentView)
                     }
                 } else {
-                    // Freeze scroll position during text mutation to prevent te
+                    // Freeze scroll position during text mutation to prevent tearing
                     let wasAtBottom = userIsAtBottom
                     let savedY = scrollView.contentView.bounds.origin.y
 

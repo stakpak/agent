@@ -10,14 +10,15 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Executes a set of pending tool calls from a single LLM turn.
+    /// / Executes a set of pending tool calls from a single LLM turn. / / Consecutive read-only tools are partitioned
+    /// into parallel batches that / pre-execute common shell reads off the main actor via a TaskGroup; the / results are stashed into `Self.precomputedResults` so the subsequent / `dispatchTool` calls return instantly. Write/mutating tools serialize. / Appends the tool results to `toolResults` via inout.
     func executePendingToolBatches(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         toolResults: inout [[String: Any]]
     ) async {
         if !pendingTools.isEmpty {
             let maxConcurrency = 10
-            // Partition into batches: consecutive read-only = parallel batch, w
+            // Partition into batches: consecutive read-only = parallel batch, write = serial batch
             var batches: [(parallel: Bool, tools: [(toolId: String, name: String, input: [String: Any])])] = []
             for tool in pendingTools {
                 let isReadOnly = Self.readOnlyTools.contains(tool.name)
@@ -61,7 +62,8 @@ extension AgentViewModel {
                                     p.currentDirectoryURL = URL(fileURLWithPath: workDir)
                                     var env = ProcessInfo.processInfo.environment
                                     env["HOME"] = NSHomeDirectory()
-                                    // Match the AGENT_PROJECT_FOLDER contract u
+                                    // Match the AGENT_PROJECT_FOLDER contract used by every other
+                                    // shell-execution path (executeTCC, UserService, HelperService).
                                     env["AGENT_PROJECT_FOLDER"] = workDir
                                     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" +
                                         (env["PATH"] ?? "")
@@ -103,7 +105,8 @@ extension AgentViewModel {
         }
     }
 
-    /// / Vision verification: auto-screenshot after UI actions so LLM can see r
+    /// / Vision verification: auto-screenshot after UI actions so the LLM can see the result. / OPT-IN via
+    /// `visionAutoScreenshotEnabled` (Settings → Vision Auto-Screenshot). / Default OFF because it (1) hogs the main thread on every UI iteration, / (2) bloats every prompt with a base64 image even for non-vision models, / and (3) the next accessibility(find_element) query usually tells the LLM / what happened just as well, without the screenshot cost.
     func runVisionAutoScreenshotIfNeeded(
         pendingTools: [(toolId: String, name: String, input: [String: Any])],
         isVision: Bool,

@@ -46,7 +46,7 @@ extension AgentViewModel {
             let appBundleId = input["appBundleId"] as? String
             tab.appendLog("🔍 \(selector)...")
             tab.flush()
-            // If it looks like plain text
+            // If it looks like plain text (not CSS selector), search for clickable elements containing that text
             let isPlainText = !selector.contains(".") && !selector.contains("#") && !selector.contains("[") && !selector
                 .contains(":") && !selector.contains("/") && !selector.contains(">")
             var resultContent = ""
@@ -160,7 +160,8 @@ extension AgentViewModel {
             let browser = input["browser"] as? String
             tab.appendLog("📜 JavaScript...")
             tab.flush()
-            // Wrap script to ensure result is captured as JSON string Safari's
+            // Wrap script to ensure result is captured as JSON string
+            // Safari's do JavaScript returns the last expression value, not return statements
             let wrappedScript: String
             if script.contains("return ") && !script.contains("JSON.stringify") {
                 // Wrap IIFE-style scripts: replace return with JSON.stringify

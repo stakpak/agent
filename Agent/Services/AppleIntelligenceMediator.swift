@@ -2,7 +2,9 @@ import Foundation
 import FoundationModels
 import SwiftUI
 
-/// Apple Intelligence mediator
+
+/// Apple Intelligence mediator — middleman that rephrases/annotates requests for the LLM.
+/// Never refuses/blocks. [AI→User]=annotation, [AI→LLM]=rephrased context, [AI→Both]=shared info.
 @MainActor
 final class AppleIntelligenceMediator: ObservableObject {
     static let shared = AppleIntelligenceMediator()
@@ -12,7 +14,8 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Timeout for Apple Intelligence to finish once started (seconds).
     private static let finishTimeout: TimeInterval = 2
 
-    /// Maximum context window size
+    /// Maximum context window size — reads dynamically from the on-device model (macOS 26.4+).
+    /// Falls back to 4096 if the model isn't available yet.
     private static var maxContextTokens: Int {
         if case .available = SystemLanguageModel.default.availability {
             return SystemLanguageModel.default.contextSize
@@ -34,14 +37,14 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// On-device summarization for context compaction
+    /// On-device summarization for context compaction (Tier 1). Off → falls through to Tier 2 aggressive pruning.
     @Published var tokenCompressionEnabled: Bool = UserDefaults.standard.object(forKey: "appleIntelligenceTokenCompression") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(tokenCompressionEnabled, forKey: "appleIntelligenceTokenCompression")
         }
     }
 
-    /// Parses accessibility commands locally
+    /// Parses accessibility commands locally; UI automation requests dispatched on-device — zero cloud tokens.
     @Published var accessibilityIntentEnabled: Bool = UserDefaults.standard.object(forKey: "appleIntelligenceAccessibilityIntent") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(accessibilityIntentEnabled, forKey: "appleIntelligenceAccessibilityIntent")
@@ -51,14 +54,15 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Brain icon color for the toolbar
     var brainIconColor: Color {
         if !isEnabled { return .red }
-        // Yellow when ANY sub-feature is disabled — at-a-glance partial-config
+        // Yellow when ANY sub-feature is disabled — at-a-glance partial-config signal.
         if !showAnnotationsToUser || !tokenCompressionEnabled || !accessibilityIntentEnabled { return .yellow }
         return .green
     }
 
     // MARK: - Conversation Context (for Apple AI session)
 
-    /// Known agent script names
+    /// Known agent script names (lowercase) for direct command matching.
+    /// Updated by the ViewModel when scripts are loaded/changed.
     static var knownAgentNames: Set<String> = []
 
     /// Last task prompt from the user
@@ -77,7 +81,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     private var accessibilityAgentSession: LanguageModelSession?
     private var accessibilityAgentTurnCount = 0
     private var accessibilityAgentLastMessage: String?
-    private let accessibilityAgentMaxTurns = 7  // Reset after N turns to preven
+    private let accessibilityAgentMaxTurns = 7  // Reset after N turns to prevent context bloat
 
     /// Represents an Apple Intelligence annotation
     struct Annotation {
@@ -154,7 +158,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Build context string for session instructions
+    /// Build context string for the session instructions (fits within ~4096 token window)
+    /// System instructions for Apple AI. Injects previous turn so "again" / "do it again" resolves.
     private func buildContextInstructions() -> String {
         var contextBlock = ""
         if let prev = lastUserPrompt, !prev.isEmpty {
@@ -185,14 +190,14 @@ final class AppleIntelligenceMediator: ObservableObject {
         """
     }
 
-    /// Deterministic generation options for intent parsing
+    /// Deterministic generation options for intent parsing — low temperature for consistent results.
     private static let deterministicOptions = GenerationOptions(sampling: .greedy, temperature: 0.0)
 
     /// Slightly creative generation options for annotations and summaries.
     private static let annotationOptions = GenerationOptions(temperature: 0.3)
 
     private func ensureSession() -> LanguageModelSession {
-        // Always create a fresh session with current context to avoid stale/stu
+        // Always create a fresh session with current context to avoid stale/stuck state
         let s = LanguageModelSession(
             model: .default,
             instructions: Instructions(buildContextInstructions())
@@ -201,7 +206,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         return s
     }
 
-    /// Ask Apple AI whether the current prompt is a follow-up to the previous o
+    /// Ask Apple AI whether the current prompt is a follow-up to the previous one.
+    /// Returns true only if Apple AI says "yes". On timeout or ambiguity, returns false.
     private func isFollowUpRequest(previous: String, current: String) async -> Bool {
         let classifier = LanguageModelSession(
             model: .default,
@@ -233,6 +239,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Wraps a session.respond call with timeout.
+    /// Returns nil on timeout so the request goes straight to the LLM.
     private func respondWithTimeout(_ session: LanguageModelSession, prompt: String, label: String, options: GenerationOptions? = nil) async -> String? {
 
         let startLimit = Self.startTimeout
@@ -255,7 +262,7 @@ final class AppleIntelligenceMediator: ObservableObject {
                     return response.content
                 }
                 group.addTask {
-                    // Finish timeout — entire call must complete within finishT
+                    // Finish timeout — entire call must complete within finishTimeout
                     try await Task.sleep(for: .seconds(finishLimit))
                     throw CancellationError()
                 }
@@ -273,7 +280,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// Generate summary annotation after LLM task completion; updates context.
+    /// Generate summary annotation after LLM task completion; updates context. Paraphrases when no tool calls.
     func summarizeCompletion(summary: String, commandsRun: [String]) async -> Annotation? {
         guard isEnabled && showAnnotationsToUser && Self.isAvailable else { return nil }
 
@@ -363,14 +370,15 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// Triage result: Apple AI answers, or pass through to the LLM.
     enum TriageResult {
-        case answered(String) // Apple AI handled it — show this text and skip L
-        case accessibilityHandled(String) // Apple AI ran the accessibility tool
+        case answered(String) // Apple AI handled it — show this text and skip LLM
+        case accessibilityHandled(String) // Apple AI ran the accessibility tool — show its summary, skip LLM
         case passThrough // Needs tools/LLM — proceed normally
     }
 
-    // extractGoogleQuery + matchDirectCommand removed.
+    // extractGoogleQuery + matchDirectCommand removed. Run/list/read/delete/google
+    // commands now flow through the cloud LLM's tools (agent_script, web_search, etc.).
 
-    /// Resolve common site names to their URLs
+    /// Resolve common site names to their URLs (e.g. "linkedin" → "linkedin.com")
     private static let siteNames: [String: String] = [
         "linkedin": "linkedin.com", "linked in": "linkedin.com",
         "facebook": "facebook.com", "face book": "facebook.com",
@@ -403,7 +411,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         return token
     }
 
-    /// Local pattern check for purely conversational messages.
+    /// Local pattern check for purely conversational messages. Defaults to passThrough — when in doubt, let the LLM handle it.
     private static func isConversationalPrompt(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         // Must be short — long prompts are almost always tasks
@@ -442,7 +450,7 @@ final class AppleIntelligenceMediator: ObservableObject {
             "i'm fine",
             "i am fine"
         ]
-        // Check exact match or starts-with for greetings
+        // Check exact match or starts-with for greetings (e.g. "hi agent", "hello there")
         for g in greetings {
             if lower == g || lower.hasPrefix(g + " ") { return true }
         }
@@ -460,12 +468,12 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     // MARK: - Accessibility Intent
 
-    /// Cheap pre-filter: does this prompt look like a UI automation request? Fa
+    /// Cheap pre-filter: does this prompt look like a UI automation request? False negatives fall through to cloud LLM (no harm).
     static func looksLikeAccessibilityRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard lower.count > 3, lower.count < 240 else { return false }
 
-        // "open" followed by path-like or file-like words → LLM territory, not
+        // "open" followed by path-like or file-like words → LLM territory, not accessibility
         if lower.hasPrefix("open ") {
             let arg = String(lower.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             if arg.hasPrefix(".") || arg.hasPrefix("/") || arg.hasPrefix("~") { return false }
@@ -475,7 +483,7 @@ final class AppleIntelligenceMediator: ObservableObject {
             if fileWords.contains(where: { arg.hasPrefix($0) }) { return false }
         }
 
-        // "have the llm" / "have the model" / "use the llm" → user explicitly w
+        // "have the llm" / "have the model" / "use the llm" → user explicitly wants cloud LLM
         let llmOverrides = ["have the llm", "use the llm", "have the model", "let the llm",
                             "ask the llm", "have llm", "use llm", "have ai", "not working"]
         if llmOverrides.contains(where: { lower.contains($0) }) { return false }
@@ -511,7 +519,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         return verbs.contains { lower.contains($0) }
     }
 
-    /// Run Apple AI as tool-calling agent with accessibility tool.
+    /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
+    /// Quick pattern check for "run agent X" style requests.
     static func looksLikeRunAgentRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         return lower.hasPrefix("run agent ") || lower.hasPrefix("agent run ")
@@ -527,7 +536,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     ) async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
 
-        // Thread-safe boxes to track tool-call/error state across the Sendable
+        // Thread-safe boxes to track tool-call/error state across the Sendable closure.
         final class CallTracker: @unchecked Sendable {
             private let lock = NSLock()
             private var _called = false
@@ -549,7 +558,8 @@ final class AppleIntelligenceMediator: ObservableObject {
             tracker.recordOutput(result)
             await appendLog("🍎 → \(String(result.prefix(300)))")
             let lower = result.lowercased()
-            // find_element is exploratory
+            // find_element is exploratory — a miss just means "try a different query", not a fatal error.
+            // Only mark the run as failed if a definitive action (click/type/open) failed.
             let isFindAction = args.action.lowercased().contains("find")
             if !isFindAction {
                 if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false")
@@ -557,7 +567,7 @@ final class AppleIntelligenceMediator: ObservableObject {
                     tracker.markFailed()
                 }
             } else {
-                // Even for find_element, track if something is fundamentally br
+                // Even for find_element, track if something is fundamentally broken (app not running)
                 if lower.contains("not running") || lower.contains("not launched") {
                     tracker.markFailed()
                 }
@@ -578,7 +588,7 @@ final class AppleIntelligenceMediator: ObservableObject {
             return result
         }
 
-        // Apple AI's ~4096-token window requires terse instructions. Known apps
+        // Apple AI's ~4096-token window requires terse instructions. Known apps from SDEFService; unknowns fall back to NSRunningApplications scan.
         let knownApps = SDEFService.shared.allInstalledAppNames().joined(separator: ", ")
         let instructions = Instructions("""
         You have TWO tools: accessibility (UI clicks/types/opens apps) and run_agent (runs user-defined agent scripts).
@@ -600,9 +610,14 @@ final class AppleIntelligenceMediator: ObservableObject {
         After tool calls succeed, reply with 1 sentence describing what happened.
         """)
 
-        // AppleScript and Shell tools removed
+        // AppleScript and Shell tools removed — Apple AI handled them poorly (hallucinated
+        // paths like /Users/your_username, wrong directories, malformed scripts). The cloud
+        // LLM handles those reliably. Only accessibility is exposed to Apple AI now.
 
-        // Adaptive context: ask Apple AI itself whether the new prompt is a fol
+        // Adaptive context: ask Apple AI itself whether the new prompt is a follow-up to the
+        // previous one. If yes, reuse the session so references like "take another", "do it
+        // again", "also click X" have context. If no, start fresh to keep unrelated tasks
+        // from bloating the 4096-token window.
         var isFollowUp = false
         if let prev = accessibilityAgentLastMessage,
            accessibilityAgentSession != nil,
@@ -616,14 +631,16 @@ final class AppleIntelligenceMediator: ObservableObject {
             accessibilityAgentTurnCount += 1
             await appendLog("🍎 (follow-up, reusing context)")
         } else {
-            // Two tools exposed to Apple AI: accessibility
+            // Two tools exposed to Apple AI: accessibility (UI automation) and run_agent
+            // (run user-defined scripts). Shell and AppleScript were removed because
+            // Apple AI hallucinated paths and directories.
             session = LanguageModelSession(model: .default, tools: [tool, runAgentTool], instructions: instructions)
             accessibilityAgentSession = session
             accessibilityAgentTurnCount = 1
         }
         accessibilityAgentLastMessage = message
 
-        // Wrap respond(to:) in task-group timeout. The agent loop runs inside r
+        // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
         let timeoutSeconds: TimeInterval = 30
         do {
             let content: String = try await withThrowingTaskGroup(of: String.self) { group in
@@ -640,21 +657,21 @@ final class AppleIntelligenceMediator: ObservableObject {
                 return result
             }
 
-            // If Apple AI didn't actually call the tool, it just chatted
+            // If Apple AI didn't actually call the tool, it just chatted — fall through to cloud LLM.
             guard tracker.called else {
                 appendLog("🍎 ⏭ No tool called — forwarding to LLM")
                 return nil
             }
-            // If any tool call failed, fall through
+            // If any tool call failed, fall through — never claim success without real execution.
             if tracker.failed {
                 appendLog("🍎 ⏭ Tool failed — forwarding to LLM")
                 return nil
             }
-            // Verify tool outputs contain real evidence of work, not just empty
+            // Verify tool outputs contain real evidence of work, not just empty/exit-0 responses.
             let outputs = tracker.outputs
             let hasSubstantiveOutput = outputs.contains { output in
                 let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                // Empty, just exit code, or just "ok" are not evidence of real
+                // Empty, just exit code, or just "ok" are not evidence of real work
                 if trimmed.isEmpty || trimmed == "(exit 0)" || trimmed.count < 3 { return false }
                 return true
             }
@@ -662,7 +679,7 @@ final class AppleIntelligenceMediator: ObservableObject {
                 appendLog("🍎 ⏭ No substantive tool output — forwarding to LLM")
                 return nil
             }
-            // If Apple AI's response indicates refusal/inability/uncertainty, f
+            // If Apple AI's response indicates refusal/inability/uncertainty, fall through.
             let upper = content.uppercased()
             let refusalPhrases = [
                 "I'M SORRY", "I'M UNABLE", "I CANNOT", "I CAN'T",
@@ -687,7 +704,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
     }
 
-    /// / Triage a prompt: direct commands → accessibility agent
+    /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
+    /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
     func triagePrompt(
         _ message: String,
         axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String,
@@ -695,9 +713,11 @@ final class AppleIntelligenceMediator: ObservableObject {
         appendLog: @escaping @Sendable @MainActor (String) -> Void,
         projectFolder: String = ""
     ) async -> TriageResult {
-        // Direct command shortcut removed
+        // Direct command shortcut removed — "run agent X", "list agents", "google for X",
+        // etc. all flow through Apple AI (accessibility) or the cloud LLM's tools now.
         guard isEnabled && Self.isAvailable else { return .passThrough }
-        // Accessibility agent
+        // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
+        // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && (Self.looksLikeAccessibilityRequest(message) || Self.looksLikeRunAgentRequest(message)) {
             if let result = await runAccessibilityAgent(message, dispatch: axDispatch, runAgent: runAgent, appendLog: appendLog, projectFolder: projectFolder) {
                 return .accessibilityHandled(result)
@@ -717,7 +737,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
         let trimmed = sanitize(content)
         let upper = trimmed.uppercased()
-        // If Apple AI refused, gave a useless response, or expressed uncertaint
+        // If Apple AI refused, gave a useless response, or expressed uncertainty, pass through to LLM.
+        // Never let Apple AI claim completion unless the response is substantive.
         let giveUpPhrases = [
             "I CAN'T", "I CANNOT", "I'M UNABLE", "NOT ABLE TO",
             "I DON'T KNOW", "NOT SURE", "I'M NOT SURE",
@@ -730,7 +751,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         return .answered(trimmed)
     }
 
-    /// Clear the session and conversation context to start fresh
+    /// Clear the session and conversation context to start fresh (call when switching contexts or starting a new conversation)
     func resetSession() {
         session = nil
         accessibilityAgentSession = nil
@@ -742,7 +763,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         conversationSummary = nil
     }
 
-    /// Clear all conversation context
+    /// Clear all conversation context (call when user clears the chat)
     func clearContext() {
         lastUserPrompt = nil
         lastAppleAIMessage = nil
@@ -775,7 +796,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         return text
     }
 
-    /// The current session's transcript
+    /// The current session's transcript — the framework's built-in conversation history.
+    /// Useful for inspecting what the on-device model has seen in the current session.
     var transcript: Transcript? {
         session?.transcript
     }
@@ -794,9 +816,11 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 }
 
-// MARK: - Accessibility Tool for Apple Intelligence FoundationModels-native too
+// MARK: - Accessibility Tool for Apple Intelligence FoundationModels-native tool — framework handles
+// schema/validation/agent loop. We just provide the dispatch closure routing to AgentViewModel.executeNativeTool.
 
-/// / Generable arguments for accessibility tool. @Generable derives /
+/// / Generable arguments for the accessibility tool. @Generable derives / ConvertibleFromGeneratedContent +
+/// GenerationSchema for Apple AI. / `app` uses natural names (e.g. "Photo Booth"); dispatch resolves via / AccessibilityService.resolveBundleId().
 @Generable
 struct AccessibilityArgs: Sendable {
     @Guide(description: "The accessibility action: click_element, type_into_element, scroll_to_element, open_app, or find_element")
@@ -817,7 +841,8 @@ struct AccessibilityArgs: Sendable {
     let text: String?
 }
 
-// ShellAppleTool and AppleScriptAppleTool removed
+// ShellAppleTool and AppleScriptAppleTool removed — Apple AI handled them poorly
+// (hallucinated paths, wrong directories). The cloud LLM handles shell/applescript now.
 
 // MARK: - Run Agent Tool for Apple AI
 
@@ -854,7 +879,7 @@ struct AccessibilityAppleTool: FoundationModels.Tool {
         "real button label (returned as AXTitle/AXDescription), then click_element with the exact label. " +
         "Button names often differ from user expectations (e.g. Photo Booth's photo button is 'take photo' not 'Take Picture')."
 
-    /// Closure performs accessibility action.
+    /// Closure that performs the accessibility action. Injected by the caller so the tool doesn't reference AgentViewModel.
     let dispatch: @Sendable (AccessibilityArgs) async -> String
 
     func call(arguments: AccessibilityArgs) async throws -> String {

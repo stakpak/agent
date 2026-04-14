@@ -3,6 +3,7 @@ import AgentMCP
 import AgentD1F
 import Cocoa
 
+
 extension AgentViewModel {
 
     /// Handle Core tool calls for tab tasks.

@@ -3,7 +3,8 @@ import AgentAudit
 @preconcurrency import Foundation
 import AgentTools
 
-/// Unified service for OpenAI and Hugging Face Inference API
+/// Unified service for OpenAI and Hugging Face Inference API (both use OpenAI chat completions format with SSE streaming).
+/// Generate a 9-char alphanumeric tool call ID compatible with all providers (including Mistral).
 private func shortToolId() -> String {
     let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     return String((0..<9).map { _ in chars.randomElement()! })
@@ -13,7 +14,7 @@ private func shortToolId() -> String {
 private func sanitizeToolId(_ id: String) -> String {
     let clean = String(id.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     if clean.count >= 9 { return String(clean.prefix(9)) }
-	    // Pad short IDs to 9 chars
+    // Pad if too short
     return clean + shortToolId().prefix(9 - clean.count)
 }
 
@@ -26,7 +27,8 @@ final class OpenAICompatibleService {
     let provider: APIProvider
     var temperature: Double = 0.2
     var compactTools: Bool = false
-    /// Key name for messages array in the request body.
+    /// Key name for the messages array in the request body.
+    /// OpenAI uses "messages", LM Studio Native uses "input".
     let messagesKey: String
 
     let historyContext: String
@@ -74,7 +76,7 @@ final class OpenAICompatibleService {
     var systemPrompt: String {
         if let override = overrideSystemPrompt { return override }
         if isLMStudio {
-            // LM Studio uses compact prompt for small context
+            // LM Studio bypasses SystemPromptService — wrap with anti-hallucination rules to match disk-seeded prompts.
             return SystemPromptService.wrapWithRules(
                 AgentTools.compactSystemPrompt(userName: userName, userHome: userHome, projectFolder: projectFolder)
             )
@@ -104,13 +106,14 @@ final class OpenAICompatibleService {
     }
 
     func tools(activeGroups: Set<String>? = nil, compact: Bool = false) -> [[String: Any]] {
-        // No mode-based narrowing — every user-enabled tool flows through. Loca
+        // No mode-based narrowing — every user-enabled tool flows through.
+        // Local endpoints with tight context windows can disable groups via the UI.
         return AgentTools.ollamaTools(for: provider, activeGroups: activeGroups, compact: compact, projectFolder: projectFolder)
     }
 
-    /// Prepend project folder to the last user message
+    /// Prepend project folder to the last user message (only on first message).
     private func withFolderPrefix(_ messages: [[String: Any]]) -> [[String: Any]] {
-        // Skip if folder is in system prompt already
+        // Skip if folder is in system prompt already (iteration 1) or short prompt (iteration 2+)
         guard !projectFolder.isEmpty, messages.count <= 1 else { return messages }
         let prefix = "PROJECT FOLDER: \(projectFolder)\n"
         var result = messages
@@ -130,7 +133,7 @@ final class OpenAICompatibleService {
         return result
     }
 
-    /// Short system prompt for subsequent iterations
+    /// Short system prompt for subsequent iterations — LLM already has the full prompt cached.
     private var shortSystemPrompt: String {
         var prompt = "Continue the task. Use tools as needed. ALWAYS call task_complete when finished."
         if !projectFolder.isEmpty {
@@ -142,20 +145,22 @@ final class OpenAICompatibleService {
 
     /// All tools every iteration — compact descriptions in coding mode.
     func toolsForIteration(_ messages: [[String: Any]], activeGroups: Set<String>? = nil) -> [[String: Any]] {
-        // Tools are byte-stable across iterations now
+        // Tools are byte-stable across iterations now (the old condensed/full _tool-name swap
+        // was removed in 2.38.0 because canonical names no longer carry the suffix).
         return tools(activeGroups: activeGroups, compact: compactTools)
     }
 
-    /// Set to true when a tool call fails
+    /// Set to true when a tool call fails — next turn sends full _tool names, then resets.
     var needsFullToolNames: Bool = false
 
-    /// Convert Claude-format messages to OpenAI chat messages.
+    /// Convert Claude-format messages to OpenAI chat messages. Full system
+    /// prompt every turn — providers cache automatically via byte-stable prefix.
     private func convertMessages(_ messages: [[String: Any]]) -> [[String: Any]] {
         let prompt = systemPrompt
         var chatMessages: [[String: Any]] = [
             ["role": "system", "content": prompt]
         ]
-        // Track tool call ID → name mapping for tool response "name" field
+        // Track tool call ID → name mapping for tool response "name" field (required by Mistral)
         var toolIdToName: [String: String] = [:]
 
         for msg in withFolderPrefix(messages) {
@@ -182,7 +187,7 @@ final class OpenAICompatibleService {
                             chatMessages.append(toolMsg)
                         }
                     } else {
-                        // Content blocks (text + images) — use OpenAI multipart
+                        // Content blocks (text + images) — use OpenAI multipart content
                         var contentParts: [[String: Any]] = []
                         let imageBlocks = blocks.filter { $0["type"] as? String == "image" }
                         AuditLog.log(
@@ -251,7 +256,7 @@ final class OpenAICompatibleService {
                                     "arguments": argsString
                                 ] as [String: Any]
                             ]
-                            // Gemini thought_signature — echo back for tool cal
+                            // Gemini thought_signature — echo back for tool call round-trips
                             if let sig = block["thought_signature"] as? String {
                                 tc["thought_signature"] = sig
                             }
@@ -261,14 +266,14 @@ final class OpenAICompatibleService {
 
                     var assistantMsg: [String: Any] = ["role": "assistant"]
                     if !textParts.isEmpty { assistantMsg["content"] = textParts }
-                    // Gemini thought_signature — echo back on assistant message
+                    // Gemini thought_signature — echo back on assistant message and each tool_call
                     if !toolCalls.isEmpty {
                         var sig: String?
                         for block in blocks {
                             if let s = block["thought_signature"] as? String { sig = s; break }
                         }
                         if let sig {
-                            // Echo on each tool_call as extra_content.google.th
+                            // Echo on each tool_call as extra_content.google.thought_signature
                             let extraContent: [String: Any] = ["google": ["thought_signature": sig]]
                             for i in toolCalls.indices {
                                 toolCalls[i]["extra_content"] = extraContent
@@ -282,7 +287,7 @@ final class OpenAICompatibleService {
                 }
             }
         }
-        // Mistral requires strict tool message ordering: tool messages follow a
+        // Mistral requires strict tool message ordering: tool messages follow assistant with tool_calls, response count equals tool_calls count
         if provider == .mistral || provider == .codestral || provider == .vibe {
             var cleaned: [[String: Any]] = []
             var i = 0
@@ -305,7 +310,7 @@ final class OpenAICompatibleService {
                         cleaned.append(msg)
                         cleaned.append(contentsOf: toolMsgs)
                     } else {
-                        // Mismatch — only keep tool messages that match a call
+                        // Mismatch — only keep tool messages that match a call ID, pad missing ones
                         cleaned.append(msg)
                         var usedIds = Set<String>()
                         for tm in toolMsgs {
@@ -347,6 +352,7 @@ final class OpenAICompatibleService {
     }
 
     /// Convert OpenAI-format messages to LM Studio Native "input" format.
+    /// Each item needs "type": "text" (or "image") plus "role" and "text".
     private func convertToNativeInput(_ openAIMessages: [[String: Any]]) -> [[String: Any]] {
         return openAIMessages.compactMap { msg -> [String: Any]? in
             let role = msg["role"] as? String ?? "user"
@@ -366,7 +372,7 @@ final class OpenAICompatibleService {
         }
     }
 
-    /// Build the messages payload for the request body, converting format if ne
+    /// Build the messages payload for the request body, converting format if needed.
     private func buildMessagesPayload(_ messages: [[String: Any]]) -> Any {
         let chatMessages = convertMessages(messages)
         if messagesKey == "input" {
@@ -380,7 +386,7 @@ final class OpenAICompatibleService {
     /// LM Studio Native (/api/v1/chat) doesn't support tools or max_tokens
     private var isNativeFormat: Bool { messagesKey == "input" }
 
-    /// Wait if needed to respect per-provider rate limits and Retry-After backo
+    /// Wait if needed to respect per-provider rate limits and Retry-After backoff.
     private func enforceRateLimit() async {
         let now = CFAbsoluteTimeGetCurrent()
         // Honor Retry-After from a previous 429
@@ -401,12 +407,12 @@ final class OpenAICompatibleService {
         Self.lastRequestTime[provider] = CFAbsoluteTimeGetCurrent()
     }
 
-    /// Record Retry-After from 429.
+    /// Record Retry-After from 429. @MainActor because retryAfterUntil is a per-class static dict; nonisolated callers hop via Task { @MainActor in ... }.
     static func recordRetryAfter(_ seconds: Double, for provider: APIProvider) {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse Retry-After header.
+    /// Parse Retry-After header. Integer seconds per RFC 7231. Returns 0 if missing/unparseable; capped at 5 min.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -436,14 +442,14 @@ final class OpenAICompatibleService {
             if !toolDefs.isEmpty {
                 body["tools"] = toolDefs
                 body["tool_choice"] = "auto"
-                // Mistral: disable parallel tool calls — our loop handles one a
+                // Mistral: disable parallel tool calls — our loop handles one at a time
                 if provider == .mistral || provider == .codestral || provider == .vibe {
                     body["parallel_tool_calls"] = false
                 }
             }
         }
 
-          // .sortedKeys for byte-stable JSON
+          // .sortedKeys for byte-stable JSON — required for prefix cache hits. Without it, semantically-identical requests produce different byte streams and miss the cache.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(bodyData: bodyData, apiKey: apiKey, url: baseURL, provider: provider)
     }
@@ -476,7 +482,7 @@ final class OpenAICompatibleService {
             }
         }
 
-        // .sortedKeys for byte-stable prefix caching — see send() for rationale
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,
@@ -505,7 +511,7 @@ final class OpenAICompatibleService {
             throw AgentError.invalidResponse
         }
         guard httpResponse.statusCode == 200 else {
-              // On 429, parse Retry-After — seed retryAfterUntil so next call's
+              // On 429, parse Retry-After — seed retryAfterUntil so next call's enforceRateLimit waits the right amount. Default 30s if header missing (Z.ai returns 429 with no Retry-After).
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -533,7 +539,7 @@ final class OpenAICompatibleService {
         var parsedToolFromText = false
 
         if let text = message["content"] as? String, !text.isEmpty {
-            // Check for DeepSeek text-based tool calls before treating as plain
+            // Check for DeepSeek text-based tool calls before treating as plain text
             if let deepSeekCalls = OllamaService.extractDeepSeekToolCalls(from: text) {
                 for call in deepSeekCalls {
                     contentBlocks.append([
@@ -627,7 +633,7 @@ final class OpenAICompatibleService {
         return (contentBlocks, stopReason, inTok, outTok)
     }
 
-    /// Pull cached-prompt-token counts from OpenAI-format `usage` and forward t
+    /// Pull cached-prompt-token counts from OpenAI-format `usage` and forward to TokenUsageStore. Accepts OpenAI standard (prompt_tokens_details.cached_tokens) and DeepSeek variant (prompt_cache_hit_tokens). Creation = 0 since OpenAI-format providers don't distinguish cache write events.
     nonisolated private static func recordCacheHits(from usage: [String: Any]?) {
         guard let usage else { return }
         var cached = 0
@@ -635,7 +641,7 @@ final class OpenAICompatibleService {
            let n = details["cached_tokens"] as? Int {
             cached = n
         } else if let n = usage["prompt_cache_hit_tokens"] as? Int {
-            // DeepSeek cache-hit field name
+            // DeepSeek variant
             cached = n
         }
         guard cached > 0 else { return }
@@ -664,7 +670,7 @@ final class OpenAICompatibleService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // On 429, parse Retry-After header
+            // On 429, parse Retry-After header — recording here means even if exponential backoff is shorter, next call's enforceRateLimit pads it out.
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -688,13 +694,14 @@ final class OpenAICompatibleService {
 
         // Accumulate streamed tool calls: index -> (id, name, arguments)
         var toolCallAccum: [Int: (id: String, name: String, arguments: String)] = [:]
-        // Gemini thought_signature — on the message/delta level, echoed back on
+        // Gemini thought_signature — on the message/delta level, echoed back on assistant message
         var thoughtSignature: String?
 
-        // Buffer text line-by-line so we can suppress raw JSON tool calls vLLM/
+        // Buffer text line-by-line so we can suppress raw JSON tool calls
+        // that vLLM/Qwen outputs as text content instead of native tool_calls
         var lineBuffer = ""
 
-        /// Check if a line is a raw JSON tool call
+        /// Check if a line is a raw JSON tool call (e.g. {"name": "...", "arguments": {...}})
         func isToolCallJSON(_ line: String) -> Bool {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.hasPrefix("{"), trimmed.contains("\"name\""),
@@ -730,7 +737,8 @@ final class OpenAICompatibleService {
             guard let data = payload.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
-            // Extract usage if present (final chunk). Most OpenAI-format provid
+            // Extract usage if present (final chunk). Most OpenAI-format providers stream the usage block in the FINAL
+            // SSE event. We also surface cached_tokens here so the LLM Usage panel reflects automatic prefix-cache hits for OpenAI/Z.ai/Grok/Mistral/Gemini/Qwen/DeepSeek/etc. exactly the same way Claude's explicit cache_control hits are tracked.
             if let usage = json["usage"] as? [String: Any] {
                 streamInputTokens = usage["prompt_tokens"] as? Int ?? streamInputTokens
                 streamOutputTokens = usage["completion_tokens"] as? Int ?? streamOutputTokens
@@ -754,7 +762,7 @@ final class OpenAICompatibleService {
 
             guard let delta = firstChoice["delta"] as? [String: Any] else { continue }
 
-            // Gemini thought_signature — nested under extra_content.google.thou
+            // Gemini thought_signature — nested under extra_content.google.thought_signature
             if let extra = delta["extra_content"] as? [String: Any],
                let google = extra["google"] as? [String: Any],
                let sig = google["thought_signature"] as? String
@@ -786,7 +794,7 @@ final class OpenAICompatibleService {
                             toolCallAccum[index]?.arguments += args
                         }
                     }
-                    // Gemini: extra_content.google.thought_signature per tool_c
+                    // Gemini: extra_content.google.thought_signature per tool_call
                     if let extra = tc["extra_content"] as? [String: Any],
                        let google = extra["google"] as? [String: Any],
                        let sig = google["thought_signature"] as? String
@@ -796,7 +804,8 @@ final class OpenAICompatibleService {
                 }
             }
 
-            // Text content delta — buffer by newlines to detect and suppress ra
+            // Text content delta — buffer by newlines to detect and suppress
+            // raw JSON tool calls that vLLM/Qwen outputs as text
             if let content = delta["content"] as? String, !content.isEmpty {
                 // Strip special tokens
                 let cleaned = content
@@ -807,9 +816,9 @@ final class OpenAICompatibleService {
                 // Suppress all text when native tool calls are being streamed
                 if !toolCallAccum.isEmpty { continue }
 
-                // Stream text directly (like Claude) — only buffer potential JS
+                // Stream text directly (like Claude) — only buffer potential JSON tool calls
                 if lineBuffer.hasPrefix("{") || cleaned.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
-                    // Buffering a potential JSON tool call line — accumulate un
+                    // Buffering a potential JSON tool call line — accumulate until newline
                     for ch in cleaned {
                         if ch == "\n" {
                             let suppressed = isToolCallJSON(lineBuffer)
@@ -890,12 +899,13 @@ final class OpenAICompatibleService {
             }
         }
 
-        // Add text if no tool calls were found from it Strip vLLM/Qwen special
+        // Add text if no tool calls were found from it
+        // Strip vLLM/Qwen special tokens that leak through as text content
         if !parsedToolFromText && !fullText.isEmpty {
             var cleaned = fullText
             // Remove <|im_start|>, <|im_end|>, and similar special tokens
             cleaned = cleaned.replacingOccurrences(of: "<\\|im_(?:start|end)\\|>", with: "", options: .regularExpression)
-            // If native tool calls exist, discard text that is just raw JSON to
+            // If native tool calls exist, discard text that is just raw JSON tool call output
             if !toolCallAccum.isEmpty {
                 let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
                 // Skip text that looks like raw tool call JSON the model leaked

@@ -65,7 +65,8 @@ extension CodingService {
 
     static func buildListFilesCommand(pattern: String, path: String?) -> String {
         let pat = shellEscape(pattern)
-        // Working directory set on Process
+        // Working directory set on Process — find . outputs relative paths (saves tokens)
+        // -type f: files only, prune dotdirs and build artifacts
         return "find . -maxdepth 8 \\( -type f -o -type d \\) -name \(pat)"
             + " -not -path '*/.*'"
             + " -not -path '*/.build/*'"

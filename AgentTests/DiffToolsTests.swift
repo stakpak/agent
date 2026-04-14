@@ -3,7 +3,8 @@ import Foundation
 @testable import Agent_
 import AgentD1F
 
-/// Tests that mirror exactly how the AI calls diff tools through the handle...
+/// Tests that mirror exactly how the AI calls diff tools through the handler code paths.
+/// Each test simulates the exact input dict the LLM sends and the exact steps the handler runs.
 @Suite("DiffTools")
 @MainActor struct DiffToolsTests {
 
@@ -35,10 +36,11 @@ import AgentD1F
         let file = "\(dir)/scenario1.swift"
         writeFile(file, "import Foundation\n\nfunc hello() {\n    print(\"Hello\")\n}\n\nfunc goodbye() {\n    print(\"Bye\")\n}\n")
 
-        // === AI calls create_diff === AI sees lines 3-5 are the hello function
+        // === AI calls create_diff ===
+        // AI sees lines 3-5 are the hello function, wants to change the print
         let destination = "func hello() {\n    print(\"Hello, World!\")\n}"
 
-        // Simulate handler: read file, extract lines 3-5, create diff, store UU
+        // Simulate handler: read file, extract lines 3-5, create diff, store UUID
         let fullText = readFile(file)
         let lines = fullText.components(separatedBy: "\n")
         let s = 2 // line 3, 0-indexed
@@ -101,7 +103,7 @@ import AgentD1F
         let startLine = 3
         let endLine = 3
 
-        // Simulate handler: read file, extract section, create diff, apply, spl
+        // Simulate handler: read file, extract section, create diff, apply, splice, write
         let fullText = readFile(file)
         let allLines = fullText.components(separatedBy: "\n")
         let s2 = max(startLine - 1, 0)
@@ -265,7 +267,7 @@ import AgentD1F
         let rejected = source.count > 200 && patched.count < source.count / 2
 
         #expect(rejected, "Should reject diff that shrinks file by >50%")
-        // File should NOT have been modified (handler would return before writi
+        // File should NOT have been modified (handler would return before writing)
         #expect(readFile(file) == original, "File should remain unchanged")
     }
 

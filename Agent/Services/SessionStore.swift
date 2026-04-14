@@ -1,6 +1,7 @@
 import Foundation
 
 /// Persists conversation messages to JSONL for session resume.
+/// Sessions stored at ~/Documents/AgentScript/sessions/<sessionId>.jsonl
 @MainActor
 final class SessionStore {
     static let shared = SessionStore()
@@ -61,7 +62,7 @@ final class SessionStore {
 
     // MARK: - Read / Resume
 
-    /// List available sessions, newest first. Returns
+    /// List available sessions, newest first. Returns (id, date, messageCount).
     func listSessions() -> [(id: String, date: Date, messageCount: Int)] {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
@@ -76,7 +77,7 @@ final class SessionStore {
             .sorted { $0.1 > $1.1 }
     }
 
-    /// Load messages from a session.
+    /// Load messages from a session. Returns the message array and restores token state.
     func loadSession(_ sessionId: String) -> [[String: Any]] {
         let url = sessionFile(sessionId)
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }

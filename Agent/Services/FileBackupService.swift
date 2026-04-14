@@ -2,6 +2,7 @@ import Foundation
 import AgentAudit
 
 /// / Backs up files before editing, organized by tab UUID. / Structure:
+/// ~/Documents/AgentScript/backups/<tabUUID>/<timestamp>_<filename> / TTL: 1 week — old backups auto-cleaned on launch.
 @MainActor
 final class FileBackupService {
     static let shared = FileBackupService()
@@ -65,7 +66,7 @@ final class FileBackupService {
             guard let underscoreRange = name.range(of: "_", range: name.index(name.startIndex, offsetBy: 15)..<name.endIndex)
             else { return nil }
             var timestampStr = String(name[..<underscoreRange.lowerBound])
-            // Only restore colons in the time portion (after T), not the date h
+            // Only restore colons in the time portion (after T), not the date hyphens
             if let tIdx = timestampStr.firstIndex(of: "T") {
                 let timePart = String(timestampStr[timestampStr.index(after: tIdx)...])
                     .replacingOccurrences(of: "-", with: ":")
@@ -83,7 +84,8 @@ final class FileBackupService {
         let backups = listBackups(tabID: tabID).filter { $0.original == fileName }
         guard let latest = backups.first else { return false }
 
-        // Find the original path by searching common locations The backup only
+        // Find the original path by searching common locations The backup only stores the filename, not the full path
+        // This is a limitation — caller should provide the full path
         let fm = FileManager.default
         do {
             try fm.copyItem(atPath: latest.backup, toPath: fileName)
@@ -186,12 +188,14 @@ final class FileBackupService {
     // MARK: - Per-Task Edit Snapshots
 
     /// Tracks file versions within a single task for diff/rollback.
+    /// Key = file path, Value = ordered list of backup paths (oldest first).
     private var taskSnapshots: [String: [String]] = [:]
 
     /// Maximum snapshots per file per task (circular buffer).
     private let maxSnapshots = 100
 
-    /// Record a snapshot for current task.
+    /// Record a snapshot for the current task. Call before each edit.
+    /// Returns the version number (1-based).
     @discardableResult
     func snapshot(filePath: String, tabID: UUID) -> Int {
         let backupPath = backup(filePath: filePath, tabID: tabID)
@@ -213,7 +217,7 @@ final class FileBackupService {
         taskSnapshots[filePath]?.count ?? 0
     }
 
-    /// Rollback a file to a specific version
+    /// Rollback a file to a specific version (1-based). Returns true on success.
     func rollback(filePath: String, toVersion: Int) -> Bool {
         guard let versions = taskSnapshots[filePath],
               toVersion >= 1 && toVersion <= versions.count else { return false }
@@ -221,7 +225,7 @@ final class FileBackupService {
         return restore(backupPath: backupPath, to: filePath)
     }
 
-    /// Get a summary of all files edited in the current task with version count
+    /// Get a summary of all files edited in the current task with version counts.
     func taskEditSummary() -> String {
         guard !taskSnapshots.isEmpty else { return "No files edited in this task." }
         return taskSnapshots.map { path, versions in

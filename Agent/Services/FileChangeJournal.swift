@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 
 /// Logs every file edit as JSONL for overnight review.
+/// Journal: ~/Documents/AgentScript/journal/<date>.jsonl
 @MainActor
 final class FileChangeJournal {
     static let shared = FileChangeJournal()

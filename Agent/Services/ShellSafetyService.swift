@@ -1,12 +1,14 @@
 import Foundation
 
-/// / Hard local guardrail for shell commands
+/// / Hard local guardrail for shell commands — runs BEFORE every execution surface / and rejects catastrophic commands
+/// without dispatching them. Primary defense; / LLM system prompts are backstops, not the enforcement layer.
 enum ShellSafetyService {
 
     struct Verdict {
         /// True when the command is permitted to run.
         let allowed: Bool
-        /// Human-readable explanation when blocked
+        /// Human-readable explanation when blocked, suitable to return as a
+        /// tool result so the LLM understands why and doesn't retry.
         let reason: String?
         /// Short identifier of the matched rule, for AuditLog.
         let rule: String?
@@ -18,9 +20,11 @@ enum ShellSafetyService {
         }
     }
 
-    /// / Inspect a shell command and return whether it's safe to dispatch.
+    /// / Inspect a shell command and return whether it's safe to dispatch. / Splits compound commands on shell
+    /// separators (`;`, `&&`, `||`, `|`, / newline) and checks each segment independently — so `ls; rm -rf /` / is blocked even though the first half is harmless.
     static func check(_ command: String) -> Verdict {
-        // Whole-command checks (fork bomb relies on `;` and `|` which are exact
+        // Whole-command checks (fork bomb relies on `;` and `|` which are exactly what splitOnShellSeparators tears
+        // apart, so it has to run BEFORE splitting).
         let forkVerdict = checkForkBomb(command)
         if !forkVerdict.allowed { return forkVerdict }
 
@@ -67,7 +71,8 @@ enum ShellSafetyService {
 
     // MARK: - Rule: dangerous rm
 
-    /// / Tokenized rm check. We collect every flag
+    /// / Tokenized rm check. We collect every flag (combined like `-rf`, / separated like `-r -f`, or long-form like
+    /// `--recursive --force`) and / every non-flag positional arg, then refuse the command if it has both / recursive AND force flags AND any positional that resolves to a / dangerous target.
     private static func checkDangerousRm(tokens: [String]) -> Verdict? {
         guard let rmIdx = tokens.firstIndex(of: "rm") else { return nil }
         var hasR = false
@@ -111,7 +116,8 @@ enum ShellSafetyService {
         return nil
     }
 
-    /// / Returns a reason string when path is too broad to ever be a / reasonab
+    /// / Returns a reason string when the path is too broad to ever be a / reasonable target for `rm -rf`. Returns nil
+    /// for safe targets so the / caller can keep checking the rest of the positionals.
     private static func dangerousRmTargetReason(_ target: String) -> String? {
         // Strip surrounding quotes the tokenizer left intact.
         var t = target
@@ -119,8 +125,151 @@ enum ShellSafetyService {
             t = String(t.dropFirst().dropLast())
         }
 
-        // Bare wildcard or current/parent dir — context-dependent but the worst
-        /// " || t == "./" || t == ".*" { return "this glob/relative path is too
+        // Bare wildcard or current/parent dir — context-dependent but the
+        // worst-case is catastrophic, so we refuse.
+        if t == "*" || t == "*.*" || t == "." || t == ".." || t == "./*" || t == "./" || t == ".*" {
+            return "this glob/relative path is too broad — the working directory could be `/` or `~`"
+        }
+
+        // Root and root-glob.
+        if t == "/" || t == "/*" || t == "/.*" || t == "/." || t == "/.." {
+            return "this would erase the entire filesystem"
+        }
+
+        // Top-level system directories on macOS + Linux.
+        let systemRoots: Set<String> = [
+            "/etc", "/usr", "/bin", "/sbin", "/var", "/lib", "/lib64",
+            "/boot", "/proc", "/sys", "/dev", "/run", "/opt",
+            "/System", "/Library", "/Applications", "/private",
+            "/Volumes", "/Network", "/cores", "/Users", "/home",
+        ]
+        // Match exact and trailing-slash and `/dir/*` glob forms.
+        for root in systemRoots {
+            if t == root || t == root + "/" || t == root + "/*" || t == root + "/.*" {
+                return "this is a critical system directory"
+            }
+        }
+
+        // Home directory in any of its written forms.
+        let homeForms: Set<String> = [
+            "~", "~/", "~/*", "~/.*",
+            "$HOME", "${HOME}", "$HOME/", "${HOME}/",
+            "$HOME/*", "${HOME}/*", "$HOME/.*", "${HOME}/.*",
+        ]
+        if homeForms.contains(t) {
+            return "this is your home directory"
+        }
+
+        // The literal expanded home — best-effort match.
+        let realHome = NSHomeDirectory()
+        if t == realHome || t == realHome + "/" || t == realHome + "/*" {
+            return "this is your home directory"
+        }
+
+        return nil
+    }
+
+    // MARK: - Rule: find -delete
+
+    private static func checkFindDelete(tokens: [String]) -> Verdict? {
+        guard tokens.contains("-delete") else { return nil }
+        guard let findIdx = tokens.firstIndex(of: "find") else { return nil }
+        // The first positional after `find` is the search root.
+        if findIdx + 1 < tokens.count {
+            let root = tokens[findIdx + 1]
+            if dangerousRmTargetReason(root) != nil {
+                return .block(
+                    reason: "Refused: `find \(root) ... -delete` — `find -delete` recursively removes everything matching the predicates and the search root is too broad. Narrow the search root.",
+                    rule: "find.delete-broad-root"
+                )
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Rule: chmod/chown -R against system roots
+
+    private static func checkRecursivePermsOnRoot(tokens: [String]) -> Verdict? {
+        guard let cmdIdx = tokens.firstIndex(where: { $0 == "chmod" || $0 == "chown" }) else { return nil }
+        let cmd = tokens[cmdIdx]
+        var recursive = false
+        var positionals: [String] = []
+        for j in (cmdIdx + 1)..<tokens.count {
+            let t = tokens[j]
+            if t == "-R" || t == "--recursive" {
+                recursive = true
+            } else if t.hasPrefix("-") {
+                if t.dropFirst().contains("R") { recursive = true }
+            } else {
+                positionals.append(t)
+            }
+        }
+        guard recursive else { return nil }
+        for target in positionals {
+            if dangerousRmTargetReason(target) != nil {
+                return .block(
+                    reason: "Refused: `\(cmd) -R ... \(target)` — recursively changing permissions/ownership on a system root will brick the OS or your account. Narrow the target.",
+                    rule: "perms.recursive-on-root"
+                )
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Rule: disk wipes
+
+    private static func checkDiskWipe(stripped: String, tokens: [String]) -> Verdict? {
+        // dd ... of=/dev/disk*  or  of=/dev/sd*  or  of=/dev/rdisk*
+        if tokens.contains("dd") {
+            for t in tokens where t.hasPrefix("of=/dev/") {
+                let dest = String(t.dropFirst(3))
+                if isRawDiskDevice(dest) {
+                    return .block(
+                        reason: "Refused: `dd of=\(dest)` writes raw bytes to a physical disk device, which destroys the partition table and any filesystem on it.",
+                        rule: "dd.raw-disk"
+                    )
+                }
+            }
+        }
+
+        // mkfs.* — formatting a filesystem.
+        if let first = tokens.first, first.hasPrefix("mkfs") {
+            return .block(
+                reason: "Refused: `\(first)` formats a filesystem and erases everything on the target device.",
+                rule: "mkfs"
+            )
+        }
+
+        // diskutil eraseDisk / zeroDisk / secureErase / eraseVolume
+        if tokens.first == "diskutil" && tokens.count >= 2 {
+            let verb = tokens[1].lowercased()
+            if verb == "erasedisk" || verb == "zerodisk" || verb == "secureerase" || verb == "erasevolume" {
+                return .block(
+                    reason: "Refused: `diskutil \(tokens[1])` erases a physical disk or volume. Mount/list operations are fine, but erase verbs are blocked.",
+                    rule: "diskutil.erase"
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func isRawDiskDevice(_ path: String) -> Bool {
+        // /dev/disk2, /dev/rdisk2, /dev/sda, /dev/nvme0n1, /dev/hd0
+        let lower = path.lowercased()
+        return lower.hasPrefix("/dev/disk")
+            || lower.hasPrefix("/dev/rdisk")
+            || lower.hasPrefix("/dev/sd")
+            || lower.hasPrefix("/dev/hd")
+            || lower.hasPrefix("/dev/nvme")
+    }
+
+    // MARK: - Rule: redirect to disk device
+
+    /// / Catches `> /dev/disk2` or `cat foo > /dev/sda` even when the rest of / the command is a different binary. Done
+    /// as a regex on the raw segment / because the redirect operator can sit anywhere.
+    private static func checkRedirectToDisk(_ command: String) -> Verdict {
+        let pattern = #">+\s*/dev/(?:r?disk[0-9]|sd[a-z]|hd[a-z]|nvme[0-9])"#
         if command.range(of: pattern, options: .regularExpression) != nil {
             return .block(
                 reason: "Refused: redirecting output to a raw disk device (`> /dev/disk*`, `> /dev/sd*`) destroys the disk's filesystem.",
@@ -151,7 +300,7 @@ enum ShellSafetyService {
         guard tokens.contains("/dev/null") else { return nil }
         // Look at every non-flag positional except the destination.
         let positionals = tokens.dropFirst().filter { !$0.hasPrefix("-") }
-        for t in positionals.dropLast() {  // dropLast = the destination /dev/nu
+        for t in positionals.dropLast() {  // dropLast = the destination /dev/null itself
             if dangerousRmTargetReason(t) != nil {
                 return .block(
                     reason: "Refused: moving `\(t)` to `/dev/null` is equivalent to deleting it permanently.",
@@ -164,7 +313,8 @@ enum ShellSafetyService {
 
     // MARK: - Helpers
 
-    /// Strip leading `sudo` and `exec`
+    /// Strip leading `sudo` and `exec` (and chains thereof) so an attacker
+    /// can't disguise `rm -rf /` as `sudo exec sudo rm -rf /`.
     private static func stripPrefixWrappers(_ command: String) -> String {
         var result = command.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefixes = ["sudo ", "exec ", "command ", "builtin ", "eval ", "doas "]
@@ -175,7 +325,7 @@ enum ShellSafetyService {
                 result = String(result.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
                 changed = true
             }
-            // Also strip env-var assignments at the start, like `FOO=bar rm -rf
+            // Also strip env-var assignments at the start, like `FOO=bar rm -rf /`.
             if let space = result.firstIndex(of: " "),
                result[..<space].contains("="),
                !result[..<space].contains("/")
@@ -188,7 +338,8 @@ enum ShellSafetyService {
         return result
     }
 
-    /// Whitespace tokenizer preserves quoted substrings as a single token.
+    /// Whitespace tokenizer that preserves quoted substrings as a single
+    /// token. Good enough for safety classification — not a full bash parser.
     private static func tokenize(_ command: String) -> [String] {
         var tokens: [String] = []
         var current = ""
@@ -229,7 +380,8 @@ enum ShellSafetyService {
         return tokens
     }
 
-    /// Split a command on shell separators so each side of `;`/`&&`/`||`/`|` ge
+    /// Split a command on shell separators so each side of `;`/`&&`/`||`/`|`
+    /// gets independently classified. Quoted strings are preserved.
     private static func splitOnShellSeparators(_ command: String) -> [String] {
         var segments: [String] = []
         var current = ""

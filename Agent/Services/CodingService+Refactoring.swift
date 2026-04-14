@@ -3,7 +3,8 @@ import Foundation
 extension CodingService {
     // MARK: - Convert If-Chains to Switch/Case
 
-    /// Convert `if name == "xxx" { ...
+    /// Convert `if name == "xxx" { ... }` blocks in a Swift file to `switch name { case "xxx": ... }`.
+    /// Preserves all code inside each block. Returns summary of changes.
     static func convertIfToSwitch(path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
@@ -100,9 +101,10 @@ extension CodingService {
         }
     }
 
-    // MARK: - Extract to File
+    // MARK: - Extract Function to File
 
     /// Extract a function (by name) from a Swift file into a new file.
+    /// The function is removed from the original and placed in a new extension file with imports.
     static func extractFunctionToFile(sourcePath: String, functionName: String, newFileName: String) -> String {
         let expanded = (sourcePath as NSString).expandingTildeInPath
         guard let data = FileManager.default.contents(atPath: expanded),
@@ -147,7 +149,7 @@ extension CodingService {
                 var commentStart = idx
                 while commentStart > 0 {
                     let prev = lines[commentStart - 1].trimmingCharacters(in: .whitespaces)
-                    if prev.hasPrefix("///") || prev.hasPrefix("//") || prev.has
+                    if prev.hasPrefix("///") || prev.hasPrefix("//") || prev.hasPrefix("@") || prev.isEmpty {
                         commentStart -= 1
                     } else { break }
                 }

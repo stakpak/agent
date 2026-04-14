@@ -1,6 +1,7 @@
 import AgentLLM
 
-/// All Agent! LLM provider configurations
+/// All Agent! LLM provider configurations — defined in the app, not the package.
+/// To add a new LLM: add a static config here and register it in registerAllProviders().
 @MainActor
 enum LLMProviderSetup {
 
@@ -74,9 +75,9 @@ enum LLMProviderSetup {
         id: "bigModel", displayName: "BigModel",
         kind: .cloudAPI, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
-            chatURL: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completio
+            chatURL: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
             modelsURL: "https://open.bigmodel.cn/api/coding/paas/v4/models",
-            visionChatURL: "https://open.bigmodel.cn/api/paas/v4/chat/completion
+            visionChatURL: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
             visionModelsURL: "https://open.bigmodel.cn/api/paas/v4/models"
         ),
         capabilities: [.streaming, .tools, .systemPrompt, .vision],
@@ -89,8 +90,8 @@ enum LLMProviderSetup {
         let baseURL: String
         switch region {
         case "CN": baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        case "HK": baseURL = "https://cn-hongkong.aliyuncs.com/compatible-mode/v
-        default: baseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/
+        case "HK": baseURL = "https://cn-hongkong.aliyuncs.com/compatible-mode/v1"
+        default: baseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         }
         return LLMProviderConfig(
             id: "qwen", displayName: "Qwen",
@@ -107,8 +108,8 @@ enum LLMProviderSetup {
         id: "gemini", displayName: "Google Gemini",
         kind: .cloudAPI, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
-            chatURL: "https://generativelanguage.googleapis.com/v1beta/openai/ch
-            modelsURL: "https://generativelanguage.googleapis.com/v1beta/openai/
+            chatURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            modelsURL: "https://generativelanguage.googleapis.com/v1beta/openai/models"
         ),
         capabilities: [.streaming, .tools, .vision, .systemPrompt]
     )
@@ -185,7 +186,7 @@ enum LLMProviderSetup {
         id: "vLLM", displayName: "vLLM",
         kind: .remoteServer, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
-            chatURL: "http://localhost:\(LLMEndpoint.vLLMPort)/v1/chat/completio
+            chatURL: "http://localhost:\(LLMEndpoint.vLLMPort)/v1/chat/completions",
             modelsURL: "http://localhost:\(LLMEndpoint.vLLMPort)/v1/models",
             authHeader: "", authPrefix: "",
             defaultPort: LLMEndpoint.vLLMPort
@@ -200,7 +201,7 @@ enum LLMProviderSetup {
         id: "lmStudio", displayName: "LM Studio",
         kind: .localServer, apiProtocol: .openAI,
         endpoint: LLMEndpoint(
-            chatURL: "http://localhost:\(LLMEndpoint.lmStudioPort)/v1/chat/compl
+            chatURL: "http://localhost:\(LLMEndpoint.lmStudioPort)/v1/chat/completions",
             modelsURL: "http://localhost:\(LLMEndpoint.lmStudioPort)/v1/models",
             authHeader: "", authPrefix: "",
             defaultPort: LLMEndpoint.lmStudioPort

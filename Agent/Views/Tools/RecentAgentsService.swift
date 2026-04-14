@@ -1,6 +1,7 @@
 import Foundation
 
-/// Tracks recently run agent script prompts for Agents menu.
+/// Tracks recently run agent script prompts for the Agents menu.
+/// Stores agent name, arguments, and the full prompt. Auto-bumps version numbers.
 @MainActor
 final class RecentAgentsService: ObservableObject {
     static let shared = RecentAgentsService()
@@ -32,7 +33,8 @@ final class RecentAgentsService: ObservableObject {
             self.status = status
         }
 
-        /// Reconstruct the prompt with arguments for task input.
+        /// Reconstruct the prompt with arguments for the task input.
+        /// Auto-bumps version numbers (e.g. 1.0.45 → 1.0.46).
         var populatedPrompt: String {
             if arguments.isEmpty {
                 return "run \(agentName)"
@@ -99,6 +101,7 @@ final class RecentAgentsService: ObservableObject {
     }
 
     /// Remove a specific failed agent run from the menu.
+    /// Only removes the exact agentName + arguments match. Good entries stay.
     func removeRun(agentName: String, arguments: String) {
         entries.removeAll { $0.agentName == agentName && $0.arguments == arguments }
         save()

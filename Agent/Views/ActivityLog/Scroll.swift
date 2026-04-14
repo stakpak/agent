@@ -54,7 +54,8 @@ extension ActivityLogView.Coordinator {
         }
     }
 
-    /// Throttled scroll
+    /// Throttled scroll — at most once per 0.1s, skipped if user scrolled away from bottom.
+    /// Uses snap (no animation) to avoid fighting with layout during streaming.
     func throttledScrollToEnd(_ textView: NSTextView) {
         guard userIsAtBottom else { return }
         let now = CFAbsoluteTimeGetCurrent()

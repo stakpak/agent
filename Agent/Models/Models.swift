@@ -80,7 +80,8 @@ enum AgentError: Error, LocalizedError {
         case .serviceUnavailable, .xpcError:
             return true
         case .apiError(let code, _) where code >= 500 || code == 429:
-            // 5xx = server error (Anthropic 529 overloaded, OpenAI 502/503) 429
+            // 5xx = server error (Anthropic 529 overloaded, OpenAI 502/503) 429 = rate limit / overloaded — Z.ai
+            // returns this with code 1305 "service may be temporarily overloaded, please try again later" Both are transient and retryable with backoff.
             return true
         default:
             return false
@@ -88,7 +89,8 @@ enum AgentError: Error, LocalizedError {
     }
 
     var isRateLimited: Bool {
-        // 429 = standard HTTP rate limit
+        // 429 = standard HTTP rate limit (OpenAI, Z.ai, Mistral, Grok, etc.) 529 = Anthropic's "Overloaded" status —
+        // same intent as 429, used when Claude is at capacity. Treat both as rate-limited so the loop's exponential-backoff branch fires instead of the generic 10-second recoverable retry.
         if case .apiError(let code, _) = self, code == 429 || code == 529 {
             return true
         }
@@ -104,7 +106,7 @@ enum AgentError: Error, LocalizedError {
     }
 }
 
-/// Unified timeout for all LLM API requests
+/// Unified timeout for all LLM API requests (Claude, OpenAI-compatible, Ollama).
 let llmAPITimeout: TimeInterval = 10800
 
 /// Timeout for an internal tool call to start executing (seconds).
@@ -113,7 +115,7 @@ let toolStartTimeout: TimeInterval = 600
 /// Timeout for an internal tool call to finish once started (seconds).
 let toolFinishTimeout: TimeInterval = 43200
 
-/// Timeout for automation calls (Accessibility
+/// Timeout for automation calls (Accessibility, Selenium, AppleScript, JavaScript) to start (seconds).
 let automationStartTimeout: TimeInterval = 9000
 
 /// Timeout for automation calls to finish once started (seconds).
@@ -283,7 +285,7 @@ final class TaskHistory {
         }
     }
 
-    /// Use the current LLM to summarize all records into 1 entry, offloaded asy
+    /// Use the current LLM to summarize all records into 1 entry, offloaded async.
     private func summarizeWithAI(apiKey: String, model: String) {
         guard !apiKey.isEmpty else {
             fallbackSummarize()
@@ -343,7 +345,7 @@ final class TaskHistory {
         }
     }
 
-    /// Fallback if API call fails
+    /// Fallback if API call fails — just concatenate into 1 record.
     private func fallbackSummarize() {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -369,7 +371,7 @@ final class TaskHistory {
 
     /// Network request off main actor
     nonisolated private static func performSummaryRequest(bodyData: Data, apiKey: String) async throws -> String {
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") els
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { throw AgentError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -395,7 +397,7 @@ final class TaskHistory {
         save()
     }
 
-    /// Returns the last task as a user/assistant message pair so the LLM sees i
+    /// Returns the last task as a user/assistant message pair so the LLM sees it in conversation.
     func lastTaskMessages() -> [[String: Any]] {
         guard let last = records.last else { return [] }
         let formatter = DateFormatter()

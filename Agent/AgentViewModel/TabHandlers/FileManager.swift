@@ -24,7 +24,8 @@ extension AgentViewModel {
             let limit = input["limit"] as? Int
             tab.appendLog("📖 Read: \(filePath)")
             let output = await Self.offMain { CodingService.readFile(path: filePath, offset: offset, limit: limit) }
-            // Cap file output at 50K chars for LLM context
+            // Cap file output at 50K chars for LLM context — matches main task path.
+            // Eliminates chunked re-read storms on Swift source files.
             let capped = LogLimits.trim(
                 output,
                 cap: LogLimits.readFileChars,
@@ -78,7 +79,8 @@ extension AgentViewModel {
                 replaceAll: replaceAll,
                 context: context
             ) }
-            // Always invalidate read cache after edit_file
+            // Always invalidate the read cache after edit_file — on success the file changed; on failure we want the next read_file
+            // to fetch fresh in case the model's context has stale content (which is usually why the edit failed in the first place).
 
             if !output.hasPrefix("Error"), let original = originalContent {
                 DiffStore.shared.recordEdit(filePath: expandedPath, originalContent: original)
@@ -258,7 +260,8 @@ extension AgentViewModel {
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
-                // No truncation guard — d1f's structural verification + applyDi
+                // No truncation guard — d1f's structural verification + applyDiff already catch malformed
+                // diffs, and undo_edit is always available for recovery if the LLM produces something bad.
 
                 // Splice back into full file if line range
                 let finalContent: String
@@ -373,7 +376,8 @@ extension AgentViewModel {
             return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": output], isComplete: false)
 
         case "restore_file":
-            // Recover the most recent backup of a file (or a specific backup) f
+            // Recover the most recent backup of a file (or a specific backup) from
+            // ~/Documents/AgentScript/backups/<tabUUID>/. Mirrors agent_script(action:"restore").
             let filePath = input["file_path"] as? String ?? ""
             let backupName = input["backup"] as? String
             let expanded = (filePath as NSString).expandingTildeInPath

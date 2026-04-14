@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import FoundationModels
 
-/// App identifiers — single source of truth for bundle ID
+/// App identifiers — single source of truth for bundle ID, XPC services, plists, etc.
 enum AppConstants {
     static let bundleID = "Agent.app.toddbruss"
     static let subsystem = bundleID
@@ -11,7 +11,8 @@ enum AppConstants {
     static let helperPlist = "\(bundleID).helper.plist"
     static let userPlist = "\(bundleID).user.plist"
 
-    /// Preferred shell path for in-app Process() calls. Reads from UserDefaults
+    /// Preferred shell path for in-app Process() calls.
+    /// Reads from UserDefaults "agentShellPath", defaults to /bin/zsh.
     static var shellPath: String {
         UserDefaults.standard.string(forKey: "agentShellPath") ?? "/bin/zsh"
     }
@@ -19,14 +20,14 @@ enum AppConstants {
 
 extension Notification.Name {
     static let appWillQuit = Notification.Name("appWillQuit")
-    /// Posted when a tab's or main activityLog changes.
+    /// Posted when a tab's or main activityLog changes. object = tab UUID (or nil for main)
     static let activityLogDidChange = Notification.Name("activityLogDidChange")
 
     // AskUserQuestion — mid-task dialog
     static let askUserQuestion = Notification.Name("askUserQuestion")
     static let userQuestionAnswered = Notification.Name("userQuestionAnswered")
 
-    // Menu command notifications — posted by Shortcuts menu, handled by Content
+    // Menu command notifications — posted by Shortcuts menu, handled by ContentView
     static let menuToggleChevrons = Notification.Name("menuToggleChevrons")
     static let menuToggleOverlay = Notification.Name("menuToggleOverlay")
     static let menuRunTask = Notification.Name("menuRunTask")
@@ -50,7 +51,8 @@ private func post(_ name: Notification.Name) {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Initialize accessibility enabled defaults on startup This ensures the
+        // Initialize accessibility enabled defaults on startup
+        // This ensures the UserDefaults keys exist before any isRestricted() checks
         _ = AccessibilityEnabled.shared
 
         // Persist window frame across launches and tiling
@@ -60,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Insert 🦾 Agents menu on launch and on every didBecomeActive to surviv
+        // Insert 🦾 Agents menu on launch and on every didBecomeActive to survive SwiftUI menu rebuilds.
         insertAgentsMenu()
         NotificationCenter.default.addObserver(
             self,
@@ -88,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         while let idx = mainMenu.items.firstIndex(where: { $0.title.contains("Agents") }) {
             mainMenu.removeItem(at: idx)
         }
-        // Create NSMenu version and insert at position 1 (after app menu, befor
+        // Create NSMenu version and insert at position 1 (after app menu, before File)
         let agentsMenu = NSMenu(title: "🦾 Agents")
         let agentsItem = NSMenuItem(title: "🦾 Agents", action: nil, keyEquivalent: "")
         agentsItem.submenu = agentsMenu
@@ -100,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Tell the view model to stop all running tasks, MCP servers, etc.
         NotificationCenter.default.post(name: .appWillQuit, object: nil)
-        // Drain compilation queue before exit to prevent stdout deadlock with C
+        // Drain compilation queue before exit to prevent stdout deadlock with C++ static destructors.
         ScriptService.drainCompilationQueue()
         return .terminateNow
     }
@@ -116,7 +118,7 @@ struct AgentApp: App {
                     // Initialize SwiftData chat history store
                     ChatHistoryStore.shared.migrateFromUserDefaults()
 
-                    // Pre-warm Apple Intelligence model into memory for instant
+                    // Pre-warm Apple Intelligence model into memory for instant first response
                     if case .available = SystemLanguageModel.default.availability {
                         let warmupSession = LanguageModelSession()
                         warmupSession.prewarm()

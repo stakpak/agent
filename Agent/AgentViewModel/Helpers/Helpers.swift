@@ -9,6 +9,7 @@ extension AgentViewModel {
     // MARK: - Project Folder Tool
 
     /// Handle project_folder tool: get, set, home, documents, library, none.
+    /// When tab is nil, operates on the main projectFolder.
     func handleProjectFolder(tab: ScriptTab?, input: [String: Any]) -> String {
         let action = (input["action"] as? String ?? "get").lowercased()
         let home = NSHomeDirectory()
@@ -25,7 +26,7 @@ extension AgentViewModel {
             guard let path = input["path"] as? String, !path.isEmpty else {
                 return "Error: path is required for project_folder set"
             }
-            // Resolve relative paths against current project folder
+            // Resolve relative paths against current project folder (so `set xox4` works like `cd ./xox4`)
             let tabFolder = tab?.projectFolder ?? ""
             let current = tabFolder.isEmpty ? projectFolder : tabFolder
             let expanded: String
@@ -138,12 +139,13 @@ extension AgentViewModel {
 
     // MARK: - Consolidated Tool Expansion
 
-    /// / Expands consolidated CRUDL tool names (git
+    /// / Expands consolidated CRUDL tool names (git, agent, applescript_tool, javascript_tool) / into legacy tool names
+    /// so existing handlers work unchanged. / Maps short tool names to their handler names. Supports both old and new names.
     private static let toolAliases = Tool.aliases
 
     static func expandConsolidatedTool(name: String, input: [String: Any]) -> (String, [String: Any]) {
         let action = input["action"] as? String ?? ""
-        // Normalize empty/relative path to nil so handlers fall back to project
+        // Normalize empty/relative path to nil so handlers fall back to project folder
         var newInput = input
         if let p = newInput["path"] as? String, (p.isEmpty || p == "." || p == "./") { newInput["path"] = nil }
         if let p = newInput["file_path"] as? String, p.isEmpty { newInput["file_path"] = nil }
@@ -179,7 +181,8 @@ extension AgentViewModel {
             case "list_backups", "backups": return ("list_agent_backups", newInput)
             case "pull", "pull_remote", "fetch": return ("pull_agent", newInput)
             case "edit":
-                // Resolve agent script name → file_path so the model never has
+                // Resolve agent script name → file_path so the model never has to know
+                // ~/Documents/AgentScript/agents/Sources/Scripts/<name>.swift exists. Dispatch to the existing edit_file handler with the resolved path.
                 var mapped = newInput
                 if let scriptName = (newInput["name"] as? String), !scriptName.isEmpty {
                     let clean = scriptName.replacingOccurrences(of: ".swift", with: "")
@@ -204,7 +207,8 @@ extension AgentViewModel {
                  "launch_app", "launch",
                  "open_app", "open",
                  "activate_app", "activate":
-                // App lifecycle: synthesize `tell application "X" to <verb>` an
+                // App lifecycle: synthesize `tell application "X" to <verb>` and route to execute.
+                // open/launch both map to AppleScript `launch` (which opens the app without bringing it forward). Use `activa...
                 let verb: String = {
                     switch action {
                     case "launch_app", "launch", "open_app", "open": return "launch"
@@ -233,7 +237,7 @@ extension AgentViewModel {
                  "launch_app", "launch",
                  "open_app", "open",
                  "activate_app", "activate":
-                // App lifecycle: synthesize JXA `Application("X").<verb>()` and
+                // App lifecycle: synthesize JXA `Application("X").<verb>()` and route to execute.
                 let verb: String = {
                     switch action {
                     case "launch_app", "launch", "open_app", "open": return "launch"
@@ -252,7 +256,8 @@ extension AgentViewModel {
             }
 
         case "file", "file_manager":
-            // Resolve `target` + `name` to a file_path for known directories so
+            // Resolve `target` + `name` to a file_path for known directories so the model never has to know paths
+            // for system prompts / hooks. Mirrors the agent_script(action:"edit", name:X) pattern.
             if let target = newInput["target"] as? String,
                let lookupName = newInput["name"] as? String, !lookupName.isEmpty,
                newInput["file_path"] == nil
@@ -352,14 +357,16 @@ extension AgentViewModel {
             }
 
         case "accessibility", "ax":
-            // Remap "action" for perform_action and manage_app to avoid collidi
+            // Remap "action" for perform_action and manage_app to avoid colliding with the dispatch "action".
+            // Callers pass `ax_action` (perform_action) or `sub_action` (manage_app) and the handler reads `action` — we ...
             var mapped = newInput
             if let axAction = mapped["ax_action"] as? String {
                 mapped["action"] = axAction
             } else if let subAction = mapped["sub_action"] as? String {
                 mapped["action"] = subAction
             }
-            // Convenience verbs: accessibility(action:"quit_app",name:"X") rout
+            // Convenience verbs: accessibility(action:"quit_app",name:"X") routes to manage_app.
+            // open/launch are aliases — both call NSWorkspace.openApplication via manageApp.launch.
             switch action {
             case "quit_app", "quit":
                 mapped["action"] = "quit"
@@ -402,10 +409,10 @@ extension AgentViewModel {
             case "highlight_element": return ("ax_highlight_element", mapped)
             case "scroll_to_element": return ("ax_scroll_to_element", mapped)
             case "manage_app":
-                // If sub_action wasn't provided, action is still "manage_app" w
+                // If sub_action wasn't provided, action is still "manage_app" which is invalid
                 let resolvedAction = mapped["action"] as? String ?? "manage_app"
                 if resolvedAction == "manage_app" {
-                    mapped["action"] = "list" // default to list when no sub_act
+                    mapped["action"] = "list" // default to list when no sub_action given
                 }
                 return ("ax_manage_app", mapped)
             case "show_menu": return ("ax_show_menu", mapped)
@@ -429,7 +436,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Convert Any to JSONValue, handling arrays and nested objects recursively
+    /// Convert Any to JSONValue, handling arrays and nested objects recursively.
     static func toJSONValue(_ value: Any) -> JSONValue {
         if let s = value as? String { return .string(s) }
         if let i = value as? Int { return .int(i) }

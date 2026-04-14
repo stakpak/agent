@@ -1,6 +1,7 @@
 import Foundation
 
-/// Parses bundled JSON SDEF files so the LLM and AppleEventService can look...
+/// Parses bundled JSON SDEF files so the LLM and AppleEventService
+/// can look up an app's commands, classes, properties, and enums.
 final class SDEFService: @unchecked Sendable {
     static let shared = SDEFService()
 
@@ -156,11 +157,13 @@ final class SDEFService: @unchecked Sendable {
         return load(name)
     }
 
-      // MARK: - Name → Bundle ID Lookup SDEF directory is the canonical "apps A
+      // MARK: - Name → Bundle ID Lookup SDEF directory is the canonical "apps Agent knows about" list. Name→bundleID
+      // inverse map lets callers pass natural names like "Photo Booth" or "safari" and get the real bundle ID.
 
     private static let nameToBundleID: [String: String] = {
         var map: [String: String] = [:]
-        // Inverse of the SDEF bundleIDMap, keyed by lowercased canonical name A
+        // Inverse of the SDEF bundleIDMap, keyed by lowercased canonical name AND lowercased no-space variant
+        // ("photobooth" → "photo booth"). The same SDEFService instance owns the source map; we duplicate it here as a static so the lookup is O(1) and lock-free.
         let source: [String: String] = [
             "com.apple.AppleScriptUtility": "AppleScriptUtility",
             "com.apple.Automator": "Automator",
@@ -213,10 +216,11 @@ final class SDEFService: @unchecked Sendable {
             "com.apple.dt.Xcode": "Xcode",
         ]
         for (bundleID, name) in source {
-            // "SystemSettings" → "system settings", "systemsettings" also accep
+            // "SystemSettings" → "system settings", "systemsettings"
+            // also accept the camelCased form Apple AI sometimes emits
             let lower = name.lowercased()
             map[lower] = bundleID
-            // Insert spaces before capitals: "SystemSettings" → "system setting
+            // Insert spaces before capitals: "SystemSettings" → "system settings"
             var spaced = ""
             for (i, ch) in name.enumerated() {
                 if i > 0, ch.isUppercase { spaced.append(" ") }
@@ -229,7 +233,8 @@ final class SDEFService: @unchecked Sendable {
         return map
     }()
 
-    /// / Resolve a natural app name
+    /// / Resolve a natural app name (or bundle ID) to a canonical bundle ID. / Uses SDEF directory as source of truth;
+    /// returns nil if not found / (caller falls back to AccessibilityService.resolveBundleId). / Accepts: "Safari"/"safari"/"SAFARI" → com.apple.Safari, / "System Settings" → com.apple.systempreferences, bundle IDs pass through.
     func resolveBundleId(name: String?) -> String? {
         guard let raw = name else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -243,12 +248,14 @@ final class SDEFService: @unchecked Sendable {
         return nil
     }
 
-    /// / Sorted list of canonical app names from the SDEF catalog.
+    /// / Sorted list of canonical app names from the SDEF catalog. Used to / dynamically build the "apps Agent knows
+    /// about" hint we inject into / the Apple AI accessibility agent's instructions — no hardcoded list / in the prompt, the source of truth is the SDEF directory itself.
     func availableAppNames() -> [String] {
         bundleIDMap.values.sorted()
     }
 
-    /// SDEF apps + every installed .app in /Applications
+    /// SDEF apps + every installed .app in /Applications, /System/Applications, ~/Applications.
+    /// Used for Apple AI's app name recognition so it can find apps like Photo Booth, Chess, etc.
     func allInstalledAppNames() -> [String] {
         var names = Set(bundleIDMap.values)
         let dirs = [
@@ -375,6 +382,7 @@ final class SDEFService: @unchecked Sendable {
     }
 
     /// Convert SDEF space-separated name to camelCase for KVC / value(forKey:).
+    /// "current track" → "currentTrack", "AirPlay enabled" → "AirPlayEnabled"
     static func toCamelCase(_ name: String) -> String {
         let words = name.components(separatedBy: " ")
         guard let first = words.first else { return name }
@@ -383,6 +391,7 @@ final class SDEFService: @unchecked Sendable {
     }
 
     /// Lookup valid property/element keys for SDEF queries.
+    /// Returns camelCase keys the AI can use with `get`, `iterate`, etc.
     func aeKeys(for bundleID: String, className: String = "application") -> (properties: [String], elements: [String]) {
         let allClasses = classes(for: bundleID)
 

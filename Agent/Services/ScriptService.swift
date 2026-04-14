@@ -11,7 +11,8 @@ final class ScriptService: @unchecked Sendable {
     private var sourcesDir: URL { Self.agentsDir.appendingPathComponent("Sources") }
     var scriptsDir: URL { sourcesDir.appendingPathComponent("Scripts") }
 
-      /// Static accessor for scripts directory
+      /// Static accessor for the scripts directory — used by the consolidated tool
+      /// dispatcher to resolve `agent_script(action:"edit")` into a full file_path.
     static var scriptsDirURL: URL { agentsDir.appendingPathComponent("Sources/Scripts") }
 
     /// Directory for saved AppleScript files
@@ -38,22 +39,25 @@ final class ScriptService: @unchecked Sendable {
     /// Lock to prevent concurrent Package.swift modifications
     let packageLock = NSLock()
 
-    /// Serial queue for script compilation
+    /// Serial queue for script compilation (prevents concurrent swift build calls)
     nonisolated static let compilationQueue = DispatchQueue(label: "com.agent.scriptcompilation", qos: .userInitiated)
 
     // MARK: - Remote repos
 
-    private static let scriptsRepoURL = "https://github.com/macOS26/AgentScripts
-    private static let bridgesRepoURL = "https://github.com/macOS26/AgentEventBr
+    private static let scriptsRepoURL = "https://github.com/macOS26/AgentScripts.git"
+    private static let bridgesRepoURL = "https://github.com/macOS26/AgentEventBridges.git"
 
-      /// Pinned AgentScripts release tag.
+      /// Pinned AgentScripts release tag. Bump when a new release ships.
+      /// Pull/sync URLs use this tag — users get an immutable snapshot, not main HEAD.
     static let scriptsRelease = "1.0.6"
 
-    /// Pinned AgentEventBridges release tag. Same rationale as scriptsRelease
+    /// Pinned AgentEventBridges release tag. Same rationale as scriptsRelease — every
+    /// user clones the same immutable bridges snapshot rather than main HEAD.
     static let bridgesRelease = "1.1.0"
 
-      /// Raw GitHub URL prefix for pulling individual script files
-    static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/
+      /// Raw GitHub URL prefix for pulling individual script files (single-file recovery
+      /// without a full clone). Uses pinned release tag for immutability.
+    static let scriptsRawURLPrefix = "https://raw.githubusercontent.com/macOS26/AgentScripts/refs/tags/\(scriptsRelease)/Agent/agents/Sources/Scripts"
 
     /// Installed location: ~/Documents/AgentScript/bridges/
     static let installedBridgesPath: URL = {
@@ -63,6 +67,7 @@ final class ScriptService: @unchecked Sendable {
     // MARK: - Package.swift generation
 
     /// Generate a clean Package.swift from the actual files on disk.
+    /// Uses AgentEventBridges package dependency for bridge modules.
     func generatePackageSwift() {
         let fm = FileManager.default
 
@@ -76,7 +81,7 @@ final class ScriptService: @unchecked Sendable {
 
         let scriptList = scriptNames.map { "    \"\($0)\"," }.joined(separator: "\n")
 
-        // Read bridge names from the installed copy at ~/Documents/AgentScript/
+        // Read bridge names from the installed copy at ~/Documents/AgentScript/bridges/
         let bridgesPackagePath = Self.installedBridgesPath.appendingPathComponent("Sources/AgentEventBridges")
         let bridgeNames: [String] = {
             let fm = FileManager.default
@@ -92,7 +97,8 @@ final class ScriptService: @unchecked Sendable {
         import PackageDescription
         import Foundation
 
-        // Scripts compile as dynamic libraries (.dylib) loaded into Agent! via
+        // Scripts compile as dynamic libraries (.dylib) loaded into Agent! via dlopen.
+        // ScriptService adds/removes entries when scripts are created/deleted.
         let scriptNames = [
         \(scriptList)
         ]
@@ -105,7 +111,7 @@ final class ScriptService: @unchecked Sendable {
         let scripts = "Sources/Scripts"
         let bridgeNameSet = Set(bridgeNames)
 
-        // Local package dependency for shared bridges
+        // Local package dependency for shared bridges (installed at ~/Documents/AgentScript/bridges/)
         let packageDependencies: [PackageDescription.Package.Dependency] = [
             .package(name: "AgentEventBridges", path: "\(Self.installedBridgesPath.path)")
         ]
@@ -180,7 +186,7 @@ final class ScriptService: @unchecked Sendable {
 
     // MARK: - Ensure package
 
-    /// Ensure ~/Documents/AgentScript/agents/ exists with scripts and Package.s
+    /// Ensure ~/Documents/AgentScript/agents/ exists with scripts and Package.swift
     func ensurePackage() {
         packageLock.lock()
         defer { packageLock.unlock() }
@@ -188,7 +194,7 @@ final class ScriptService: @unchecked Sendable {
         let fm = FileManager.default
         let agentsPath = Self.agentsDir.path
 
-        // Migrate: rename AgentEventBridges → bridges and regenerate Package.sw
+        // Migrate: rename AgentEventBridges → bridges and regenerate Package.swift
         let oldBridgesPath = fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents/AgentScript/AgentEventBridges")
         var didMigrateBridges = false
         if fm.fileExists(atPath: oldBridgesPath.path) && !fm.fileExists(atPath: Self.installedBridgesPath.path) {
@@ -210,9 +216,10 @@ final class ScriptService: @unchecked Sendable {
         createOutputFolders()
     }
 
+
     // MARK: - JSON files
 
-    /// The parent directory ~/Documents/AgentScript/ where JSON input/output fi
+    /// The parent directory ~/Documents/AgentScript/ where JSON input/output files live
     static let agentDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent("Documents/AgentScript")
@@ -227,7 +234,8 @@ final class ScriptService: @unchecked Sendable {
         }
     }
 
-      // MARK: - Git clone AgentScripts (→ ~/Documents/AgentScript/agents/Source
+      // MARK: - Git clone AgentScripts (→ ~/Documents/AgentScript/agents/Sources/) and AgentEventBridges (→
+      // ~/Documents/AgentScript/bridges/Sources/) are cloned from their GitHub repos on first use, not bundled at build.
 
     /// Clone AgentScripts repo to ~/Documents/AgentScript/agents/
     private func cloneScriptsRepo() {
@@ -258,7 +266,8 @@ final class ScriptService: @unchecked Sendable {
         cloneBridgesRepo()
     }
 
-    /// Clone AgentEventBridges repo to ~/Documents/AgentScript/bridges/. Pinned
+    /// Clone AgentEventBridges repo to ~/Documents/AgentScript/bridges/.
+    /// Pinned to `bridgesRelease` so every user clones the same immutable snapshot.
     private func cloneBridgesRepo() {
         let dest = Self.installedBridgesPath
         let fm = FileManager.default
@@ -297,9 +306,10 @@ final class ScriptService: @unchecked Sendable {
         UserDefaults.standard.set(Array(deleted), forKey: Self.deletedScriptsKey)
     }
 
+
     // MARK: - Helpers
 
-    /// Returns true if source file has a newer modification date than destinati
+    /// Returns true if source file has a newer modification date than destination
     private func isNewer(_ src: URL, than dst: URL) -> Bool {
         let fm = FileManager.default
         guard let srcAttrs = try? fm.attributesOfItem(atPath: src.path),
@@ -337,7 +347,7 @@ final class ScriptService: @unchecked Sendable {
         return scripts.enumerated().map { "#\($0.offset + 1) \($0.element.name) (\($0.element.size) bytes)" }.joined(separator: "\n")
     }
 
-    /// Compact comma-separated list of agent names
+    /// Compact comma-separated list of agent names (for LLM context injection)
     func compactNameList() -> String {
         let names = listScripts().map { $0.name }
         guard !names.isEmpty else { return "" }

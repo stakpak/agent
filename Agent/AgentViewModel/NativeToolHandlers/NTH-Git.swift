@@ -12,6 +12,7 @@ import Cocoa
 extension AgentViewModel {
 
     /// Handles git_* tool calls plus batch_commands and wait/sleep/pause.
+    /// Returns `nil` if the name is not a git-group tool.
     func handleGitNativeTool(name: String, input: [String: Any]) async -> String? {
         let pf = projectFolder
         switch name {

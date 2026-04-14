@@ -1,4 +1,4 @@
-//  TaskExecution+WebTools.swift Agent  Web Automation tool handlers for TaskExe
+//  TaskExecution+WebTools.swift Agent  Web Automation tool handlers for TaskExecution 
 
 import Foundation
 
@@ -6,7 +6,7 @@ import Foundation
 
 extension AgentViewModel {
 
-    /// Handles web automation tool calls
+    /// Handles web automation tool calls (web_open, web_find, web_click, web_type, etc.)
     func handleWebTool(name: String, input: [String: Any]) async -> String? {
         // web_open
         switch name {
