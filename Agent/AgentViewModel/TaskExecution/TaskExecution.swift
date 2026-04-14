@@ -115,13 +115,40 @@ extension AgentViewModel {
         let mediator = AppleIntelligenceMediator.shared
         var appleAIAnnotations: [AppleIntelligenceMediator.Annotation] = []
 
-        // No pre-LLM triage. The main task, like tab tasks, goes straight to the
-        // configured cloud LLM. Apple-AI accessibility / direct-command routing
-        // was stalling runs with zero user-visible activity and no network bytes
-        // between the user prompt and the '🧠' line. `mediator` is kept for
-        // post-run annotations (suggestNextSteps) only.
-        appendLog(cloudModelLogLine)
-        flushLog()
+        // ! or !apple prefix bypasses Apple AI triage — sends prompt straight to cloud LLM
+        let appleBypass = rawPrompt.hasPrefix("\u{F8FF}") || rawPrompt.lowercased().hasPrefix("!apple ")
+        if appleBypass {
+            appendLog("⏭ Apple AI bypassed")
+            appendLog(cloudModelLogLine)
+            flushLog()
+        } else {
+            // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM.
+            let triageResult = await mediator.triagePrompt(prompt, axDispatch: { [weak self] args in
+                guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
+                var input: [String: Any] = ["action": args.action]
+                if let role = args.role { input["role"] = role }
+                if let title = args.title { input["title"] = title }
+                if let rawApp = args.app {
+                    let resolved = SDEFService.shared.resolveBundleId(name: rawApp) ?? rawApp
+                    input["appBundleId"] = resolved
+                    input["app"] = resolved
+                }
+                if let text = args.text { input["text"] = text }
+                return await self.executeNativeTool("accessibility", input: input)
+            }, runAgent: { [weak self] args in
+                guard let self else { return "error: agent deallocated" }
+                let success = await self.runAgentDirect(name: args.name, arguments: args.arguments ?? "")
+                return success ? "Launched agent '\(args.name)'" : "Agent '\(args.name)' not found"
+            }, appendLog: { [weak self] msg in self?.appendLog(msg) }, projectFolder: projectFolder)
+            let triageOutcome = await handleTriageOutcome(
+                triageResult,
+                prompt: prompt,
+                cloudModelLogLine: cloudModelLogLine,
+                messages: &messages,
+                completionSummary: &completionSummary
+            )
+            if case .completed = triageOutcome { return }
+        }
 
         // Apple Intelligence context injection removed — was confusing LLMs at task start
         // Apple AI still runs on task_complete to summarize results for the user

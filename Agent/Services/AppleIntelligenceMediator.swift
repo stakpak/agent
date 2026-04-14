@@ -13,9 +13,6 @@ final class AppleIntelligenceMediator: ObservableObject {
     private static let startTimeout: TimeInterval = 1
     /// Timeout for Apple Intelligence to finish once started (seconds).
     private static let finishTimeout: TimeInterval = 2
-    /// Hard upper bound on any single Apple AI call — matches the "Apple AI
-    /// gets 5s to respond" rule so a stuck session never blocks a task.
-    private static let overallTimeout: TimeInterval = 5
 
     /// Maximum context window size — reads dynamically from the on-device model (macOS 26.4+).
     /// Falls back to 4096 if the model isn't available yet.
@@ -654,10 +651,8 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
         accessibilityAgentLastMessage = message
 
-        // Hard 5s cap on the whole accessibility-agent respond(to:) call so a
-        // stalled Apple-AI session never freezes a task — covers cold-start stalls
-        // where no tokens ever arrive.
-        let timeoutSeconds: TimeInterval = Self.overallTimeout
+        // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
+        let timeoutSeconds: TimeInterval = 30
         do {
             let content: String = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {
