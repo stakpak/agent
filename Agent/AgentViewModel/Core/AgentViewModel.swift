@@ -70,8 +70,8 @@ final class AgentViewModel {
     var thinkingOutputExpanded: Bool = UserDefaults.standard.object(forKey: "thinkingOutputExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(thinkingOutputExpanded, forKey: "thinkingOutputExpanded") }
     }
-    /// / Expanded state of the Steps (tool calls) disclosure inside the LLM / Output HUD on the main tab. Persisted
-    /// across launches and across / Cmd+B hide/show cycles so newly arriving steps don't collapse the list.
+    /// Expanded state of the Steps (tool calls) disclosure inside the LLM / Output HUD.
+    /// Persisted across launches and Cmd+B hide/show so newly arriving steps don't collapse the list.
     var toolStepsExpanded: Bool = UserDefaults.standard.object(forKey: "toolStepsExpanded") as? Bool ?? false {
         didSet { UserDefaults.standard.set(toolStepsExpanded, forKey: "toolStepsExpanded") }
     }
@@ -619,7 +619,7 @@ final class AgentViewModel {
     var streamingTextStarted = false
     var recentOutputHashes: Set<Int> = []
 
-    // MARK: - Image snapshot cache (persists across launches)
+    // MARK: - Image snapshot cache
 
     static let logImageCacheDir: URL = {
         guard let caches = FileManager.default.urls(
@@ -676,12 +676,12 @@ final class AgentViewModel {
         activityLog = ScriptTab.trimLog(activityLog)
         CodeBlockTheme.updateAppearance()
         TerminalNeoTheme.updateAppearance()
-        // Restore ~/Documents/AgentScript/ folder and bundled resources if missing (off main thread)
+        // Restore ~/Documents/AgentScript/ and bundled resources if missing (off main thread)
         Task.detached { [scriptService = self.scriptService] in
             scriptService.ensurePackage()
             scriptService.rebuildAllMetadata()
-            // After ensurePackage, refresh upstream-bundled scripts when Agent! has been upgraded since the last sync.
-            // User-authored scripts are never touched, and any modified bundled script is backed up to .Trash before replacement.
+            // Refresh upstream-bundled scripts when Agent! has been upgraded since last sync.
+            // User-authored scripts are never touched; modified bundled scripts are backed up to .Trash.
             await scriptService.syncBundledScriptsFromRemote()
             let names = Set(scriptService.listScripts().map { $0.name.lowercased() })
             await MainActor.run { AppleIntelligenceMediator.knownAgentNames = names }
