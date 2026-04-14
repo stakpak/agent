@@ -155,16 +155,31 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Build context string for the session instructions (fits within ~4096 token window)
-    /// System instructions for Apple AI. Only sees the current user prompt — no history.
+    /// System instructions for Apple AI. Injects previous turn so "again" / "do it again" resolves.
     private func buildContextInstructions() -> String {
+        var contextBlock = ""
+        if let prev = lastUserPrompt, !prev.isEmpty {
+            contextBlock += "\nPrevious conversation:"
+            contextBlock += "\n- User said: \"\(prev)\""
+            if let aiMsg = lastAppleAIMessage, !aiMsg.isEmpty {
+                contextBlock += "\n- Assistant annotated: \"\(aiMsg)\""
+            }
+            if let llmResp = lastLLMResponse, !llmResp.isEmpty {
+                let snippet = String(llmResp.prefix(300))
+                contextBlock += "\n- AI responded: \"\(snippet)\""
+            }
+            contextBlock += "\n\nNow the user says something new. Resolve pronouns and vague references using the previous conversation."
+        }
         return """
         You rephrase user requests to help an AI assistant understand them better. You are a middleman, NOT a gatekeeper.
+        \(contextBlock)
 
         Rules:
         - NEVER refuse, block, or judge a request. You do NOT decide what is allowed.
         - Reply with 1 sentence only. Never multiple lines.
         - Rephrase or add brief context to clarify the user's intent for the AI.
-        - If the request is already clear, reply with nothing.
+        - If the request references a previous action (e.g. "again", "do it again", "same thing"), expand it to the full action.
+        - If the request is already clear and self-contained, reply with nothing.
         - Never include tags, labels, or prefixes like [AI], LLM:, User:, CLEAR, etc.
         - NEVER change agent names, tool names, script names, or identifiers.
         - Just give the plain helpful text. Nothing else.
