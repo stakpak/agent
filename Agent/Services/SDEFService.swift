@@ -254,6 +254,27 @@ final class SDEFService: @unchecked Sendable {
         bundleIDMap.values.sorted()
     }
 
+    /// SDEF apps + every installed .app in /Applications, /System/Applications, ~/Applications.
+    /// Used for Apple AI's app name recognition so it can find apps like Photo Booth, Chess, etc.
+    func allInstalledAppNames() -> [String] {
+        var names = Set(bundleIDMap.values)
+        let dirs = [
+            "/Applications",
+            "/System/Applications",
+            "/System/Applications/Utilities",
+            NSHomeDirectory() + "/Applications"
+        ]
+        for dir in dirs {
+            if let files = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+                for file in files where file.hasSuffix(".app") {
+                    let name = (file as NSString).deletingPathExtension
+                    names.insert(name)
+                }
+            }
+        }
+        return names.sorted()
+    }
+
     // MARK: - Queries
 
     /// List all available SDEF names.

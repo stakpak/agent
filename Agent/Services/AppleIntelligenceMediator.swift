@@ -632,7 +632,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         }
 
         // Apple AI's ~4096-token window requires terse instructions. Known apps from SDEFService; unknowns fall back to NSRunningApplications scan.
-        let knownApps = SDEFService.shared.availableAppNames().joined(separator: ", ")
+        let knownApps = SDEFService.shared.allInstalledAppNames().joined(separator: ", ")
         let instructions = Instructions("""
         You have 3 tools: accessibility (UI clicks/types), applescript (Finder/app automation), shell (CLI commands).
 
@@ -642,15 +642,19 @@ final class AppleIntelligenceMediator: ObservableObject {
         - click buttons, type text, open apps by name → accessibility
         - ls, git, find, any CLI → shell
 
-        ACCESSIBILITY: Use the EXACT app name from the user's request. \
-        Roles: AXButton, AXTextField, AXLink, AXMenuItem. \
-        Known apps: \(knownApps)
+        ACCESSIBILITY RULES:
+        1. App names like "photobooth", "photo booth" → Photo Booth (the app). Match the name to an app in the known list below — normalize spacing/case.
+        2. NEVER put an app name in the `title` field. App goes in `app`, button/menu name goes in `title`.
+        3. To perform an action IN an app, first open_app(app:"<App Name>"), then click_element(app:"<App Name>", title:"<button name>").
+        4. "Take a photo using Photo Booth" → open_app(app:"Photo Booth"), then click_element(app:"Photo Booth", title:"Take Picture").
+        5. Roles: AXButton, AXTextField, AXLink, AXMenuItem.
+        6. Known apps: \(knownApps)
 
         APPLESCRIPT: tell application "Finder" to open POSIX file "/path"
 
         SHELL: open /path, ls, git status, etc.
 
-        Reply with 1 sentence after tool calls succeed.
+        After tool calls succeed, reply with 1 sentence describing what happened.
         """)
 
         let scriptTool = AppleScriptAppleTool { source in
