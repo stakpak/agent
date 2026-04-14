@@ -520,11 +520,20 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
-    /// Quick pattern check for "run agent X" style requests.
+    /// Quick pattern check for "run agent X" style requests — strict match only.
+    /// Only triggers on "run agent {name}" or "run agent {number}" (with optional "the" / quotes).
     static func looksLikeRunAgentRequest(_ message: String) -> Bool {
         let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return lower.hasPrefix("run agent ") || lower.hasPrefix("agent run ")
-            || lower.contains(" run agent ") || lower.contains(" the agent ")
+        // Match: "run agent Foo", "run the agent Foo", "run agent 5", "run the agent 5"
+        // Also: "agent run Foo" variant
+        let runAgentPattern = #"run\s+(?:the\s+)?agent\s+\S+"#
+        let agentRunPattern = #"agent\s+run\s+\S+"#
+        guard let runAgentRegex = try? NSRegularExpression(pattern: runAgentPattern),
+              let agentRunRegex = try? NSRegularExpression(pattern: agentRunPattern)
+        else { return false }
+        let range = NSRange(lower.startIndex..., in: lower)
+        return runAgentRegex.firstMatch(in: lower, range: range) != nil
+            || agentRunRegex.firstMatch(in: lower, range: range) != nil
     }
 
     func runAccessibilityAgent(
@@ -860,12 +869,12 @@ struct RunAgentArgs: Sendable {
 struct RunAgentAppleTool: FoundationModels.Tool {
     typealias Output = String
     let name = "run_agent"
-    let description = "Run a user-defined agent script by name. ONLY use when the user explicitly " +
-        "says 'run agent X', 'run the X agent', or 'run X agent'. Do NOT use for editing code, " +
-        "creating files, applying diffs, building projects, or any other task — those are NOT agent " +
-        "scripts. If the user mentions a tool name like 'diff_apply', 'edit_file', 'write_file', " +
-        "'xcode', etc. that is a cloud LLM tool, NOT an agent script. Reply 'action not performed' " +
-        "and the cloud LLM will handle it."
+    let description = "Run a user-defined agent script by name or number. ONLY invoke when the user's " +
+        "message contains the exact phrase 'run agent' followed by a name or number " +
+        "(e.g. 'run agent ArchiveXcode', 'run agent 3', 'run the agent CreateDmg'). " +
+        "If the user does NOT say 'run agent', do NOT use this tool. " +
+        "Tool names like diff_apply, edit_file, xcode, git, write_file are NOT agent scripts — " +
+        "reply 'action not performed' and the cloud LLM will handle them."
 
     let dispatch: @Sendable (RunAgentArgs) async -> String
 
