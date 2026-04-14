@@ -269,11 +269,14 @@ struct ContentView: View {
                     return nil
                 }
 
-                // Intercept Cmd+V for image paste
+                // Intercept Cmd+V for image paste or long-text attachment
                 if event.modifierFlags.contains(.command),
                    event.charactersIgnoringModifiers == "v"
                 {
                     if viewModel.pasteImageFromClipboard() {
+                        return nil
+                    }
+                    if viewModel.pasteLongTextAsAttachment() {
                         return nil
                     }
                 }

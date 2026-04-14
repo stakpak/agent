@@ -14,7 +14,10 @@ extension AgentViewModel {
 
     /// Start an LLM task on a specific script tab.
     func runTabTask(tab: ScriptTab) {
-        let task = tab.taskInput.trimmingCharacters(in: .whitespaces)
+        let typed = tab.taskInput.trimmingCharacters(in: .whitespaces)
+        // Merge long-text attachments (captured via Cmd+V chips) into the prompt.
+        let task = Self.mergePastedTexts(tab.pastedTexts, into: typed)
+        tab.pastedTexts.removeAll()
         guard !task.isEmpty else { return }
 
         // Handle /memory in tab context

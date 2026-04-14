@@ -11,7 +11,40 @@ struct InputSectionView: View {
 
     var body: some View {
         if let tab = selectedTab {
-            // Tab input
+            VStack(alignment: .leading, spacing: 4) {
+                pastedTextChips(tab: tab)
+                tabInputRow(tab: tab)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .bottom) {
+                suggestionsDropdown
+                    .offset(y: -55)
+            }
+            .onDrop(of: [.fileURL, .text], isTargeted: nil) { providers in
+                handleDrop(providers, tab: tab)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                pastedTextChips(tab: nil)
+                mainInputRow
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .bottom) {
+                suggestionsDropdown
+                    .offset(y: -55)
+            }
+            .onDrop(of: [.fileURL, .text], isTargeted: nil) { providers in
+                handleDrop(providers, tab: nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tabInputRow(tab: ScriptTab) -> some View {
             HStack {
                 inputButtons
 
@@ -117,18 +150,10 @@ struct InputSectionView: View {
                     }
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .overlay(alignment: .bottom) {
-                suggestionsDropdown
-                    .offset(y: -55)
-            }
-            .onDrop(of: [.fileURL, .text], isTargeted: nil) { providers in
-                handleDrop(providers, tab: tab)
-            }
-        } else {
-            // Main tab input
+    }
+
+    @ViewBuilder
+    private var mainInputRow: some View {
             HStack {
                 inputButtons
 
@@ -218,17 +243,6 @@ struct InputSectionView: View {
                         }
                     }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .overlay(alignment: .bottom) {
-                suggestionsDropdown
-                    .offset(y: -55)
-            }
-            .onDrop(of: [.fileURL, .text], isTargeted: nil) { providers in
-                handleDrop(providers, tab: nil)
-            }
-        }
     }
 
     // MARK: - Current Input Binding
@@ -368,6 +382,56 @@ struct InputSectionView: View {
             }
         }
         return false
+    }
+
+    // MARK: - Pasted Text Chips
+
+    /// Row of removable chips for long-text attachments captured on Cmd+V.
+    @ViewBuilder
+    private func pastedTextChips(tab: ScriptTab?) -> some View {
+        let items: [PastedText] = tab?.pastedTexts ?? viewModel.pastedTexts
+        if !items.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(items) { item in
+                        pastedTextChip(item, tab: tab)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pastedTextChip(_ item: PastedText, tab: ScriptTab?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.plaintext")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text("Pasted text")
+                .font(.caption)
+            Text("\(item.text.count.formatted()) chars")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Button {
+                if let tab {
+                    tab.pastedTexts.removeAll { $0.id == item.id }
+                } else {
+                    viewModel.pastedTexts.removeAll { $0.id == item.id }
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove attachment")
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(Color.accentColor.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
     }
 
     private var inputButtons: some View {

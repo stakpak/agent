@@ -475,6 +475,10 @@ final class AgentViewModel {
     var attachedImages: [NSImage] = []
     var attachedImagesBase64: [String] = []
 
+    /// Long pasted text — captured as chips above the TextField instead of
+    /// inlined into SwiftUI's TextField (which stalls on huge content).
+    var pastedTexts: [PastedText] = []
+
     /// Force vision mode for all providers (for testing image sending)
     var forceVision: Bool = UserDefaults.standard.bool(forKey: "agentForceVision") {
         didSet { UserDefaults.standard.set(forceVision, forKey: "agentForceVision") }

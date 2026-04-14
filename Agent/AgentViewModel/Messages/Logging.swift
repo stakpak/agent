@@ -193,6 +193,30 @@ extension AgentViewModel {
         return true
     }
 
+    /// Threshold above which a pasted string is captured as a chip attachment
+    /// rather than inserted into the TextField (SwiftUI TextField stalls on
+    /// very long content).
+    static let pastedTextAttachmentThreshold = 2000
+
+    /// If the clipboard holds a plain string longer than the threshold, attach
+    /// it as a chip on the active tab (or the main viewModel) and return true
+    /// so the Cmd+V handler swallows the event. Short strings fall through to
+    /// default paste.
+    @discardableResult
+    func pasteLongTextAsAttachment() -> Bool {
+        let pb = NSPasteboard.general
+        guard let text = pb.string(forType: .string), text.count >= Self.pastedTextAttachmentThreshold else {
+            return false
+        }
+        let attachment = PastedText(text)
+        if let tabId = selectedTabId, let tab = self.tab(for: tabId) {
+            tab.pastedTexts.append(attachment)
+        } else {
+            pastedTexts.append(attachment)
+        }
+        return true
+    }
+
     /// Encode image data to a base64 PNG string off the main thread.
     /// Downscales images larger than 2048px to prevent memory issues.
     private static nonisolated func encodeImageToBase64(_ data: Data) async -> String? {

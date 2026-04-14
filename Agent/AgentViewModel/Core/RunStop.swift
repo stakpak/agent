@@ -61,7 +61,10 @@ extension AgentViewModel {
     // MARK: - Run / Stop
 
     func run() {
-        let task = taskInput.trimmingCharacters(in: .whitespaces)
+        let typed = taskInput.trimmingCharacters(in: .whitespaces)
+        // Merge long-text attachments (captured via Cmd+V chips) into the prompt.
+        let task = Self.mergePastedTexts(pastedTexts, into: typed)
+        pastedTexts.removeAll()
         guard !task.isEmpty else { return }
 
         // Handle /clear commands
@@ -269,4 +272,16 @@ extension AgentViewModel {
         persistScriptTabs()
     }
 
+    /// Compose the final prompt by prepending each pasted-text attachment as a
+    /// fenced block, followed by the typed prompt. If there are no attachments,
+    /// returns `typed` unchanged.
+    static func mergePastedTexts(_ attachments: [PastedText], into typed: String) -> String {
+        guard !attachments.isEmpty else { return typed }
+        var parts: [String] = []
+        for (idx, att) in attachments.enumerated() {
+            parts.append("[Pasted text #\(idx + 1)]\n\(att.text)")
+        }
+        if !typed.isEmpty { parts.append(typed) }
+        return parts.joined(separator: "\n\n")
+    }
 }

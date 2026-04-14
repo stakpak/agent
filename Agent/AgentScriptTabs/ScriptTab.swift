@@ -1,6 +1,17 @@
 import Foundation
 import AppKit
 
+/// A chunk of long text pasted into the task input. Rendered as a removable
+/// chip above the TextField; prepended to the prompt at task-run time.
+struct PastedText: Identifiable, Equatable {
+    let id: UUID
+    let text: String
+    init(_ text: String) {
+        self.id = UUID()
+        self.text = text
+    }
+}
+
 /// Thread-safe boolean flag for cross-thread cancellation checks.
 final class AtomicFlag: @unchecked Sendable {
     private let lock = NSLock()
@@ -114,6 +125,13 @@ final class ScriptTab: Identifiable {
 
     var attachedImages: [NSImage] = []
     var attachedImagesBase64: [String] = []
+
+    // MARK: - Per-Tab Pasted Text Attachments
+
+    /// Long text pastes are captured as attachments (chips) instead of being
+    /// inserted inline into the TextField — SwiftUI's TextField beach-balls
+    /// on very long content. Prepended to the prompt when the task runs.
+    var pastedTexts: [PastedText] = []
 
     // LLM streaming state
     var llmStreamBuffer: String = ""
