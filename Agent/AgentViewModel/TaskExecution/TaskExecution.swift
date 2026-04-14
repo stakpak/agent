@@ -174,6 +174,28 @@ extension AgentViewModel {
         taskLoop: while !Task.isCancelled {
             iterations += 1
 
+            // Iteration cap — the LLM can loop forever calling tools without ever
+            // invoking task_complete (common with smaller/local models). Enforce a
+            // hard stop one turn after a "wrap up" nudge.
+            if iterations == maxIterations {
+                appendLog("⏱ Iteration \(iterations)/\(maxIterations) — nudging LLM to call task_complete")
+                flushLog()
+                messages.append([
+                    "role": "user",
+                    "content": "You have reached the iteration limit. Call task_complete with a summary of what you accomplished on your next turn. This is your last chance — no more tool calls."
+                ])
+            }
+            if iterations > maxIterations {
+                let summary = completionSummary.isEmpty
+                    ? (commandsRun.isEmpty ? "(no actions — iteration cap reached)" : "Forced completion after \(iterations - 1) iterations. Last actions: \(commandsRun.suffix(5).joined(separator: ", "))")
+                    : completionSummary
+                completionSummary = summary
+                appendLog("⏱ Forced task_complete — hit iteration cap (\(maxIterations))")
+                appendLog("✅ Completed: \(summary)")
+                flushLog()
+                break taskLoop
+            }
+
             // No prompt tiering and no mode auto-switching: every turn sends the full system prompt with full tool
             // descriptions, filtered only by the user's UI toggles in ToolPreferencesService.
 

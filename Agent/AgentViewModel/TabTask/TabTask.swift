@@ -181,6 +181,26 @@ extension AgentViewModel {
         mainLoop: while !Task.isCancelled {
             iterations += 1
 
+            // Iteration cap — force task_complete when the LLM refuses to end.
+            if iterations == maxIterations {
+                tab.appendLog("⏱ Iteration \(iterations)/\(maxIterations) — nudging LLM to call task_complete")
+                tab.flush()
+                messages.append([
+                    "role": "user",
+                    "content": "You have reached the iteration limit. Call task_complete with a summary of what you accomplished on your next turn. This is your last chance — no more tool calls."
+                ])
+            }
+            if iterations > maxIterations {
+                let summary = completionSummary.isEmpty
+                    ? (commandsRun.isEmpty ? "(no actions — iteration cap reached)" : "Forced completion after \(iterations - 1) iterations. Last actions: \(commandsRun.suffix(5).joined(separator: ", "))")
+                    : completionSummary
+                completionSummary = summary
+                tab.appendLog("⏱ Forced task_complete — hit iteration cap (\(maxIterations))")
+                tab.appendLog("✅ Completed: \(summary)")
+                tab.flush()
+                break mainLoop
+            }
+
             // Mode auto-switching removed: every user-enabled tool is available on
             // every turn. ToolPreferencesService UI toggles are the only filter.
 
