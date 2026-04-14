@@ -624,9 +624,19 @@ final class AppleIntelligenceMediator: ObservableObject {
             tracker.recordOutput(result)
             await appendLog("🍎 → \(String(result.prefix(300)))")
             let lower = result.lowercased()
-            if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false")
-                || lower.contains("no element") || lower.contains("timed out") || lower.contains("not running") {
-                tracker.markFailed()
+            // find_element is exploratory — a miss just means "try a different query", not a fatal error.
+            // Only mark the run as failed if a definitive action (click/type/open) failed.
+            let isFindAction = args.action.lowercased().contains("find")
+            if !isFindAction {
+                if lower.contains("error") || lower.contains("not found") || lower.contains("\"success\":false")
+                    || lower.contains("no element") || lower.contains("timed out") || lower.contains("not running") {
+                    tracker.markFailed()
+                }
+            } else {
+                // Even for find_element, track if something is fundamentally broken (app not running)
+                if lower.contains("not running") || lower.contains("not launched") {
+                    tracker.markFailed()
+                }
             }
             return result
         }
@@ -645,10 +655,11 @@ final class AppleIntelligenceMediator: ObservableObject {
         ACCESSIBILITY RULES:
         1. App names like "photobooth", "photo booth" → Photo Booth (the app). Match the name to an app in the known list below — normalize spacing/case.
         2. NEVER put an app name in the `title` field. App goes in `app`, button/menu name goes in `title`.
-        3. To perform an action IN an app, first open_app(app:"<App Name>"), then click_element(app:"<App Name>", title:"<button name>").
-        4. "Take a photo using Photo Booth" → open_app(app:"Photo Booth"), then click_element(app:"Photo Booth", title:"Take Picture").
-        5. Roles: AXButton, AXTextField, AXLink, AXMenuItem.
-        6. Known apps: \(knownApps)
+        3. To perform an action IN an app: first open_app(app:"<App Name>"), then use find_element to discover the real button label, then click_element with the exact label.
+        4. ALWAYS discover button labels first: find_element(app:"<App>", role:"AXButton", title:"<guess>") returns the actual AXTitle/AXDescription. Use the EXACT title returned — buttons often have unexpected labels (e.g. Photo Booth's camera button is "take photo" NOT "Take Picture").
+        5. If click_element fails with "not found", retry with find_element using a PARTIAL title or just the role to list available buttons, then click with the exact label.
+        6. Roles: AXButton, AXTextField, AXLink, AXMenuItem.
+        7. Known apps: \(knownApps)
 
         APPLESCRIPT: tell application "Finder" to open POSIX file "/path"
 
@@ -681,7 +692,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         let session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
 
         // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
-        let timeoutSeconds: TimeInterval = 15
+        let timeoutSeconds: TimeInterval = 30
         do {
             let content: String = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {
@@ -920,9 +931,11 @@ struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
 
     let name = "accessibility"
-    let description = "Click, type, scroll, or open Mac UI elements via the macOS Accessibility API. " +
+    let description = "Click, type, scroll, find, or open Mac UI elements via the macOS Accessibility API. " +
         "Every action takes role+title+app (use the natural app name the user said, verbatim), never coordinates. " +
-        "For multi-step requests, call this tool multiple times in order — first open_app, then click_element."
+        "DISCOVERY PATTERN: when clicking a button, first use find_element with a partial title guess to discover the " +
+        "real button label (returned as AXTitle/AXDescription), then click_element with the exact label. " +
+        "Button names often differ from user expectations (e.g. Photo Booth's photo button is 'take photo' not 'Take Picture')."
 
     /// Closure that performs the accessibility action. Injected by the caller so the tool doesn't reference AgentViewModel.
     let dispatch: @Sendable (AccessibilityArgs) async -> String
