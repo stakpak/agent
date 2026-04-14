@@ -294,9 +294,14 @@ extension AgentViewModel {
     func appendRawOutput(_ text: String) {
         guard !text.isEmpty else { return }
         let cached = snapshotImages(in: text)
-        ChatHistoryStore.shared.appendMessage(cached)
-        logBuffer += cached
-        if !cached.hasSuffix("\n") {
+        // Ensure first line starts on its own line so it doesn't run into a timestamp prefix
+        var output = cached
+        if !logBuffer.hasSuffix("\n") && !output.hasPrefix("\n") {
+            output = "\n" + output
+        }
+        ChatHistoryStore.shared.appendMessage(output)
+        logBuffer += output
+        if !logBuffer.hasSuffix("\n") {
             logBuffer += "\n"
         }
         scheduleLogFlush()

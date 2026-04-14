@@ -273,8 +273,10 @@ final class XcodeService: @unchecked Sendable {
             guard let message = issue.message else { continue }
 
             if let filePath = issue.filePath,
+               !filePath.isEmpty,
                let startLine = issue.startingLineNumber,
-               let col = issue.startingColumnNumber
+               let col = issue.startingColumnNumber,
+               startLine > 0
             {
                 let endLine = issue.endingLineNumber ?? startLine
                 output += "\(filePath):\(startLine):\(col) [\(type)] \(message)\n"
