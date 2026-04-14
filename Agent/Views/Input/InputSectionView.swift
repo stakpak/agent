@@ -404,40 +404,49 @@ struct InputSectionView: View {
 
     @ViewBuilder
     private func pastedTextChip(_ item: PastedText, tab: ScriptTab?) -> some View {
-        let (head, tail) = Self.chipPreview(for: item.text, edge: 24)
-        HStack(spacing: 6) {
-            Image(systemName: "doc.plaintext")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Text("Pasted text")
-                .font(.caption)
-            Text("\(item.text.count.formatted()) chars")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("\(head) … \(tail)")
+        let (head, tail) = Self.chipPreview(for: item.text, edge: 48)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.plaintext")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("Pasted text")
+                    .font(.caption)
+                Text("\(item.text.count.formatted()) chars")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Button {
+                    if let tab {
+                        tab.pastedTexts.removeAll { $0.id == item.id }
+                    } else {
+                        viewModel.pastedTexts.removeAll { $0.id == item.id }
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove attachment")
+            }
+            Text(head.isEmpty ? " " : head)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
-            Button {
-                if let tab {
-                    tab.pastedTexts.removeAll { $0.id == item.id }
-                } else {
-                    viewModel.pastedTexts.removeAll { $0.id == item.id }
-                }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Remove attachment")
+                .truncationMode(.tail)
+            Text(tail.isEmpty ? " " : "… \(tail)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .frame(minWidth: 220, maxWidth: 360, alignment: .leading)
         .background(Color.accentColor.opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
         .help("\(head)\n…\n\(tail)")
     }
 
