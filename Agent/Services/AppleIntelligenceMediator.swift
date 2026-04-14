@@ -593,10 +593,12 @@ final class AppleIntelligenceMediator: ObservableObject {
         let instructions = Instructions("""
         You have TWO tools: accessibility (UI clicks/types/opens apps) and run_agent (runs user-defined agent scripts).
 
-        TOOL SELECTION:
-        - "run agent X" / "run the X agent" → run_agent(name: "X")
-        - clicking buttons, typing text, opening apps → accessibility
-        - anything else → reply "action not performed" and the cloud LLM will handle it.
+        TOOL SELECTION — follow these rules IN ORDER:
+        1. ONLY use run_agent when the user LITERALLY says "run agent X", "run the X agent", or "run X agent" — the word "run" must appear with "agent".
+        2. clicking buttons, typing text, opening apps → accessibility tool.
+        3. ALL other requests (editing code, applying diffs, building projects, creating files, searching, git, xcode, writing scripts, etc.) → reply EXACTLY "action not performed" so the cloud LLM handles them. Do NOT try to map tool names to run_agent.
+
+        CRITICAL: "diff_apply", "edit_file", "write_file", "xcode", "git", "search" etc. are CLOUD LLM tools, NOT agent scripts. NEVER pass them to run_agent.
 
         ACCESSIBILITY RULES:
         1. App names like "photobooth", "photo booth" → Photo Booth (the app). Match the name to an app in the known list below — normalize spacing/case.
@@ -858,9 +860,12 @@ struct RunAgentArgs: Sendable {
 struct RunAgentAppleTool: FoundationModels.Tool {
     typealias Output = String
     let name = "run_agent"
-    let description = "Run a user-defined agent script by name. Use when the user says 'run agent X' " +
-        "or 'run the X agent'. Returns a confirmation that the agent was launched. " +
-        "The agent runs in its own tab — you don't wait for it to finish."
+    let description = "Run a user-defined agent script by name. ONLY use when the user explicitly " +
+        "says 'run agent X', 'run the X agent', or 'run X agent'. Do NOT use for editing code, " +
+        "creating files, applying diffs, building projects, or any other task — those are NOT agent " +
+        "scripts. If the user mentions a tool name like 'diff_apply', 'edit_file', 'write_file', " +
+        "'xcode', etc. that is a cloud LLM tool, NOT an agent script. Reply 'action not performed' " +
+        "and the cloud LLM will handle it."
 
     let dispatch: @Sendable (RunAgentArgs) async -> String
 
