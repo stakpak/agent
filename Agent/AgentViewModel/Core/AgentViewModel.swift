@@ -548,6 +548,10 @@ final class AgentViewModel {
         didSet { restoreProviderFromActiveTab() }
     }
 
+    /// Re-entrancy guard: true while restoreProviderFromActiveTab is mid-flight so the
+    /// chained selectedProvider.didSet doesn't overwrite the tab's user-picked model.
+    var isRestoringProviderFromTab: Bool = false
+
     /// O(1) tab lookup by UUID
     private var tabsByID: [UUID: ScriptTab] = [:]
 

@@ -268,6 +268,10 @@ extension AgentViewModel {
                 sessionInputTokens += inTok
                 sessionOutputTokens += outTok
                 TokenUsageStore.shared.record(inputTokens: inTok, outputTokens: outTok)
+                TokenUsageStore.shared.recordModelUsage(
+                    model: modelId, input: inTok, output: outTok, provider: provider.displayName,
+                    tabId: tab.id, tabLabel: tab.displayTitle
+                )
                 FallbackChainService.shared.recordSuccess()
                 let streamElapsed = CFAbsoluteTimeGetCurrent() - streamStart
                 tab.lastElapsed = streamElapsed
@@ -302,7 +306,7 @@ extension AgentViewModel {
                     history.add(
                         TaskRecord(prompt: prompt, summary: completionSummary, commandsRun: commandsRun),
                         maxBeforeSummary: maxHistoryBeforeSummary, apiKey: apiKey,
-                        model: selectedModel
+                        model: modelId
                     )
                     tab.isLLMRunning = false
                     tab.isLLMThinking = false

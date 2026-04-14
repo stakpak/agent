@@ -92,7 +92,9 @@ extension AgentViewModel {
     }
 
     /// Push global provider/model change into the active tab's LLMConfig.
+    /// Skipped while a restore-from-tab is in flight so the tab's user-picked model isn't clobbered.
     func syncProviderToActiveTab() {
+        if isRestoringProviderFromTab { return }
         guard let tabId = selectedTabId, let tab = tab(for: tabId), tab.isMainTab else { return }
         let model = globalModelForProvider(selectedProvider)
         tab.llmConfig = LLMConfig(provider: selectedProvider, model: model, displayName: tab.scriptName)
@@ -104,9 +106,10 @@ extension AgentViewModel {
         guard let tabId = selectedTabId,
               let tab = tab(for: tabId),
               let config = tab.llmConfig else { return }
-        // Suppress the didSet re-sync by checking if already correct
         if selectedProvider != config.provider {
+            isRestoringProviderFromTab = true
             selectedProvider = config.provider
+            isRestoringProviderFromTab = false
         }
     }
 }

@@ -191,18 +191,42 @@ final class TokenUsageStore {
     /// Provider name per model key (for tooltip display).
     private(set) var modelProvider: [String: String] = [:]
 
+    /// Per-tab × per-model usage for the current session. Outer key is tab UUID
+    /// (`nil`-tab uses `Self.mainTabKey`); inner key is the model ID.
+    private(set) var tabModelUsage: [UUID: [String: ModelUsage]] = [:]
+
+    /// Human-readable label per tab UUID (for the usage popover picker).
+    private(set) var tabLabel: [UUID: String] = [:]
+
+    /// Sentinel UUID representing the main (non-tab) task context.
+    static let mainTabKey = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
     /// Lines of code added/removed in the current task.
     private(set) var taskLinesAdded: Int = 0
     private(set) var taskLinesRemoved: Int = 0
 
-    /// Record usage for a specific model.
-    func recordModelUsage(model: String, input: Int, output: Int, provider: String? = nil) {
+    /// Record usage for a specific model. `tabId` defaults to the main-tab sentinel when omitted.
+    func recordModelUsage(
+        model: String, input: Int, output: Int, provider: String? = nil,
+        tabId: UUID? = nil, tabLabel: String? = nil
+    ) {
         var usage = modelUsage[model, default: ModelUsage()]
         usage.inputTokens += input
         usage.outputTokens += output
         usage.callCount += 1
         modelUsage[model] = usage
         if let provider { modelProvider[model] = provider }
+
+        let tKey = tabId ?? Self.mainTabKey
+        var tabMap = tabModelUsage[tKey] ?? [:]
+        var tUsage = tabMap[model, default: ModelUsage()]
+        tUsage.inputTokens += input
+        tUsage.outputTokens += output
+        tUsage.callCount += 1
+        tabMap[model] = tUsage
+        tabModelUsage[tKey] = tabMap
+        if let tabLabel { self.tabLabel[tKey] = tabLabel }
+        else if self.tabLabel[tKey] == nil, tKey == Self.mainTabKey { self.tabLabel[tKey] = "Main" }
     }
 
     /// Record lines changed from a diff/edit.
@@ -221,6 +245,8 @@ final class TokenUsageStore {
     func resetModelUsage() {
         modelUsage.removeAll()
         modelProvider.removeAll()
+        tabModelUsage.removeAll()
+        tabLabel.removeAll()
     }
 
     // MARK: - Per-Provider Cost Rates (USD per 1M tokens)

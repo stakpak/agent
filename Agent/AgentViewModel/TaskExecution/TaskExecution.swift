@@ -244,7 +244,10 @@ extension AgentViewModel {
                 TokenUsageStore.shared.record(inputTokens: inTok, outputTokens: outTok)
                 budgetTracker.recordTurn(inputTokens: inTok, outputTokens: outTok)
                 budgetUsedFraction = budgetTracker.usedFraction
-                TokenUsageStore.shared.recordModelUsage(model: modelName, input: inTok, output: outTok, provider: provider.displayName)
+                TokenUsageStore.shared.recordModelUsage(
+                    model: modelName, input: inTok, output: outTok, provider: provider.displayName,
+                    tabId: TokenUsageStore.mainTabKey, tabLabel: "Main"
+                )
                 FallbackChainService.shared.recordSuccess()
                 flushStreamBuffer()
                 isThinking = false
