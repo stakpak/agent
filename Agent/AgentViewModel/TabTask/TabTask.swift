@@ -121,19 +121,10 @@ extension AgentViewModel {
         tab.appendLog("👤 \(prompt)")
         tab.flush()
 
-        // Triage: direct commands, Apple AI, accessibility, or pass through.
-        var directCommandContext: String?
-        let triageOutcome = await runTabTaskTriage(
-            tab: tab, prompt: prompt, completionSummary: &completionSummary
-        )
-        switch triageOutcome {
-        case .done:
-            return
-        case .passThrough:
-            break
-        case .llmWithContext(let ctx):
-            directCommandContext = ctx
-        }
+        // No pre-LLM triage. Every tab task goes straight to its configured LLM —
+        // Apple-AI accessibility / direct-command routing was stalling sessions
+        // with zero user-visible activity between '👤' and '🧠' log lines.
+        let directCommandContext: String? = nil
 
         let tabHistoryContext = buildTabHistoryContext(tab: tab)
 
