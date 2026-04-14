@@ -2,11 +2,10 @@ import Foundation
 
 @_cdecl("script_main")
 public func scriptMain() -> Int32 {
-    // Get parameters from environment variables
+    // Get parameters from environment
     let version = ProcessInfo.processInfo.environment["AGENT_SCRIPT_ARGS"] ?? ""
     
-    // Parse arguments: version|notes|binaryPath|workingDir
-    // Example: "v1.0.20|Release notes here|./build/export/App.dmg|/Users/toddbruss/Documents/GitHub/Agent"
+    // Args: version|notes|binaryPath|workingDir (e.g. "v1.0.20|Release notes|./build/App.dmg|/path/to/repo")
     let args = version.components(separatedBy: "|")
     
     guard args.count >= 1, !args[0].isEmpty else {
@@ -121,17 +120,17 @@ public func scriptMain() -> Int32 {
         print("Error creating release: \(error)")
         return 1
     }
-    // Format release notes with collapsible sections and organization
+    // Format release notes with collapsible sections
     func formatReleaseNotes(_ rawNotes: String) -> String {
         var formatted = ""
         
-        // Split by sections (assuming sections are separated by --- or ###)
+        // Split by sections (separated by --- or ###)
         let sections = rawNotes.components(separatedBy: "---").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         
         for section in sections {
             if section.isEmpty { continue }
             
-            // Try to extract section title (first line)
+            // Extract section title (first line)
             let lines = section.components(separatedBy: "\n")
             let title = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Section"
             let content = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,3 +141,4 @@ public func scriptMain() -> Int32 {
         
         return formatted.isEmpty ? rawNotes : formatted
     }
+}
