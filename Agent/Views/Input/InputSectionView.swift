@@ -101,6 +101,11 @@ struct InputSectionView: View {
                 }
                 .onChange(of: tab.taskInput) { _, newValue in
                     selectedSuggestionIndex = 0
+                    // Long inputs skip suggestion UI entirely — keeps main thread responsive.
+                    guard newValue.count <= 120 else {
+                        if showSuggestions { showSuggestions = false }
+                        return
+                    }
                     withAnimation(.easeInOut(duration: 0.15)) {
                         showSuggestions = viewModel.taskAutoComplete && !newValue.isEmpty && !suggestions.isEmpty
                     }
@@ -198,6 +203,10 @@ struct InputSectionView: View {
                     }
                     .onChange(of: viewModel.taskInput) { _, newValue in
                         selectedSuggestionIndex = 0
+                        guard newValue.count <= 120 else {
+                            if showSuggestions { showSuggestions = false }
+                            return
+                        }
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showSuggestions = viewModel.taskAutoComplete && !newValue.isEmpty && !suggestions.isEmpty
                         }
@@ -234,14 +243,15 @@ struct InputSectionView: View {
     // MARK: - Suggestions
 
     private var suggestions: [String] {
-        let query = currentInput.wrappedValue.lowercased()
-        guard !query.isEmpty else { return [] }
+        let raw = currentInput.wrappedValue
+        // Skip suggestion matching for long inputs — avoids main-thread stall from
+        // repeated lowercased()/contains() across history on every keystroke.
+        guard !raw.isEmpty, raw.count <= 120 else { return [] }
+        let query = raw.lowercased()
         let history = viewModel.currentTabPromptHistory
-        let currentValue = currentInput.wrappedValue
         let matches = history.reversed().filter {
-            $0.lowercased().contains(query) && $0.lowercased() != currentValue.lowercased()
+            $0.lowercased().contains(query) && $0.lowercased() != query
         }
-        // Deduplicate preserving order
         var seen = Set<String>()
         return matches.filter { seen.insert($0).inserted }.prefix(6).map { $0 }
     }
