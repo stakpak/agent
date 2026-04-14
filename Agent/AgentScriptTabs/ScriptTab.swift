@@ -47,7 +47,7 @@ final class ScriptTab: Identifiable {
     var isMessagesTab: Bool = false
     /// The iMessage handle to reply to when a Messages tab task completes
     var replyHandle: String?
-    /// Display name: scriptName (set at creation, numbered for duplicate LLM tabs)
+    /// Display name: scriptName (numbered for duplicate LLM tabs; "Messages" for iMessage tab)
     var displayTitle: String { isMessagesTab ? "Messages" : scriptName }
 
     // Log buffering (mirrors AgentViewModel pattern)
@@ -63,12 +63,12 @@ final class ScriptTab: Identifiable {
     var thinkingDismissed: Bool = true
     var thinkingExpanded: Bool = false
     var thinkingOutputExpanded: Bool = false
-    /// Expanded state for tool steps disclosure (persists across toggles).
+    /// Expanded state for tool steps disclosure (persists across toggles)
     var toolStepsExpanded: Bool = false
     /// User's drag-resized height for the LLM Output HUD on this tab. Persisted across tab switches.
     var llmOutputHeight: Double = 80
 
-    /// Unified busy check — true when the tab is doing anything (running, LLM, thinking).
+    /// Unified busy check — true when the tab is doing anything (running, LLM, thinking)
     var isBusy: Bool { isRunning || isLLMRunning || isLLMThinking }
     var runningLLMTask: Task<Void, Never>?
     var llmMessages: [[String: Any]] = []
@@ -144,7 +144,7 @@ final class ScriptTab: Identifiable {
         self.scriptName = scriptName
     }
 
-    /// Create a new main tab with its own LLM configuration.
+    /// Create a new main tab with its own LLM configuration
     init(llmConfig: LLMConfig, id: UUID = UUID()) {
         self.id = id
         self.scriptName = llmConfig.displayName
@@ -152,7 +152,7 @@ final class ScriptTab: Identifiable {
         self.isRunning = false
     }
 
-    /// Restore a tab from persisted SwiftData record.
+    /// Restore a tab from persisted SwiftData record
     init(record: ScriptTabRecord) {
         self.id = record.tabId
         self.scriptName = record.scriptName
@@ -225,15 +225,13 @@ final class ScriptTab: Identifiable {
     }
 
     /// Hard cap for activityLog — applied at every mutation site.
-    /// 50K is small enough that ActivityLogView can render it without beach-balling.
+    /// 50K is small enough for ActivityLogView to render without beach-balling.
     nonisolated static let logCap = 50_000
 
-    /// Banner inserted at the front whenever the log is trimmed. ActivityLogView
-    /// styles this literal with a yellow background at render time.
+    /// Banner inserted when the log is trimmed; ActivityLogView styles it with a yellow background.
     nonisolated static let trimBanner = "··· earlier output trimmed ···\n\n"
 
-    /// THE ONE log trim function. Hard 50K cap, snaps to next newline, prepends banner.
-    /// Used everywhere `activityLog` grows. Idempotent — calling on already-trimmed text is a no-op.
+    /// THE ONE log trim function: hard 50K cap, snaps to next newline, prepends banner. Idempotent.
     nonisolated static func trimLog(_ log: String) -> String {
         guard log.count > logCap else { return log }
         let target = max(0, logCap - trimBanner.count)
@@ -268,7 +266,7 @@ final class ScriptTab: Identifiable {
         startDripIfNeeded()
     }
 
-    /// Drip characters from rawLLMOutput into displayedLLMOutput one at a time (terminal effect)
+    /// Drip characters from rawLLMOutput into displayedLLMOutput for a terminal typing effect
     func startDripIfNeeded() {
         guard dripTask == nil else { return }
         dripTask = Task { [weak self] in
