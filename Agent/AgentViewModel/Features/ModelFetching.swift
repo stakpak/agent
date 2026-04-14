@@ -757,8 +757,7 @@ extension AgentViewModel {
         }.sorted { $0.name < $1.name }
     }
 
-    /// Trigger model fetch for a provider if its list is empty.
-    /// Single model-list refresh for any provider. `force: true` skips the empty check.
+    /// Trigger model fetch for a provider if its list is empty. `force: true` skips the empty check.
     func fetchModelsIfNeeded(for provider: APIProvider, force: Bool = false) {
         switch provider {
         case .claude: if force || availableClaudeModels.isEmpty { Task { await fetchClaudeModels() } }
