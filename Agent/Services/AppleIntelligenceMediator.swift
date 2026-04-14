@@ -78,6 +78,9 @@ final class AppleIntelligenceMediator: ObservableObject {
     private var conversationSummary: String?
 
     private var session: LanguageModelSession?
+    private var accessibilityAgentSession: LanguageModelSession?
+    private var accessibilityAgentTurnCount = 0
+    private let accessibilityAgentMaxTurns = 8  // Reset after N turns to prevent context bloat
 
     /// Represents an Apple Intelligence annotation
     struct Annotation {
@@ -704,7 +707,17 @@ final class AppleIntelligenceMediator: ObservableObject {
             return output
         }
 
-        let session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
+        // Reuse session across turns so "take another", "now do X", etc. have context.
+        // Reset every N turns to prevent context window overflow.
+        let session: LanguageModelSession
+        if let existing = accessibilityAgentSession, accessibilityAgentTurnCount < accessibilityAgentMaxTurns {
+            session = existing
+            accessibilityAgentTurnCount += 1
+        } else {
+            session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
+            accessibilityAgentSession = session
+            accessibilityAgentTurnCount = 1
+        }
 
         // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
         let timeoutSeconds: TimeInterval = 30
@@ -816,6 +829,8 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// Clear the session and conversation context to start fresh (call when switching contexts or starting a new conversation)
     func resetSession() {
         session = nil
+        accessibilityAgentSession = nil
+        accessibilityAgentTurnCount = 0
         lastUserPrompt = nil
         lastAppleAIMessage = nil
         lastLLMResponse = nil
