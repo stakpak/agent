@@ -158,19 +158,17 @@ extension AgentViewModel {
         startMainTask(task)
     }
 
-    /// / Start executing a task on the main tab. If a previous task is still draining / (retry loop or in-flight HTTP),
-    /// waits for it to fully terminate first — otherwise / both loops write to the same activityLog producing garbled output.
+    /// Start executing a task on the main tab. If a previous task is still draining (retry loop or in-flight HTTP),
+    /// waits for it to fully terminate first — otherwise both loops write to the same activityLog producing garbled output.
     private func startMainTask(_ task: String) {
         let previousTask = runningTask
         runningTask = Task {
-            // Drain any previous main task before starting this one. cancel() is idempotent — stop() may have already
-            // called it, this just ensures it. Then await the previous task's value so we know it has fully exited its loop, including any in-flight HTTP request and any catch-block log lines.
+            // Drain any previous main task before starting this one. cancel() is idempotent (stop() may have already called it). Await the previous task's value so we know it has fully exited, including any in-flight HTTP request and catch-block log lines.
             if let previous = previousTask {
                 previous.cancel()
                 _ = await previous.value
             }
-            // Reset cancellation flag AFTER the previous task has fully exited. Setting it before would let the
-            // previous task think it's no longer cancelled if it polls vm.isCancelled (some loops do).
+            // Reset cancellation flag AFTER the previous task has fully exited. Setting it before would let the previous task think it's no longer cancelled if it polls vm.isCancelled.
             isCancelled = false
             currentTaskPrompt = task
             ChatHistoryStore.shared.startNewTask(prompt: task)
