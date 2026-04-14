@@ -404,6 +404,7 @@ struct InputSectionView: View {
 
     @ViewBuilder
     private func pastedTextChip(_ item: PastedText, tab: ScriptTab?) -> some View {
+        let (head, tail) = Self.chipPreview(for: item.text, edge: 24)
         HStack(spacing: 6) {
             Image(systemName: "doc.plaintext")
                 .font(.system(size: 11))
@@ -413,6 +414,11 @@ struct InputSectionView: View {
             Text("\(item.text.count.formatted()) chars")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text("\(head) … \(tail)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Button {
                 if let tab {
                     tab.pastedTexts.removeAll { $0.id == item.id }
@@ -432,6 +438,21 @@ struct InputSectionView: View {
         .background(Color.accentColor.opacity(0.12))
         .clipShape(Capsule())
         .overlay(Capsule().stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+        .help("\(head)\n…\n\(tail)")
+    }
+
+    /// Build a single-line preview: first `edge` and last `edge` visible chars,
+    /// with whitespace/newlines collapsed so the chip stays compact.
+    private static func chipPreview(for text: String, edge: Int) -> (String, String) {
+        let flat = text
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+        let collapsed = flat.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        guard collapsed.count > edge * 2 else { return (collapsed, "") }
+        let head = String(collapsed.prefix(edge))
+        let tail = String(collapsed.suffix(edge))
+        return (head, tail)
     }
 
     private var inputButtons: some View {
