@@ -441,6 +441,46 @@ enum CodingService {
         return bestScore > 0 ? bestRange : nil
     }
 
+    // MARK: - Fuzzy Line Match
+
+    /// Find the best matching line range in `fullText` for `source`, using a
+    /// line-level similarity score. Returns a `Range<Int>` (line indices) suitable
+    /// for `Array.replaceSubrange`. Returns nil when no reasonable match exists.
+    static func fuzzyMatchLines(source: String, in fullText: String) -> Range<Int>? {
+        let srcLines = source.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard srcLines.count >= 2 else { return nil }
+
+        let fileLines = fullText.components(separatedBy: "\n")
+        let srcCount = srcLines.count
+        let fileCount = fileLines.count
+        guard srcCount <= fileCount else { return nil }
+
+        var bestScore = 0
+        var bestRange: Range<Int>?
+
+        // Sliding window over file lines
+        for i in 0...(fileCount - srcCount) {
+            var score = 0
+            for j in 0..<srcCount {
+                let fileTrimmed = fileLines[i + j].trimmingCharacters(in: .whitespaces)
+                if fileTrimmed == srcLines[j] {
+                    score += 2  // exact match (ignoring whitespace)
+                } else if fileTrimmed.contains(srcLines[j]) || srcLines[j].contains(fileTrimmed) {
+                    score += 1  // partial match
+                }
+            }
+            if score > bestScore {
+                bestScore = score
+                bestRange = i..<(i + srcCount)
+            }
+        }
+
+        // Require at least 50% of lines to match reasonably
+        let threshold = max(srcCount, 2)
+        return bestScore >= threshold ? bestRange : nil
+    }
+
     // MARK: - Undo Edit
 
     /// Restore a file to its original content (before last edit).
@@ -513,7 +553,19 @@ enum CodingService {
             guard actualSource != destination else {
                 return ("Error: source and destination are identical", "")
             }
-            finalContent = destination
+            // Find source within the full file and splice destination in its place
+            // to prevent truncation when the LLM sends only the changed snippet
+            if let range = fullText.range(of: source) {
+                finalContent = fullText.replacingCharacters(in: range, with: destination)
+            } else if let fuzzyRange = Self.fuzzyMatchLines(source: source, in: fullText) {
+                // Fuzzy fallback: source lines may have minor whitespace differences
+                let allLines = fullText.components(separatedBy: "\n")
+                var newLines = allLines
+                newLines.replaceSubrange(fuzzyRange, with: destination.components(separatedBy: "\n"))
+                finalContent = newLines.joined(separator: "\n")
+            } else {
+                return ("Error: source text not found in file. Use start_line/end_line or provide exact matching text.", "")
+            }
         } else {
             actualSource = fullText
             guard actualSource != destination else {
