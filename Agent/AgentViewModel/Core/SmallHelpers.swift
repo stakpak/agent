@@ -77,8 +77,7 @@ extension AgentViewModel {
 
     // MARK: - Ollama Pre-warm
 
-    /// Send a tiny request to Ollama to load the model into memory.
-    /// This eliminates the 5-15s cold-start delay on the first task.
+    /// Send a tiny request to Ollama to load the model into memory, eliminating cold-start delay.
     func preWarmOllama() async {
         let provider = selectedProvider
         guard provider == .ollama || provider == .localOllama else { return }
