@@ -216,7 +216,7 @@ extension AgentViewModel {
             let sourceInput = input["source"] as? String
             let startLine = input["start_line"] as? Int
             let endLine = input["end_line"] as? Int
-            let rangeNote = (startLine != nil && endLine != nil) ? " (lines \(startLine!)-\(endLine!))" : ""
+            let rangeNote: String = if let s = startLine, let e = endLine { " (lines \(s)-\(e))" } else { "" }
 
             // Reject diff-formatted input (❌/✅ markers, +/- prefixes) — LLMs must send raw text only
             for marker in ["❌ ", "✅ "] {
