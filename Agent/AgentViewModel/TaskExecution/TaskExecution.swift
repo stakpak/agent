@@ -135,6 +135,10 @@ extension AgentViewModel {
                 }
                 if let text = args.text { input["text"] = text }
                 return await self.executeNativeTool("accessibility", input: input)
+            }, runAgent: { [weak self] args in
+                guard let self else { return "error: agent deallocated" }
+                let success = await self.runAgentDirect(name: args.name, arguments: args.arguments ?? "")
+                return success ? "Launched agent '\(args.name)'" : "Agent '\(args.name)' not found"
             }, appendLog: { [weak self] msg in self?.appendLog(msg) }, projectFolder: projectFolder)
             let triageOutcome = await handleTriageOutcome(
                 triageResult,

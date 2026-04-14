@@ -520,7 +520,20 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
-    func runAccessibilityAgent(_ message: String, dispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void, projectFolder: String = "") async -> String? {
+    /// Quick pattern check for "run agent X" style requests.
+    static func looksLikeRunAgentRequest(_ message: String) -> Bool {
+        let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return lower.hasPrefix("run agent ") || lower.hasPrefix("agent run ")
+            || lower.contains(" run agent ") || lower.contains(" the agent ")
+    }
+
+    func runAccessibilityAgent(
+        _ message: String,
+        dispatch: @escaping @Sendable (AccessibilityArgs) async -> String,
+        runAgent: @escaping @Sendable (RunAgentArgs) async -> String,
+        appendLog: @escaping @Sendable @MainActor (String) -> Void,
+        projectFolder: String = ""
+    ) async -> String? {
         guard isEnabled && accessibilityIntentEnabled && Self.isAvailable else { return nil }
 
         // Thread-safe boxes to track tool-call/error state across the Sendable closure.
@@ -562,13 +575,28 @@ final class AppleIntelligenceMediator: ObservableObject {
             return result
         }
 
+        let runAgentTool = RunAgentAppleTool { args in
+            tracker.markCalled()
+            await appendLog("🍎 run_agent(name: \(args.name), args: \(args.arguments ?? "–"))")
+            let result = await runAgent(args)
+            tracker.recordOutput(result)
+            await appendLog("🍎 → \(String(result.prefix(300)))")
+            let lower = result.lowercased()
+            if lower.contains("not found") || lower.contains("error") || lower.contains("failed") {
+                tracker.markFailed()
+            }
+            return result
+        }
+
         // Apple AI's ~4096-token window requires terse instructions. Known apps from SDEFService; unknowns fall back to NSRunningApplications scan.
         let knownApps = SDEFService.shared.allInstalledAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You have ONE tool: accessibility (UI clicks/types/opens apps).
+        You have TWO tools: accessibility (UI clicks/types/opens apps) and run_agent (runs user-defined agent scripts).
 
-        Use accessibility for ALL actions: clicking buttons, typing text, opening apps.
-        Anything else (files, folders, shell commands, AppleScript) → DO NOT attempt. Reply "action not performed" and the cloud LLM will handle it.
+        TOOL SELECTION:
+        - "run agent X" / "run the X agent" → run_agent(name: "X")
+        - clicking buttons, typing text, opening apps → accessibility
+        - anything else → reply "action not performed" and the cloud LLM will handle it.
 
         ACCESSIBILITY RULES:
         1. App names like "photobooth", "photo booth" → Photo Booth (the app). Match the name to an app in the known list below — normalize spacing/case.
@@ -603,10 +631,10 @@ final class AppleIntelligenceMediator: ObservableObject {
             accessibilityAgentTurnCount += 1
             await appendLog("🍎 (follow-up, reusing context)")
         } else {
-            // Only the accessibility tool is exposed to Apple AI. Shell and AppleScript
-            // tools were removed because Apple AI handled them poorly — hallucinating
-            // paths, wrong directories, malformed scripts. The cloud LLM handles those.
-            session = LanguageModelSession(model: .default, tools: [tool], instructions: instructions)
+            // Two tools exposed to Apple AI: accessibility (UI automation) and run_agent
+            // (run user-defined scripts). Shell and AppleScript were removed because
+            // Apple AI hallucinated paths and directories.
+            session = LanguageModelSession(model: .default, tools: [tool, runAgentTool], instructions: instructions)
             accessibilityAgentSession = session
             accessibilityAgentTurnCount = 1
         }
@@ -678,14 +706,20 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
     /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
-    func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void, projectFolder: String = "") async -> TriageResult {
+    func triagePrompt(
+        _ message: String,
+        axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String,
+        runAgent: @escaping @Sendable (RunAgentArgs) async -> String,
+        appendLog: @escaping @Sendable @MainActor (String) -> Void,
+        projectFolder: String = ""
+    ) async -> TriageResult {
         // Direct command shortcut removed — "run agent X", "list agents", "google for X",
         // etc. all flow through Apple AI (accessibility) or the cloud LLM's tools now.
         guard isEnabled && Self.isAvailable else { return .passThrough }
         // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
         // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
-        if accessibilityIntentEnabled && Self.looksLikeAccessibilityRequest(message) {
-            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, appendLog: appendLog, projectFolder: projectFolder) {
+        if accessibilityIntentEnabled && (Self.looksLikeAccessibilityRequest(message) || Self.looksLikeRunAgentRequest(message)) {
+            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, runAgent: runAgent, appendLog: appendLog, projectFolder: projectFolder) {
                 return .accessibilityHandled(result)
             }
         }
@@ -809,6 +843,31 @@ struct AccessibilityArgs: Sendable {
 
 // ShellAppleTool and AppleScriptAppleTool removed — Apple AI handled them poorly
 // (hallucinated paths, wrong directories). The cloud LLM handles shell/applescript now.
+
+// MARK: - Run Agent Tool for Apple AI
+
+@Generable
+struct RunAgentArgs: Sendable {
+    @Guide(description: "Name of the agent/script to run (e.g. 'ArchiveXcode', 'CreateDmg').")
+    let name: String
+
+    @Guide(description: "Optional arguments to pass to the agent. Empty string if none.")
+    let arguments: String?
+}
+
+struct RunAgentAppleTool: FoundationModels.Tool {
+    typealias Output = String
+    let name = "run_agent"
+    let description = "Run a user-defined agent script by name. Use when the user says 'run agent X' " +
+        "or 'run the X agent'. Returns a confirmation that the agent was launched. " +
+        "The agent runs in its own tab — you don't wait for it to finish."
+
+    let dispatch: @Sendable (RunAgentArgs) async -> String
+
+    func call(arguments: RunAgentArgs) async throws -> String {
+        return await dispatch(arguments)
+    }
+}
 
 struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
