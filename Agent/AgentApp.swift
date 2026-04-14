@@ -11,8 +11,7 @@ enum AppConstants {
     static let helperPlist = "\(bundleID).helper.plist"
     static let userPlist = "\(bundleID).user.plist"
 
-    /// Preferred shell path for in-app Process() calls.
-    /// Reads from UserDefaults "agentShellPath", defaults to /bin/zsh.
+    /// Shell path for in-app Process() calls. Reads UserDefaults "agentShellPath", defaults to /bin/zsh.
     static var shellPath: String {
         UserDefaults.standard.string(forKey: "agentShellPath") ?? "/bin/zsh"
     }
@@ -51,8 +50,7 @@ private func post(_ name: Notification.Name) {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Initialize accessibility enabled defaults on startup
-        // This ensures the UserDefaults keys exist before any isRestricted() checks
+        // Initialize accessibility defaults so UserDefaults keys exist before isRestricted() checks
         _ = AccessibilityEnabled.shared
 
         // Persist window frame across launches and tiling
@@ -62,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Insert 🦾 Agents menu on launch and on every didBecomeActive to survive SwiftUI menu rebuilds.
+        // Insert 🦾 Agents menu; re-insert on didBecomeActive to survive SwiftUI menu rebuilds
         insertAgentsMenu()
         NotificationCenter.default.addObserver(
             self,
@@ -118,7 +116,7 @@ struct AgentApp: App {
                     // Initialize SwiftData chat history store
                     ChatHistoryStore.shared.migrateFromUserDefaults()
 
-                    // Pre-warm Apple Intelligence model into memory for instant first response
+                    // Pre-warm Apple Intelligence model for instant first response
                     if case .available = SystemLanguageModel.default.availability {
                         let warmupSession = LanguageModelSession()
                         warmupSession.prewarm()
