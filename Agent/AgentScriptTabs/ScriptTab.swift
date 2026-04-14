@@ -230,7 +230,13 @@ final class ScriptTab: Identifiable {
     func appendLog(_ message: String) {
         let timestamp = AgentViewModel.timestampFormatter.string(from: Date())
         AgentViewModel.prepareLogBuffer(message: message, buffer: &logBuffer, existingLog: activityLog)
-        logBuffer += "[\(timestamp)] \(message)\n"
+        // Multi-line messages (diffs, edit payloads) drop onto their own line
+        // so the first content line isn't jammed next to the timestamp.
+        if message.contains("\n") {
+            logBuffer += "[\(timestamp)]\n\(message)\n"
+        } else {
+            logBuffer += "[\(timestamp)] \(message)\n"
+        }
         scheduleFlush()
     }
 

@@ -305,7 +305,12 @@ extension AgentViewModel {
     func appendLog(_ message: String) {
         let timestamp = Self.timestampFormatter.string(from: Date())
         let cached = snapshotImages(in: message)
-        let formattedMessage = "[\(timestamp)] \(cached)"
+        // Multi-line messages (diffs, edit payloads, memory dumps) drop onto
+        // their own line so the first content line isn't jammed next to the
+        // timestamp.
+        let formattedMessage = cached.contains("\n")
+            ? "[\(timestamp)]\n\(cached)"
+            : "[\(timestamp)] \(cached)"
 
         // Store in SwiftData
         ChatHistoryStore.shared.appendMessage(formattedMessage)
