@@ -18,8 +18,8 @@
 		23D4A25EAF30497598063A0D /* TokenUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3804F32B8914764A3690CB5 /* TokenUsageStore.swift */; };
 		294AAA2C5E0241FCC1290B01 /* TaskUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEBEFF49533F8BC00811AE5C /* TaskUtilities.swift */; };
 		AA10000000000000000300 /* WebSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000303 /* WebSearch.swift */; };
-		AA10000000000000000301 /* DirectCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000304 /* DirectCommand.swift */; };
 		AA10000000000000000302 /* RunAgentDirect.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000305 /* RunAgentDirect.swift */; };
+		AA10000000000000000350 /* WebToolHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000351 /* WebToolHandler.swift */; };
 		34558227A73FD129C9AF86AA /* Automation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224DF4E08C4D8857DC2B563B /* Automation.swift */; };
 		3E8B8A7B5C4F4DD0B9DA34BC /* FileBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AFB0612717E44BF8818651B /* FileBackupService.swift */; };
 		4992CD23A14EED92AB5B902A /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03E40CE4E05384C443BA8A9 /* KeyboardShortcuts.swift */; };
@@ -386,8 +386,8 @@
 		CDB8327F7EE04EFBB6153380 /* MemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryStore.swift; sourceTree = "<group>"; };
 		CEBEFF49533F8BC00811AE5C /* TaskUtilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskUtilities.swift"; sourceTree = "<group>"; };
 		AA10000000000000000303 /* WebSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebSearch.swift"; sourceTree = "<group>"; };
-		AA10000000000000000304 /* DirectCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DirectCommand.swift"; sourceTree = "<group>"; };
 		AA10000000000000000305 /* RunAgentDirect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RunAgentDirect.swift"; sourceTree = "<group>"; };
+		AA10000000000000000351 /* WebToolHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebToolHandler.swift"; sourceTree = "<group>"; };
 		CF8C3DA5A80E9774D8FE8E51 /* Shell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shell.swift"; sourceTree = "<group>"; };
 		CS110000000000000000002 /* CodingService+ShellCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CodingService+ShellCommands.swift"; sourceTree = "<group>"; };
 		CS110000000000000000004 /* CodingService+SplitFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CodingService+SplitFile.swift"; sourceTree = "<group>"; };
@@ -920,8 +920,8 @@
 			isa = PBXGroup;
 			children = (
 				CEBEFF49533F8BC00811AE5C /* TaskUtilities.swift */,
-				AA10000000000000000304 /* DirectCommand.swift */,
 				AA10000000000000000305 /* RunAgentDirect.swift */,
+				AA10000000000000000351 /* WebToolHandler.swift */,
 				AA10000000000000000303 /* WebSearch.swift */,
 			);
 			path = TaskUtilities;
@@ -1229,8 +1229,8 @@
 				7FA36E1A9CC0DFA5A3ECB9AD /* NativeToolHandler.swift in Sources */,
 				294AAA2C5E0241FCC1290B01 /* TaskUtilities.swift in Sources */,
 				AA10000000000000000300 /* WebSearch.swift in Sources */,
-				AA10000000000000000301 /* DirectCommand.swift in Sources */,
 				AA10000000000000000302 /* RunAgentDirect.swift in Sources */,
+				AA10000000000000000350 /* WebToolHandler.swift in Sources */,
 				CC10000000000000000001 /* TabToolHandlers.swift in Sources */,
 				22439788DCAA5510D58ABEEC /* Core.swift in Sources */,
 				16AC65E0831D60B1FBA8C98E /* FileManager.swift in Sources */,

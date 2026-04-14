@@ -368,145 +368,15 @@ final class AppleIntelligenceMediator: ObservableObject {
 
     // MARK: - Conversation Triage
 
-    /// Triage result: Apple AI answers, a direct command is executed, or pass through to the LLM.
+    /// Triage result: Apple AI answers, or pass through to the LLM.
     enum TriageResult {
         case answered(String) // Apple AI handled it — show this text and skip LLM
-        case directCommand(DirectCommand) // Matched command — execute locally, skip LLM
         case accessibilityHandled(String) // Apple AI ran the accessibility tool — show its summary, skip LLM
         case passThrough // Needs tools/LLM — proceed normally
     }
 
-    /// Parsed direct command with optional argument.
-    struct DirectCommand {
-        let name: String
-        let argument: String
-    }
-
-    /// Known direct commands that can be executed without the LLM.
-    /// Matches patterns like "list agents", "run AgentName", "read AgentName", "delete AgentName".
-    static func matchDirectCommand(_ message: String) -> DirectCommand? {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = trimmed.lowercased()
-
-        // list agents
-        if lower == "list agents" || lower == "list agent" || lower == "list scripts"
-            || lower == "show agents" || lower == "show scripts"
-        {
-            return DirectCommand(name: "list_agents", argument: "")
-        }
-
-        // "read X", "read agent X", "show agent X" — safe, no args needed
-        let readPatterns = ["read agent ", "read script ", "show agent "]
-        for prefix in readPatterns {
-            if lower.hasPrefix(prefix) {
-                let arg = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-                if !arg.isEmpty { return DirectCommand(name: "read_agent", argument: arg) }
-            }
-        }
-
-        // "delete agent X", "remove agent X" — safe, no args needed
-        let deletePatterns = ["delete agent ", "remove agent ", "delete script ", "remove script "]
-        for prefix in deletePatterns {
-            if lower.hasPrefix(prefix) {
-                let arg = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-                if !arg.isEmpty { return DirectCommand(name: "delete_agent", argument: arg) }
-            }
-        }
-
-        // Google search — extract query from many phrasings
-        if let query = extractGoogleQuery(lower, original: trimmed) {
-            return DirectCommand(name: "google_search", argument: query)
-        }
-
-        // "run agent X" or "agent run X" — direct agent execution
-        if lower.hasPrefix("run agent ") {
-            let arg = String(trimmed.dropFirst("run agent ".count)).trimmingCharacters(in: .whitespaces)
-            if !arg.isEmpty { return DirectCommand(name: "run_agent", argument: arg) }
-        }
-        if lower.hasPrefix("agent run ") {
-            let arg = String(trimmed.dropFirst("agent run ".count)).trimmingCharacters(in: .whitespaces)
-            if !arg.isEmpty { return DirectCommand(name: "run_agent", argument: arg) }
-        }
-
-        return nil
-    }
-
-    /// Extract a Google search query from many phrasings.
-    /// Returns the query string or nil if no match.
-    private static func extractGoogleQuery(_ lower: String, original: String) -> String? {
-        // Prefix patterns — longest first so "do a google search for" matches before "google search"
-        let prefixPatterns = [
-            "do a google web search in safari for ",
-            "do a google web search for ",
-            "do a google search for ",
-            "do a google search ",
-            "go a google search for ",
-            "google web search in safari for ",
-            "google web search for ",
-            "google web search ",
-            "google search for ",
-            "google search ",
-            "search google for ",
-            "search the web for ",
-            "search web for ",
-            "web search for ",
-            "google for ",
-        ]
-        for prefix in prefixPatterns {
-            if lower.hasPrefix(prefix) {
-                var arg = String(original.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-                // Strip trailing noise
-                let suffixes = [
-                    " using google search",
-                    " using google.com",
-                    " using google",
-                    " in safari",
-                    " on google",
-                    " on google.com",
-                    " with google",
-                    " with safari"
-                ]
-                for suffix in suffixes {
-                    if arg.lowercased().hasSuffix(suffix) {
-                        arg = String(arg.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
-                    }
-                }
-                // Strip surrounding quotes
-                if (arg.hasPrefix("\"") && arg.hasSuffix("\"")) || (arg.hasPrefix("'") && arg.hasSuffix("'")) {
-                    arg = String(arg.dropFirst().dropLast())
-                }
-                if !arg.isEmpty { return arg }
-            }
-        }
-        // Keyword fallback: contains "google" somewhere — extract "for X" pattern
-        if lower.contains("google") {
-            // Look for "for <query>" pattern
-            if let forRange = lower.range(of: " for ") {
-                let afterFor = String(original[forRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-                // Strip trailing noise
-                var query = afterFor
-                let suffixes = [
-                    " using google search",
-                    " using google.com",
-                    " using google",
-                    " in safari",
-                    " on google",
-                    " on google.com",
-                    " with google",
-                    " with safari"
-                ]
-                for suffix in suffixes {
-                    if query.lowercased().hasSuffix(suffix) {
-                        query = String(query.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
-                    }
-                }
-                query = query.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !query.isEmpty { return query }
-            }
-        }
-        return nil
-    }
+    // extractGoogleQuery + matchDirectCommand removed. Run/list/read/delete/google
+    // commands now flow through the cloud LLM's tools (agent_script, web_search, etc.).
 
     /// Resolve common site names to their URLs (e.g. "linkedin" → "linkedin.com")
     private static let siteNames: [String: String] = [
@@ -809,10 +679,8 @@ final class AppleIntelligenceMediator: ObservableObject {
     /// / Triage a prompt: direct commands → accessibility agent (Apple AI) → conversational patterns. / Falls back to
     /// .passThrough for anything needing the cloud LLM. / `axDispatch` routes AccessibilityArgs to AgentViewModel.executeNativeTool.
     func triagePrompt(_ message: String, axDispatch: @escaping @Sendable (AccessibilityArgs) async -> String, appendLog: @escaping @Sendable @MainActor (String) -> Void, projectFolder: String = "") async -> TriageResult {
-        // Direct commands execute without any AI — works even if Apple AI is off
-        if let cmd = Self.matchDirectCommand(message) {
-            return .directCommand(cmd) // Caller executes the tool
-        }
+        // Direct command shortcut removed — "run agent X", "list agents", "google for X",
+        // etc. all flow through Apple AI (accessibility) or the cloud LLM's tools now.
         guard isEnabled && Self.isAvailable else { return .passThrough }
         // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
         // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
