@@ -56,8 +56,9 @@ struct NewMainTabSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Create Tab") {
-                    let displayName = viewModel.modelDisplayName(provider: provider, modelId: selectedModelId)
-                    let config = LLMConfig(provider: provider, model: selectedModelId, displayName: displayName)
+                    // Tab label uses the raw model ID so it matches whatever case the LLM provider
+                    // publishes (e.g., "glm-5.1", "mistral-large-latest") — no formatting applied.
+                    let config = LLMConfig(provider: provider, model: selectedModelId, displayName: selectedModelId)
                     viewModel.createMainTab(config: config)
                     dismiss()
                 }

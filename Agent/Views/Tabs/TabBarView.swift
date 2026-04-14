@@ -11,15 +11,16 @@ struct TabBarView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 // Main tab (always present, not closable, not draggable)
+                let mainTitle = viewModel.globalModelForProvider(viewModel.selectedProvider)
                 TabItem(
-                    title: viewModel.selectedProvider.displayName,
+                    title: mainTitle.isEmpty ? viewModel.selectedProvider.displayName : mainTitle,
                     isSelected: viewModel.selectedTabId == nil,
                     isRunning: viewModel.isRunning,
                     tint: .green,
                     onSelect: { viewModel.selectMainTab() },
                     onClose: nil
                 )
-                .id("main-\(viewModel.selectedProvider.rawValue)")
+                .id("main-\(viewModel.selectedProvider.rawValue)-\(mainTitle)")
 
                 ForEach(viewModel.scriptTabs) { tab in
                     let isDragging = draggingTabId == tab.id
