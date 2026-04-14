@@ -15,7 +15,7 @@ final class AccessibilityEnabled {
         self.accessibilityGlobalEnabled = UserDefaults.standard.object(forKey: "AccessibilityGlobalEnabled") as? Bool ?? true
     }
 
-    /// Returns true if accessibility is OFF (all actions blocked).
+    /// Returns true if accessibility is OFF
     func isRestricted(_ id: String) -> Bool {
         !accessibilityGlobalEnabled
     }

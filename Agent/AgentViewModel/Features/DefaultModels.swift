@@ -35,8 +35,7 @@ extension AgentViewModel {
         OpenAIModelInfo(id: "glm-4.5-air", name: "GLM-4.5 Air"),
         OpenAIModelInfo(id: "glm-4.5-flash", name: "GLM-4.5 Flash"),
         OpenAIModelInfo(id: "glm-4-32b-0414-128k", name: "GLM-4-32B-128K"),
-        // Non-coding / general models (use /api/paas/ endpoint)
-        // Tagged with :v suffix — stripped before sending to API
+        // Non-coding / general models
         OpenAIModelInfo(id: "glm-5.1:v", name: "GLM-5.1"),
         OpenAIModelInfo(id: "glm-5:v", name: "GLM-5"),
         OpenAIModelInfo(id: "glm-5-turbo:v", name: "GLM-5 Turbo"),

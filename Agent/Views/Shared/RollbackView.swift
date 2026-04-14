@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Time Machine-style file backups — grouped by filename with expandable versions.
+/// Time Machine-style file backups
 struct RollbackView: View {
     @Bindable var viewModel: AgentViewModel
     @State private var backups: [(original: String, backup: String, date: Date)] = []

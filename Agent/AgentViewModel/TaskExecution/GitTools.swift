@@ -1,11 +1,9 @@
 @preconcurrency import Foundation
 
-
 // MARK: - Git Tool Execution
 extension AgentViewModel {
 
     /// Handles git tool calls routed through User LaunchAgent via XPC.
-    /// Includes: git_status, git_diff, git_log, git_commit, git_diff_patch, git_branch
     @MainActor
     func handleGitTool(
         name: String,

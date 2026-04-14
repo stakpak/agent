@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// NSTextField subclass that notifies on focus and blocks system path autocomplete.
+/// NSTextField subclass that notifies on focus and blocks system path autocompl
 private class FocusAwareTextField: NSTextField {
     var onBlur: (() -> Void)?
     var onClick: (() -> Void)?
@@ -35,7 +35,7 @@ private struct PathTextField: NSViewRepresentable {
     var onFocusChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> FocusAwareTextField {
-        // Kill system text completion app-wide (SwiftUI TextFields are unaffected)
+        // Kill system text completion app-wide (SwiftUI TextFields are unaffect
         UserDefaults.standard.set(false, forKey: "NSUseSpellCheckerForCompletions")
         let tf = FocusAwareTextField()
         tf.placeholderString = placeholder
@@ -289,8 +289,7 @@ struct ProjectFolderField: View {
         }
     }
 
-    /// If the path points to a file (not a directory), return its parent folder.
-    /// .app bundles are treated as files — returns their containing folder.
+    /// If the path points to a file
     static func resolveToFolder(_ path: String) -> String {
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
@@ -428,7 +427,7 @@ private struct FolderTreeRow: View {
                 }
                 .buttonStyle(.plain)
 
-                // Folder icon + name: single click selects, double click toggles expand
+                // Folder icon + name: single click selects, double click toggle
                 HStack(spacing: 4) {
                     Image(systemName: path == selectedFolder ? "folder.fill" : "folder")
                         .foregroundStyle(path == selectedFolder ? .green : .blue)

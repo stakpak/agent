@@ -1,13 +1,11 @@
 
 @preconcurrency import Foundation
 
-
 // MARK: - Tab Task Stuck-File Guard
 
 extension AgentViewModel {
 
-    /// / Detect 3 consecutive edit failures on the same file and append a / recovery nudge as a synthetic tool_result.
-    /// Mirrors the inline stuck-file / block from the legacy monolithic executeTabTask.
+    /// / Detect 3 consecutive edit failures on the same file and append a / rec
     func appendStuckFileNudgeIfNeeded(
         tab: ScriptTab,
         name: String,

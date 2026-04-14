@@ -16,8 +16,7 @@ extension AgentViewModel {
             let scriptName = input["name"] as? String ?? ""
             let arguments = input["arguments"] as? String ?? ""
             if tab.isMainTab {
-                // ── Main tab: spawn a separate background tab so main tab stays free ──
-                // Dedup: close any existing background tab for this script before spawning a fresh one.
+                // ── Main tab: spawn a separate background tab so main tab stay
                 if let existing = scriptTabs.first(where: { $0.scriptName == scriptName && !$0.isMainTab && $0.id != tab.id }) {
                     closeScriptTab(id: existing.id)
                 }

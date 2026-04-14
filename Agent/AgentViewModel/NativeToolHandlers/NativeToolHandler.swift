@@ -7,18 +7,13 @@ import AgentSwift
 import AgentAccess
 import Cocoa
 
-
-
-
 // MARK: - Native Tool Handler (Apple AI)
 
 extension AgentViewModel {
 
-
     // MARK: - Native Tool Handler (Apple AI)
 
-    /// Executes a tool call from Apple AI's Foundation Models native tool system.
-    /// Routes to the same execution logic as TaskExecution tool handlers.
+    /// Executes a tool call from Apple AI's Foundation Models native tool syste
     func executeNativeTool(_ rawName: String, input rawInput: sending [String: Any]) async -> String {
         // Expand consolidated CRUDL tools into legacy tool names
         let (name, input) = Self.expandConsolidatedTool(name: rawName, input: rawInput)
@@ -27,7 +22,7 @@ extension AgentViewModel {
         // Prefix-matched tools
         if let result = await handleWebTool(name: name, input: input) { return result }
         if let result = await handleSeleniumTool(name: name, input: input) { return result }
-        // Saved-script CRUDL tools. expandConsolidatedTool maps applescript(action:list) → list_apple_scripts etc. Leaf names live in handleSavedScriptTool, not the main switch.
+        // Saved-script CRUDL tools. expandConsolidatedTool maps applescript(act
         let savedScriptNames: Set<String> = [
             "list_apple_scripts", "run_apple_script", "save_apple_script", "delete_apple_script",
             "list_javascript", "run_javascript", "save_javascript", "delete_javascript",
@@ -35,10 +30,9 @@ extension AgentViewModel {
         if savedScriptNames.contains(name) {
             return await handleSavedScriptTool(name: name, input: input)
         }
-        // ax_ accessibility tools — already expanded. expandConsolidatedTool maps accessibility(action:X) → ax_X, so ax_ names arrive here already expanded.
+        // ax_ accessibility tools — already expanded. expandConsolidatedTool ma
 
-        // Route to per-category helpers. Each returns `nil` if it doesn't
-        // recognize the tool so the dispatcher can fall through to the next.
+        // Route to per-category helpers. Each returns `nil` if it doesn't recog
         if let result = await handleShellNativeTool(name: name, input: input) { return result }
         if let result = await handleAgentScriptNativeTool(name: name, input: input) { return result }
         if let result = await handleFileNativeTool(name: name, input: input) { return result }
@@ -47,7 +41,7 @@ extension AgentViewModel {
         if let result = await handleXcodeNativeTool(name: name, input: input) { return result }
         if let result = await handleGitNativeTool(name: name, input: input) { return result }
 
-        // Handle ax_ accessibility tools directly (avoid recursion through executeNativeTool)
+        // Handle ax_ accessibility tools directly
         if name.hasPrefix("ax_") {
             let axAction = String(name.dropFirst(3))
             var axInput = input
@@ -57,7 +51,7 @@ extension AgentViewModel {
         return "⚠️ Tool '\(rawName)' (expanded: '\(name)') not handled. Recovery: call list_tools to see available tools, or check spelling."
     }
 
-    /// Read-only accessibility actions that should NOT auto-launch the target app. These are queries — they should fail gracefully if the app isn't running, NOT silently spawn it.
+    /// Read-only accessibility actions should NOT auto-launch target app.
     private static let readOnlyAxActions: Set<String> = [
         "list_windows",
         "inspect_element",
@@ -72,14 +66,13 @@ extension AgentViewModel {
         "highlight_element"
     ]
 
-    /// Direct accessibility dispatch — no recursion through executeNativeTool
+    /// Direct accessibility dispatch
     private func handleAccessibilityAction(action: String, input: [String: Any]) async -> String {
         let ax = AgentAccess.AccessibilityService.shared
         let role = input["role"] as? String
         let title = input["title"] as? String
         let value = input["value"] as? String
-        // Resolve app name → bundle ID. Read-only queries use lookupBundleId (NO auto-launch); write actions use
-        // resolveBundleId (auto-launches if not running, since you can't click a button on an app that isn't up). This prevents speculative reads from silently opening apps the user never asked for — most visibly the "Photo Booth keeps opening" bug.
+        // Resolve app name → bundle ID. Read-only queries use lookupBundleId (N
         let appNameOrId = input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String
         let app = Self.readOnlyAxActions.contains(action)
             ? ax.lookupBundleId(appNameOrId)
@@ -89,7 +82,7 @@ extension AgentViewModel {
 
         switch action {
         case "open_app":
-            // Launch/activate app and return all interactive elements in one call
+            // Launch/activate app and return all interactive elements in one ca
             return ax.openApp(input["appBundleId"] as? String ?? input["app"] as? String ?? input["name"] as? String)
         case "list_windows":
             // If app specified, filter to just that app's windows
@@ -98,7 +91,7 @@ extension AgentViewModel {
             }
             return ax.listWindows(limit: input["limit"] as? Int ?? 50)
         case "inspect_element":
-            // If role/title provided, find element first then inspect at its position
+            // If role/title provided, find element first then inspect at its po
             if (role != nil || title != nil), x == nil, y == nil {
                 return ax.getElementProperties(role: role, title: title, value: value, appBundleId: app, x: nil, y: nil)
             }
@@ -111,29 +104,25 @@ extension AgentViewModel {
                 appBundleId: app, x: x, y: y,
                 action: input["ax_action"] as? String ?? "")
         case "type_text", "type_into_element":
-            // AXorcist-only: typing requires an element. There is no "type at the
-            // current focus" path — find the text field by role/title first.
+            // AXorcist-only: typing requires an element.
             return ax.typeTextIntoElement(
                 role: role, title: title,
                 text: input["text"] as? String ?? "",
                 appBundleId: app,
                 verify: input["verify"] as? Bool ?? true)
         case "click", "click_element":
-            // AXorcist-only. Coordinate-based click is not supported — provide role/title/value (and ideally
-            // appBundleId) so the click goes through AXorcist's element-finder.
+            // AXorcist-only. Coordinate-based click is not supported
             return ax.clickElement(
                 role: role, title: title, value: value,
                 appBundleId: app,
                 timeout: input["timeout"] as? Double ?? 5,
                 verify: input["verify"] as? Bool ?? false)
         case "scroll", "scroll_to_element":
-            // AXorcist-only: scroll to an element by role/title. The old coordinate
-            // path through InputDriver was removed.
+            // AXorcist-only: scroll to an element by role/title. The old coordi
             return ax.scrollToElement(
                 role: role, title: title, appBundleId: app)
         case "press_key":
-            // press_key is no longer supported — AXorcist doesn't drive raw key events and the InputDriver path was
-            // removed. Use clickElement for buttons or clickMenuItem for keyboard-shortcut menu commands.
+            // press_key is no longer supported
             return """
                 Error: press_key is removed. Find the relevant button \
                 via accessibility(action:"click_element", \
@@ -142,8 +131,7 @@ extension AgentViewModel {
                 appBundleId:..., menuPath:"File > Save").
                 """
         case "drag":
-            // drag is no longer supported — see the AccessibilityService+Interaction
-            // comment for the removal rationale and AXorcist-based alternatives.
+            // drag is no longer supported
             return """
                 Error: drag is removed. For window move/resize use \
                 accessibility(action:"set_window_frame", \
@@ -152,8 +140,7 @@ extension AgentViewModel {
                 role:"AXSlider", ...).
                 """
         case "screenshot":
-            // All three paths are async — they dispatch screencapture to a background queue so the main thread stays
-            // responsive while the ~100ms screencapture process runs.
+            // All three paths are async
             let w = (input["width"] as? Double).map { CGFloat($0) }
             let h = (input["height"] as? Double).map { CGFloat($0) }
             if let wid = input["windowId"] as? Int, wid > 0 {
@@ -244,8 +231,7 @@ extension AgentViewModel {
                 pb.setString(text, forType: .string)
                 return "Copied to clipboard: \(text.prefix(100))"
             case "paste":
-                // Cmd+V via AppleScript System Events. The old path used AXorcist InputDriver hotkey which is gone.
-                // NSAppleScript runs in-process with TCC and produces a real synthesized keystroke without going through CGEvent directly.
+                // Cmd+V via AppleScript System Events.
                 let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
                 var asErr: NSDictionary?
                 if let script = NSAppleScript(source: pasteScript) {
@@ -273,7 +259,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Clean HTML to readable text. Strips script/style/noscript blocks (with content), HTML comments, tags, decodes entities, collapses whitespace, drops garbage lines.
+    /// Clean HTML to readable text. Strips script/style/noscript blocks
     nonisolated static func cleanHTML(_ html: String) -> String {
         var s = html
         // Remove script/style/noscript/svg blocks WITH their content

@@ -1,11 +1,10 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Coordinator: Inline Markdown Rendering Bold, italic, inline code, link detection, and manual bold/italic
-// fallbacks for content Apple's markdown parser misses.
+// MARK: - Coordinator: Inline Markdown Rendering Bold
 
 extension ActivityLogView.Coordinator {
-    /// Parses inline markdown (bold, italic, inline code) using Apple's AttributedString.
+    /// Parses inline markdown
     nonisolated func renderInlineElements(_ text: String, baseFont: NSFont) -> NSAttributedString {
         guard !text.isEmpty else { return NSAttributedString() }
 
@@ -14,15 +13,14 @@ extension ActivityLogView.Coordinator {
             .foregroundColor: NSColor.labelColor
         ]
 
-        // Fast path: skip the markdown parser for lines with no markdown syntax.
+        // Fast path: skip the markdown parser for lines with no markdown syntax
         let hasMarkdownChars = text.contains("*") || text.contains("_") || text.contains("`")
             || text.contains("[") || text.contains("~")
         guard hasMarkdownChars else {
             return linkifyURLs(NSAttributedString(string: text, attributes: plainAttrs))
         }
 
-        // SAFETY: Skip markdown parsing if text contains Swift raw strings with backticks (e.g., #"...`..."#). Apple's
-        // markdown parser mangles these. Also skip if text looks like numbered code output (e.g., "1 | code")
+        // SAFETY: Skip markdown parsing if text contains Swift raw strings with
         let hasRawStringWithBacktick = text.contains("#\"") && text.contains("\"#") && text.contains("`")
         let looksLikeNumberedCode = text.contains(#"\d+\s*\|"#) && text.split(separator: "\n").allSatisfy {
             $0.trimmingCharacters(in: .whitespaces).isEmpty || $0.range(of: #"^\s*\d+\s*\|"#, options: .regularExpression) != nil
@@ -61,7 +59,7 @@ extension ActivityLogView.Coordinator {
                 }
             }
 
-            // Manual fallback: apply **bold** and *italic* that Apple's parser missed
+            // Manual fallback: apply **bold** and *italic* that Apple's parser
             applyManualBoldItalic(nsAttr, baseFont: baseFont)
             return nsAttr
         } catch {
@@ -79,7 +77,7 @@ extension ActivityLogView.Coordinator {
 
         // 1. Convert markdown links [text](url) → clickable "text" with link
         if text.contains("](") {
-            let mdPattern = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\((https?://[^\)]+)\)"#)
+            let mdPattern = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\((h
             let mdMatches = mdPattern?.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)) ?? []
             for match in mdMatches.reversed() {
                 let displayRange = match.range(at: 1)
@@ -119,7 +117,7 @@ extension ActivityLogView.Coordinator {
             result.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: match.range)
         }
 
-        // 3. Linkify Xcode build errors: /path/file.swift:42:10: error/warning: message
+        // 3. Linkify Xcode build errors: /path/file.swift:42:10: error/warning:
         let resultText = result.string
         if resultText.contains(": error:") || resultText.contains(": warning:") || resultText.contains(": note:") {
             let errorPattern = try? NSRegularExpression(pattern: #"(/[^\s:]+\.\w+):(\d+):(\d+): (error|warning|note):"#)
@@ -133,7 +131,7 @@ extension ActivityLogView.Coordinator {
                 let col = (resultText as NSString).substring(with: match.range(at: 3))
                 let severity = (resultText as NSString).substring(with: match.range(at: 4))
                 // Encode as xcode:// URL for clickedOnLink handler
-                let xcodeURL = "xcode://open?file=\(filePath)&line=\(line)&col=\(col)"
+                let xcodeURL = "xcode://open?file=\(filePath)&line=\(line)&col=\
                 let color: NSColor = severity == "error" ? .systemRed : severity == "warning" ? .systemOrange : .systemBlue
                 // Only linkify the file:line:col portion
                 let fileRange = match.range(at: 1)
@@ -148,7 +146,7 @@ extension ActivityLogView.Coordinator {
         return result
     }
 
-    /// Manually apply **bold** and *italic* markers that Apple's markdown parser missed.
+    /// Manually apply **bold** and *italic* markers that Apple's markdown parse
     nonisolated func applyManualBoldItalic(_ attrStr: NSMutableAttributedString, baseFont: NSFont) {
         let text = attrStr.string
         // Bold: **text**

@@ -7,13 +7,11 @@ import AppKit
 import AgentMCP
 import AgentD1F
 
-
 // MARK: - Tab Task Triage
 
 extension AgentViewModel {
 
-    /// / Outcome of pre-LLM triage for a tab task. When `.passThrough` the caller / should fall through to the cloud
-    /// LLM loop; when `.done` the task has / already been handled and the caller should return immediately. When / `.llmWithContext` the caller should pass the provided context string / through to the LLM as an additional user message.
+    /// / Outcome of pre-LLM triage for a tab task.
     enum TabTaskTriageOutcome {
         case done
         case passThrough
@@ -21,14 +19,12 @@ extension AgentViewModel {
     }
 
     /// Run triage: direct commands, Apple AI conversation, accessibility agent.
-    /// Mirrors the triage block in the old monolithic executeTabTask.
     func runTabTaskTriage(
         tab: ScriptTab,
         prompt: String,
         completionSummary: inout String
     ) async -> TabTaskTriageOutcome {
-        // Triage: direct commands, Apple AI conversation, accessibility agent, or pass through to LLM. The axDispatch
-        // closure routes Apple AI's tool calls through the same executeNativeTool path the cloud LLM uses. If Apple AI fails, is unavailable, or doesn't call the tool, runAccessibilityAgent returns nil → triage returns .passThrough → we fall through to the cloud LLM loop below.
+        // Triage: direct commands, Apple AI conversation, accessibility agent,
         let mediator = AppleIntelligenceMediator.shared
         let triageResult = await mediator.triagePrompt(prompt, axDispatch: { [weak self] args in
             guard let self else { return "{\"success\":false,\"error\":\"agent deallocated\"}" }
@@ -71,9 +67,7 @@ extension AgentViewModel {
             tab.isLLMThinking = false
             return .done
         case .accessibilityHandled(let summary):
-            // Apple AI ran accessibility tool(s) and produced a summary. Tool calls went through axDispatch →
-            // executeNativeTool (already logged). If Apple AI never called the tool or any call failed, we get nil → .passThrough → cloud LLM.
-            // Note: AppleIntelligenceMediator already logged "🍎 ✅ <summary>" — no duplicate log here.
+            // Apple AI ran accessibility tool(s) and produced a summary. Tool c
             tab.rawLLMOutput = summary
             tab.displayedLLMOutput = summary
             tab.dripDisplayIndex = summary.count

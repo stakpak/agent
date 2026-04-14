@@ -12,17 +12,16 @@ enum DiffError: LocalizedError {
     }
 }
 
-/// / In-memory store for diff results keyed by UUID. / Allows `create_diff` to return a compact UUID that `apply_diff`
-/// can reference / instead of requiring the LLM to echo the entire diff text back. / Also tracks applied diffs per file for UUID-based undo.
+/// / In-memory store for diff results keyed by UUID.
 @MainActor
 final class DiffStore {
     static let shared = DiffStore()
 
     private var diffs: [UUID: DiffResult] = [:]
     private var sources: [UUID: String] = [:]
-    private var filePaths: [UUID: String] = [:] // diff_id → file path it was applied to
-    private var appliedDiffs: [String: [UUID]] = [:] // file path → stack of applied diff_ids
-    private var editHistory: [String: String] = [:] // file path → original content before first edit
+    private var filePaths: [UUID: String] = [:] // diff_id → file path it was ap
+    private var appliedDiffs: [String: [UUID]] = [:] // file path → stack of app
+    private var editHistory: [String: String] = [:] // file path → original cont
 
     private init() {}
 
@@ -44,7 +43,7 @@ final class DiffStore {
     func recordApply(diffId: UUID, filePath: String, originalContent: String) {
         filePaths[diffId] = filePath
         appliedDiffs[filePath, default: []].append(diffId)
-        // Only record the original if this is the first edit (preserve the true original for full undo)
+        // Only record the original if this is the first edit
         if editHistory[filePath] == nil {
             editHistory[filePath] = originalContent
         }
@@ -81,14 +80,13 @@ final class DiffStore {
         appliedDiffs.removeValue(forKey: filePath)
     }
 
-    /// Invalidate all stored diffs for a file (call after any apply — line numbers shift).
+    /// Invalidate all stored diffs for a file
     func invalidateDiffs(for filePath: String) {
         let idsToRemove = filePaths.filter { $0.value == filePath }.map { $0.key }
         // Also remove any diff whose stored source came from this file
         for id in diffs.keys {
             if filePaths[id] == nil {
-                // Diff not yet applied — could be stale if it was created from this file
-                // We can't know for sure, so clear all unapplied diffs to be safe
+                // Diff not yet applied
             }
         }
         for id in idsToRemove {

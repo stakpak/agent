@@ -85,7 +85,7 @@ struct ContentView: View {
                 )
             }
 
-            // Activity Log with LLM Output overlaid on top — overlay doesn't push log down
+            // Activity Log with LLM Output overlaid on top — overlay doesn't pu
             ZStack(alignment: .top) {
                 ActivityLogView(
                     text: viewModel.selectedTab?.activityLog ?? viewModel.activityLog,
@@ -195,8 +195,7 @@ struct ContentView: View {
         } message: {
             Text("'\(viewModel.failedAgentName)' failed. Remove from 🦾 Agents menu?")
         }
-        // Auto-expand of HUD on run-start happens in AgentViewModel.executeTask now,
-        // so we don't fire it from a generic onChange (which would also trigger on tab swaps).
+        // Auto-expand of HUD on run-start happens in AgentViewModel.executeTask
         .onChange(of: viewModel.selectedTabId) { _, _ in
             // Reset search state when switching tabs
             if showSearch {
@@ -222,8 +221,7 @@ struct ContentView: View {
                 let status = DependencyChecker.check()
                 DispatchQueue.main.async {
                     dependencyStatus = status
-                    // Don't dismiss here — the overlay animates its own
-                    // 2.5-second auto-dismiss when allGood is true.
+                    // Don't dismiss here
                 }
             }
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -278,12 +276,11 @@ struct ContentView: View {
                     }
                 }
 
-                // Keyboard shortcuts for common actions
-                // Cmd+N: New task (focus input)
+                // Keyboard shortcuts for common actions Cmd+N: New task (focus
                 if event.modifierFlags.contains(.command),
                    event.charactersIgnoringModifiers == "n"
                 {
-                    // Focus is already on text field, this is just a quick way to clear and start new
+                    // Focus is already on text field, this is just a quick way
                     return nil
                 }
 
@@ -340,8 +337,7 @@ struct ContentView: View {
                 if event.modifierFlags.contains([.command, .shift]),
                    event.charactersIgnoringModifiers == "p"
                 {
-                    // System prompts window would be opened here
-                    // For now, focus on settings
+                    // System prompts window would be opened here For now, focus
                     showSettings = true
                     return nil
                 }
@@ -493,8 +489,7 @@ struct ContentView: View {
                     }
                 }
 
-                // Up/Down arrow for prompt history (per-tab or main) Only navigate history for short, single-line
-                // input; let arrows move the cursor in longer/multi-line text. Always allow history navigation when already browsing history.
+                // Up/Down arrow for prompt history
                 if event.keyCode == 126 || event.keyCode == 125 {
                     let text: String
                     let browsingHistory: Bool
@@ -633,7 +628,7 @@ struct ContentView: View {
         .orange, .purple, .pink, .cyan, .mint, .indigo, .teal, .yellow
     ]
 
-    /// Assign a consistent color per tab based on its index. Main tab uses .red.
+    /// Assign a consistent color per tab based on its index. Main tab uses .red
     static func tabColor(for tabId: UUID, in tabs: [ScriptTab]) -> Color {
         guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return .orange }
         return tabColors[idx % tabColors.count]
@@ -662,7 +657,7 @@ struct ContentView: View {
         return viewModel.thinkingDismissed
     }
 
-    /// Whether the active context (selected tab or main) is in thinking state.
+    /// Whether the active context
     private var isActiveThinking: Bool {
         if let selId = viewModel.selectedTabId,
            let tab = viewModel.tab(for: selId)
@@ -672,7 +667,7 @@ struct ContentView: View {
         return viewModel.isThinking
     }
 
-    /// Whether the active context is doing anything — thinking, running, or executing.
+    /// Whether the active context is doing anything
     private var isActiveRunning: Bool {
         if let selId = viewModel.selectedTabId,
            let tab = viewModel.tab(for: selId)
@@ -682,7 +677,7 @@ struct ContentView: View {
         return viewModel.isRunning || viewModel.isThinking
     }
 
-    /// The prompt of the currently running task (main or selected tab).
+    /// The prompt of the currently running task
     private var activeTaskPrompt: String? {
         // Check selected tab first
         if let selId = viewModel.selectedTabId,
@@ -719,5 +714,3 @@ struct ContentView: View {
         return .red
     }
 }
-
-

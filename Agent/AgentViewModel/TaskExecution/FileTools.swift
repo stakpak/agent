@@ -1,12 +1,10 @@
 @preconcurrency import Foundation
 import AgentD1F
 
-
 // MARK: - File I/O Tool Execution
 extension AgentViewModel {
 
-    /// Handles file I/O tool calls.
-    /// Returns nil if this is not a file tool call.
+    /// Handles file I/O tool calls. Returns nil if this is not a file tool call
     @MainActor
     func handleFileTool(
         name: String,
@@ -49,8 +47,7 @@ extension AgentViewModel {
                 return true
             }
 
-            // Cap file output at 50K chars for LLM context. 50K covers ~95% of Swift source files in one read — eliminates the chunked re-read storm where the LLM repeatedly calls read_file
-            // with offset/limit just to see the whole file. Each chunked read is a different cache key, so the dedup cache can't help; raising the cap is what actually reduces redundant reads.
+            // Cap file output at 50K chars for LLM context. 50K covers ~95% of
             let capped = LogLimits.trim(
                 output,
                 cap: LogLimits.readFileChars,
@@ -90,7 +87,7 @@ extension AgentViewModel {
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": writeResult])
             return true
 
-        // MARK: edit_file — uses CodingService for replacement logic, D1F for preview
+        // MARK: edit_file — uses CodingService for replacement logic, D1F for p
         case "edit_file":
             let filePath = input["file_path"] as? String ?? ""
             let oldString = input["old_string"] as? String ?? ""
@@ -111,7 +108,7 @@ extension AgentViewModel {
                 return true
             }
 
-            // Use CodingService for the replacement (handles fuzzy match, context, etc.)
+            // Use CodingService for the replacement (handles fuzzy match, conte
             let output = await Self.offMain { CodingService.editFile(
                 path: filePath,
                 oldString: oldString,
@@ -144,7 +141,7 @@ extension AgentViewModel {
                 tool: "edit_file"
             )
             commandsRun.append("edit_file: \(filePath)")
-            // Post-edit diagnostic: quick syntax check for Swift files in Xcode projects
+            // Post-edit diagnostic: quick syntax check for Swift files in Xcode
             let editDiag = await Self.postEditDiagnostic(filePath: expandedEdit, projectFolder: projectFolder)
             let editResult = editDiag.isEmpty ? output : output + "\n\n⚠️ Diagnostics:\n" + editDiag
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": editResult])
@@ -223,8 +220,7 @@ extension AgentViewModel {
                 } else {
                     throw DiffError.invalidDiff
                 }
-                // No truncation guard. d1f's structural verification + the applyDiff round-trip already catch malformed diffs. Legitimate refactors that delete most of a section were getting
-                // blocked, and undo_edit is always available if the LLM produces something bad — we'd rather trust the model and give the user undo than second-guess every shrink with a length heuristic.
+                // No truncation guard. d1f's structural verification + applyDif
                 try patched.write(to: URL(fileURLWithPath: expandedPath), atomically: true, encoding: .utf8)
                 // Track the apply for UUID-based undo
                 if let uuid = UUID(uuidString: diffIdStr) {
@@ -239,7 +235,7 @@ extension AgentViewModel {
                 appendLog(display)
                 let newLineCount = patched.components(separatedBy: "\n").count
                 appendLog("📝 Applied diff to \(filePath) [verified: \(verified)] (\(newLineCount) lines)")
-                // Invalidate all pending diffs for this file — line numbers have shifted
+                // Invalidate all pending diffs for this file — line numbers hav
                 DiffStore.shared.invalidateDiffs(for: expandedPath)
                 commandsRun.append("apply_diff: \(filePath)")
                 toolResults.append([
@@ -320,7 +316,7 @@ extension AgentViewModel {
             toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": output])
             return true
 
-        // MARK: diff_and_apply — same as create_diff + apply_diff in one call, no shortcuts
+        // MARK: diff_and_apply — same as create_diff + apply_diff in one call,
         case "diff_and_apply":
             let filePath = input["file_path"] as? String ?? ""
             let destination = input["destination"] as? String ?? ""
@@ -372,8 +368,7 @@ extension AgentViewModel {
             )
             let diffId = DiffStore.shared.store(diff: diff, source: source)
 
-            // Step 3: Apply diff (same as apply_diff). No truncation guard — d1f's structural
-            // verification + applyDiff already catch malformed diffs, and undo_edit is always available for recovery.
+            // Step 3: Apply diff (same as apply_diff). No truncation guard
             do {
                 let patched = try MultiLineDiff.applyDiff(to: source, diff: diff)
 
@@ -401,7 +396,7 @@ extension AgentViewModel {
                 let newLineCount = finalContent.components(separatedBy: "\n").count
                 appendLog(display)
                 appendLog("📝 Diff+Apply: \(filePath)\(rangeNote) [verified: \(verified)] (\(newLineCount) lines)")
-                // Invalidate all pending diffs for this file — line numbers have shifted
+                // Invalidate all pending diffs for this file — line numbers hav
                 DiffStore.shared.invalidateDiffs(for: expanded)
                 commandsRun.append("diff_and_apply: \(filePath)")
                 toolResults.append([
@@ -428,8 +423,7 @@ extension AgentViewModel {
 
     // MARK: - Post-Edit Diagnostics
 
-    /// Quick syntax check after editing a Swift file. Returns error lines or empty string.
-    /// Only runs for .swift files in Xcode project folders.
+    /// Quick syntax check after editing a Swift file.
     nonisolated static func postEditDiagnostic(filePath: String, projectFolder: String) async -> String {
         // Only check Swift files in Xcode projects
         guard filePath.hasSuffix(".swift") else { return "" }

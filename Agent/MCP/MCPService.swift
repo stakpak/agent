@@ -12,7 +12,7 @@ final class MCPService: @unchecked Sendable {
     var connectionErrors: [UUID: String] = [:]
     private(set) var discoveredTools: [MCPToolInfo] = []
     private(set) var discoveredResources: [MCPResourceInfo] = []
-    /// Tool names disabled by the user, keyed by server name. Stored in UserDefaults.
+    /// Tool names disabled by the user, keyed by server name.
     var disabledTools: Set<String> = [] {
         didSet { saveDisabledTools() }
     }
@@ -82,11 +82,10 @@ final class MCPService: @unchecked Sendable {
                 autoStart: config.autoStart
             )
         } else {
-            // Resolve bare command names (e.g. "uvx") to full paths since
-            // macOS apps don't inherit the user's shell PATH
+            // Resolve bare command names
             let resolvedCommand = Self.resolveCommand(config.command)
 
-            // Merge user's PATH into the server environment so child processes can find tools
+            // Merge user's PATH into the server environment so child processes
             var env = config.environment
             if env["PATH"] == nil {
                 env["PATH"] = Self.userShellPATH()
@@ -111,9 +110,9 @@ final class MCPService: @unchecked Sendable {
         await refreshState()
     }
 
-    /// Disconnect from an MCP server (with timeout to prevent beach ball)
+    /// Disconnect from an MCP server
     func disconnect(serverId: UUID) async {
-        // Timeout the removeServer call to prevent hangs on unresponsive servers
+        // Timeout the removeServer call to prevent hangs on unresponsive server
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 await self.client.removeServer(serverId)
@@ -131,7 +130,7 @@ final class MCPService: @unchecked Sendable {
         await refreshState()
     }
 
-    /// Disconnect all connected MCP servers (called on app quit)
+    /// Disconnect all connected MCP servers
     func disconnectAll() async {
         for serverId in connectedServerIds {
             await client.removeServer(serverId)
@@ -216,7 +215,7 @@ final class MCPService: @unchecked Sendable {
 
     // MARK: - PATH Resolution
 
-    /// Resolve bare command to full path (macOS apps lack shell PATH).
+    /// Resolve bare command to full path
     private static func resolveCommand(_ command: String) -> String {
         guard !command.contains("/") else { return command }
         let home = FileManager.default.homeDirectoryForCurrentUser.path

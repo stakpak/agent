@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 import AgentColorSyntax
 
-// MARK: - Coordinator: Block-Level Markdown Rendering Fenced code blocks, headers, bullets, blockquotes, horizontal
-// rules, and NSTextTable-backed markdown tables.
+// MARK: - Coordinator: Block-Level Markdown Rendering Fenced code blocks
 
 extension ActivityLogView.Coordinator {
     nonisolated func renderMarkdown(_ text: String) -> NSAttributedString {
@@ -12,8 +11,7 @@ extension ActivityLogView.Coordinator {
             .foregroundColor: NSColor.labelColor
         ]
 
-        // Check if the text is read_file output (strictly matches "NN |" at the start of lines)
-        // This check MUST come before markdown processing to preserve backticks in code
+        // Check if the text is read_file output
         let readFilePattern = #"^\s*\d+\s*\|\s"#
         let lines = text.components(separatedBy: "\n").filter { !$0.isEmpty }
         let isReadFileOutput = !lines.isEmpty
@@ -32,8 +30,7 @@ extension ActivityLogView.Coordinator {
             return block
         }
 
-        // Detect source code output (e.g. from cat command) — look for Swift/code patterns Skip this heuristic if text
-        // contains markdown indicators (headers, fences, bullets) to avoid treating markdown summaries with embedded code as raw code output
+        // Detect source code output (e.g. from cat command)
         let hasMarkdownStructure = lines.contains { line in
             let t = line.trimmingCharacters(in: .whitespaces)
             return t.hasPrefix("#") || t.hasPrefix("```") || t.hasPrefix("- ") || t.hasPrefix("* ")
@@ -91,7 +88,7 @@ extension ActivityLogView.Coordinator {
             var code = nsText.substring(with: fence.range(at: 2))
             if code.hasSuffix("\n") { code = String(code.dropLast()) }
 
-            // Copy button only for actual source code blocks (not shell output or file reads)
+            // Copy button only for actual source code blocks
             let shellLangs: Set<String> = ["bash", "sh", "zsh", "shell", "console", "terminal"]
             let firstLine = code.components(separatedBy: "\n").first ?? ""
             let looksLikeNumberedOutput = firstLine.range(of: #"^\s*\d+\s+"#, options: .regularExpression) != nil
@@ -128,8 +125,7 @@ extension ActivityLogView.Coordinator {
         return result
     }
 
-    /// Splits text into lines and renders block-level markdown (headers, lists, rules, tables)
-    /// then delegates inline rendering (bold, italic, code) per line.
+    /// Splits text into lines and renders block-level markdown (headers
     nonisolated func renderInlineMarkdown(_ text: String) -> NSAttributedString {
         guard !text.isEmpty else { return NSAttributedString() }
 
@@ -270,7 +266,7 @@ extension ActivityLogView.Coordinator {
         return cell
     }
 
-    /// Renders a single line, detecting block-level elements first, then inline.
+    /// Renders a single line, detecting block-level elements first, then inline
     nonisolated func renderMarkdownLine(_ line: String) -> NSAttributedString {
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
@@ -328,7 +324,7 @@ extension ActivityLogView.Coordinator {
             return result
         }
 
-        // Activity log output (timestamps, grep results) — bypass markdown parser but still linkify URLs
+        // Activity log output (timestamps, grep results)
         if let highlighted = CodeBlockHighlighter.highlightActivityLogLine(line: line, font: font) {
             return linkifyURLs(highlighted)
         }

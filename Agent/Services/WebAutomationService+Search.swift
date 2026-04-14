@@ -5,7 +5,6 @@ extension WebAutomationService {
     // MARK: - Safari Google Search
 
     /// Perform a Google search in Safari and return the results page content.
-    /// Opens google.com, types the query, submits, waits for results, returns text.
     func safariGoogleSearch(query: String, maxResults: Int = 3000) async -> String {
         // 1. Open google.com
         let openScript = """
@@ -29,7 +28,7 @@ extension WebAutomationService {
             if found == "ready" { break }
         }
 
-        // 3. Type query and submit — use AppleScript string quoting (backslash-escape double quotes)
+        // 3. Type query and submit — use AppleScript string quoting
         let safeQuery = query.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let submitResult = await runAppleScript("""
         tell application "Safari" to do JavaScript \
@@ -75,7 +74,7 @@ extension WebAutomationService {
         """
     }
 
-    /// Scan the current page for interactive elements (inputs, buttons, links, selects).
+    /// Scan the current page for interactive elements
     func scanInteractiveElements(maxElements: Int = 50) async -> String {
         let js = """
         (function() {
@@ -144,7 +143,7 @@ extension WebAutomationService {
         """)
     }
 
-    /// Search on the current page by finding a search input field, typing the query, and submitting.
+    /// Search on the current page by finding a search input field
     func safariSiteSearch(query: String) async -> String {
         // Try common search input selectors
         let escapedQuery = query.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")

@@ -5,7 +5,7 @@ import Foundation
 extension ScriptService {
     // MARK: - Script Metadata
 
-    /// Cached metadata about script requirements (persisted in UserDefaults)
+    /// Cached metadata about script requirements
     private static let metadataKey = "agentScriptMetadata"
 
     struct ScriptMetadata: Codable {
@@ -52,7 +52,7 @@ extension ScriptService {
         return loadAllMetadata()[name]
     }
 
-    /// Check if a script can run without arguments (safe for direct execution)
+    /// Check if a script can run without arguments
     func canRunDirectly(name: String) -> Bool {
         guard let meta = metadata(for: name) else {
             // Not yet analyzed — scan it now
@@ -66,7 +66,7 @@ extension ScriptService {
         return !meta.requiresArguments && !meta.requiresInput
     }
 
-    /// Rebuild metadata for all scripts (call on app launch or after bulk changes)
+    /// Rebuild metadata for all scripts
     func rebuildAllMetadata() {
         var all: [String: ScriptMetadata] = [:]
         for script in listScripts() {
@@ -87,7 +87,7 @@ extension ScriptService {
         return try? String(contentsOf: scriptFile, encoding: .utf8)
     }
 
-    /// Strip any shebang line — scripts are compiled via swift build, not run directly
+    /// Strip any shebang line
     func stripShebang(_ content: String) -> String {
         if content.hasPrefix("#!/") {
             if let newline = content.firstIndex(of: "\n") {
@@ -97,14 +97,14 @@ extension ScriptService {
         return content
     }
 
-    /// Convert a name to UpperCamelCase: "compress_dmg" → "CompressDmg", "hello" → "Hello"
+    /// Convert a name to UpperCamelCase: "compress_dmg" → "CompressDmg"
     static func toUpperCamelCase(_ name: String) -> String {
         let parts = name.split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == " " })
         if parts.isEmpty { return name }
         return parts.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
     }
 
-    /// Create a new script as Sources/Scripts/{name}.swift and register in Package.swift
+    /// Create a new script as Sources/Scripts/{name}.swift and register in Pack
     func createScript(name: String, content: String) -> String {
         AuditLog.log(.agentScript, "createScript: \(name)")
         // Ensure package exists first (without lock - just creates directories)
@@ -117,7 +117,7 @@ extension ScriptService {
         }
         // Auto-convert to UpperCamelCase
         let scriptName = Self.toUpperCamelCase(raw)
-        // Reject invalid names: pure numbers, names with dots, tool name conflicts
+        // Reject invalid names: pure numbers, names with dots, tool name confli
         let invalidNames: Set<String> = [
             "ListAgents",
             "RunAgent",
@@ -181,12 +181,10 @@ extension ScriptService {
         }
     }
 
-    /// Trash directory for deleted agent scripts. Lives next to Package.swift so users
-    /// can recover via `restoreScript(name:)`.
+    /// Trash directory for deleted agent scripts.
     var scriptsTrashDir: URL { Self.agentsDir.appendingPathComponent(".Trash") }
 
-    /// Return all backups for a given script name (or all backups if name is empty),
-    /// sorted newest-first by filename timestamp.
+    /// Return all backups for a given script name
     func listScriptBackups(name: String = "") -> [URL] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: scriptsTrashDir, includingPropertiesForKeys: nil) else {
@@ -203,7 +201,6 @@ extension ScriptService {
     }
 
       /// Restore the most recent backup of `name` into Sources/Scripts/.
-      /// Refuses to overwrite an existing live script — caller must delete first.
     func restoreScript(name: String, backupFilename: String? = nil) -> String {
         AuditLog.log(.agentScript, "restoreScript: \(name) backup=\(backupFilename ?? "latest")")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
@@ -248,7 +245,6 @@ extension ScriptService {
     }
 
       /// Copy a script to the trash with a timestamp suffix before deletion.
-      /// Best-effort — failures are logged but don't block the delete.
     @discardableResult
     private func backupScriptToTrash(_ scriptFile: URL, scriptName: String) -> URL? {
         let fm = FileManager.default
@@ -270,12 +266,12 @@ extension ScriptService {
 
     private static let lastSyncedAgentVersionKey = "agentLastSyncedBundledVersion"
     private static let bundledCatalogAPIURL =
-        "https://api.github.com/repos/macOS26/AgentScripts/contents/Agent/agents/Sources/Scripts"
+        "https://api.github.com/repos/macOS26/AgentScripts/contents/Agent/agents
 
-    /// Refresh upstream-bundled scripts on launch when version changes. Version-gated, catalog-driven, SHA-compared, backed up before replacing, silent on failure, never auto-resurrects locally-deleted scripts.
+    /// Refresh upstream-bundled scripts on launch when version changes.
     func syncBundledScriptsFromRemote() async {
         AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: start")
-        // Include both short version and build number so a TestFlight build bump re-syncs.
+        // Include both short version and build number so a TestFlight build bum
         let info = Bundle.main.infoDictionary
         let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
         let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
@@ -356,14 +352,12 @@ extension ScriptService {
             }
         }
 
-        // Sync finalization (lock + Package.swift regen) must happen in a sync
-        // function so we don't try to grab `packageLock.lock()` from an async context.
+        // Sync finalization
         finalizeBundledSync(currentVersion: currentVersion, didReplaceScripts: replaced > 0)
         AuditLog.log(.agentScript, "syncBundledScriptsFromRemote: done (\(replaced)/\(checked) replaced)")
     }
 
-    /// Synchronous tail of the sync — runs after all awaits complete so we can
-    /// safely grab `packageLock` and bump UserDefaults.
+    /// Synchronous tail of the sync
     private func finalizeBundledSync(currentVersion: String, didReplaceScripts: Bool) {
         if didReplaceScripts {
             packageLock.lock()
@@ -373,7 +367,7 @@ extension ScriptService {
         UserDefaults.standard.set(currentVersion, forKey: Self.lastSyncedAgentVersionKey)
     }
 
-    /// Compute git blob SHA1 of file content. Matches GitHub contents API `sha` field so we skip unchanged files.
+    /// Compute git blob SHA1 of file content.
     static func gitBlobSHA1(of content: String) -> String {
         let bodyData = content.data(using: .utf8) ?? Data()
         guard let header = "blob \(bodyData.count)\0".data(using: .utf8) else { return "" }
@@ -383,15 +377,14 @@ extension ScriptService {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Pull missing script from AgentScripts GitHub (raw URL, no clone). Refuses to overwrite diverged live script — delete first.
+    /// Pull missing script from AgentScripts GitHub
     func pullScriptFromRemote(name: String) async -> String {
         AuditLog.log(.agentScript, "pullScriptFromRemote: \(name)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let scriptFile = scriptsDir.appendingPathComponent("\(scriptName).swift")
         let fm = FileManager.default
 
-        // Try `main` first, fall back to `master` for older repos. Both URLs come from the raw.githubusercontent.com
-        // host so the failure mode is just an HTTP 404 — no DNS or auth differences to worry about.
+        // Try `main` first, fall back to `master` for older repos. Both URLs co
         let fetchedContent: String
         switch await fetchUpstreamScript(scriptName: scriptName, branch: "main") {
         case .success(let content):
@@ -409,8 +402,7 @@ extension ScriptService {
             return "Error pulling '\(scriptName)' from remote: \(err). Recovery: try again in a moment, or use agent_script(action:\"restore\", name:\"\(scriptName)\") to recover from .Trash backup."
         }
 
-        // If the live file is byte-identical to upstream, treat as a no-op success rather than an error. Lets the model
-        // call `pull` defensively without having to delete first when nothing actually needs to change.
+        // If the live file is byte-identical to upstream, treat as a no-op succ
         if fm.fileExists(atPath: scriptFile.path) {
             if let local = try? String(contentsOf: scriptFile, encoding: .utf8), local == fetchedContent {
                 return "'\(scriptName)' already matches AgentScripts upstream (no-op, \(fetchedContent.count) bytes)."
@@ -418,7 +410,7 @@ extension ScriptService {
             return "Error: '\(scriptName)' has local edits that differ from upstream. Recovery: call agent_script(action:\"delete\", name:\"\(scriptName)\") first (delete creates a backup automatically), then retry pull. Or use agent_script(action:\"restore\", name:\"\(scriptName)\") if you want to recover the previous local version instead."
         }
 
-        // Synchronous: write file, lock package, regen — no await between lock and unlock
+        // Synchronous: write file, lock package, regen
         return installPulledScript(scriptName: scriptName, scriptFile: scriptFile, content: fetchedContent)
     }
 
@@ -429,8 +421,7 @@ extension ScriptService {
         case failure(String)
     }
 
-    /// / Fetch a script's raw content from the AgentScripts repo on a specific branch. / Returns `.notFound` for HTTP
-    /// 404 (so the caller can try a fallback branch), / `.failure` for any other error, `.success` with the content otherwise.
+    /// Fetch script content from the AgentScripts repo on a branch.
     private func fetchUpstreamScript(scriptName: String, branch: String) async -> UpstreamFetchResult {
         let prefix = Self.scriptsRawURLPrefix.replacingOccurrences(of: "/main/", with: "/\(branch)/")
         guard let url = URL(string: "\(prefix)/\(scriptName).swift") else {
@@ -456,8 +447,7 @@ extension ScriptService {
         }
     }
 
-    /// Synchronous installer for `pullScriptFromRemote` — write the file, regenerate
-    /// Package.swift under the lock, no async hops in between.
+    /// Synchronous installer for `pullScriptFromRemote`
     private func installPulledScript(scriptName: String, scriptFile: URL, content: String) -> String {
         let fm = FileManager.default
         do {
@@ -475,8 +465,7 @@ extension ScriptService {
         }
     }
 
-    /// Delete a script and remove from Package.swift (idempotent — succeeds even if file already gone).
-    /// Always backs the file up to `~/Documents/AgentScript/agents/.Trash/` first.
+    /// Delete a script and remove from Package.swift (idempotent
     func deleteScript(name: String) -> String {
         AuditLog.log(.agentScript, "deleteScript: \(name)")
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
@@ -496,7 +485,7 @@ extension ScriptService {
             }
         }
 
-        // Always mark deleted and regenerate Package.swift (self-heal stale entries)
+        // Always mark deleted and regenerate Package.swift (self-heal stale ent
         markScriptDeleted(scriptName)
         packageLock.lock()
         defer { packageLock.unlock() }
@@ -521,8 +510,7 @@ extension ScriptService {
         let agentsPath = Self.agentsDir.path.replacingOccurrences(of: "'", with: "'\\''")
         let dylibFile = dylibPath(name: scriptName).replacingOccurrences(of: "'", with: "'\\''")
         let escapedName = scriptName.replacingOccurrences(of: "'", with: "'\\''")
-        // No `touch Package.swift` here — it had no documented reason and was failing under TCC when the User Launch
-        // Agent tried to update mtime on a file in ~/Documents/. Swift Package Manager detects source changes via the .swift file mtimes, so touching Package.swift is a no-op for build invalidation. Re-sign dylib with the app's identity so macOS attributes AppleScript permission prompts to "Agent!" instead of "Xcode".
+        // No `touch Package.swift` here
         return
             "cd '\(agentsPath)' && swift build --product '\(escapedName)' 2>&1 "
             + "&& codesign --force --sign - --identifier \(AppConstants.bundleID) "
@@ -535,7 +523,7 @@ extension ScriptService {
         return Self.agentsDir.appendingPathComponent(".build/debug/lib\(scriptName).dylib").path
     }
 
-    /// Check if the compiled dylib is up to date (newer than source file).
+    /// Check if the compiled dylib is up to date
     func isDylibCurrent(name: String) -> Bool {
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let sourceFile = scriptsDir.appendingPathComponent("\(scriptName).swift")
@@ -552,8 +540,7 @@ extension ScriptService {
         return dylibDate > sourceDate
     }
 
-    /// / Load and run a compiled script dylib via dlopen/dlsym. Captures stdout / (and optionally stderr), returns
-    /// output + exit status. Runs on background thread. / `projectFolder` → AGENT_PROJECT_FOLDER env var (always set, separate from args). / In-process variant can't safely chdir, so scripts must read AGENT_PROJECT_FOLDER.
+    /// / Load and run a compiled script dylib via dlopen/dlsym.
     func loadAndRunScript(
         name: String, arguments: String = "", projectFolder: String = "",
         captureStderr: Bool = false,
@@ -563,7 +550,7 @@ extension ScriptService {
         let scriptName = name.replacingOccurrences(of: ".swift", with: "")
         let path = dylibPath(name: scriptName)
 
-        // Resolve project folder: expand tilde + verify it exists; fall back to home.
+        // Resolve project folder: expand tilde + verify it exists; fall back to
         let fm = FileManager.default
         let resolvedProjectFolder: String = {
             let expanded = (projectFolder as NSString).expandingTildeInPath
@@ -576,7 +563,7 @@ extension ScriptService {
 
         return await withCheckedContinuation { continuation in
             Self.compilationQueue.async {
-                // AGENT_PROJECT_FOLDER is always set; AGENT_SCRIPT_ARGS only when present.
+                // AGENT_PROJECT_FOLDER is always set; AGENT_SCRIPT_ARGS only wh
                 setenv("AGENT_PROJECT_FOLDER", resolvedProjectFolder, 1)
                 if !arguments.isEmpty {
                     setenv("AGENT_SCRIPT_ARGS", arguments, 1)
@@ -592,14 +579,13 @@ extension ScriptService {
                     dup2(pipefd[1], STDERR_FILENO)
                 }
 
-                // Force line-buffered stdout so print() in dylibs flushes on each newline
-                // (pipes default to full buffering which delays output until script exits)
+                // Force line-buffered stdout so print() in dylibs flushes on ea
                 setvbuf(stdout, nil, _IOLBF, 0)
                 if captureStderr {
                     setvbuf(stderr, nil, _IONBF, 0)
                 }
 
-                /// Restore stdout (and stderr if captured) to their original file descriptors.
+/// Restore original file descriptors.
                 func restoreFDs() {
                     dup2(savedStdout, STDOUT_FILENO)
                     if captureStderr { dup2(savedStderr, STDERR_FILENO) }
@@ -705,7 +691,6 @@ extension ScriptService {
     }
 
     /// Block until any in-flight compilation/script work finishes.
-    /// Call before exit to avoid stdout deadlock in C++ static destructors.
     nonisolated static func drainCompilationQueue() {
         compilationQueue.sync {}
     }

@@ -1,7 +1,6 @@
 import Foundation
 
-/// Tracks per-task token budget to detect diminishing returns and prevent runaway costs.
-/// Create one at task start, call `recordTurn` after each LLM response, then check `shouldStop` or `shouldNudge`.
+/// Tracks per-task token budget to detect diminishing returns and prevent r...
 struct TokenBudgetTracker {
     /// Max total tokens (input+output) for this task. 0 = unlimited.
     var ceiling: Int
@@ -26,26 +25,24 @@ struct TokenBudgetTracker {
         totalUsed += inputTokens + outputTokens
     }
 
-    /// Fraction of budget consumed (0.0–1.0). Returns 0 if no ceiling set.
+    /// Fraction of budget consumed
     var usedFraction: Double {
         guard ceiling > 0 else { return 0 }
         return min(1.0, Double(totalUsed) / Double(ceiling))
     }
 
-    /// True when 90%+ of budget consumed — inject a nudge message to the LLM.
+    /// True when 90%+ of budget consumed
     var shouldNudge: Bool {
         ceiling > 0 && usedFraction >= 0.9 && usedFraction < 1.0
     }
 
-    /// True when the task should auto-stop: only when budget is fully exhausted.
-    /// Diminishing returns is informational only — does NOT auto-stop.
+    /// True when the task should auto-stop: only when budget is fully exhausted
     var shouldStop: Bool {
         guard ceiling > 0 else { return false }
         return usedFraction >= 1.0
     }
 
-    /// Diminishing returns: 5+ turns where the last two each produced < 100 output tokens.
-    /// Only meaningful when a budget ceiling is set.
+    /// Diminishing returns: 5+ turns where the last two each produced < 100 out
     var isDiminishing: Bool {
         guard ceiling > 0 else { return false }
         return turnCount >= 5 && lastDeltaTokens < 100 && prevDeltaTokens < 100
@@ -59,7 +56,7 @@ struct TokenBudgetTracker {
     }
 }
 
-/// Persists daily token usage to ~/Library/Application Support/Agent/token_usage.json
+/// Persists daily token usage to ~/Library/Application Support/Agent/token_...
 @MainActor
 @Observable
 final class TokenUsageStore {
@@ -69,13 +66,11 @@ final class TokenUsageStore {
         let date: String // "2026-03-29"
         var inputTokens: Int
         var outputTokens: Int
-        /// / Prompt cache read tokens — what we saved by hitting the cache instead of / re-sending the prompt.
-        /// Persisted so the 7-day chart can plot a cache line. / Optional in JSON for backward compat with older records.
+        /// / Prompt cache read tokens
         var cacheReadTokens: Int = 0
         var totalTokens: Int { inputTokens + outputTokens }
 
-        // Manual decoding so existing token_usage.json files (without cacheReadTokens)
-        // still load cleanly.
+        // Manual decoding so existing token_usage.json files
         enum CodingKeys: String, CodingKey {
             case date, inputTokens, outputTokens, cacheReadTokens
         }
@@ -147,8 +142,7 @@ final class TokenUsageStore {
 
     // MARK: - Prompt Cache Metrics
 
-    /// Record cache metrics from Claude API response. Updates session counters AND
-    /// persists cache-read tokens onto today's DayRecord so the 7-day chart can plot it.
+    /// Record cache metrics from Claude API response.
     func recordCacheMetrics(read: Int, creation: Int) {
         sessionCacheReadTokens += read
         sessionCacheCreationTokens += creation
@@ -162,7 +156,7 @@ final class TokenUsageStore {
         save()
     }
 
-    /// Cache hit rate as a percentage (0-100). Returns 0 if no cache activity.
+    /// Cache hit rate as a percentage
     var cacheHitRate: Int {
         let total = sessionCacheReadTokens + sessionCacheCreationTokens
         guard total > 0 else { return 0 }
@@ -225,7 +219,7 @@ final class TokenUsageStore {
 
     // MARK: - Per-Provider Cost Rates (USD per 1M tokens)
 
-    /// Input/output cost per million tokens. Approximate — check provider pricing pages.
+    /// Input/output cost per million tokens. Approximate
     static let costRates: [String: (input: Double, output: Double)] = [
         // Claude
         "claude-sonnet-4": (3.0, 15.0), "claude-opus-4": (15.0, 75.0), "claude-haiku-4": (0.80, 4.0),
@@ -241,7 +235,7 @@ final class TokenUsageStore {
         "grok-3": (3.0, 15.0), "grok-3-mini": (0.30, 0.50),
     ]
 
-    /// Estimate cost for a model. Returns 0 if model not in rate table (local/free).
+    /// Estimate cost for a model. Returns 0 if model not in rate table
     func estimatedCost(model: String, inputTokens: Int, outputTokens: Int) -> Double {
         // Try exact match, then prefix match
         let rates = Self.costRates[model] ?? Self.costRates.first(where: { model.hasPrefix($0.key) })?.value
@@ -256,7 +250,7 @@ final class TokenUsageStore {
         }
     }
 
-    /// Max cost per task (USD). 0 = unlimited. Stored in UserDefaults.
+    /// Max cost per task (USD).
     static let udMaxCostKey = "agent.maxTaskCost"
     var maxTaskCost: Double {
         get { UserDefaults.standard.double(forKey: Self.udMaxCostKey) }

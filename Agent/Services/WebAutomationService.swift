@@ -3,14 +3,13 @@ import AgentAudit
 import Foundation
 import AppKit
 
-/// / Unified web automation service that combines Accessibility, AppleScript/JS, and Selenium. / Auto-selects the best
-/// strategy based on the browser and operation. / Phase 2 Implementation: Unified API with caching and fuzzy matching.
+/// / Unified web automation service combines Accessibility
 final class WebAutomationService: @unchecked Sendable {
     static let shared = WebAutomationService()
     
     // MARK: - JavaScript Escaping
 
-    /// Escape a string for embedding in JavaScript string literals (single or double quoted).
+    /// Escape a string for embedding in JavaScript string literals
     static func escapeJS(_ str: String) -> String {
         str.replacingOccurrences(of: "\\", with: "\\\\")
            .replacingOccurrences(of: "\"", with: "\\\"")
@@ -21,8 +20,7 @@ final class WebAutomationService: @unchecked Sendable {
            .replacingOccurrences(of: "\0", with: "")
     }
 
-    /// Escape JavaScript for embedding inside AppleScript `do JavaScript "..."`.
-    /// AppleScript only needs `\` and `"` escaped — single quotes are fine as-is.
+    /// Escape JavaScript for embedding inside AppleScript `do JavaScript "..."`
     static func escapeJSForAppleScript(_ str: String) -> String {
         str.replacingOccurrences(of: "\\", with: "\\\\")
            .replacingOccurrences(of: "\"", with: "\\\"")
@@ -32,8 +30,7 @@ final class WebAutomationService: @unchecked Sendable {
            .replacingOccurrences(of: "\0", with: "")
     }
 
-    /// Properly escape a string for embedding in a JSON value (for Selenium args).
-    /// Uses JSONSerialization for correctness.
+    /// Properly escape a string for embedding in a JSON value
     static func escapeJSON(_ str: String) -> String {
         if let data = try? JSONSerialization.data(withJSONObject: str),
            let json = String(data: data, encoding: .utf8) {
@@ -76,7 +73,7 @@ final class WebAutomationService: @unchecked Sendable {
     
     // MARK: - Unified API
     
-    /// Open a URL in the specified browser. Returns immediately after the URL is sent — no page load wait.
+    /// Open a URL in the specified browser.
     func open(url: URL, browser: BrowserType = .safari, waitForLoad: Bool = false) async throws -> String {
         // Try AppleScript first (fastest, most reliable)
         if let result = try? await openViaAppleScript(url: url, browser: browser) {
@@ -94,7 +91,7 @@ final class WebAutomationService: @unchecked Sendable {
         return "Opened \(url.absoluteString) in default browser"
     }
 
-    /// Wait for the current page to finish loading (document.readyState == "complete")
+    /// Wait for the current page to finish loading
     func waitForPageReady(browser: String? = nil, timeout: TimeInterval = 3) async {
         let browserId = browser ?? detectActiveBrowser() ?? "com.apple.Safari"
         let start = CFAbsoluteTimeGetCurrent()
@@ -135,8 +132,7 @@ final class WebAutomationService: @unchecked Sendable {
         return "Error: could not get page title"
     }
     
-    /// / Find an element using the best available strategy / - Parameters: / - selector: CSS selector, XPath, or
-    /// accessibility identifier / - strategy: Auto, Accessibility, JavaScript, or Selenium / - timeout: Maximum wait time / - fuzzyThreshold: Minimum match score (0-1) for fuzzy matching / - Returns: Element properties and source
+    /// / Find an element using the best available strategy /
     func findElement(
         selector: String,
         strategy: SelectorStrategy = .auto,
@@ -163,7 +159,7 @@ final class WebAutomationService: @unchecked Sendable {
             let isBrowser = browserId != nil && browserIDs.contains(browserId!)
 
             if isBrowser {
-                // Web page: JS only (fast), skip accessibility (too slow on browser AX trees)
+                // Web page: JS only (fast), skip accessibility (too slow on bro
                 if let jsResult = try? await findViaJavaScript(selector: selector, browser: browserId!) {
                     result = jsResult
                     source = .javascript
@@ -221,7 +217,7 @@ final class WebAutomationService: @unchecked Sendable {
         ]
         let isBrowser = browserId != nil && browserIDs.contains(browserId!)
 
-        // For browsers, skip findElement and click directly via JS (much faster)
+        // For browsers, skip findElement and click directly via JS (much faster
         if isBrowser && (strategy == .auto || strategy == .javascript) {
             return try await executeJavaScriptClick(selector: selector, browser: browserId!)
         }
@@ -457,8 +453,7 @@ final class WebAutomationService: @unchecked Sendable {
     }
     
     private func findViaSelenium(selector: String, timeout: TimeInterval) async throws -> [String: Any]? {
-        // Note: Selenium operations are handled via Selenium AgentScript This method returns nil to indicate Selenium
-        // should be called separately The unified API will fall back to Accessibility/JS strategies
+        // Note: Selenium operations are handled via Selenium AgentScript This m
         return nil
     }
     
@@ -498,14 +493,14 @@ final class WebAutomationService: @unchecked Sendable {
     }
     
     private func executeJavaScriptClick(selector: String, browser: String) async throws -> String {
-        // Handle jQuery-style :contains() or plain text — extract text, find by content, click by href/class
+        // Handle jQuery-style :contains() or plain text
         if selector.contains(":contains(") {
             if let start = selector.range(of: ":contains(")?.upperBound {
                 var text = String(selector[start...])
                 text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"')"))
                 if text.hasSuffix(")") { text = String(text.dropLast()) }
                 text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                // Use text search to find element, then click by its actual selector
+                // Use text search to find element, then click by its actual sel
                 let escaped = Self.escapeJS(text)
                 let js = """
                 (function() {
@@ -553,7 +548,7 @@ final class WebAutomationService: @unchecked Sendable {
             return "Clicked element via JavaScript: \(selector)"
         }
 
-        // Second try: dispatch mousedown/mouseup/click events (handles event delegation)
+        // Second try: dispatch mousedown/mouseup/click events
         let jsDispatch: String
         if isXPath {
             jsDispatch = """
@@ -585,8 +580,7 @@ final class WebAutomationService: @unchecked Sendable {
             return "Clicked element via event dispatch: \(selector)"
         }
 
-        // Both JS paths failed. The previous third-try fallback used AccessibilityService.clickAt to drive a raw OS
-        // click at the element's bounding-rect coordinates, but that path has been removed because AgentAccess is now AXorcist-only. If the JS dispatch can't reach this element, the LLM should switch to accessibility(action:"click_element") against the browser's AXWebArea — Safari and Chrome both expose page links/buttons as AXLink/AXButton inside the web area.
+        // Both JS paths failed. The previous third-try fallback used Accessibil
         return
             "Error: could not click element via JavaScript: \(selector). "
             + "The page may block synthetic events. "
@@ -600,8 +594,7 @@ final class WebAutomationService: @unchecked Sendable {
         let escapedSel = Self.escapeJS(selector)
         let isXPath = selector.hasPrefix("/") || selector.hasPrefix("./")
 
-        // Universal type function that handles: 1. <input> / <textarea> — use React-compatible native setter 2.
-        // contenteditable divs — use innerText + InputEvent (LinkedIn post, Gmail, Slack) 3. [role="textbox"] — same as contenteditable 4. Plain elements with .value — fallback
+        // Universal type function handles: 1. <input> / <textarea>
         let typeJS = """
         (function() {
             var sel = '\(escapedSel)';
@@ -632,7 +625,7 @@ final class WebAutomationService: @unchecked Sendable {
             }
 
             if (tag === 'INPUT' || tag === 'TEXTAREA') {
-                // Simulate character-by-character typing (works on React/Vue/Angular)
+                // Simulate character-by-character typing (works on React/Vue/An
                 var proto = tag === 'INPUT' ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
                 var setter = Object.getOwnPropertyDescriptor(proto, 'value');
                 // Clear existing value
@@ -654,7 +647,7 @@ final class WebAutomationService: @unchecked Sendable {
                 return 'typed';
             }
 
-            // Fallback: try execCommand (simulates real keyboard input), then .value
+            // Fallback: try execCommand (simulates real keyboard input), then .
             el.focus();
             if (document.execCommand) {
                 document.execCommand('selectAll', false, null);
@@ -690,7 +683,7 @@ final class WebAutomationService: @unchecked Sendable {
             }
         }
 
-        // Phase 2: JS verify failed — retry with character-by-character approach
+        // Phase 2: JS verify failed — retry with character-by-character approac
         let retryJS = """
         (function() {
             var sel = '\(escapedSel)';
@@ -701,7 +694,7 @@ final class WebAutomationService: @unchecked Sendable {
             if (!el) return 'not found';
             el.focus();
             el.click();
-            // Try execCommand first (works in contenteditable and some inputs in Safari)
+            // Try execCommand first (works in contenteditable and some inputs i
             document.execCommand('selectAll', false, null);
             if (document.execCommand('insertText', false, text)) return 'typed';
             // Last resort: set value + char-by-char events
@@ -719,8 +712,7 @@ final class WebAutomationService: @unchecked Sendable {
     
     // MARK: - iframe Support
 
-    /// JavaScript snippet that queries the main document and all same-origin iframes.
-    /// Call with a quoted CSS selector string, e.g. querySelectorWithIframes("'button.submit'")
+    /// JavaScript snippet queries the main document and all same-origin iframes
     static func querySelectorWithIframes(_ selectorExpr: String) -> String {
         """
         (function(sel) {

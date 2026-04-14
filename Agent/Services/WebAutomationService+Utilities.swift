@@ -2,8 +2,7 @@ import Foundation
 import AppKit
 
 extension WebAutomationService {
-    // MARK: - Selenium Helpers Note: Selenium operations are handled via Selenium AgentScript through tool handlers
-    // These methods are placeholders - actual Selenium calls go through run_agent_script
+    // MARK: - Selenium Helpers Note: Selenium operations are handled via Seleni
 
     func seleniumClick(selector: String) async throws -> String {
         throw WebAutomationError.seleniumError("Selenium operations should be called via selenium_click tool")

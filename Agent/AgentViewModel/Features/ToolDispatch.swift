@@ -13,7 +13,7 @@ struct ToolContext {
 enum ToolHandlerResult {
     /// Tool was handled, append this content to toolResults.
     case handled(String)
-    /// Tool was handled, result already appended to toolResults (for handlers that need custom format).
+    /// Tool was handled, result already appended to toolResults
     case alreadyAppended
     /// Tool was not recognized by this handler.
     case notHandled
@@ -21,15 +21,14 @@ enum ToolHandlerResult {
     case taskComplete(String)
 }
 
-/// Tool handler function type — takes name, input, context; returns result.
+/// Tool handler function type
 typealias ToolHandler = @MainActor (AgentViewModel, String, [String: Any], ToolContext) async -> ToolHandlerResult
 
 // MARK: - Tool Dispatch Table
 
 extension AgentViewModel {
 
-    /// The dispatch table — maps tool names to handler functions.
-    /// Built once lazily via `buildDispatchTable()`. Extensions can register additional handlers.
+    /// The dispatch table
     @MainActor static var toolDispatchTable: [String: ToolHandler] = buildDispatchTable()
 
     /// Build the base dispatch table. Called once.
@@ -59,7 +58,7 @@ extension AgentViewModel {
         toolDispatchTable[name] = handler
     }
 
-    /// Read-only tools safe for parallel execution — no filesystem writes, no UI actions, no state changes.
+    /// Read-only tools safe for parallel execution
     static let readOnlyTools: Set<String> = [
         // File reading
         "read_file", "list_files", "search_files", "read_dir",
@@ -78,7 +77,7 @@ extension AgentViewModel {
     /// Pre-computed results from parallel shell execution. Cleared after use.
     @MainActor static var precomputedResults: [String: String]?
 
-    /// Build a shell command for a read-only tool (runs off MainActor).
+    /// Build a shell command for a read-only tool
     nonisolated static func buildReadOnlyCommand(name: String, input: [String: Any], projectFolder: String) -> String {
         let pf = projectFolder.isEmpty ? NSHomeDirectory() : projectFolder
         switch name {
@@ -130,7 +129,7 @@ extension AgentViewModel {
         ctx: ToolContext,
         toolResults: inout [[String: Any]]
     ) async -> ToolHandlerResult {
-        // Normalize empty/relative path to nil so handlers fall back to project folder
+        // Normalize empty/relative path to nil so handlers fall back to project
         var input = rawInput
         if let p = input["path"] as? String, (p.isEmpty || p == "." || p == "./") { input["path"] = nil }
         if let p = input["file_path"] as? String, p.isEmpty { input["file_path"] = nil }
@@ -211,7 +210,7 @@ extension AgentViewModel {
 
         // Fallback: route through executeNativeTool
         let output = await executeNativeTool(name, input: input)
-        // Shell commands already streamed output via appendRawOutput — skip the duplicate log.
+        // Shell commands already streamed output via appendRawOutput
         let shellTools: Set<String> = ["execute_agent_command", "run_shell_script", "execute_daemon_command"]
         if !shellTools.contains(name) {
             appendLog(output)

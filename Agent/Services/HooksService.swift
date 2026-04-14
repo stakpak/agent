@@ -20,7 +20,7 @@ struct Hook: Codable, Identifiable {
     let id: UUID
     var name: String
     var event: HookEvent
-    /// Tool name pattern to match (empty = all tools). Supports prefix matching with *.
+    /// Tool name pattern to match
     var toolPattern: String
     /// Shell command to execute. Receives tool name and input as env vars.
     var command: String
@@ -45,8 +45,7 @@ struct Hook: Codable, Identifiable {
     }
 }
 
-/// Manages user-defined hooks for tool execution events.
-/// Hooks are stored at ~/Documents/AgentScript/hooks.json
+/// Manages user-defined hooks for tool execution events. Hooks are stored at
 @MainActor
 final class HooksService {
     static let shared = HooksService()
@@ -90,7 +89,7 @@ final class HooksService {
 
     // MARK: - Execution
 
-    /// Run all matching pre-tool hooks. Returns .block(message) if any hook blocks.
+    /// Run all matching pre-tool hooks. Returns .block(message) if any hook blo
     func runPreToolHooks(toolName: String, input: [String: Any]) async -> (decision: HookDecision, message: String?) {
         let matching = hooks.filter { $0.enabled && $0.event == .preToolUse && $0.matches(toolName: toolName) }
         for hook in matching {
@@ -139,8 +138,7 @@ final class HooksService {
             env["HOOK_INPUT"] = inputJSON
             env["HOOK_OUTPUT"] = output
             env["HOOK_EVENT"] = hook.event.rawValue
-            // Hooks run from $HOME with no project context — export AGENT_PROJECT_FOLDER pointing at home so hook
-            // scripts can rely on the same env contract as every other shell-execution path in Agent!.
+            // Hooks run from $HOME with no project context
             env["AGENT_PROJECT_FOLDER"] = NSHomeDirectory()
             process.environment = env
 

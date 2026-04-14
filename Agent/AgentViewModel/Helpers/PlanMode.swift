@@ -6,8 +6,7 @@ import AgentMCP
 
 extension AgentViewModel {
 
-    /// Git repo root for plan files. Plans go directly in the repo root (no subdirectory).
-    /// Returns nil if the project folder is not inside a git repository.
+    /// Git repo root for plan files.
     private static func planDir(_ projectFolder: String) -> String? {
         let base = projectFolder.isEmpty ? NSHomeDirectory() : resolvedWorkingDirectory(projectFolder)
         var dir = base
@@ -22,7 +21,7 @@ extension AgentViewModel {
         return nil
     }
 
-    /// Resolve the plan file path for a given plan_id. Returns nil if not in a git repo.
+    /// Resolve the plan file path for a given plan_id.
     private static func planFilePath(_ planId: String, projectFolder: String) -> String? {
         guard let dir = planDir(projectFolder) else { return nil }
         return (dir as NSString).appendingPathComponent("plan_\(planId).md")
@@ -53,12 +52,11 @@ extension AgentViewModel {
             return dateA > dateB
         }
         let filename = sorted[0]
-        let id = String(filename.dropFirst(5).dropLast(3)) // strip "plan_" and ".md"
+        let id = String(filename.dropFirst(5).dropLast(3)) // strip "plan_" and
         return (id, (dir as NSString).appendingPathComponent(filename))
     }
 
     /// Handle plan_mode tool calls: create, update, read, list, or delete.
-    /// tabName is used as the plan ID — "main" for the main tab, or the tab's display title.
     static func handlePlanMode(
         action: String,
         input: [String: Any],
@@ -118,8 +116,7 @@ extension AgentViewModel {
             } else {
                 return "Error: step number is required for plan_mode update"
             }
-            // Be permissive about step indexing.
-            // Steps are 1-based, but LLMs frequently send 0 (zero-indexed thinking). Treat 0 as 1 instead of erroring out...
+            // Be permissive about step indexing. Steps are 1-based, but LLMs fr
             guard rawStep >= 0 else {
                 return "Error: step number must be ≥ 0 (steps are 1-based; 0 is accepted as a synonym for 1)"
             }

@@ -1,5 +1,4 @@
-// AgentViewModel+TaskExecution+AboutSelf.swift Agent AboutSelf tool implementation - provides information about Agent's
-// capabilities
+// AgentViewModel+TaskExecution+AboutSelf.swift Agent AboutSelf tool implementat
 
 import Foundation
 import FoundationModels
@@ -8,7 +7,7 @@ import FoundationModels
 
 extension AgentViewModel {
 
-    /// Handles the about_self tool - returns information about Agent's capabilities
+    /// Handles the about_self tool
     func handleAboutSelfTool(name: String, input: [String: Any]) async -> String? {
         guard name == "about_self" else { return nil }
 
@@ -260,7 +259,7 @@ extension AgentViewModel {
         return aboutText
     }
 
-    /// Ask Apple Intelligence for a brief insight about what Agent! could help with right now.
+    /// Ask Apple Intelligence for a brief insight about what Agent! could help
     private func generateAppleAIInsight() async -> String {
         guard AppleIntelligenceMediator.isAvailable else { return "" }
         do {

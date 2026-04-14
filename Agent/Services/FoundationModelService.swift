@@ -2,8 +2,7 @@ import AgentLLM
 import FoundationModels
 import Foundation
 
-/// / On-device language model provider using Apple's Foundation Models framework. / Text-only conversation mode — no
-/// tool execution. Main LLM handles all tools. / Requires macOS 26.0+ with Apple Intelligence enabled.
+/// / On-device language model provider using Apple's Foundation Models framewor
 @MainActor
 final class FoundationModelService {
     let historyContext: String
@@ -13,18 +12,18 @@ final class FoundationModelService {
 
     private(set) var session: LanguageModelSession?
 
-    /// Timeout for Apple Intelligence calls (seconds). Short timeout to skip quickly if unavailable.
+    /// Timeout for Apple Intelligence calls (seconds).
     private static let responseTimeout: TimeInterval = 5
 
     /// Call to force a new session (e.g. after prompt changes).
     func resetSession() { session = nil }
 
-    /// The current session's transcript — the framework's built-in conversation history.
+    /// The current session's transcript
     var transcript: Transcript? {
         session?.transcript
     }
 
-    // MARK: - Enabled Tools (none — Apple AI is text-only, main LLM handles tools)
+    // MARK: - Enabled Tools (none — Apple AI is text-only, main LLM handles too
 
     /// Names of tools currently enabled for Apple Intelligence.
     var enabledToolNames: [String] { [] }
@@ -180,7 +179,6 @@ final class FoundationModelService {
     // MARK: - Prompt Cleanup
 
     /// Clean up a user prompt (fix spelling/grammar) using Apple Intelligence.
-    /// Returns the cleaned text, or the original if AI is unavailable or fails.
     static func cleanUpPrompt(_ text: String) async -> String {
         guard isAvailable else { return text }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -235,10 +233,10 @@ final class FoundationModelService {
 
 // MARK: - Shared State (used by NativeToolHandler for task loop coordination)
 
-/// Shared state for native tool handling — used by the main task loop regardless of provider.
+/// Shared state for native tool handling
 enum NativeToolContext {
     @MainActor static var projectFolder: String = ""
-    /// Set when task_complete is called — the task loop checks this after each iteration.
+    /// Set when task_complete is called
     @MainActor static var taskCompleteSummary: String?
     /// Counts tool calls per session turn to prevent infinite loops.
     @MainActor static var toolCallCount = 0

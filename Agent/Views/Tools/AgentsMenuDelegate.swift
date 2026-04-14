@@ -1,6 +1,6 @@
 import AppKit
 
-/// NSMenu delegate that builds the 🦾 Agents menu dynamically from RecentAgentsService.
+/// NSMenu delegate that builds the 🦾 Agents menu dynamically from RecentAge...
 @MainActor
 final class AgentsMenuDelegate: NSObject, NSMenuDelegate {
     static let shared = AgentsMenuDelegate()
@@ -32,7 +32,7 @@ final class AgentsMenuDelegate: NSObject, NSMenuDelegate {
             seen[entry.agentName]?.append(entry)
         }
 
-        // Sort: green (success) first, orange (cancelled) second, red (failed) last, pending at end
+        // Sort: green (success) first
         let statusOrder: [RecentAgentsService.RunStatus] = [.success, .cancelled, .failed, .pending]
         let sorted = order.sorted { a, b in
             let sa = seen[a]?.first?.status ?? .pending

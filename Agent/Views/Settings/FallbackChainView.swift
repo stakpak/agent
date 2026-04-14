@@ -1,7 +1,7 @@
 import SwiftUI
 import AgentTools
 
-/// Editor for the model fallback chain — users pick ordered provider/model pairs.
+/// Editor for the model fallback chain
 struct FallbackChainView: View {
     @Bindable var viewModel: AgentViewModel
     @State private var selectedProvider: APIProvider
@@ -9,7 +9,7 @@ struct FallbackChainView: View {
 
     init(viewModel: AgentViewModel) {
         self.viewModel = viewModel
-        // Default the picker to the user's currently-active provider — never hard-code.
+        // Default the picker to the user's currently-active provider — never ha
         _selectedProvider = State(initialValue: viewModel.selectedProvider)
     }
 
@@ -190,8 +190,7 @@ struct FallbackChainView: View {
         .frame(width: 380)
     }
 
-    /// (id, display) pairs for the model picker. `id` is stored/sent to API,
-    /// `display` is shown in the UI (e.g. Z.ai coding models show `-Code` suffix).
+    /// (id, display) pairs for model picker.
     private func modelOptionsForProvider(_ provider: APIProvider) -> [(id: String, display: String)] {
         func oai(_ list: [AgentViewModel.OpenAIModelInfo]) -> [(id: String, display: String)] {
             list.map { ($0.id, $0.name) }
@@ -227,8 +226,7 @@ struct FallbackChainView: View {
         return clean
     }
 
-    /// / Default model for a provider — uses the user's currently-selected model for that / provider (read from the
-    /// ViewModel), falling back to the first dynamically-fetched / model. Never hardcoded — model strings change frequently across provider updates.
+    /// / Default model for a provider
     private func defaultModel(for provider: APIProvider) -> String {
         // Prefer the model the user is actively using for that provider
         switch provider {

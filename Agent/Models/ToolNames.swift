@@ -1,8 +1,7 @@
 import Foundation
 import AgentTools
 
-/// / Single source of truth for all tool/group names. Use constants everywhere, never hardcode. / Names reference
-/// AgentTools.Name.* where possible. Local tools (memory/skill/spawn/tell/ask/fetch/file/git) / are defined here until hoisted into the AgentTools package.
+/// / Single source of truth for all tool/group names.
 enum Tool {
     // MARK: - Tool Names (what the LLM calls)
 
@@ -72,12 +71,10 @@ enum Tool {
 
     static let allGroups: [String] = [Group.core, Group.work, Group.code, Group.auto, Group.user, Group.root, Group.subAgents, Group.exp]
 
-    // MARK: - Legacy Aliases (old name → handler name)
-    // LLM sends short name, alias resolves to the handler the app uses
+    // MARK: - Legacy Aliases (old name → handler name) LLM sends short name, al
 
     static let aliases: [String: String] = [
-        // Canonical short names (the strings the LLM actually emits, defined in AgentTools.Name.*) → internal handler
-        // names. ONLY include entries here when the canonical maps to a single leaf handler. For consolidated tools that need action sub-dispatch (chat, javascript, applescript, etc.), let expandConsolidatedTool's switch handle them — adding them here would short-circuit the action routing and break the tool.
+        // Canonical short names ( strings LLM actually emits, defined in AgentT
         "user_shell": "execute_agent_command",
         "root_shell": "execute_daemon_command",
         "batch": "batch_commands",
@@ -92,7 +89,6 @@ enum Tool {
         "spawn": "spawn_agent",
         "multi": "batch_tools",
         "msg": "send_message",
-        // No legacy aliases below this line. Older short names (sh/user/root/dir/
-        // tools/mem/batch_shell/ask_user_question/message_agent/ send_message_to_agent) were retired — every supported provider now sees and emits the canonical names from AgentTools.Name.*. Re-add an entry ONLY if a model in active use is observed emitting the old name.
+        // No legacy aliases below this line. Older short names (sh/user/root/di
     ]
 }

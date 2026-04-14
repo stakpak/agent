@@ -32,22 +32,22 @@ final class ScriptTab: Identifiable {
     var exitCode: Int32?
     var cancelHandler: (() -> Void)?
 
-    /// Thread-safe flag readable from any thread (for Sendable closures)
+    /// Thread-safe flag readable from any thread
     nonisolated let _cancelFlag = AtomicFlag()
 
     // MARK: - Multi-Main-Tab LLM Config
 
     /// Non-nil when this is a "Main" tab with its own LLM provider/model
     var llmConfig: LLMConfig?
-    /// Which main tab spawned this script tab (for LLM inheritance)
+    /// Which main tab spawned this script tab
     var parentTabId: UUID?
     /// Whether this tab acts as an independent main tab
     var isMainTab: Bool { llmConfig != nil }
-    /// Whether this is the dedicated Messages tab (for iMessage Agent! commands)
+    /// Whether this is the dedicated Messages tab
     var isMessagesTab: Bool = false
     /// The iMessage handle to reply to when a Messages tab task completes
     var replyHandle: String?
-    /// Display name: scriptName (set at creation, numbered for duplicate LLM tabs)
+    /// Display name: scriptName (set at creation, numbered for duplicate LLM ta
     var displayTitle: String { isMessagesTab ? "Messages" : scriptName }
 
     // Log buffering (mirrors AgentViewModel pattern)
@@ -63,12 +63,12 @@ final class ScriptTab: Identifiable {
     var thinkingDismissed: Bool = true
     var thinkingExpanded: Bool = false
     var thinkingOutputExpanded: Bool = false
-    /// Expanded state for tool steps disclosure (persists across toggles).
+    /// Expanded state for tool steps disclosure
     var toolStepsExpanded: Bool = false
-    /// User's drag-resized height for the LLM Output HUD on this tab. Persisted across tab switches.
+    /// User's drag-resized height for the LLM Output HUD on this tab.
     var llmOutputHeight: Double = 80
 
-    /// Unified busy check — true when the tab is doing anything (running, LLM, thinking).
+    /// Unified busy check — true when the tab is doing anything
     var isBusy: Bool { isRunning || isLLMRunning || isLLMThinking }
     var runningLLMTask: Task<Void, Never>?
     var llmMessages: [[String: Any]] = []
@@ -118,13 +118,13 @@ final class ScriptTab: Identifiable {
     // LLM streaming state
     var llmStreamBuffer: String = ""
     var rawLLMOutput: String = ""
-    /// Character-by-character dripped version of rawLLMOutput for terminal effect
+    /// Character-by-character dripped version of rawLLMOutput for terminal effe
     var displayedLLMOutput: String = ""
     var dripDisplayIndex: Int = 0
     var dripTask: Task<Void, Never>?
     var lastElapsed: Double = 0
     var taskStartDate: Date? // Set when task starts, nil when idle
-    var taskElapsed: Double { // Computes live elapsed — works even when tab is in background
+    var taskElapsed: Double { // Computes live elapsed — works even when tab is
         get {
             if let start = taskStartDate, isRunning || isLLMRunning {
                 return Date().timeIntervalSince(start)
@@ -185,7 +185,7 @@ final class ScriptTab: Identifiable {
             self.tabErrors = errors
         }
         self.rawLLMOutput = record.rawLLMOutput
-        self.displayedLLMOutput = record.rawLLMOutput // Show full text on restore (no drip)
+        self.displayedLLMOutput = record.rawLLMOutput // Show full text on resto
         self.dripDisplayIndex = record.rawLLMOutput.count
         self.lastElapsed = record.lastElapsed
         self.thinkingExpanded = record.thinkingExpanded
@@ -224,16 +224,13 @@ final class ScriptTab: Identifiable {
         }
     }
 
-    /// Hard cap for activityLog — applied at every mutation site.
-    /// 50K is small enough that ActivityLogView can render it without beach-balling.
+    /// Hard cap for activityLog
     nonisolated static let logCap = 50_000
 
-    /// Banner inserted at the front whenever the log is trimmed. ActivityLogView
-    /// styles this literal with a yellow background at render time.
+    /// Banner inserted at the front whenever the log is trimmed.
     nonisolated static let trimBanner = "··· earlier output trimmed ···\n\n"
 
-    /// THE ONE log trim function. Hard 50K cap, snaps to next newline, prepends banner.
-    /// Used everywhere `activityLog` grows. Idempotent — calling on already-trimmed text is a no-op.
+    /// THE ONE log trim function.
     nonisolated static func trimLog(_ log: String) -> String {
         guard log.count > logCap else { return log }
         let target = max(0, logCap - trimBanner.count)
@@ -268,7 +265,7 @@ final class ScriptTab: Identifiable {
         startDripIfNeeded()
     }
 
-    /// Drip characters from rawLLMOutput into displayedLLMOutput one at a time (terminal effect)
+    /// Drip characters from rawLLMOutput into displayedLLMOutput one at a time
     func startDripIfNeeded() {
         guard dripTask == nil else { return }
         dripTask = Task { [weak self] in

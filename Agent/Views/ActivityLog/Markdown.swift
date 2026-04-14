@@ -1,11 +1,10 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Coordinator: Markdown Build Pipeline Top-level attributed-string builders: detect image/HTML file paths,
-// convert them to clickable links, and style the `ScriptTab.trimBanner` literal.
+// MARK: - Coordinator: Markdown Build Pipeline Top-level attributed-string buil
 
 extension ActivityLogView.Coordinator {
-    /// Fast render for incremental text updates - detects image/HTML paths and creates clickable links
+    /// Fast render for incremental text updates
     nonisolated func renderMarkdownOnly(_ text: String) -> NSAttributedString {
         // Check for image or HTML file paths in this chunk
         let nsText = text as NSString
@@ -78,8 +77,7 @@ extension ActivityLogView.Coordinator {
         return result
     }
 
-    /// / Build attributed string from text. Converts image/HTML paths to clickable links. / Source `activityLog` is
-    /// bounded to `ScriptTab.logCap` (50K) by `ScriptTab.trimLog`, / so this view never trims — it just renders and styles the trim banner literal yellow.
+    /// / Build attributed string from text.
     nonisolated func buildAttributedString(from text: String) -> NSAttributedString {
         let baseAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -171,8 +169,7 @@ extension ActivityLogView.Coordinator {
         return Self.styleTrimBanner(result, font: font)
     }
 
-    /// Apply yellow background + medium-weight styling to the trim-banner literal
-    /// (`ScriptTab.trimBanner`) wherever it appears in the rendered attributed string.
+    /// Apply yellow background + medium-weight styling to the trim-banner liter
     nonisolated static func styleTrimBanner(_ rendered: NSAttributedString, font: NSFont) -> NSAttributedString {
         let bannerLiteral = ScriptTab.trimBanner.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !bannerLiteral.isEmpty else { return rendered }

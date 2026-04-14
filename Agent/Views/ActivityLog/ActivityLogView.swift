@@ -32,14 +32,13 @@ final class ArrowCursorTextView: NSTextView {
     }
 }
 
-/// / NSTextView-backed activity log — avoids SwiftUI Text layout storms. / Detects image/HTML paths and shows clickable
-/// links. Optimized for streaming. / Rendering, scroll, search, markdown, and cache live on `Coordinator`, split across: / ActivityLogView+Update.swift, +Scroll, +Search, +Markdown, +MarkdownBlock, / +MarkdownInline, +Cache, +Rendering.
+/// / NSTextView-backed activity log
 struct ActivityLogView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     let text: String
     var tabID: UUID? // nil = main tab
-    var isActive: Bool = false // true when tab/task is running — skip truncation
-    var textProvider: (@MainActor () -> String)? = nil // polled for live updates
+    var isActive: Bool = false // true when tab/task is running — skip truncatio
+    var textProvider: (@MainActor () -> String)? = nil // polled for live update
     var searchText: String = ""
     var caseSensitive: Bool = false
     var currentMatchIndex: Int = 0
@@ -155,13 +154,13 @@ struct ActivityLogView: NSViewRepresentable {
         var latestTabID: UUID?
         /// Track the last fully rendered text for incremental updates
         var lastRenderedText = ""
-        /// Track which tab we last rendered — forces full rebuild on tab switch
+        /// Track which tab we last rendered
         var lastTabID: UUID?
-        /// Set by updateNSView when tab changes — consumed by performRender
+        /// Set by updateNSView when tab changes
         var forceTabSwitch = false
-        /// Separate length tracker for updateNSView dedup (independent of performRender's lastLength)
+        /// Separate length tracker for updateNSView dedup
         var updateNSViewLastLength = 0
-        /// Polls the text source directly — bypasses SwiftUI observation
+        /// Polls the text source directly
         var textProvider: (@MainActor () -> String)?
         /// Notification observer for activityLog changes
         nonisolated(unsafe) var logObserver: NSObjectProtocol?
@@ -174,27 +173,27 @@ struct ActivityLogView: NSViewRepresentable {
         /// Minimum time between full renders during streaming (ms)
         private static let minRenderInterval: CFAbsoluteTime = 50
 
-        /// Tracks whether user is at/near bottom — updated continuously via scroll notifications
+        /// Tracks whether user is at/near bottom
         var userIsAtBottom = true
         /// Suppresses scroll tracking during programmatic scrolls
         var isProgrammaticScroll = false
         /// Observation token for scroll notifications
         nonisolated(unsafe) var scrollObserver: NSObjectProtocol?
-        /// Last known appearance name — used to detect light/dark mode changes
+        /// Last known appearance name
         var lastAppearanceName: NSAppearance.Name?
 
         // MARK: - Search-state props (consumed by ActivityLogView+Search.swift)
 
         /// Track previous search highlight ranges so we can remove only those
         var lastSearchRanges: [NSRange] = []
-        /// Saved original foreground colors per highlighted range so we can restore them
+        /// Saved original foreground colors per highlighted range so we can res
         var savedForegroundColors: [(range: NSRange, color: NSColor?)] = []
         /// Debounce timer for search highlighting during streaming
         var pendingSearchWork: DispatchWorkItem?
 
-        // MARK: - Per-Tab TextStorage Cache (consumed by ActivityLogView+Cache.swift)
+        // MARK: - Per-Tab TextStorage Cache (consumed by ActivityLogView+Cache.
 
-        /// Cached NSTextStorage per tab — swapping avoids re-layout entirely.
+        /// Cached NSTextStorage per tab
         struct TabCache {
             let textStorage: NSTextStorage
             let textLength: Int
@@ -212,7 +211,7 @@ struct ActivityLogView: NSViewRepresentable {
                 }
         }
 
-        /// React to activityLog changes — no polling, instant response
+        /// React to activityLog changes
         func startObservingLogChanges() {
             guard logObserver == nil else { return }
             logObserver = NotificationCenter.default.addObserver(
@@ -231,7 +230,6 @@ struct ActivityLogView: NSViewRepresentable {
         }
 
         /// Schedule rendering AFTER SwiftUI's layout pass completes.
-        /// If already scheduled, marks dirty so a follow-up render fires.
         private var renderDirty = false
         func scheduleRender() {
             if scheduledRenderWork != nil {
@@ -287,7 +285,7 @@ struct ActivityLogView: NSViewRepresentable {
 
         // MARK: - Link Clicks
 
-        /// Open image/HTML file links — images in default app (Preview), HTML in browser
+        /// Open image/HTML file links
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             let urlString: String
             if let url = link as? URL {

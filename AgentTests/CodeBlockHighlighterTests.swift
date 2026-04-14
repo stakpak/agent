@@ -578,7 +578,7 @@ struct CodeBlockHighlighterTests {
         let result = CodeBlockHighlighter.highlightActivityLogLine(line: code, font: defaultFont)
         
         #expect(result != nil)
-        // Path segments: home prefix dim, top dir green, middle dirs cyan, filename blue bold
+        // Path segments: home prefix dim, top dir green, middle dirs cyan, file
         #expect(hasColor(result!, for: "/Users/toddbruss/Documents/file.swift"))
     }
     
@@ -602,7 +602,7 @@ struct CodeBlockHighlighterTests {
         #expect(hasColor(result, for: "property"))
     }
     
-    // MARK: - Function Call Highlighting Tests
+    // MARK: - Call Highlighting Tests
     
     @Test("Function calls are highlighted")
     func functionCallsHighlighted() {
@@ -617,8 +617,7 @@ struct CodeBlockHighlighterTests {
     
     @Test("Dark mode uses dark theme colors")
     func darkModeThemeColors() async {
-        // This test verifies theme color computation for dark mode
-        // Colors should adapt based on effective appearance
+        // This test verifies theme color computation for dark mode Colors shoul
         let code = "let x = 5"
         let result = CodeBlockHighlighter.highlight(code: code, language: "swift", font: defaultFont)
         

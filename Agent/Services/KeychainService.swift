@@ -3,7 +3,6 @@ import Security
 import AgentAudit
 
 /// Secure credential storage using the macOS data protection keychain.
-/// No password prompts across rebuilds.
 final class KeychainService: Sendable {
     static let shared = KeychainService()
 

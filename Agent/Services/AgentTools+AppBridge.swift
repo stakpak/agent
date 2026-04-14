@@ -1,11 +1,10 @@
 import Foundation
 import AgentTools
 
-/// Bridge extension that provides convenience methods using app-specific services
-/// (ToolPreferencesService, MCPService) that the AgentTools package doesn't know about.
+/// Bridge extension provides convenience methods using app-specific services
 extension AgentTools {
 
-    /// Xcode tool names that should be filtered out when not in an Xcode project.
+    /// Xcode tool names that should be filtered out when not in an Xcode projec
     private static let xcodeToolNames: Set<String> = [
         "xc",
         "xcode",

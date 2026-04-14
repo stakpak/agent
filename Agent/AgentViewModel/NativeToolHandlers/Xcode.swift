@@ -11,15 +11,13 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// Handles Xcode-related tool calls plus batch_tools, web_search, and
-    /// lookup_sdef. Returns `nil` if the name is not an Xcode-group tool.
+    /// Handles Xcode-related tool calls plus batch_tools, web_search, and looku
     func handleXcodeNativeTool(name: String, input: [String: Any]) async -> String? {
         switch name {
         // MARK: - Xcode Tools
         case "xcode_build":
             let projectPath = input["project_path"] as? String ?? ""
-            // Background mode: spawn a fresh script tab and run xcodebuild there in a detached Task. The calling LLM
-            // gets an immediate "started in background" tool_result and continues; build progress streams to the spawned tab. Same pattern as run_agent — mirrors agent_script(action:"run").
+            // Background mode: spawn a fresh script tab and run xcodebuild ther
             if input["background"] as? Bool == true {
                 let label = projectPath.isEmpty ? "Build" : ((projectPath as NSString).lastPathComponent as NSString).deletingPathExtension
                 let spawnedTab = openScriptTab(scriptName: "xcode_build:\(label)", selectTab: false)
@@ -75,7 +73,7 @@ extension AgentViewModel {
                 return "🚀 Started xcode_build in background script tab 'xcode_build:\(label)'. Output streams to that tab — switch to it to monitor progress. The current task continues. Recovery: if the build is still running and you need the result, switch to that tab; if you need to retry without backgrounding pass background:false."
             }
             let buildResult = await Self.offMain { XcodeService.shared.buildProject(projectPath: projectPath) }
-            // Git auto-checkpoint after successful build — saves progress for overnight runs
+            // Git auto-checkpoint after successful build
             if buildResult.contains("BUILD SUCCEEDED") && !projectFolder.isEmpty {
                 let dir = projectFolder
                 let checkResult = await Self.offMain {
@@ -211,8 +209,7 @@ extension AgentViewModel {
             let query = input["query"] as? String ?? ""
             guard !query.isEmpty else { return "Error: query is required" }
             return await Self.performWebSearchForTask(query: query, apiKey: tavilyAPIKey, provider: selectedProvider)
-        // lookup_sdef — supports single bundle ID, "list", or comma-separated / array of bundle IDs for batch lookup
-        // (e.g. Safari + System Events in one call when scripting a multi-app workflow).
+        // lookup_sdef — supports single bundle ID
         case "lookup_sdef":
             let bundleIDInput = input["bundle_id"] as? String ?? ""
             let bundleIDArray = input["bundle_id"] as? [String]
@@ -254,8 +251,7 @@ extension AgentViewModel {
                 return SDEFService.shared.summary(for: bundleID)
             }
 
-            // Multiple bundle IDs — concatenate summaries with clear headers. class_name doesn't make sense across
-            // multiple apps, so it's ignored in batch mode (warn the LLM in the output so the next call narrows correctly).
+            // Multiple bundle IDs — concatenate summaries with clear headers. c
             if bundleIDs.isEmpty {
                 return "Error: bundle_id required (single ID, comma-separated list, array, or 'list' to enumerate the catalog)"
             }

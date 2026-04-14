@@ -28,18 +28,16 @@ struct DependencyChecker {
 
         // Check if running on Apple Silicon (M1+)
         #if arch(arm64)
-            // On macOS 26+, Apple Intelligence is fully integrated and supported
+            // On macOS 26+, Apple Intelligence is fully integrated and supporte
             if #available(macOS 26.0, *) {
-                // Apple Intelligence requires M1 or later - all arm64 Macs support it
-                // Check if Apple Intelligence is actually enabled
+                // Apple Intelligence requires M1 or later
                 let defaults = UserDefaults.standard
-                // Apple Intelligence is enabled by default on supported Macs running macOS 26+
-                // The actual setting is in com.apple.appleintelligence
+                // Apple Intelligence is enabled by default on supported Macs ru
                 if let aiEnabled = defaults.object(forKey: "AppleIntelligenceEnabled") as? Bool, aiEnabled {
                     return (true, "Enabled")
                 }
 
-                // Check system language - Apple Intelligence supports multiple languages
+                // Check system language - Apple Intelligence supports multiple
                 let preferredLanguage = Locale.preferredLanguages.first ?? ""
                 if preferredLanguage.hasPrefix("en") {
                     // On macOS 26+ with Apple Silicon, AI is fully available

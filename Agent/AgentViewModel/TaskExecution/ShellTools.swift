@@ -3,11 +3,9 @@ import AgentAudit
 import CoreGraphics
 import ImageIO
 
-
 // MARK: - Vision Verification
 extension AgentViewModel {
-    /// Capture a screenshot of the frontmost window and return base64-encoded PNG data.
-    /// Used by the vision loop to auto-verify UI actions.
+    /// Capture a screenshot of the frontmost window and return base64-encoded P
     nonisolated static func captureVerificationScreenshot() async -> String? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
@@ -74,7 +72,6 @@ extension AgentViewModel {
 extension AgentViewModel {
 
     /// Execute a command via UserService XPC with streaming output.
-    /// Falls back to in-process execution when working directory is TCC-protected.
     func executeViaUserAgent(
         command: String,
         workingDirectory: String = "",
@@ -93,7 +90,7 @@ extension AgentViewModel {
         let dir = workingDirectory.isEmpty ? projectFolder : workingDirectory
         let fullCommand = Self.prependWorkingDirectory(command, projectFolder: dir)
 
-        // TCC-protected folders must run in-process (app has permissions, launch agent doesn't)
+        // TCC-protected folders must run in-process
         let result: (status: Int32, output: String)
         if Self.isTCCProtectedPath(dir) || Self.needsTCCPermissions(command) {
             result = await Self.executeTCCStreaming(command: fullCommand, workingDirectory: dir) { [weak self] chunk in
@@ -113,7 +110,7 @@ extension AgentViewModel {
         return result
     }
 
-    /// Returns true if the path is under a TCC-protected folder that the launch agent can't access.
+    /// Returns true if the path is under a TCC-protected folder that the launch
     nonisolated static func isTCCProtectedPath(_ path: String) -> Bool {
         let expanded = (path as NSString).expandingTildeInPath
         let home = NSHomeDirectory()
@@ -121,8 +118,7 @@ extension AgentViewModel {
         return protected.contains { expanded.hasPrefix(home + $0) }
     }
 
-    /// / Normalize a workingDirectory to an actual directory path. If the caller / accidentally passed a file path
-    /// (e.g. project_folder set to a `.swift` / file by mistake), strip the filename so Process() / XPC don't crash with / "Not a directory" when they try to chdir into it. Empty stays empty.
+    /// / Normalize a workingDirectory to an actual directory path.
     nonisolated static func normalizeWorkingDirectory(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
         var isDir: ObjCBool = false
@@ -133,11 +129,9 @@ extension AgentViewModel {
     }
 
     /// Runs a command in the Agent app process to inherit TCC permissions
-    /// (Automation, Accessibility, ScreenRecording).
     nonisolated static func executeTCC(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
         let workingDirectory = normalizeWorkingDirectory(workingDirectory)
-        // Hard local guardrail — refuses catastrophic commands like `rm -rf /` BEFORE the Process is even constructed.
-        // The verdict string is shaped to be informative to the LLM, so it understands why the command was rejected and can pick a narrower target on the retry instead of looping the same broken request.
+        // Hard local guardrail — refuses catastrophic commands like `rm -rf /`
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.shell, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -155,8 +149,7 @@ extension AgentViewModel {
 
                 var env = ProcessInfo.processInfo.environment
                 env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
-                // Export the project folder so shell commands can read $AGENT_PROJECT_FOLDER the same way agent scripts
-                // do. Falls back to $HOME when no working dir is provided so the var is ALWAYS defined.
+                // Export the project folder so shell commands can read $AGENT_P
                 env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
                     ? FileManager.default.homeDirectoryForCurrentUser.path
                     : workingDirectory
@@ -176,7 +169,7 @@ extension AgentViewModel {
                     return
                 }
 
-                // Read pipes then wait — osascript output is small, no deadlock risk
+                // Read pipes then wait — osascript output is small, no deadlock
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
@@ -194,7 +187,6 @@ extension AgentViewModel {
     }
 
     /// Run a command in the Agent app process with streaming output.
-    /// Inherits TCC permissions (Automation, Accessibility, ScreenRecording).
     nonisolated static func executeTCCStreaming(
         command: String,
         workingDirectory: String = "",
@@ -202,8 +194,7 @@ extension AgentViewModel {
     ) async -> (status: Int32, output: String)
     {
         let workingDirectory = normalizeWorkingDirectory(workingDirectory)
-        // Same guardrail as executeTCC — refuse catastrophic commands before
-        // the Process is constructed.
+        // Same guardrail as executeTCC
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.shell, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -223,8 +214,7 @@ extension AgentViewModel {
 
                 var env = ProcessInfo.processInfo.environment
                 env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
-                // Export AGENT_PROJECT_FOLDER for streamed shell commands (same contract
-                // as the non-streaming executeTCC and as agent scripts).
+                // Export AGENT_PROJECT_FOLDER for streamed shell commands (same
                 env["AGENT_PROJECT_FOLDER"] = workingDirectory.isEmpty
                     ? FileManager.default.homeDirectoryForCurrentUser.path
                     : workingDirectory
@@ -269,25 +259,24 @@ extension AgentViewModel {
         command.contains("osascript") || command.contains("/usr/bin/osascript")
     }
 
-    /// / Returns true if the command needs TCC permissions (must run in-process). / The Launch Agent and Daemon are
-    /// separate processes with separate bundle IDs / and typically NO TCC grants. Add new keywords for any TCC-touching binary.
+    /// / Returns true if the command needs TCC permissions
     nonisolated static func needsTCCPermissions(_ command: String) -> Bool {
         let lower = command.lowercased()
         return lower.contains("osascript")           // AppleScript / JXA CLI
             || lower.contains("applescript")         // any literal mention
             || lower.contains("nsapplescript")       // Foundation API name
-            || lower.contains("jxa")                 // JavaScript for Automation alias
-            || lower.contains("scriptingbridge")     // SBApplication-using binaries
-            || lower.contains("tell application")    // literal AppleScript embedded in heredoc
-            || lower.contains("do shell script")     // AppleScript that wraps shell
+            || lower.contains("jxa")                 // JavaScript for Automatio
+            || lower.contains("scriptingbridge")     // SBApplication-using bina
+            || lower.contains("tell application")    // literal AppleScript embe
+            || lower.contains("do shell script")     // AppleScript that wraps s
             || lower.contains("screencapture")       // Screen Recording TCC
             || lower.contains("accessibility")       // AX TCC
             || lower.contains("axorcist")            // AX library binary
             || lower.contains("automation")          // Automation TCC
-            || lower.contains("agentscript")         // agent script dylibs (use ScriptingBridge)
+            || lower.contains("agentscript")         // agent script dylibs (use
             || lower.contains("appleevent")          // raw Apple Events
-            || lower.contains("automator")           // Automator workflows (Apple Events)
-            || lower.contains("shortcuts run")       // Shortcuts CLI (often needs Automation)
+            || lower.contains("automator")           // Automator workflows (App
+            || lower.contains("shortcuts run")       // Shortcuts CLI (often nee
     }
 
 }

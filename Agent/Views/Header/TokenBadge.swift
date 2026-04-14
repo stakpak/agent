@@ -8,7 +8,7 @@ struct TokenBadge: View {
     let sessionOut: Int
     var providerName: String = ""
     var modelName: String = ""
-    /// Fraction of per-task token budget used (0.0–1.0). 0 = no budget set.
+    /// Fraction of per-task token budget used
     var budgetUsedFraction: Double = 0
 
     @State private var showDetail: Bool = false
@@ -158,8 +158,7 @@ private struct TokenDetailView: View {
 
                     Chart {
                         ForEach(recent, id: \.date) { day in
-                            // PointMarks ensure single-day data is visible — LineMark
-                            // alone draws nothing when there's only one data point.
+                            // PointMarks ensure single-day data is visible
                             PointMark(
                                 x: .value("Date", shortDate(day.date)),
                                 y: .value("Tokens", day.inputTokens)
@@ -306,7 +305,7 @@ private struct TokenDetailView: View {
     }
 
     private func shortModel(_ model: String) -> String {
-        // Trim long model IDs like "claude-sonnet-4-20250514" to "claude-sonnet-4"
+        // Trim long model IDs like "claude-sonnet-4-20250514" to "claude-sonnet
         let parts: [String] = model.components(separatedBy: "-")
         if parts.count > 3, let last = parts.last, last.count == 8, Int(last) != nil {
             return parts.dropLast().joined(separator: "-")

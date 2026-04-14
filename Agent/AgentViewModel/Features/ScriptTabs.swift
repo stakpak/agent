@@ -13,7 +13,7 @@ extension AgentViewModel {
         {
             tab.parentTabId = parent.id
         }
-        // Inherit project folder from the currently selected tab (parent), falling back to global
+        // Inherit project folder from the currently selected tab
         let parentFolder = selectedTabId.flatMap { self.tab(for: $0) }?.projectFolder ?? ""
         let sourceFolder = parentFolder.isEmpty ? self.projectFolder : parentFolder
         tab.projectFolder = Self.resolvedWorkingDirectory(sourceFolder)
@@ -34,7 +34,7 @@ extension AgentViewModel {
             numberedConfig.displayName = "\(baseName) \(existingCount + 1)"
         }
         let tab = ScriptTab(llmConfig: numberedConfig)
-        // Inherit project folder from the currently selected tab, falling back to global
+        // Inherit project folder from the currently selected tab, falling back
         let parentFolder = selectedTabId.flatMap { self.tab(for: $0) }?.projectFolder ?? ""
         let sourceFolder = parentFolder.isEmpty ? self.projectFolder : parentFolder
         tab.projectFolder = Self.resolvedWorkingDirectory(sourceFolder)
@@ -45,7 +45,6 @@ extension AgentViewModel {
     }
 
     /// Resolve the LLM provider and model for a given tab.
-    /// Main tabs use their own config; script tabs inherit from parent; fallback to global.
     func resolvedLLMConfig(for tab: ScriptTab) -> (provider: APIProvider, model: String) {
         if let config = tab.llmConfig {
             return (config.provider, config.model)
@@ -105,8 +104,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Return the chat URL for the given provider from the LLM registry (single source of truth).
-    /// Pick the right chat URL — code or vision — based on the model's :v suffix.
+    /// Return the chat URL for given provider from the LLM registry
     func chatURLForProvider(_ provider: APIProvider) -> String {
         guard let endpoint = LLMRegistry.shared.provider(provider.rawValue)?.endpoint else { return "" }
         let raw = provider == .zAI ? zAIModel : (provider == .bigModel ? bigModelModel : "")
@@ -174,7 +172,7 @@ extension AgentViewModel {
             }
             tab.logFlushTask?.cancel()
             tab.llmStreamFlushTask?.cancel()
-            // Clear log before removal — prevents expensive NSAttributedString copy on tab switch
+            // Clear log before removal — prevents expensive NSAttributedString
             tab.activityLog = ""
             tab.rawLLMOutput = ""
         }
@@ -211,8 +209,7 @@ extension AgentViewModel {
         persistScriptTabs()
     }
 
-    /// / Ensure an LLM tab is selected when a task comes in: / 1. If currently on a main LLM tab, stay there / 2. If on
-    /// a script tab with a parent, switch to the parent LLM tab / 3. Otherwise, switch to main tab
+    /// / Ensure an LLM tab is selected when a task comes in: / 1.
     func ensureLLMTabSelected() {
         if selectedTabId == nil {
             // Already on main tab
@@ -245,7 +242,7 @@ extension AgentViewModel {
 
     // MARK: - Script Tab Persistence
 
-    /// Save open script tabs: order/selected to UserDefaults, log data to SwiftData.
+    /// Save open script tabs: order/selected to UserDefaults, log data to Swift
     func persistScriptTabs() {
         for tab in scriptTabs { tab.flush() }
 
@@ -298,7 +295,7 @@ extension AgentViewModel {
         ChatHistoryStore.shared.saveScriptTabs(tabData)
     }
 
-    /// Restore script tabs from UserDefaults (order) + SwiftData (data).
+    /// Restore script tabs from UserDefaults
     func restoreScriptTabs() {
         guard let ids = UserDefaults.standard.stringArray(forKey: "agentScriptTabIds"),
               !ids.isEmpty else { return }

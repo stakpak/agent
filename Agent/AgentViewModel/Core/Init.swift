@@ -15,12 +15,11 @@ extension AgentViewModel {
         activityLog = ScriptTab.trimLog(activityLog)
         CodeBlockTheme.updateAppearance()
         TerminalNeoTheme.updateAppearance()
-        // Restore ~/Documents/AgentScript/ folder and bundled resources if missing (off main thread)
+        // Restore ~/Documents/AgentScript/ folder and bundled resources if miss
         Task.detached { [scriptService = self.scriptService] in
             scriptService.ensurePackage()
             scriptService.rebuildAllMetadata()
             // After ensurePackage, refresh upstream-bundled scripts when Agent!
-            // has been upgraded since the last sync. User-authored scripts are never touched, and any modified bundled sc...
             await scriptService.syncBundledScriptsFromRemote()
             let names = Set(scriptService.listScripts().map { $0.name.lowercased() })
             await MainActor.run { AppleIntelligenceMediator.knownAgentNames = names }
@@ -92,8 +91,7 @@ extension AgentViewModel {
         fetchModelsIfNeeded(for: selectedProvider)
     }
 
-    /// When the user changes the global provider via Settings, push it into the
-    /// active tab's LLMConfig so the tab remembers its own provider+model.
+    /// When the user changes the global provider via Settings
     func syncProviderToActiveTab() {
         guard let tabId = selectedTabId, let tab = tab(for: tabId), tab.isMainTab else { return }
         let model = globalModelForProvider(selectedProvider)
@@ -101,8 +99,7 @@ extension AgentViewModel {
         persistScriptTabs()
     }
 
-    /// When the user switches tabs, restore the global provider/model from that
-    /// tab's saved LLMConfig so the Settings popup shows the right provider.
+    /// When user switches tabs
     func restoreProviderFromActiveTab() {
         guard let tabId = selectedTabId,
               let tab = tab(for: tabId),

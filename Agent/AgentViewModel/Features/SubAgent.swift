@@ -64,8 +64,7 @@ extension AgentViewModel {
         subAgents.filter { $0.status == .running }
     }
 
-    /// Spawn an isolated sub-agent that runs concurrently with the parent task.
-    /// Returns immediately with the agent ID. Results arrive via notification.
+    /// Spawn an isolated sub-agent runs concurrently with parent task.
     func spawnSubAgent(name: String, prompt: String, toolGroups: Set<String>? = nil, maxIterations: Int = 15) -> String {
         guard activeSubAgents.count < Self.maxSubAgents else {
             return "Error: Maximum \(Self.maxSubAgents) concurrent sub-agents reached. Wait for one to complete."
@@ -90,7 +89,7 @@ extension AgentViewModel {
             + "You will receive a <task-notification> when it completes."
     }
 
-    /// Execute a sub-agent's task in isolation using the current provider/model.
+    /// Execute a sub-agent's task in isolation using the current provider/model
     private func executeSubAgent(_ agent: SubAgent) async -> String {
         let provider = selectedProvider
         let modelName = globalModelForProvider(provider)
@@ -165,8 +164,7 @@ extension AgentViewModel {
         ollama?.temperature = temperatureForProvider(provider)
         openAICompatible?.temperature = temperatureForProvider(provider)
 
-        // Sub-agent tool groups — configurable by parent, defaults to Core+Work+Code. Deliberately NOT including
-        // Tool.Group.subAgents in the default, so a spawned child cannot recursively spawn grandchildren without explicit parent opt-in. The maxSubAgents=3 cap is enforced per-parent, so recursive spawning would silently blow past it. Parents that need multi-level orchestration can pass agent.toolGroups explicitly.
+        // Sub-agent tool groups
         let activeGroups: Set<String> = agent.toolGroups ?? [Tool.Group.core, Tool.Group.work, Tool.Group.code]
 
         var messages: [[String: Any]] = [

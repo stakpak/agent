@@ -2,8 +2,7 @@ import SwiftUI
 import AgentTools
 import AgentTerminalNeo
 
-/// Collapsible thinking indicator shown in the activity log area while the LLM is processing.
-/// Shows real-time model info, token counts, and message stats when expanded.
+/// Collapsible thinking indicator shown in the activity log area while the LLM
 struct ThinkingIndicatorView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: AgentViewModel
@@ -23,8 +22,7 @@ struct ThinkingIndicatorView: View {
             else { viewModel.thinkingOutputExpanded = newValue }
         }
     }
-    /// / Live LLM Output HUD height — synced from/to the tab (or main viewModel) on appear and on change. / Using
-    /// @State here keeps the Binding identity stable across renders, which avoids drip / stuttering caused by closure-based bindings creating new identities each frame.
+    /// / Live LLM Output HUD height
     @State private var outputHeight: CGFloat = 80
     @State private var dots = ""
     @State private var tick = 0
@@ -53,7 +51,7 @@ struct ThinkingIndicatorView: View {
             && tab.llmMessages.isEmpty && tab.rawLLMOutput.isEmpty
     }
 
-    /// True when the tab's script is executing (LLM was used before but isn't active now)
+    /// True when the tab's script is executing
     private var isExecuting: Bool {
         guard let tab else { return false }
         return tab.isRunning && !tab.isLLMRunning && !tab.isLLMThinking
@@ -262,7 +260,7 @@ struct ThinkingIndicatorView: View {
                             let used = inputTokens + outputTokens
                             let rawFraction = min(Double(used) / Double(contextWindow), 1.0)
                             let isRunning = viewModel.isRunning || (tab?.isLLMRunning ?? false)
-                            // Show 100% when task is done, actual usage while running
+                            // Show 100% when task is done, actual usage while r
                             let fraction: Double = !isRunning ? 1.0 : (rawFraction > 0.95 ? 1.0 : rawFraction)
                             let barColor: Color = isRunning ? .green : .blue
                             HStack(spacing: 4) {
@@ -285,7 +283,6 @@ struct ThinkingIndicatorView: View {
                                 "\(Int(fraction * 100)) percent, \(Self.fmtTokens(used)) of \(Self.fmtTokens(contextWindow))"
                             )
                         }
-
 
                         Spacer()
                     }
@@ -336,7 +333,7 @@ struct ThinkingIndicatorView: View {
         .background(colorScheme == .dark ? Color.clear : Color.white.opacity(0.53))
         .background(.ultraThinMaterial.opacity(colorScheme == .dark ? 0.95 : 0.97))
         .onAppear {
-            // Restore persisted height for the active context (tab or main viewModel)
+            // Restore persisted height for the active context (tab or main view
             outputHeight = CGFloat(tab?.llmOutputHeight ?? viewModel.llmOutputHeight)
         }
         .onChange(of: tab?.id) { _, _ in
@@ -349,8 +346,7 @@ struct ThinkingIndicatorView: View {
             else { viewModel.llmOutputHeight = Double(newHeight) }
         }
         .onChange(of: tab?.isLLMRunning) { oldValue, newValue in
-            // Only fire on actual transitions, not tab swaps. The auto-expand of the chevron + dismiss is handled at
-            // the run-start sites in executeTabTask so it doesn't get applied to the wrong tab during a swap.
+            // Only fire on actual transitions, not tab swaps. The auto-expand o
             guard let tab, oldValue != newValue else { return }
             if newValue == true {
                 tab.taskStartDate = Date()
@@ -363,7 +359,7 @@ struct ThinkingIndicatorView: View {
             }
         }
         .onChange(of: viewModel.isRunning) { oldValue, newValue in
-            // Only fire on actual transitions on the main tab — auto-expand happens in executeTask.
+            // Only fire on actual transitions on the main tab
             guard tab == nil, oldValue != newValue else { return }
             if newValue {
                 viewModel.mainTaskStartDate = Date()
@@ -377,7 +373,7 @@ struct ThinkingIndicatorView: View {
         }
         .onReceive(refreshTimer) { _ in
             guard isActive else { return }
-            tick += 1 // Just refresh UI — elapsed is computed from taskStartDate
+            tick += 1 // Just refresh UI — elapsed is computed from taskStartDat
             switch dots.count {
             case 0: dots = "."
             case 1: dots = ".."
@@ -388,7 +384,7 @@ struct ThinkingIndicatorView: View {
     }
 }
 
-/// Resizable LLM output box — neo-retro terminal look, adapts to dark/light mode.
+/// Resizable LLM output box
 private struct LLMOutputBox: View {
     @Environment(\.colorScheme) private var colorScheme
     let text: String
@@ -432,7 +428,7 @@ private struct LLMOutputBox: View {
 
     private let minHeight: CGFloat = 80
 
-    /// Convert URLs in text to clickable underlined links, keeping the rest in termText color.
+    /// Convert URLs in text to clickable underlined links
     private static func linkify(_ text: String, color: Color) -> AttributedString {
         var result = AttributedString(text)
         result.foregroundColor = color
@@ -452,7 +448,7 @@ private struct LLMOutputBox: View {
 
     // MARK: - Terminal Table Rendering
 
-    /// Build an AttributedString that renders markdown tables as box-drawn terminal tables.
+    /// Build an AttributedString that renders markdown tables as box-drawn term
     private static func richText(_ text: String, color: Color, dimColor: Color, headerColor: Color) -> AttributedString {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var result = AttributedString()
@@ -558,8 +554,7 @@ private struct LLMOutputBox: View {
         return result
     }
 
-    /// / Maximum height: leave room for header, status bar, and input area. / IMPORTANT: keyWindow/mainWindow return
-    /// nil when the app deactivates — must / fall back to our own visible window, NOT NSScreen, otherwise the cap balloons / to screen size and the view fills the entire window on focus loss.
+    /// / Maximum height: leave room for header, status bar, and input area.
     private var maxHeight: CGFloat {
         let windowH = NSApp.keyWindow?.frame.height
             ?? NSApp.mainWindow?.frame.height
@@ -570,7 +565,7 @@ private struct LLMOutputBox: View {
 
     var body: some View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Hide cursor only while actively inside a table (last line starts with |)
+        // Hide cursor only while actively inside a table (last line starts with
         let lastLine = trimmed.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespaces) ?? ""
         let inTable = lastLine.hasPrefix("|") || lastLine.allSatisfy({ $0 == "-" || $0 == ":" || $0 == "|" || $0 == " " }) && lastLine
             .contains("-")
@@ -581,11 +576,10 @@ private struct LLMOutputBox: View {
                 if !displayText.isEmpty {
                     LLMOutputTextView(text: displayText, isStreaming: isStreaming) { h in
                         guard dragStartHeight == 0 else { return }
-                        // Pre-size from raw stream (ahead of drip) to prevent stutter
+                        // Pre-size from raw stream (ahead of drip) to prevent s
                         let lineCount = CGFloat(rawText.components(separatedBy: "\n").count)
                         let lineEstimate = lineCount * 24 + 24
-                        // Use the larger of: line-count estimate (pre-size), or actual rendered
-                        // height from the package (which accounts for word-wrap and tables).
+                        // Use larger of: line-count estimate
                         let proposed = min(max(minHeight, max(lineEstimate, h + 4)), maxHeight)
                         height = proposed
                     }
@@ -704,8 +698,7 @@ private struct ContentHeightKey: PreferenceKey {
 
 // MARK: - Tool Steps View
 
-/// / Collapsible list of tool invocations for the current task. / / `isExpanded` is a Binding (not local @State) so the
-/// disclosure state / survives the view being torn down and rebuilt — which happens whenever / the user toggles the LLM HUD with Cmd+B, switches tabs, or when steps / transition from empty → non-empty between LLM iterations. Without this, / every newly arriving step would collapse the list.
+/// / Collapsible list of tool invocations for current task.
 struct ToolStepsView: View {
     let steps: [AgentViewModel.ToolStep]
     @Binding var isExpanded: Bool

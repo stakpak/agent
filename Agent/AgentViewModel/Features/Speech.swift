@@ -142,7 +142,7 @@ extension AgentViewModel {
 
                 if hasError || isFinal {
                     if self.isHotwordListening {
-                        // Restart listening after a pause (recognition sessions time out)
+                        // Restart listening after a pause (recognition sessions
                         self.restartHotwordSession()
                     } else {
                         self.stopDictation()
@@ -154,8 +154,7 @@ extension AgentViewModel {
 
     // MARK: - Hotword Processing
 
-    /// / Find the LAST word-boundary occurrence of "agent"/"agent!" in lowercased / transcription and return index
-    /// after it. Word-boundary = char before must be / non-letter (or start) AND char after "t"/"!" must be non-letter (or end). / Anchors on LAST occurrence so "agent open agent script" treats second as wake word.
+    /// / Find the LAST word-boundary occurrence of "agent"/"agent!" in lowercas
     private static func wakeWordAnchor(in transcription: String) -> String.Index? {
         let lower = transcription.lowercased()
         let wakes = ["agent!", "agent"] // try the punctuated form first
@@ -174,18 +173,18 @@ extension AgentViewModel {
                     return !next.isLetter
                 }()
                 if beforeOK && afterOK {
-                    bestEnd = range.upperBound // keep walking — we want the LAST hit
+                    bestEnd = range.upperBound // keep walking — we want the LAS
                 }
                 searchStart = lower.index(after: range.lowerBound)
             }
-            if bestEnd != nil { break } // prefer "agent!" over "agent" if both matched
+            if bestEnd != nil { break } // prefer "agent!" over "agent" if both
         }
         return bestEnd
     }
 
     private func handleHotwordTranscription(_ transcription: String) {
         if !isHotwordCapturing {
-            // Look for the wake word "agent" / "agent!" — must be a complete word
+            // Look for the wake word "agent" / "agent!" — must be a complete wo
             guard let anchor = Self.wakeWordAnchor(in: transcription) else { return }
 
             // Wake word detected — start capturing the command after it
@@ -200,8 +199,7 @@ extension AgentViewModel {
             return
         }
 
-        // Already capturing — re-anchor on the LAST wake-word hit so the
-        // captured command stays in sync with the latest transcription.
+        // Already capturing
         if let anchor = Self.wakeWordAnchor(in: transcription) {
             let afterAgent = String(transcription[anchor...])
                 .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "!.,")))

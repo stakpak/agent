@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Project folder section with token badge - displayed below header
+/// Project folder section with token badge
 struct ProjectFolderSectionView: View {
     @Bindable var viewModel: AgentViewModel
     var selectedTab: ScriptTab?

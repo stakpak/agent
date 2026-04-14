@@ -86,7 +86,7 @@ struct AccessibilityServiceTests {
         #expect(deep.hasPrefix("{"))
     }
     
-    // MARK: - Element Properties Tests
+    // MARK: - Element Tests
     
     @Test("getElementProperties returns valid JSON")
     func getElementPropertiesJSON() {
@@ -106,8 +106,7 @@ struct AccessibilityServiceTests {
     
     @Test("performAction allows enabled actions")
     func performActionAllowsEnabledActions() {
-        // AXPress is enabled by default — should not be blocked by restrictions
-        // (may still fail due to "element not found" which is fine)
+        // AXPress is enabled by default
         let result = service.performAction(
             role: nil,
             title: nil,
@@ -187,13 +186,13 @@ struct AccessibilityServiceTests {
     
     @Test("pressKey returns valid JSON")
     func pressKeyReturnsJSON() {
-        let result = service.pressKey(virtualKey: 0x24, modifiers: [])  // Return key
+        let result = service.pressKey(virtualKey: 0x24, modifiers: [])  // Retur
         #expect(result.hasPrefix("{"))
     }
     
     @Test("pressKey handles modifiers")
     func pressKeyWithModifiers() {
-        let result = service.pressKey(virtualKey: 0x07, modifiers: ["command"])  // Cmd+X
+        let result = service.pressKey(virtualKey: 0x07, modifiers: ["command"])
         #expect(result.hasPrefix("{"))
     }
     
@@ -207,7 +206,7 @@ struct AccessibilityServiceTests {
     
     @Test("captureScreenshot with windowID returns valid JSON")
     func captureScreenshotWindowID() {
-        let result = service.captureScreenshot(windowID: 99999)  // Non-existent window
+        let result = service.captureScreenshot(windowID: 99999)  // Non-existent
         #expect(result.hasPrefix("{"))
         // Should fail gracefully
     }
@@ -275,7 +274,7 @@ struct AccessibilityServiceTests {
             y: nil,
             action: "AXPress"
         )
-        // Should fail because element not found, not because of role restriction
+        // Should fail because element not found, not because of role restrictio
         #expect(result.contains("not found") || result.contains("error"))
         #expect(!result.contains("restricted"))
     }
@@ -299,7 +298,7 @@ struct AccessibilityServiceTests {
     }
     
     // MARK: - Integration Smoke Tests
-    // These tests verify basic functionality without making assertions about results
+    // These tests verify basic functionality without making assertions about re
     
     @Test("listWindows smoke test")
     func listWindowsSmoke() {

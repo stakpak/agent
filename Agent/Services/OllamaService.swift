@@ -15,8 +15,7 @@ final class OllamaService {
     /// Context window size for local Ollama. 0 = let model decide.
     let contextSize: Int
 
-    // MARK: - Rate Limit Tracking
-    // Local daemon doesn't rate-limit, but Ollama Cloud/Pro/Max can return 429. Capture Retry-After and pad the next request. Per-provider dict for independent tracking.
+    // MARK: - Rate Limit Tracking Local daemon doesn't rate-limit, but Ollama C
     private static var retryAfterUntil: [APIProvider: CFAbsoluteTime] = [:]
 
     /// Wait if needed to respect Retry-After backoff from a previous 429.
@@ -33,7 +32,7 @@ final class OllamaService {
         retryAfterUntil[provider] = CFAbsoluteTimeGetCurrent() + seconds
     }
 
-    /// Parse Retry-After header. Integer seconds per RFC 7231. Returns 0 if missing; capped at 5 min.
+    /// Parse Retry-After header.
     nonisolated static func parseRetryAfter(_ headerValue: String?) -> Double {
         guard let v = headerValue?.trimmingCharacters(in: .whitespaces),
               !v.isEmpty,
@@ -56,7 +55,7 @@ final class OllamaService {
     ) {
         self.apiKey = apiKey
         self.model = model
-        let effectiveEndpoint = endpoint.isEmpty ? "http://localhost:11434/api/chat" : endpoint
+        let effectiveEndpoint = endpoint.isEmpty ? "http://localhost:11434/api/c
         self.baseURL = URL(string: effectiveEndpoint) ?? URL(filePath: "/")
         self.supportsVision = supportsVision
         self.provider = provider
@@ -97,10 +96,10 @@ final class OllamaService {
         )
     }
 
-    /// Set to true when a tool call fails — next turn sends full _tool names, then resets.
+    /// Set to true when a tool call fails
     var needsFullToolNames: Bool = false
 
-    /// Prepend project folder to the last user message so it's always visible in context.
+    /// Prepend project folder to the last user message so it's always visible i
     private func withFolderPrefix(_ messages: [[String: Any]]) -> [[String: Any]] {
         guard !projectFolder.isEmpty else { return messages }
         let prefix = "PROJECT FOLDER: \(projectFolder)\n"
@@ -122,7 +121,6 @@ final class OllamaService {
     }
 
     /// Send messages via OpenAI-compatible chat completions API.
-    /// Translates response into the same format as ClaudeService for the task loop.
     func send(
         messages: [[String: Any]],
         activeGroups: Set<String>? = nil
@@ -195,7 +193,7 @@ final class OllamaService {
                             let callId = block["id"] as? String ?? UUID().uuidString
                             let name = block["name"] as? String ?? ""
                             let input = block["input"] as? [String: Any] ?? [:]
-                            // Ollama native API expects arguments as a dict, not a JSON string
+                            // Ollama native API expects arguments as a dict, no
                             toolCalls.append([
                                 "id": callId,
                                 "type": "function",
@@ -215,7 +213,7 @@ final class OllamaService {
             }
         }
 
-        // Ollama requires the last message to be user or tool — strip trailing assistant messages
+        // Ollama requires the last message to be user or tool
         while chatMessages.last?["role"] as? String == "assistant" {
             chatMessages.removeLast()
         }
@@ -225,11 +223,11 @@ final class OllamaService {
             "messages": chatMessages,
             "tools": tools(activeGroups: activeGroups, compact: compactTools),
             "stream": false,
-            // Keep model in VRAM 30 min after each call so KV cache survives between loop iterations (default 5 min drops it).
+            // Keep model in VRAM 30 min after each call so KV cache survives be
             "keep_alive": "30m"
         ]
 
-        // Only send options for local Ollama; cloud providers manage their own context limits
+        // Only send options for local Ollama; cloud providers manage their own
         if provider == .localOllama {
             var opts: [String: Any] = ["temperature": temperature]
             if contextSize > 0 {
@@ -239,7 +237,7 @@ final class OllamaService {
             body["options"] = opts
         }
 
-        // .sortedKeys for byte-stable JSON — makes request bodies diffable for debugging, no cost on local Ollama.
+        // .sortedKeys for byte-stable JSON
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performRequest(
             bodyData: bodyData,
@@ -248,7 +246,6 @@ final class OllamaService {
             provider: provider
         )
     }
-
 
     // MARK: - Streaming
 
@@ -339,7 +336,7 @@ final class OllamaService {
             }
         }
 
-        // Ollama requires the last message to be user or tool — strip trailing assistant messages
+        // Ollama requires the last message to be user or tool
         while chatMessages.last?["role"] as? String == "assistant" {
             chatMessages.removeLast()
         }
@@ -349,12 +346,11 @@ final class OllamaService {
             "messages": chatMessages,
             "tools": tools(activeGroups: activeGroups, compact: compactTools),
             "stream": true,
-            // Keep model + KV cache resident for 30 min so the loop's stable prefix
-            // (system prompt + tools + earlier history) gets reused across iterations.
+            // Keep model + KV cache resident for 30 min so the loop's stable pr
             "keep_alive": "30m"
         ]
 
-        // Only send options for local Ollama; cloud providers manage their own context limits
+        // Only send options for local Ollama; cloud providers manage their own
         if provider == .localOllama {
             var opts: [String: Any] = ["temperature": temperature]
             if contextSize > 0 {
@@ -364,7 +360,7 @@ final class OllamaService {
             body["options"] = opts
         }
 
-        // .sortedKeys for byte-stable prefix caching — see send() for rationale.
+        // .sortedKeys for byte-stable prefix caching — see send() for rationale
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return try await Self.performStreamingRequest(
             bodyData: bodyData,
@@ -375,7 +371,7 @@ final class OllamaService {
         )
     }
 
-    /// Network I/O off main thread. Parses Ollama native response into Claude-compatible format.
+    /// Network I/O off main thread.
     nonisolated private static func performRequest(
         bodyData: Data, apiKey: String, url: URL, provider: APIProvider
     ) async throws -> (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int) {
@@ -395,7 +391,7 @@ final class OllamaService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // Ollama Cloud/Pro/Max can return 429. Local doesn't rate-limit but same path handles it. Default 30s if Retry-After missing.
+            // Ollama Cloud/Pro/Max can return 429. Local doesn't rate-limit but
             if httpResponse.statusCode == 429 {
                 let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
                 let parsed = parseRetryAfter(header)
@@ -445,7 +441,7 @@ final class OllamaService {
                 }
                 parsedToolFromText = true
             }
-            // Check for DeepSeek V3.2 DSML-style tool calls (<function_calls><invoke name="...">)
+            // Check for DeepSeek V3.2 DSML-style tool calls
             else if let dsmlCalls = Self.extractDSMLToolCalls(from: text) {
                 // Extract text before the first <function_calls> or <invoke tag
                 let cleaned = text.replacingOccurrences(of: "｜DSML｜", with: "").replacingOccurrences(of: "|DSML|", with: "")
@@ -466,7 +462,7 @@ final class OllamaService {
                 }
                 parsedToolFromText = true
             }
-            // Check if model wrote a tool call as plain text (common with Ollama models)
+            // Check if model wrote a tool call as plain text (common with Ollam
             else if let (toolName, nameRange, parsed) = Self.extractFirstToolCall(from: text) {
                 let beforeText = String(text[..<nameRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !beforeText.isEmpty {
@@ -572,7 +568,7 @@ final class OllamaService {
         var contentBlocks: [[String: Any]] = []
         let stopReason = "end_turn"
         var insideToolCall = false
-        var pendingBuffer = "" // Buffer text that might be the start of a tool call
+        var pendingBuffer = "" // Buffer text that might be the start of a tool
         var repetitionCount = 0
         var lastSegment = ""
         var streamInputTokens = 0
@@ -587,14 +583,14 @@ final class OllamaService {
                 continue
             }
 
-            // Each line has: {"message": {"content": "...", "role": "assistant"}, "done": false}
+            // Each line has: {"message": {"content": "...", "role": "assistant"
             if let message = json["message"] as? [String: Any],
                let content = message["content"] as? String,
                !content.isEmpty
             {
                 fullText += content
 
-                // Repetition detection: if the model keeps emitting the same ~50 char segment, bail out
+                // Repetition detection: if the model keeps emitting the same ~5
                 if fullText.count > 200 {
                     let recentEnd = fullText.endIndex
                     let recentStart = fullText.index(recentEnd, offsetBy: -min(60, fullText.count))
@@ -624,11 +620,11 @@ final class OllamaService {
                     if check.contains(marker) { detectedMarker = marker; break }
                 }
 
-                // Detect plain-text tool calls (V3.1 style: tool_name{...} or tool_name {"..."})
+                // Detect plain-text tool calls
                 if detectedMarker == nil {
                     for toolName in AgentTools.toolNames {
                         if let range = check.range(of: toolName) {
-                            // Verify it's followed by { or whitespace+{ (not just a substring in prose)
+                            // Verify it's followed by { or whitespace+{ (not ju
                             let after = check[range.upperBound...]
                             let trimmed = after.drop(while: { $0 == " " || $0 == "\n" })
                             if trimmed.first == "{" {
@@ -656,7 +652,7 @@ final class OllamaService {
                     continue // Keep buffering — might be XML tag
                 }
 
-                // If buffer ends with a known tool name, hold it back — the '{' with arguments may arrive in the next chunk. Flush if buffer grows too large without '{'.
+                // If buffer ends with a known tool name, hold it back
                 if pendingBuffer.count < 300 {
                     var containsToolName = false
                     for toolName in AgentTools.toolNames {
@@ -756,8 +752,7 @@ final class OllamaService {
         return (contentBlocks, stopReason, streamInputTokens, streamOutputTokens)
     }
 
-    /// Find the earliest tool call by position in the text, parse its JSON args.
-    /// Returns (toolName, rangeOfName, parsedArgs) or nil.
+    /// Find the earliest tool call by position in the text, parse its JSON args
     nonisolated static func extractFirstToolCall(from text: String) -> (String, Range<String.Index>, [String: Any])? {
         let toolNames = AgentTools.toolNames
 
@@ -773,7 +768,7 @@ final class OllamaService {
             // Only allow up to 20 garbage chars between name and '{'
             guard text.distance(from: nameRange.upperBound, to: braceIdx) <= 20 else { continue }
             let afterName = String(remainder[braceIdx...])
-            // Extract just the first balanced JSON object to avoid garbage trailing braces
+            // Extract just the first balanced JSON object to avoid garbage trai
             guard let json = Self.extractFirstJSON(from: afterName) else { continue }
             earliest = (toolName, nameRange, json)
         }
@@ -781,10 +776,9 @@ final class OllamaService {
         return earliest
     }
 
-    /// / Parse DeepSeek-style tool calls from text using special token markers. / V3.1 format:
-    /// <｜tool▁call▁begin｜>function_name<｜tool▁sep｜>{"arg":"val"}<｜tool▁call▁end｜> / Also handles: <｜tool▁call▁begin｜>{"name":"...","parameters":{...}}<｜tool▁call▁end｜> / Unicode variants with fullwidth ｜ and half-width | are both supported.
+    /// / Parse DeepSeek-style tool calls from text using special token markers.
     nonisolated static func extractDeepSeekToolCalls(from text: String) -> [(name: String, input: [String: Any])]? {
-        // Normalize: DeepSeek uses fullwidth ｜ (U+FF5C) and ▁ (U+2581) in tokens
+        // Normalize: DeepSeek uses fullwidth ｜ (U+FF5C) and ▁ (U+2581) in token
         let normalized = text
             .replacingOccurrences(of: "｜", with: "|")
             .replacingOccurrences(of: "▁", with: "_")
@@ -806,8 +800,7 @@ final class OllamaService {
                 .replacingOccurrences(of: "|>", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // V3.1 format: function_name\ntool_sep\n{"arg":"val"}
-            // After stripping <| and |>, tool_sep appears as plain text
+            // V3.1 format: function_name\ntool_sep\n{"arg":"val"} After strippi
             if rawContent.contains("tool_sep") {
                 let parts = rawContent.components(separatedBy: "tool_sep")
                 let funcName = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -839,8 +832,7 @@ final class OllamaService {
         return results.isEmpty ? nil : results
     }
 
-    /// / Parse DeepSeek V3.2 DSML-style tool calls from text. / V3.2 emits: <｜DSML｜function_calls><｜DSML｜invoke
-    /// name="tool"> / <｜DSML｜parameter name="key" string="true">value</｜DSML｜parameter> / </｜DSML｜invoke></｜DSML｜function_calls> / Ollama strips the ｜DSML｜ tokens, leaving plain XML-like tags.
+    /// / Parse DeepSeek V3.2 DSML-style tool calls from text. / V3.2 emits:
     nonisolated static func extractDSMLToolCalls(from text: String) -> [(name: String, input: [String: Any])]? {
         // Strip any remaining DSML tokens
         let cleaned = text
@@ -882,7 +874,7 @@ final class OllamaService {
                     if isString {
                         params[key] = value
                     } else {
-                        // Try to parse as JSON value (number, bool, object, array)
+                        // Try to parse as JSON value (number, bool, object, arr
                         if let data = value.data(using: .utf8),
                            let parsed = try? JSONSerialization.jsonObject(with: data)
                         {
@@ -911,7 +903,7 @@ final class OllamaService {
         return results.isEmpty ? nil : results
     }
 
-    /// Extract the first balanced JSON object from a string, ignoring trailing garbage.
+    /// Extract the first balanced JSON object from a string, ignoring trailing
     nonisolated static func extractFirstJSON(from text: String) -> [String: Any]? {
         var depth = 0
         var inString = false

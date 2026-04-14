@@ -10,16 +10,14 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Result of parsing a single LLM response turn's content blocks. / - `taskCompleted`: the LLM issued a
-    /// `task_complete` tool call; caller / should `return` immediately from executeTask (all completion side / effects — history, chat store, reply — have already been performed). / - `continueProcessing`: caller should continue with tool batch dispatch.
+    /// / Result of parsing a single LLM response turn's content blocks.
     struct ResponseParseResult {
         var hasToolUse: Bool
         var pendingTools: [(toolId: String, name: String, input: [String: Any])]
         var taskCompleted: Bool
     }
 
-    /// / Walks the LLM response content blocks, logging server-side web search / activity, collecting tool_use calls
-    /// into `pendingTools`, and handling / the terminal `task_complete` tool call inline (history, reply, etc.). / Mirrors the original inline `for block in response.content` loop exactly. / Mutates `filesEditedThisTask` and `completionSummary` inout.
+    /// / Walks the LLM response content blocks
     func parseLLMResponseContent(
         _ responseContent: [[String: Any]],
         prompt: String,
@@ -37,7 +35,7 @@ extension AgentViewModel {
             if type == "text" {
                 // LLM text goes to LLM Output only — LogView is for user status
             } else if type == "server_tool_use" {
-                // Server-side tool (web search) — executed by the API, just log it
+                // Server-side tool (web search) — executed by the API, just log
                 hasToolUse = true
                 if let input = block["input"] as? [String: Any],
                    let query = input["query"] as? String
@@ -67,8 +65,7 @@ extension AgentViewModel {
                 // Expand consolidated CRUDL tools into legacy tool names
                 (name, input) = Self.expandConsolidatedTool(name: name, input: input)
 
-                // Plans are encouraged but never required. Track edited files for task summary purposes. No mid-stream
-                // blocking — the LLM decides whether to plan up front.
+                // Plans are encouraged but never required.
                 let editTools: Set<String> = [
                     "write_file",
                     "edit_file",
@@ -89,15 +86,14 @@ extension AgentViewModel {
                         if !lastText.isEmpty { summary = String(lastText.prefix(300)) }
                     }
                     completionSummary = summary
-                    // Show task complete in the LLM Output HUD so the user sees the result. Append to rawLLMOutput and
-                    // let the drip task pick up the new chars naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
+                    // Show task complete in LLM Output HUD so user sees the res
                     let trimmedRaw = rawLLMOutput.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmedRaw.isEmpty {
                         rawLLMOutput = "✅ \(summary)"
                     } else if !trimmedRaw.contains(summary) {
                         rawLLMOutput += "\n\n✅ \(summary)"
                     }
-                    // Make sure the drip task is still running so it picks up the appended chars
+                    // Make sure the drip task is still running so it picks up t
                     startDripIfNeeded()
 
                     // Apple Intelligence summary annotation
@@ -137,16 +133,14 @@ extension AgentViewModel {
         return ResponseParseResult(hasToolUse: hasToolUse, pendingTools: pendingTools, taskCompleted: false)
     }
 
-    /// / Post-tool-dispatch handling: append the assistant turn to the / conversation, append tool results on the user
-    /// turn, and detect whether / the model implicitly signaled completion via free-text. Returns `true` / if the outer task loop should `break`.
+    /// / Post-tool-dispatch handling: append the assistant turn to the / conver
     func finalizeTurnAndDetectCompletion(
         responseContent: [[String: Any]],
         hasToolUse: Bool,
         toolResults: [[String: Any]],
         messages: inout [[String: Any]]
     ) -> Bool {
-        // Add assistant response to conversation
-        // Guard against empty content — Ollama rejects assistant messages with no content or tool_calls
+        // Add assistant response to conversation Guard against empty content
         let assistantContent: Any = responseContent.isEmpty
             ? "I'll continue with the task." as Any
             : responseContent as Any
@@ -162,7 +156,7 @@ extension AgentViewModel {
             SessionStore.shared.appendMessage(userMsg)
             return false
         } else if !hasToolUse {
-            // Check if model wrote task_complete/done as text instead of a tool call
+            // Check if model wrote task_complete/done as text instead of a tool
             let responseText = responseContent.compactMap { $0["text"] as? String }.joined()
             if responseText.contains("task_complete") || responseText.contains("done(summary") {
                 if let match = responseText.range(
@@ -210,7 +204,7 @@ extension AgentViewModel {
             flushLog()
             return true
         } else {
-            // Check if LLM signaled it's done via text even though it made tool calls
+            // Check if LLM signaled it's done via text even though it made tool
             let allText = responseContent.compactMap { $0["text"] as? String }.joined().lowercased()
             let stopPhrases = [
                 "no more content",

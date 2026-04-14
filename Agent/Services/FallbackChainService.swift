@@ -21,8 +21,7 @@ struct FallbackEntry: Codable, Identifiable {
     }
 }
 
-/// / Manages a user-configured fallback chain for overnight unattended runs. / When the primary provider/model fails N
-/// times, automatically switches to the next. / Persisted to UserDefaults.
+/// / Manages a user-configured fallback chain for overnight unattended runs.
 @MainActor
 @Observable
 final class FallbackChainService {
@@ -44,7 +43,7 @@ final class FallbackChainService {
         didSet { UserDefaults.standard.set(enabled, forKey: Self.udEnabledKey) }
     }
 
-    /// Current position in the fallback chain (0 = first fallback, -1 = still on primary).
+    /// Current position in the fallback chain
     var currentIndex: Int = -1
 
     /// Consecutive failure count for the current provider.
@@ -82,14 +81,13 @@ final class FallbackChainService {
 
     // MARK: - Fallback Logic
 
-    /// / Record a successful API call — resets failure count AND chain position so the / next call goes back to the
-    /// primary provider. This allows the chain to recover / from a transient failure (e.g., temporary rate limit) instead of being stuck / on the fallback provider for the rest of the session.
+    /// / Record a successful API call
     func recordSuccess() {
         consecutiveFailures = 0
         currentIndex = -1
     }
 
-    /// Record a failure. Returns the next fallback entry if threshold reached, nil if no more fallbacks.
+    /// Record a failure.
     func recordFailure() -> FallbackEntry? {
         consecutiveFailures += 1
         guard enabled, consecutiveFailures >= Self.maxFailuresBeforeFallback else { return nil }
@@ -118,7 +116,6 @@ final class FallbackChainService {
         return enabledChain[currentIndex]
     }
 
-    /// Summary for display.
     var summary: String {
         guard !chain.isEmpty else { return "No fallback chain configured." }
         let enabledChain = chain.filter { $0.enabled }

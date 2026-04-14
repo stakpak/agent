@@ -11,8 +11,7 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Handles shell, AppleScript, osascript, and JXA tool calls. / Returns `nil` if the name is not a shell-group
-    /// tool so the main / dispatcher can fall through to the next handler.
+    /// / Handles shell, AppleScript, osascript, and JXA tool calls.
     func handleShellNativeTool(name: String, input: [String: Any]) async -> String? {
         let pf = projectFolder
         switch name {
@@ -59,8 +58,7 @@ extension AgentViewModel {
         case "execute_daemon_command":
             let command = input["command"] as? String ?? ""
             guard !command.isEmpty else { return "Error: command is required. Recovery: pass command:\"whoami\" or any shell command." }
-            // TCC GUARD — TCC-touching commands (osascript, screencapture, etc.) MUST run in-process where Agent! holds
-            // TCC grants. Launch Daemon has no TCC. Reroute to executeTCCStreaming and log it.
+            // TCC GUARD — TCC-touching commands
             if Self.needsTCCPermissions(command) {
                 appendLog("🔧 $ (rerouted to in-process for TCC) \(Self.collapseHeredocs(command))")
                 flushLog()

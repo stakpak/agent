@@ -2,13 +2,12 @@ import AgentAudit
 import AppKit
 import ServiceManagement
 
-// MARK: - SMAppService Safe Wrapper for Daemon / Safely wraps SMAppService daemon operations to prevent crashes from
-// malformed/missing plists. / The crash happens inside Objective-C code that Swift can't catch, so we verify / the plist exists BEFORE calling SMAppService methods.
+// MARK: - SMAppService Safe Wrapper for Daemon / Safely wraps SMAppService daem
 enum SafeSMAppServiceDaemon {
     /// The plist filename for daemon
     static let daemonPlistName = AppConstants.helperPlist
 
-    /// Path to the plist inside the app bundle (where SMAppService reads from)
+    /// Path to the plist inside the app bundle
     static var bundlePlistURL: URL? {
         Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/LaunchDaemons")
@@ -40,13 +39,12 @@ enum SafeSMAppServiceDaemon {
 
     /// Create daemon service ONLY if plist is valid
     static func createDaemon() -> SMAppService? {
-        // Note: For daemons, SMAppService may manage registration state internally We check existence but still allow
-        // creation for already-registered daemons CRITICAL: Only create if plist exists and is valid to prevent ObjC crash
+        // Note: For daemons, SMAppService may manage registration state interna
         guard daemonPlistExists() else { return nil }
         return SMAppService.daemon(plistName: daemonPlistName)
     }
 
-    /// Safely check if daemon is ready - returns false if any issue
+    /// Safely check if daemon is ready
     static func isDaemonReady() -> Bool {
         // First verify plist exists
         guard daemonPlistExists() else { return false }
@@ -54,7 +52,7 @@ enum SafeSMAppServiceDaemon {
         // Create service and check status (may still crash in ObjC)
         guard let service = createDaemon() else { return false }
 
-        // Accessing .status could crash if plist is malformed, but we validated above
+        // Accessing .status could crash if plist is malformed, but we validated
         return service.status == .enabled
     }
 
@@ -179,8 +177,7 @@ final class HelperService {
     }
 
     func execute(command: String, workingDirectory: String = "") async -> (status: Int32, output: String) {
-        // Defense-in-depth: if a caller passed a file path as workingDirectory,
-        // strip the filename so the daemon doesn't crash with "Not a directory".
+        // Defense-in-depth: if a caller passed a file path as workingDirectory
         var workingDirectory = workingDirectory
         if !workingDirectory.isEmpty {
             var isDir: ObjCBool = false
@@ -190,8 +187,7 @@ final class HelperService {
             }
         }
         AuditLog.log(.launchDaemon, "execute: \(command.prefix(100))")
-        // Hard local guardrail — refuse catastrophic commands before they cross the XPC boundary into the privileged
-        // daemon. The daemon runs as root, so this is the LAST place we can stop a destructive command from doing maximum damage.
+        // Hard local guardrail — refuse catastrophic commands before they cross
         let verdict = ShellSafetyService.check(command)
         if !verdict.allowed {
             AuditLog.log(.launchDaemon, "BLOCKED [\(verdict.rule ?? "?")]: \(command.prefix(200))")
@@ -210,7 +206,7 @@ final class HelperService {
             }
         }
 
-        // Always send an absolute path — relative paths resolve wrong in the daemon
+        // Always send an absolute path — relative paths resolve wrong in the da
         let dir: String
         if workingDirectory.isEmpty || workingDirectory == "." || workingDirectory == "./" {
             dir = NSHomeDirectory()
@@ -219,8 +215,7 @@ final class HelperService {
         } else {
             dir = (workingDirectory as NSString).expandingTildeInPath
         }
-        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the root daemon's command runs in the right
-        // directory AND has the project folder env var available, matching the agent script and user-launch-agent contracts.
+        // Prepend `export AGENT_PROJECT_FOLDER='<dir>'; cd '<dir>' && ` so the
         let fullCommand: String
         if !dir.isEmpty && !command.hasPrefix("cd ") {
             let escaped = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -228,28 +223,26 @@ final class HelperService {
         } else {
             fullCommand = command
         }
-        // Honor the user's zsh/bash toggle. The daemon always invokes /bin/zsh (XPC protocol stays unchanged) but if
-        // the user picked a different shell, we wrap the command with `exec <shell> -c '...'` so the outer zsh process is replaced by the chosen shell. Defaults to no wrapping when /bin/zsh is selected (most common case, zero overhead).
+        // Honor the user's zsh/bash toggle.
         let wrapped = Self.wrapForShell(fullCommand, shellPath: AppConstants.shellPath)
         return await executeViaXPC(script: wrapped, workingDirectory: dir, outputHandler: handler)
     }
 
-    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a / shell other than /bin/zsh (the
-    /// daemon's default). Single quotes inside / the command are escaped using the standard `'\''` pattern so the / wrapping survives any shell metacharacter — including the `!` in / `Agent!.app` paths and arbitrary user content.
+    /// / Wrap a command with `exec <shell> -c '...'` when the user has chosen a
     private static func wrapForShell(_ command: String, shellPath: String) -> String {
         guard shellPath != "/bin/zsh", !shellPath.isEmpty else { return command }
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
         return "exec \(shellPath) -c '\(escaped)'"
     }
 
-    /// Quick connectivity test with 5-second timeout. Returns true if XPC responds.
+    /// Quick connectivity test with 5-second timeout. Returns true if XPC respo
     func ping() async -> Bool {
         let handler = OutputHandler { _ in }
         let conn = makeConnection(outputHandler: handler)
         return await Self.performPing(connection: conn)
     }
 
-    /// Runs XPC ping off the main actor so continuation can be resumed from any thread.
+    /// Runs XPC ping off the main actor so continuation can be resumed from any
     private nonisolated static func performPing(connection: NSXPCConnection) async -> Bool {
         await withCheckedContinuation { continuation in
             var didResume = false
@@ -333,7 +326,7 @@ final class HelperService {
                 return
             }
 
-            // Start timeout — tool must begin executing within toolStartTimeout seconds.
+            // Start timeout — tool must begin executing within toolStartTimeout
             var started = false
             let startedLock = NSLock()
             let startTimer = DispatchWorkItem {
@@ -347,7 +340,7 @@ final class HelperService {
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + toolStartTimeout, execute: startTimer)
 
-            // Finish timeout — tool must complete within toolFinishTimeout seconds.
+            // Finish timeout — tool must complete within toolFinishTimeout seco
             let finishTimer = DispatchWorkItem {
                 connection.invalidate()
                 safeResume((-1, "Tool timed out after \(Int(toolFinishTimeout))s"))

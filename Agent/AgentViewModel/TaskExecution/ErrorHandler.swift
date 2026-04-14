@@ -6,23 +6,21 @@ import AgentD1F
 import AgentSwift
 import Cocoa
 
-// MARK: - Task Execution — LLM Error Handling
+// MARK: - Task Execution — LLM Error
 
 extension AgentViewModel {
 
     /// Result of handling a thrown error inside the LLM task loop.
     enum TaskLoopErrorOutcome {
-        /// Caller should `continue` the outer while loop (retry with the same or updated state).
+        /// Caller should `continue` the outer while loop
         case continueLoop
         /// Caller should `break` out of the outer while loop.
         case breakLoop
-        /// Caller should switch to the named fallback provider/model and `continue`.
-        /// The caller is responsible for rebuilding LLM services from these values.
+        /// Caller should switch to the named fallback provider/model and `conti
         case fallbackRequested(provider: APIProvider, modelName: String, isVision: Bool)
     }
 
-    /// / Which LLM service a given task-loop iteration is talking to. / Used only so the caller can tell
-    /// `handleTaskLoopError` which of / claude/openAICompatible/ollama/foundationModelService was active / without having to ship the whole service quartet across the call.
+    /// / Which LLM service a given task-loop iteration is talking to.
     enum ActiveLLMService {
         case claude
         case openAICompatible
@@ -31,8 +29,7 @@ extension AgentViewModel {
         case none
     }
 
-    /// / Handles an error from LLM streaming: context-overflow pruning, stale connection / retries, timeouts (with
-    /// Ollama health-check/restart), 429 rate-limits, / recoverable AgentErrors, network loss, and fallback-chain switching. / Mutates `messages` and `timeoutRetryCount` inout. Returns TaskLoopErrorOutcome.
+    /// / Handles an error from LLM streaming: context-overflow pruning
     func handleTaskLoopError(
         _ error: Error,
         activeService: ActiveLLMService,
@@ -69,7 +66,6 @@ extension AgentViewModel {
         // Detect timeout errors
         let isNetworkTimeout = errMsg.lowercased().contains("timeout") || errMsg.lowercased().contains("timed out")
 
-
         // Determine error source for better logging
         var errorSource = "Unknown"
         switch activeService {
@@ -100,7 +96,7 @@ extension AgentViewModel {
                     let healthCheckResult = await Self.offMain {
                         let healthCheckTask = Process()
                         healthCheckTask.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-                        healthCheckTask.arguments = ["-s", "-f", "http://localhost:11434/api/tags", "--max-time", "5"]
+                        healthCheckTask.arguments = ["-s", "-f", "http://localho
                         healthCheckTask.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
                         let pipe = Pipe()
@@ -127,7 +123,7 @@ extension AgentViewModel {
                         flushLog()
 
                         // Wait longer for Ollama startup
-                        let startupDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
+                        let startupDelay = TimeInterval(min(10 * timeoutRetryCou
                         let retryMessage =
                             """
                             \(errorSource) timeout detected \
@@ -150,7 +146,7 @@ extension AgentViewModel {
                     }
                 }
 
-                let retryDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) // Exponential backoff up to 30 seconds
+                let retryDelay = TimeInterval(min(10 * timeoutRetryCount, 30)) /
                 let retryMessage =
                     """
                     \(errorSource) timeout detected \
@@ -181,8 +177,7 @@ extension AgentViewModel {
                     flushLog()
                 }
 
-                // Retry budget exhausted on the same provider — try fallback chain BEFORE giving up. Without this,
-                // every timeout/exhaustion would skip past the fallback entirely and the user would never see it trigger.
+                // Retry budget exhausted on the same provider
                 if let fallback = await tryFallbackChain(reason: "\(errorSource) timeout after \(maxTimeoutRetries) retries") {
                     timeoutRetryCount = 0
                     return fallback
@@ -202,13 +197,11 @@ extension AgentViewModel {
                 return .breakLoop
             }
         } else if let agentErr = error as? AgentError, agentErr.isRateLimited, timeoutRetryCount < maxTimeoutRetries {
-            // 429 rate-limit / "service overloaded" — exponential backoff up to 60s. Z.ai returns this with body code
-            // 1305 ("service may be temporarily overloaded"); OpenAI returns 429 with a Retry-After header. Either way the server is asking for a longer wait than the generic 10-second recoverable retry below — bumping each attempt by 15s up to a 60s ceiling.
+            // 429 rate-limit / "service overloaded"
             timeoutRetryCount += 1
             let apiBody: String
             if case .apiError(_, let msg) = error as? AgentError { apiBody = msg } else { apiBody = errMsg }
-            // Record every 429 with the fallback chain — it fires once its
-            // own threshold is met (3 total failures across the task).
+            // Record every 429 with the fallback chain
             if let fallback = await tryFallbackChain(reason: "429 (\(timeoutRetryCount))") {
                 timeoutRetryCount = 0
                 return fallback
@@ -263,7 +256,7 @@ extension AgentViewModel {
                 if Task.isCancelled { return .breakLoop }
                 return .continueLoop
             } else {
-                // Network retry budget exhausted — try fallback chain before giving up.
+                // Network retry budget exhausted — try fallback chain before gi
                 if let fallback = await tryFallbackChain(reason: "network connection lost after \(maxTimeoutRetries) retries") {
                     timeoutRetryCount = 0
                     return fallback
@@ -295,8 +288,7 @@ extension AgentViewModel {
         }
     }
 
-    /// / Shared helper used by every error branch in handleTaskLoopError. Records / a failure with FallbackChainService
-    /// and, if the threshold is reached and / a fallback entry is available, returns the .fallbackRequested outcome / for the caller to act on. Returns nil if no fallback should fire (chain / disabled, threshold not yet reached, or no more entries).
+    /// / Shared helper used by every error branch in handleTaskLoopError.
     private func tryFallbackChain(reason: String) async -> TaskLoopErrorOutcome? {
         guard let fallback = FallbackChainService.shared.recordFailure() else { return nil }
         appendLog("🔄 Fallback triggered (\(reason))")

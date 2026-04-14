@@ -24,7 +24,6 @@ extension AgentViewModel {
     // MARK: - Agent Failure Notification
 
     /// Call when an agent fails — triggers the remove-from-menu alert.
-    /// Finds the most recent matching entry by name and stores its UUID for exact removal.
     func notifyAgentFailed(name: String, arguments: String) {
         if let entry = RecentAgentsService.shared.entries.first(where: { $0.agentName == name && $0.arguments == arguments })
             ?? RecentAgentsService.shared.entries.first(where: { $0.agentName == name })
@@ -37,7 +36,7 @@ extension AgentViewModel {
 
     // MARK: - Service Group Sync
 
-    /// Keep service tool groups and individual tools in sync with userEnabled/rootEnabled.
+    /// Keep service tool groups and individual tools in sync with userEnabled/r
     func syncServicesGroup() {
         let prefs = ToolPreferencesService.shared
         // Sync User Agent group
@@ -78,7 +77,6 @@ extension AgentViewModel {
     // MARK: - Ollama Pre-warm
 
     /// Send a tiny request to Ollama to load the model into memory.
-    /// This eliminates the 5-15s cold-start delay on the first task.
     func preWarmOllama() async {
         let provider = selectedProvider
         guard provider == .ollama || provider == .localOllama else { return }
@@ -86,7 +84,7 @@ extension AgentViewModel {
         let model = provider == .ollama ? ollamaModel : localOllamaModel
         guard !model.isEmpty else { return }
 
-        let chatURL = endpoint.isEmpty ? "http://localhost:11434/api/chat" : endpoint
+        let chatURL = endpoint.isEmpty ? "http://localhost:11434/api/chat" : end
         guard let url = URL(string: chatURL) else { return }
 
         var request = URLRequest(url: url)
@@ -97,7 +95,7 @@ extension AgentViewModel {
             "model": model,
             "messages": [["role": "user", "content": "hi"]],
             "stream": false,
-            "options": ["num_predict": 1] // Generate just 1 token — enough to load model
+            "options": ["num_predict": 1] // Generate just 1 token — enough to l
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 

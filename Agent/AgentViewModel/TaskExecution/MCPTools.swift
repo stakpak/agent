@@ -1,12 +1,10 @@
 @preconcurrency import Foundation
 import AgentMCP
 
-
 // MARK: - MCP Tool Execution
 extension AgentViewModel {
 
     /// Handles MCP tool calls (mcp_ServerName_toolName).
-    /// Returns true if this was an MCP tool call, false otherwise.
     @MainActor
     func handleMCPTool(
         name: String,
@@ -119,14 +117,14 @@ extension AgentViewModel {
             lines.append(msg)
         }
 
-        // String arrays: results, matches, items (XcodeGrep, XcodeGlob, XcodeLS)
+        // String arrays: results, matches, items (XcodeGrep, XcodeGlob, XcodeLS
         for key in ["results", "matches", "items"] {
             if let arr = json[key] as? [String], !arr.isEmpty {
                 lines.append(contentsOf: arr)
             }
         }
 
-        // Object arrays: issues, errors, tests (build errors, diagnostics, test results)
+        // Object arrays: issues, errors, tests
         for key in ["issues", "errors", "buildLogEntries"] {
             if let arr = json[key] as? [[String: Any]], !arr.isEmpty {
                 for obj in arr {

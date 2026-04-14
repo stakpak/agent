@@ -1,7 +1,6 @@
 import Foundation
 
-/// Persistent task queue for overnight runs. Survives crashes.
-/// Stored at ~/Documents/AgentScript/taskqueue.json
+/// Persistent task queue for overnight runs.
 @MainActor
 final class TaskQueueStore {
     static let shared = TaskQueueStore()
@@ -38,7 +37,7 @@ final class TaskQueueStore {
 
     // MARK: - Queue Management
 
-    /// Set a new task list (from plan mode or user input). Replaces existing queue.
+    /// Set a new task list (from plan mode or user input). Replaces existing qu
     func setTasks(_ titles: [String]) {
         tasks = titles.map { QueuedTask(title: $0) }
         save()
@@ -102,7 +101,6 @@ final class TaskQueueStore {
         return parts.isEmpty ? "No tasks" : parts.joined(separator: ", ")
     }
 
-    /// Clear all tasks.
     func clear() {
         tasks.removeAll()
         save()

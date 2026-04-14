@@ -1,8 +1,7 @@
 import Foundation
 import AgentD1F
 
-/// Pure file operations for coding tools — no shell, no Process, no escaping issues.
-/// Process-based tools (list, search, git) route through UserService XPC instead.
+/// Pure file operations for coding tools
 enum CodingService {
 
     // MARK: - Adaptive Algorithm Selection
@@ -21,8 +20,7 @@ enum CodingService {
 
     // MARK: - Read File
 
-      /// Walk up from `originalPath` to find nearest existing ancestor directory, then
-      /// search up to 4 levels deep for matching basenames. Capped at `maxResults`.
+      /// Walk up from `originalPath` to find nearest existing ancestor director
     static func findFilesByBasename(originalPath: String, maxResults: Int) -> [String] {
         let basename = (originalPath as NSString).lastPathComponent
         guard !basename.isEmpty else { return [] }
@@ -41,7 +39,7 @@ enum CodingService {
             return []
         }
 
-        // BFS for matching basenames, max depth 4, skip dotfiles, build/.git/.swiftpm/DerivedData
+        // BFS for matching basenames, max depth 4, skip dotfiles, build/.git/.s
         var results: [String] = []
         let skipDirs: Set<String> = [".git", ".build", ".swiftpm", "DerivedData", "node_modules", ".Trash", "Pods"]
         var queue: [(path: String, depth: Int)] = [(search, 0)]
@@ -68,14 +66,12 @@ enum CodingService {
         return results
     }
 
-      /// Read file contents with line numbers. Parameters: path (absolute), offset
-      /// (1-based start line, default 1), limit (max lines, default 2000).
+      /// Read file contents with line numbers.
     static func readFile(path: String, offset: Int?, limit: Int?) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            // Model guessed wrong path — find files with same basename in nearby dirs
-            // and hand the model the actual path inline so it can fix in one shot.
+            // Model guessed wrong path — find files with same basename in nearb
             let candidates = findFilesByBasename(originalPath: path, maxResults: 5)
             let dir = (path as NSString).deletingLastPathComponent
             let suggestPath = dir.isEmpty ? "." : dir
@@ -160,8 +156,7 @@ enum CodingService {
 
     // MARK: - Edit File (d1f-powered string replacement)
 
-    /// / Replace exact text in a file with d1f-verified diff/apply pipeline: / read → locate match (exact → fuzzy →
-    /// context) → compute replacement → / build d1f diff → verify round-trip → write → return .ai preview.
+    /// / Replace exact text in a file with d1f-verified diff/apply pipeline: /
     static func editFile(path: String, oldString: String, newString: String, replaceAll: Bool, context: String? = nil) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
@@ -174,8 +169,7 @@ enum CodingService {
             return "Error: could not read file: \(path)"
         }
 
-        // 1. Normalize line endings on both file and inputs so a CRLF file
-        //    accepts an LF old_string (and vice versa) without spurious mismatches.
+        // 1. Normalize line endings on both file and inputs so a CRLF file acce
         let original = raw.replacingOccurrences(of: "\r\n", with: "\n")
         let needle = oldString.replacingOccurrences(of: "\r\n", with: "\n")
         let replacement = newString.replacingOccurrences(of: "\r\n", with: "\n")
@@ -197,8 +191,7 @@ enum CodingService {
                 matchRange = range
                 matchNote = " (fuzzy whitespace match)"
             } else {
-                // Build a recovery message that INCLUDES the current file content around where the model probably tried
-                // to edit. The model now has fresh content in the same response and can self-correct without an extra read round-trip.
+                // Build a recovery message INCLUDES current file content around
                 let trimmed = needle.trimmingCharacters(in: .whitespacesAndNewlines)
                 let firstLine = needle.components(separatedBy: "\n")
                     .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
@@ -267,8 +260,7 @@ enum CodingService {
             return "Error: internal — no match range computed for non-replaceAll edit"
         }
 
-        // 3a. No-op detection: if the substring replacement produced identical content, the edit is a no-op. This
-        // catches the case where the LLM thinks it's fixing something but old_string and new_string are equivalent after fuzzy matching, OR the matched range already contains the target text. Don't touch disk and tell the LLM clearly.
+        // 3a. No-op detection: if the substring replacement produced identical
         if updated == original {
             return
                 "Warning: edit is a no-op — applying old_string→new_string "
@@ -288,8 +280,7 @@ enum CodingService {
             includeMetadata: true
         )
 
-        // 5. Round-trip the diff through applyDiff to confirm it produces exactly what we computed via direct substring
-        // replacement. Catches any diff-library edge cases before we touch disk.
+        // 5. Round-trip the diff through applyDiff to confirm it produces exact
         let applied: String
         do {
             applied = try MultiLineDiff.applyDiff(to: original, diff: diff)
@@ -326,8 +317,7 @@ enum CodingService {
         return result
     }
 
-    /// / Fuzzy line-by-line match with multiple normalization passes. / Pass 1: tabs→spaces + strip trailing
-    /// whitespace. / Pass 2: trim all leading/trailing whitespace per line (catches indentation mismatches). / Also strips leading/trailing blank lines from target before matching. / Edit failure recovery: anchors on firstLine of old_string, falls back to / trimmed match, falls back to file head. Returns ~10 lines max.
+    /// / Fuzzy line-by-line match with multiple normalization passes.
     static func findEditFailureContext(in content: String, firstLine: String?, trimmedNeedle: String) -> String {
         let lines = content.components(separatedBy: "\n")
         let contextLines = 10
@@ -393,7 +383,7 @@ enum CodingService {
             for start in 0...(contentLines.count - targetLines.count) {
                 let window = contentLines[start..<(start + targetLines.count)]
                 if window.enumerated().allSatisfy({ normalize($0.element) == targetNorm[$0.offset] }) {
-                    let beforeCount = contentLines[..<start].reduce(0) { $0 + $1.count + 1 } // +1 for \n
+                    let beforeCount = contentLines[..<start].reduce(0) { $0 + $1
                     let matchStr = contentLines[start..<(start + targetLines.count)].joined(separator: "\n")
                     let startIdx = content.index(content.startIndex, offsetBy: beforeCount)
                     let endIdx = content.index(startIdx, offsetBy: matchStr.count)
@@ -404,7 +394,7 @@ enum CodingService {
         return nil
     }
 
-    /// Find the occurrence of `target` in `content` closest to the given `context` text.
+    /// Find the occurrence of `target` in `content` closest to the given `conte
     private static func findOccurrenceByContext(in content: String, target: String, context: String) -> Range<String.Index>? {
         var ranges: [Range<String.Index>] = []
         var searchStart = content.startIndex

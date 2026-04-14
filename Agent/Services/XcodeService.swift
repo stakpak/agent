@@ -3,7 +3,7 @@ import Foundation
 import ScriptingBridge
 import XcodeScriptingBridge
 
-/// Xcode automation via ScriptingBridge — build, run, list/select projects, grant permission.
+/// Xcode automation via ScriptingBridge — build
 private class SBApplicationDelegateIgnore: NSObject, SBApplicationDelegate {
     func eventDidFail(_ event: UnsafePointer<AppleEvent>, withError error: any Error) -> Any? {
         return nil // Suppress error, return nil to caller
@@ -23,7 +23,7 @@ final class XcodeService: @unchecked Sendable {
 
     // MARK: - Grant Permission
 
-      /// Grant Automation permission via lightweight osascript no-op (get name).
+      /// Grant Automation permission via lightweight osascript no-op (get name)
     nonisolated func grantPermission() -> String {
         let script = """
         tell application "Xcode"
@@ -66,11 +66,10 @@ final class XcodeService: @unchecked Sendable {
 
     // MARK: - Build
 
-    /// Build a project via ScriptingBridge. Blocks until build completes.
-    /// Returns errors/warnings in file:line:col [Error] message format with code snippets.
+    /// Build a project via ScriptingBridge.
     nonisolated func buildProject(projectPath: String) -> String {
         AuditLog.log(.xcode, "build: \(projectPath)")
-        // Always auto-detect from open Xcode projects — ignore model's guessed path
+        // Always auto-detect from open Xcode projects — ignore model's guessed
         let resolvedPath = autoSelectProject() ?? projectPath
         guard isValidProjectPath(resolvedPath) else {
             return
@@ -121,7 +120,7 @@ final class XcodeService: @unchecked Sendable {
 
     // MARK: - Run
 
-    /// Run a project via ScriptingBridge. Builds first — only runs if build is clean.
+    /// Run a project via ScriptingBridge. Builds first
     nonisolated func runProject(projectPath: String) -> String {
         AuditLog.log(.xcode, "run: \(projectPath)")
         let resolvedPath = autoSelectProject() ?? projectPath
@@ -217,7 +216,7 @@ final class XcodeService: @unchecked Sendable {
         return selected
     }
 
-    /// Auto-select the first open .xcodeproj project (not .xcworkspace wrappers).
+    /// Auto-select the first open .xcodeproj project
     private nonisolated func autoSelectProject() -> String? {
         guard let xcode = xcodeApp() else { return nil }
         guard let documents = xcode.documents?() else { return nil }
@@ -267,7 +266,6 @@ final class XcodeService: @unchecked Sendable {
     // MARK: - Issue Collection (xcf pattern)
 
     /// Collect issues from an SBElementArray into a formatted string.
-    /// Format: file:line:col [Type] message\n```swift\n<snippet>\n```
     private nonisolated func collectIssues(_ issues: SBElementArray, type: String, into output: inout String) {
         for case let issue as XcodeBuildError in issues {
             guard let message = issue.message else { continue }
@@ -327,7 +325,7 @@ final class XcodeService: @unchecked Sendable {
         return true
     }
 
-    // MARK: - Project File Management (pbxproj editing)
+    // MARK: - Project File (pbxproj editing)
 
     /// Generate a unique 24-char hex ID not present in the pbxproj content.
     private nonisolated func generateUniqueID(existing: String) -> String {
@@ -494,7 +492,7 @@ final class XcodeService: @unchecked Sendable {
         return "Version: \(version), Build: \(build)"
     }
 
-    /// Bump MARKETING_VERSION patch by delta (+1 or -1). Also bumps build number by same delta.
+    /// Bump MARKETING_VERSION patch by delta (+1 or -1).
     nonisolated func bumpVersion(delta: Int = 1) -> String {
         guard let pbxPath = selectedPbxprojPath() else {
             return "Error: no Xcode project selected or pbxproj not found."

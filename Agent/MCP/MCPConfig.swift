@@ -59,12 +59,11 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         self.autoStart = autoStart
     }
 
-    // SSE/HTTP transport endpoint paths (for servers that use separate endpoints)
+    // SSE/HTTP transport endpoint paths (for servers that use separate endpoint
     var sseEndpoint: String?
     var httpEndpoint: String?
 
-    /// Unsupported fields that aren't part of the standard MCP spec but are preserved for export.
-    /// Stored as JSON string for Hashable conformance.
+    /// Unsupported fields aren't part of the standard MCP spec but are preserve
     var unsupportedFieldsJSON: String? = nil
 
     /// Get unsupported fields as a dictionary
@@ -90,8 +89,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         unsupportedFieldsJSON = json
     }
 
-    // Only encode/decode MCP-standard fields in JSON
-    // Only MCP-standard fields in JSON; name is the dictionary key, not a field
+    // Only encode/decode MCP-standard fields in JSON Only MCP-standard fields .
     private enum CodingKeys: String, CodingKey {
         case transport, command, args, env, url, headers
         case sseEndpoint, httpEndpoint
@@ -107,7 +105,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         headers = try c.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
         sseEndpoint = try c.decodeIfPresent(String.self, forKey: .sseEndpoint)
         httpEndpoint = try c.decodeIfPresent(String.self, forKey: .httpEndpoint)
-        // If transport is explicitly "http"/"https" but url is missing, clear command
+        // If transport is explicitly "http"/"https" but url is missing, clear c
         if let transport, (transport == "http" || transport == "https"), url != nil {
             command = ""
         }
@@ -138,15 +136,14 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
         enabled = true
         autoStart = true
 
-        // Standard fields for the ACTUAL transport type HTTP transport uses: transport, url, headers, sseEndpoint,
-        // httpEndpoint Stdio transport uses: transport, command, args, env
+        // Standard fields for ACTUAL transport type HTTP transport uses: transp
         let httpStandardFields = Set(["transport", "url", "headers", "sseEndpoint", "httpEndpoint"])
         let stdioStandardFields = Set(["transport", "command", "args", "env"])
 
         var unsupported: [String: Any] = [:]
 
         if isHTTPTransport {
-            // HTTP server: preserve stdio fields as unsupported for round-tripping
+            // HTTP server: preserve stdio fields as unsupported for round-tripp
             if !command.isEmpty { unsupported["command"] = command }
             if !arguments.isEmpty { unsupported["args"] = arguments }
             if !environment.isEmpty { unsupported["env"] = environment }
@@ -162,7 +159,7 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
                 }
             }
         } else {
-            // Stdio server: preserve HTTP fields as unsupported for round-tripping
+            // Stdio server: preserve HTTP fields as unsupported for round-tripp
             if let u = url { unsupported["url"] = u }
             if !headers.isEmpty { unsupported["headers"] = headers }
             if let sse = sseEndpoint { unsupported["sseEndpoint"] = sse }
@@ -345,8 +342,7 @@ final class MCPServerRegistry {
         }
     }
 
-    /// Validate that a command exists — supports both absolute paths and bare names resolved via PATH.
-    /// macOS apps don't inherit the user's shell PATH, so we check common tool directories.
+    /// Validate a command exists
     private static func validateCommandPath(_ command: String) -> Bool {
         let fm = FileManager.default
         // Absolute or relative path — check directly
@@ -468,7 +464,7 @@ final class MCPServerRegistry {
         if let mcp = json["mcpServers"] as? [String: Any] {
             serverDict = mcp
         } else {
-            // Treat top-level keys as server names (but filter out non-server keys like globalShortcut)
+            // Treat top-level keys as server names
             let knownNonServerKeys = Set(["globalShortcut"])
             serverDict = json.filter { key, value in
                 !knownNonServerKeys.contains(key) && value is [String: Any]

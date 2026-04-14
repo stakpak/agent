@@ -128,12 +128,12 @@ extension AgentViewModel {
             return
         }
 
-        // Switch to appropriate LLM tab: current LLM tab, parent LLM tab if on child, or main tab
+        // Switch to appropriate LLM tab: current LLM tab, parent LLM tab if on
         ensureLLMTabSelected()
 
         promptHistory.append(task)
         UserDefaults.standard.set(promptHistory, forKey: "agentPromptHistory")
-        // Sync to selected tab so arrow keys work — seed from viewModel if tab is empty
+        // Sync to selected tab so arrow keys work — seed from viewModel if tab
         if let selectedId = selectedTabId,
            let tab = tab(for: selectedId)
         {
@@ -158,19 +158,16 @@ extension AgentViewModel {
         startMainTask(task)
     }
 
-    /// / Start executing a task on the main tab. If a previous task is still draining / (retry loop or in-flight HTTP),
-    /// waits for it to fully terminate first — otherwise / both loops write to the same activityLog producing garbled output.
+    /// / Start executing a task on the main tab.
     private func startMainTask(_ task: String) {
         let previousTask = runningTask
         runningTask = Task {
-            // Drain any previous main task before starting this one. cancel() is idempotent — stop() may have already
-            // called it, this just ensures it. Then await the previous task's value so we know it has fully exited its loop, including any in-flight HTTP request and any catch-block log lines.
+            // Drain any previous main task before starting this one. cancel() i
             if let previous = previousTask {
                 previous.cancel()
                 _ = await previous.value
             }
-            // Reset cancellation flag AFTER the previous task has fully exited. Setting it before would let the
-            // previous task think it's no longer cancelled if it polls vm.isCancelled (some loops do).
+            // Reset cancellation flag AFTER the previous task has fully exited.
             isCancelled = false
             currentTaskPrompt = task
             ChatHistoryStore.shared.startNewTask(prompt: task)
@@ -184,7 +181,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Navigate prompt history. direction: -1 = older (up arrow), 1 = newer (down arrow)
+    /// Navigate prompt history. direction: -1 = older
     func navigatePromptHistory(direction: Int) {
         guard !currentTabPromptHistory.isEmpty else { return }
 
@@ -225,7 +222,7 @@ extension AgentViewModel {
         runningTask = nil
         helperService.cancel()
         helperService.onOutput = nil
-        // Don't cancel userService — tabs may be using it for concurrent operations
+        // Don't cancel userService — tabs may be using it for concurrent operat
         userService.onOutput = nil
         // Stop progress updates
         stopProgressUpdates()

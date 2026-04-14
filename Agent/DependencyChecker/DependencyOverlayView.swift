@@ -115,7 +115,7 @@ struct DependencyOverlay: View {
                 withAnimation(.easeOut(duration: 0.3).delay(0.5)) { showRow2 = true }
                 withAnimation(.easeOut(duration: 0.3).delay(0.7)) { showRow3 = true }
 
-                // Always auto-dismiss — 2.5s if all good, 5s if something missing
+                // Always auto-dismiss — 2.5s if all good, 5s if something missi
                 let delay: Double = status.allGood ? 2.5 : 5.0
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     dismiss()

@@ -1,4 +1,4 @@
-//  TaskExecution+Selenium.swift Agent  Selenium WebDriver tool handlers for TaskExecution 
+//  TaskExecution+Selenium.swift Agent  Selenium WebDriver tool handlers fo...
 
 import Foundation
 
@@ -6,7 +6,7 @@ import Foundation
 
 extension AgentViewModel {
 
-    /// Handles Selenium WebDriver tool calls (selenium_start, selenium_stop, selenium_navigate, etc.)
+    /// Handles Selenium WebDriver tool calls (selenium_start
     func handleSeleniumTool(name: String, input: [String: Any]) async -> String? {
 
         // Helper for Selenium operations

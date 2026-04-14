@@ -7,7 +7,6 @@ import AppKit
 import AgentMCP
 import AgentD1F
 
-
 // MARK: - Tab Task Execution
 
 extension AgentViewModel {
@@ -137,8 +136,7 @@ extension AgentViewModel {
 
         let tabHistoryContext = buildTabHistoryContext(tab: tab)
 
-        // Use tab's project folder if set, otherwise fall back to main project folder
-        // Resolve to directory (strip filename if path points to a file like .xcodeproj)
+        // Use tab's project folder if set, otherwise fall back to main project
         let rawFolder = tab.projectFolder.isEmpty ? self.projectFolder : tab.projectFolder
         let projectFolder = Self.resolvedWorkingDirectory(rawFolder)
 
@@ -162,24 +160,21 @@ extension AgentViewModel {
             directCommandContext: directCommandContext
         )
 
-        // No mode filtering — every user-enabled tool is sent on every turn.
-        // ToolPreferencesService is the only tool filter.
+        // No mode filtering
         let activeGroups: Set<String>? = nil
 
         var iterations = 0
         var textOnlyCount = 0
         var timeoutRetryCount = 0
-        var stuckFiles: [String: Int] = [:] // Edit failure count per file (for nudge)
+        var stuckFiles: [String: Int] = [:] // Edit failure count per file (for
         // Plan-mode enforcement state
         var filesEditedThisTask: Set<String> = []
-        // Full system prompt + full tool descriptions on every turn — no condensed prompt, no compactTools, no mode
-        // auto-switching. The LLM always sees the complete context and the complete tool list (filtered only by the user's UI toggles in ToolPreferencesService).
+        // Full system prompt + full tool descriptions on every turn
 
         mainLoop: while !Task.isCancelled {
             iterations += 1
 
-            // Mode auto-switching removed: every user-enabled tool is available on
-            // every turn. ToolPreferencesService UI toggles are the only filter.
+            // Mode auto-switching removed: every user-enabled tool is available
 
             // Prune old messages every 4 iterations to save tokens
             if iterations > 1 && iterations % 4 == 0 && messages.count > 10 {
@@ -195,7 +190,7 @@ extension AgentViewModel {
 
             do {
                 tab.isLLMThinking = true
-                // Only auto-show overlay on the FIRST iteration. Respect manual dismiss (Cmd+B).
+                // Only auto-show overlay on the FIRST iteration. Respect manual
                 if iterations == 1 { tab.thinkingDismissed = false }
                 let response: (content: [[String: Any]], stopReason: String, inputTokens: Int, outputTokens: Int)
                 let streamStart = CFAbsoluteTimeGetCurrent()
@@ -260,7 +255,7 @@ extension AgentViewModel {
                 if !tab.rawLLMOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try? await Task.sleep(for: .seconds(3))
                 }
-                // Track token usage — use reported counts or estimate from text (~4 chars/token)
+                // Track token usage — use reported counts or estimate from text
                 let inTok = response.inputTokens > 0 ? response.inputTokens : Self.estimateTokens(messages: messages)
                 let outTok = response.outputTokens > 0 ? response.outputTokens : Self.estimateTokens(content: response.content)
                 taskInputTokens += inTok
@@ -316,10 +311,10 @@ extension AgentViewModel {
                         messages.append(["role": "user", "content": capped])
                         tab.llmMessages = messages
                     } else if !hasToolUse {
-                        // Check if model wrote task_complete as text instead of a tool call
+                        // Check if model wrote task_complete as text instead of
                         let responseText = response.content.compactMap { $0["text"] as? String }.joined()
                         if responseText.contains("task_complete") || responseText.contains("done(summary") {
-                            // Extract summary from task_complete/done(summary: "...") or (summary="...")
+                            // Extract summary from task_complete/done(summary:
                             if let match = responseText.range(
                                 of: #"(?:task_complete|done)\(summary[=:]\s*"([^"]+)""#,
                                 options: .regularExpression
@@ -339,7 +334,7 @@ extension AgentViewModel {
                             tab.flush()
                             break mainLoop
                         }
-                        // LLM responded with text only — nudge it to continue or finish
+                        // LLM responded with text only — nudge it to continue o
                         textOnlyCount += 1
                         if textOnlyCount >= 3 {
                             if !responseText.isEmpty { completionSummary = String(responseText.prefix(500)) }
@@ -350,7 +345,7 @@ extension AgentViewModel {
                             "content": "Continue with the next step. When you are completely done, call task_complete(summary: \"...\")."
                         ])
                     } else {
-                        // Check if LLM signaled it's done via text even though it made tool calls
+                        // Check if LLM signaled it's done via text even though
                         let allText = response.content.compactMap { $0["text"] as? String }.joined().lowercased()
                         let stopPhrases = ["no more content", "no further action", "task is complete", "nothing more to do", "task_complete"]
                         if stopPhrases.contains(where: { allText.contains($0) }) && completionSummary.isEmpty {
@@ -396,7 +391,6 @@ extension AgentViewModel {
             }
         }
 
-
         // Save task history if task didn't call task_complete
         if completionSummary.isEmpty {
             let summary = Task.isCancelled ? "(cancelled)" : commandsRun.isEmpty ? "(no actions)" : "(incomplete)"
@@ -433,7 +427,7 @@ extension AgentViewModel {
         let isComplete: Bool
     }
 
-    /// Dispatch tab tool calls — handler bodies in AgentViewModel+TabToolHandlers.swift
+    /// Dispatch tab tool calls
     func handleTabToolCall(
         tab: ScriptTab, name: String, input: [String: Any], toolId: String
     ) async -> TabToolResult {
@@ -442,10 +436,9 @@ extension AgentViewModel {
 
     // MARK: - Tab Command Execution
 
-    /// Execute a command via UserService with cd prefix to ensure correct directory.
-    /// Falls back to in-process execution when working directory is TCC-protected.
+    /// Execute a command via UserService with cd prefix to ensure correct direc
     func executeForTab(command: String, projectFolder pf: String = "") async -> (status: Int32, output: String) {
-        // Fallback chain: passed projectFolder → self.projectFolder → home (handled by UserService)
+        // Fallback chain: passed projectFolder → self.projectFolder → home
         let folder = pf.isEmpty ? self.projectFolder : pf
         let dir = folder.isEmpty ? "" : Self.resolvedWorkingDirectory(folder)
         let fullCommand = Self.prependWorkingDirectory(command, projectFolder: dir)

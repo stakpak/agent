@@ -4,7 +4,7 @@ import AgentTools
 struct SettingsView: View {
     @Bindable var viewModel: AgentViewModel
 
-    /// Per-provider temperature binding so the slider always edits the active model's temp.
+    /// Per-provider temperature binding so the slider always edits the active m
     private var llmTemperatureBinding: Binding<Double> {
         switch viewModel.selectedProvider {
         case .claude: return $viewModel.claudeTemperature
@@ -645,7 +645,7 @@ struct SettingsView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Endpoint").font(.caption).foregroundStyle(.secondary)
-                        TextField("http://localhost:8000/v1/chat/completions", text: $viewModel.vLLMEndpoint)
+                        TextField("http://localhost:8000/v1/chat/completions", t
                             .textFieldStyle(.roundedBorder)
                     }
 
@@ -694,7 +694,7 @@ struct SettingsView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Endpoint").font(.caption).foregroundStyle(.secondary)
-                        TextField("http://localhost:11434/api/chat", text: $viewModel.localOllamaEndpoint)
+                        TextField("http://localhost:11434/api/chat", text: $view
                             .textFieldStyle(.roundedBorder)
                     }
 
@@ -783,7 +783,7 @@ struct SettingsView: View {
                 }
             }
 
-            // Temperature — lives with the LLM since it's a per-provider setting
+            // Temperature — lives with the LLM since it's a per-provider settin
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -799,7 +799,7 @@ struct SettingsView: View {
                     .id(viewModel.selectedProvider)
                     .tint(viewModel.temperatureColor(llmTemperatureBinding.wrappedValue))
                     .onAppear {
-                        // Force the slider thumb + tint color to redraw on first appear.
+                        // Force the slider thumb + tint color to redraw on firs
                         let current = llmTemperatureBinding.wrappedValue
                         llmTemperatureBinding.wrappedValue = max(0, current - 0.1)
                         DispatchQueue.main.async {
@@ -883,8 +883,7 @@ struct SettingsView: View {
 
 // MARK: - Locked Secure Field
 
-/// A SecureField with a lock/unlock button. When locked, the field is disabled.
-/// Lock state persists in UserDefaults via the lockKey.
+/// A SecureField with a lock/unlock button.
 struct LockedSecureField: View {
     @Binding var text: String
     let placeholder: String

@@ -61,8 +61,7 @@ struct MemoryEntry: Identifiable {
     }
 }
 
-/// / Persistent user memory system with typed, per-topic files. / Backward compatible with the legacy flat memory.md
-/// file. / Directory: ~/Documents/AgentScript/memory/ / Index: ~/Documents/AgentScript/memory/MEMORY.md / Legacy: ~/Documents/AgentScript/memory.md (migrated on first access)
+/// / Persistent user memory system with typed, per-topic files.
 @MainActor
 final class MemoryStore {
     static let shared = MemoryStore()
@@ -132,7 +131,7 @@ final class MemoryStore {
         return MemoryEntry.parse(id: id, raw: raw)
     }
 
-    /// List all memory entries (frontmatter only — content loaded lazily).
+    /// List all memory entries (frontmatter only
     func listAll() -> [MemoryEntry] {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: memoryDir,
@@ -152,7 +151,7 @@ final class MemoryStore {
             }
     }
 
-    /// Build a manifest string for relevance scanning (one line per entry).
+    /// Build a manifest string for relevance scanning
     func manifest() -> String {
         listAll().map(\.manifestLine).joined(separator: "\n")
     }
@@ -167,7 +166,6 @@ final class MemoryStore {
     // MARK: - Context Injection
 
     /// Memory content formatted for injection into LLM system prompt.
-    /// Loads all entries and includes full content (for small memory sets).
     var contextBlock: String {
         let entries = listAll()
         guard !entries.isEmpty else { return "" }
@@ -181,7 +179,7 @@ final class MemoryStore {
 
     // MARK: - Legacy Compatibility
 
-    /// Read the full legacy memory content (for backward compat with /memory commands).
+    /// Read the full legacy memory content
     var content: String {
         let entries = listAll()
         return entries.map(\.content).joined(separator: "\n\n")

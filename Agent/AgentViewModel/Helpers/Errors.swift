@@ -6,8 +6,7 @@ import AgentMCP
 
 extension AgentViewModel {
 
-    /// Auto-inject SDEF dictionary into failed AppleScript results. Extracts `tell application "X"`,
-    /// looks up X's SDEF, and prepends it. Skips if no tell clause, X not in catalog, or TCC error.
+    /// Auto-inject SDEF dictionary into failed AppleScript results.
     static func enrichAppleScriptFailure(source: String, output: String) -> String {
         // TCC permission errors need System Settings, not a vocabulary dump.
         if let tcc = Self.detectTCCError(output) {
@@ -20,10 +19,9 @@ extension AgentViewModel {
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "AppleScript")
     }
 
-    /// Auto-inject SDEF into failed JXA results. Extracts `Application("X")` names,
-    /// resolves via SDEFService, and prepends canonical terms. Skips if not found.
+    /// Auto-inject SDEF into failed JXA results.
     static func enrichJXAFailure(source: String, output: String) -> String {
-        // TCC errors take priority — the dictionary won't fix a missing permission.
+        // TCC errors take priority — the dictionary won't fix a missing permiss
         if let tcc = Self.detectTCCError(output) {
             Self.openTCCPaneIfNeeded(tcc)
             return Self.formatTCCError(originalOutput: output, kind: tcc)
@@ -34,8 +32,7 @@ extension AgentViewModel {
         return Self.injectMultipleSDEFs(appNames: appNames, output: output, syntaxHint: "JXA")
     }
 
-    /// Extract every distinct app reference matching `pattern` from `source`,
-    /// preserving order of first appearance and trimming whitespace.
+    /// Extract every distinct app reference matching `pattern` from `source`
     private static func collectAppReferences(source: String, pattern: String, caseInsensitive: Bool) -> [String] {
         let options: NSRegularExpression.Options = caseInsensitive ? .caseInsensitive : []
         guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
@@ -55,12 +52,11 @@ extension AgentViewModel {
         return ordered
     }
 
-    /// Resolve each app name → bundle ID via SDEFService, append SDEF summaries to
-    /// output. 9KB total budget split evenly; apps that don't resolve are skipped.
+    /// Resolve each app name → bundle ID via SDEFService
     private static func injectMultipleSDEFs(appNames: [String], output: String, syntaxHint: String) -> String {
         if appNames.isEmpty { return output }
 
-        // (originalName, bundleID, summary) — pre-resolve so we budget only across apps with data.
+        // (originalName, bundleID, summary)
         var resolved: [(name: String, bundleID: String, summary: String)] = []
         for name in appNames {
             guard let bundleID = SDEFService.shared.resolveBundleId(name: name) else { continue }
@@ -94,8 +90,7 @@ extension AgentViewModel {
 
     // MARK: - TCC error detection
 
-    /// / Which TCC permission a failed AppleScript needs. Used to skip the / SDEF dump (it's noise for permission
-    /// errors) and to open the right / System Settings pane on the user's behalf.
+    /// / Which TCC permission a failed AppleScript needs.
     enum TCCRequirement: Sendable {
         case accessibility    // sending keystrokes / clicking via System Events
         case automation       // sending Apple Events to other apps
@@ -104,17 +99,14 @@ extension AgentViewModel {
         case inputMonitoring  // raw key events
     }
 
-    /// / Track which TCC panes we've already opened during this app session, / so a script that fails 5 times in a row
-    /// doesn't pop System Settings / 5 times. The user only needs the prompt once.
+    /// / Track TCC panes we've already opened during this app session
     nonisolated(unsafe) private static var openedTCCPanes = Set<String>()
     private static let openedTCCPanesLock = NSLock()
 
-    /// / Inspect a failed AppleScript / JXA / osascript output for TCC error / signatures. Returns the relevant
-    /// TCCRequirement when one matches, / nil for vocabulary or other errors.
+    /// / Inspect a failed AppleScript / JXA / osascript output for TCC error /
     static func detectTCCError(_ output: String) -> TCCRequirement? {
         let lower = output.lowercased()
-        // Accessibility — most common, fired by `keystroke`, `key code`, and AX click attempts via System
-        // Events when Agent! isn't on the Accessibility allow list.
+        // Accessibility — most common
         if lower.contains("not allowed to send keystrokes")
             || lower.contains("not allowed assistive access")
             || lower.contains("assistive access is")
@@ -122,8 +114,7 @@ extension AgentViewModel {
         {
             return .accessibility
         }
-        // Automation — sending Apple Events to a target app the user hasn't
-        // approved in System Settings → Privacy & Security → Automation.
+        // Automation — sending Apple Events to a target app the user hasn't app
         if lower.contains("not authorized to send apple events")
             || lower.contains("not allowed to send apple events")
             || lower.contains("not permitted to send apple events")
@@ -131,13 +122,11 @@ extension AgentViewModel {
         {
             return .automation
         }
-        // Screen Recording — needed for `screencapture`, AVCaptureSession,
-        // and AppleScript paths that read window content.
+        // Screen Recording — needed for `screencapture`, AVCaptureSession, and
         if lower.contains("screen recording") || lower.contains("not allowed to record") {
             return .screenRecording
         }
-        // Full Disk Access — operations on protected directories like
-        // ~/Library/Mail or chat.db.
+        // Full Disk Access — operations on protected directories like ~/Library
         if lower.contains("operation not permitted") && lower.contains("library") {
             return .fullDiskAccess
         }
@@ -148,8 +137,7 @@ extension AgentViewModel {
         return nil
     }
 
-    /// Format a short, LLM-targeted TCC error message without dumping a full SDEF.
-    /// The original macOS error is preserved so the LLM can read the exact message.
+    /// Format a short, LLM-targeted TCC error message without dumping a full SD
     static func formatTCCError(originalOutput: String, kind: TCCRequirement) -> String {
         let permName: String
         let permPath: String
@@ -187,7 +175,7 @@ extension AgentViewModel {
         """
     }
 
-    /// Open the System Settings pane for a TCC requirement, once per kind per app session.
+    /// Open the System Settings pane for a TCC requirement
     static func openTCCPaneIfNeeded(_ kind: TCCRequirement) {
         let key: String
         let urlString: String

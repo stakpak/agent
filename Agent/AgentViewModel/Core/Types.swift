@@ -121,8 +121,7 @@ extension AgentViewModel {
 
     // MARK: - Static helpers
 
-    /// / Detect vision-capable models by name patterns / Auto-detect vision-capable models by name keywords. / Sources:
-    /// ollama.com/search?c=vision, OpenAI docs, Anthropic docs
+    /// / Detect vision-capable models by name patterns / Auto-detect vision-cap
     nonisolated static func isVisionModel(_ model: String) -> Bool {
         let lower = model.lowercased()
         let visionKeywords = [
@@ -144,7 +143,7 @@ extension AgentViewModel {
         return visionKeywords.contains { lower.contains($0) }
     }
 
-    // MARK: - Off-Main-Thread Helper
+    // MARK: - Off-Main-Thread
 
     /// Run synchronous work off the main thread to avoid blocking the UI.
     static func offMain<T: Sendable>(_ work: @Sendable @escaping () -> T) async -> T {

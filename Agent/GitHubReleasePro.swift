@@ -5,8 +5,7 @@ public func scriptMain() -> Int32 {
     // Get parameters from environment variables
     let version = ProcessInfo.processInfo.environment["AGENT_SCRIPT_ARGS"] ?? ""
     
-    // Parse arguments: version|notes|binaryPath|workingDir
-    // Example: "v1.0.20|Release notes here|./build/export/App.dmg|/Users/toddbruss/Documents/GitHub/Agent"
+    // Parse arguments: version|notes|binaryPath|workingDir Example: "v1.0.20|Re
     let args = version.components(separatedBy: "|")
     
     guard args.count >= 1, !args[0].isEmpty else {

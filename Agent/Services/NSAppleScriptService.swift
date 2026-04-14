@@ -1,13 +1,11 @@
 import AgentAudit
 import Foundation
 
-/// / Executes AppleScript code in-process via NSAppleScript. / Runs in the Agent app process, inheriting ALL TCC grants
-/// (Automation, Accessibility, ScreenRecording). / Use SDEFService to look up correct terminology before building scripts.
+/// / Executes AppleScript code in-process via NSAppleScript.
 final class NSAppleScriptService: @unchecked Sendable {
     static let shared = NSAppleScriptService()
 
     /// Execute AppleScript source code and return the result.
-    /// Runs synchronously on the calling thread — call from offMain.
     func execute(source: String) -> (success: Bool, output: String) {
         AuditLog.log(.appleScript, "execute: \(source.prefix(100))")
         var errorInfo: NSDictionary?
@@ -22,8 +20,7 @@ final class NSAppleScriptService: @unchecked Sendable {
         return (true, output)
     }
 
-    /// Build and execute an AppleScript that targets a specific app by bundle ID.
-    /// Automatically wraps the body in `tell application id "bundle.id"`.
+    /// Build and execute an AppleScript targets a specific app by bundle ID.
     func executeForApp(bundleID: String, body: String) -> (success: Bool, output: String) {
         let source = """
         tell application id "\(bundleID)"

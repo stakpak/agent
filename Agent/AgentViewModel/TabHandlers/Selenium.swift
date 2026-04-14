@@ -10,8 +10,7 @@ extension AgentViewModel {
         guard let compileCmd = await Self.offMain({ [ss = scriptService] in ss.compileCommand(name: "Selenium") }) else {
             return tabResult("Error: Selenium script not found", toolId: toolId)
         }
-        // MUST run via executeTCC (in-process) so swift build inherits the main app's TCC grants for ~/Documents
-        // access. The Launch Agent path (executeForTab → userService.execute) runs in a separate TCC context that can't getcwd() inside ~/Documents/AgentScript/agents/.
+        // MUST run via executeTCC (in-process) so swift build inherits the main
         let compileResult = await Self.executeTCC(command: compileCmd)
         if compileResult.status != 0 {
             tab.appendLog("❌ Compile failed: \(compileResult.output)")

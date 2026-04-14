@@ -11,8 +11,7 @@ import Cocoa
 
 extension AgentViewModel {
 
-    /// / Handles write_text, transform_text, send_message, fix_text, plan_mode, / and project_folder tool calls.
-    /// Returns `nil` if the name is not a / conversation-group tool.
+    /// / Handles write_text, transform_text, send_message, fix_text, plan_mode,
     func handleConversationNativeTool(name: String, input: [String: Any]) async -> String? {
         let pf = projectFolder
         switch name {

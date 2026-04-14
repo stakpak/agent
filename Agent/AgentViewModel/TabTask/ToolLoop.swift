@@ -3,7 +3,6 @@
 import AgentTools
 import AgentLLM
 
-
 // MARK: - Tab Task Tool Loop
 
 extension AgentViewModel {
@@ -12,12 +11,11 @@ extension AgentViewModel {
     enum TabToolProcessingOutcome {
         /// task_complete was called — caller should finalize and return
         case complete(summary: String)
-        /// Normal completion; caller should append assistant/tool messages and continue
+        /// Normal completion; caller should append assistant/tool messages and
         case normal(hasToolUse: Bool, toolResults: [[String: Any]])
     }
 
-    /// Process the tool_use blocks in an LLM streaming response. Extracted from the legacy monolithic
-    /// executeTabTask loop body. Mutates the per-task tracking state (`commandsRun`, `stuckFiles`, `filesEditedThisTask`) in place.
+    /// Process the tool_use blocks in an LLM streaming response.
     func processTabResponseContent(
         tab: ScriptTab,
         content: [[String: Any]],
@@ -33,7 +31,7 @@ extension AgentViewModel {
             guard let type = block["type"] as? String else { continue }
 
             if type == "text" {
-                // Text goes to LLM output only — streaming delta already shows it there
+                // Text goes to LLM output only — streaming delta already shows
             } else if type == "tool_use" {
                 hasToolUse = true
                 guard let toolId = block["id"] as? String,
@@ -45,8 +43,7 @@ extension AgentViewModel {
 
                 commandsRun.append(name)
 
-                // Plans are encouraged but never required. Track edited files for task summary purposes. No mid-stream
-                // blocking — the LLM decides whether to plan up front.
+                // Plans are encouraged but never required.
                 let editTools: Set<String> = [
                     "write_file",
                     "edit_file",
@@ -61,8 +58,7 @@ extension AgentViewModel {
 
                 if name == "task_complete" {
                     completionSummary = input["summary"] as? String ?? "Done"
-                    // Show task complete in the LLM Output HUD so the user sees the result. Append to rawLLMOutput and
-                    // let the drip task pick up the new chars naturally — DO NOT sync displayedLLMOutput, that would skip the drip.
+                    // Show task complete in LLM Output HUD so user sees the res
                     let trimmedRaw = tab.rawLLMOutput.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmedRaw.isEmpty {
                         tab.rawLLMOutput = "✅ \(completionSummary)"
@@ -85,8 +81,7 @@ extension AgentViewModel {
                 }
                 if let toolResult = result.toolResult {
                     toolResults.append(toolResult)
-                    // Stuck-file nudge: if this was an edit tool and the result looks like a failure, increment the
-                    // per-file failure count. At 3 failures, append an actionable recovery nudge.
+                    // Stuck-file nudge: if this was an edit tool and the result
                     appendStuckFileNudgeIfNeeded(
                         tab: tab,
                         name: name,

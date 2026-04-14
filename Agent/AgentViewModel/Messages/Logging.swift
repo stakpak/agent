@@ -128,14 +128,13 @@ extension AgentViewModel {
     }
 
     /// Try all pasteboard formats to grab an image.
-    /// Returns true if image data was found (encoding happens async in background).
     @discardableResult
     func pasteImageFromClipboard() -> Bool {
         let pb = NSPasteboard.general
 
         var rawData: Data?
 
-        // Try raw data types first (avoids full NSImage deserialization overhead)
+        // Try raw data types first (avoids full NSImage deserialization overhea
         for type in [
             NSPasteboard.PasteboardType.png,
             NSPasteboard.PasteboardType.tiff,
@@ -194,7 +193,6 @@ extension AgentViewModel {
     }
 
     /// Encode image data to a base64 PNG string off the main thread.
-    /// Downscales images larger than 2048px to prevent memory issues.
     private static nonisolated func encodeImageToBase64(_ data: Data) async -> String? {
         guard let bitmap = NSBitmapImageRep(data: data) else { return nil }
 
@@ -230,7 +228,7 @@ extension AgentViewModel {
 
     // MARK: - Log Buffering
 
-    /// Snapshot any image files found in text to persistent cache, rewriting paths to UUID copies.
+    /// Snapshot any image files found in text to persistent cache
     private func snapshotImages(in text: String) -> String {
         let nsText = text as NSString
         let matches = Self.imagePathRegex?.matches(in: text, range: NSRange(location: 0, length: nsText.length)) ?? []
@@ -266,7 +264,7 @@ extension AgentViewModel {
 
     static let newTaskMarker = "--- New Task ---"
 
-    /// Shared log formatting — prepends spacing for first task, strips blank lines before Cancelled.
+    /// Shared log formatting — prepends spacing for first task
     static func prepareLogBuffer(message: String, buffer: inout String, existingLog: String) {
         let combined = existingLog + buffer
         if message.contains(newTaskMarker) && !combined.contains(newTaskMarker) {
@@ -302,13 +300,12 @@ extension AgentViewModel {
         scheduleLogFlush()
     }
 
-    /// Collapse heredoc bodies in commands to keep the log clean.
-    /// "cat > file.html <<'EOF'\n<html>...\nEOF" -> "cat > file.html <<'EOF'\n...(heredoc)...\nEOF"
+    /// Collapse heredoc bodies in commands to keep the log clean. "cat > file.h
     static func collapseHeredocs(_ command: String) -> String {
         let lines = command.components(separatedBy: "\n")
         guard lines.count > 3 else { return command }
 
-        // Find the line containing a heredoc marker: <<'DELIM', <<DELIM, <<"DELIM", <<-'DELIM'
+        // Find the line containing a heredoc marker: <<'DELIM', <<DELIM, <<"DEL
         let pattern = #"<<-?\s*'?"?(\w+)'?"?"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
 
@@ -323,7 +320,7 @@ extension AgentViewModel {
                 $0.trimmingCharacters(in: .whitespaces) == delimiter
             }), endIdx > i + 1 else { continue }
 
-            // Collapse: keep lines before + heredoc line, placeholder, delimiter + remainder
+            // Collapse: keep lines before + heredoc line, placeholder, delimite
             var result = Array(lines[...i])
             result.append("...(\(delimiter) heredoc)...")
             result.append(contentsOf: lines[endIdx...])
@@ -381,7 +378,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Clear everything: log, LLM output, prompt history, task history, token counts.
+    /// Clear everything: log, LLM output, prompt history, task history, token c
     func clearAll() {
         // Clear log
         clearSelectedLog()
@@ -433,7 +430,7 @@ extension AgentViewModel {
         startDripIfNeeded()
     }
 
-    /// Drip characters from rawLLMOutput into displayedLLMOutput one at a time (terminal effect)
+    /// Drip characters from rawLLMOutput into displayedLLMOutput one at a time
     func startDripIfNeeded() {
         guard dripTask == nil else { return }
         dripTask = Task { [weak self] in
@@ -447,14 +444,14 @@ extension AgentViewModel {
                 } else if !self.streamingTextStarted {
                     break // Stream ended and all chars dripped
                 } else {
-                    try? await Task.sleep(for: .milliseconds(max(5, self.terminalSpeed.rawValue / 2))) // Wait for more
+                    try? await Task.sleep(for: .milliseconds(max(5, self.termina
                 }
             }
             self.dripTask = nil
         }
     }
 
-    /// Collapse runs of 3+ newlines to 2 (one blank line max) to prevent huge gaps from chatty models.
+    /// Collapse runs of 3+ newlines to 2
     static func collapseNewlines(_ text: String) -> String {
         var result = ""
         var newlineCount = 0
@@ -555,7 +552,7 @@ extension AgentViewModel {
         }
     }
 
-    /// Keep only the last N tasks visible in the chat (controlled by visibleTaskCount preference)
+    /// Keep only the last N tasks visible in the chat
     func trimToRecentTasks() {
         let marker = Self.newTaskMarker
         let parts = activityLog.components(separatedBy: marker)
