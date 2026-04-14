@@ -695,50 +695,26 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Apple AI's ~4096-token window requires terse instructions. Known apps from SDEFService; unknowns fall back to NSRunningApplications scan.
         let knownApps = SDEFService.shared.allInstalledAppNames().joined(separator: ", ")
         let instructions = Instructions("""
-        You have 3 tools: accessibility (UI clicks/types), applescript (Finder/app automation), shell (CLI commands).
+        You have ONE tool: accessibility (UI clicks/types/opens apps).
 
-        TOOL SELECTION:
-        - open a FILE or FOLDER by path → shell(command:"open /path/to/thing")
-        - Finder operations (reveal, move, copy) → applescript
-        - click buttons, type text, open apps by name → accessibility
-        - ls, git, find, any CLI → shell
+        Use accessibility for ALL actions: clicking buttons, typing text, opening apps.
+        Anything else (files, folders, shell commands, AppleScript) → DO NOT attempt. Reply "action not performed" and the cloud LLM will handle it.
 
         ACCESSIBILITY RULES:
         1. App names like "photobooth", "photo booth" → Photo Booth (the app). Match the name to an app in the known list below — normalize spacing/case.
         2. NEVER put an app name in the `title` field. App goes in `app`, button/menu name goes in `title`.
-        3. To perform an action IN an app: first open_app(app:"<App Name>"), then use find_element to discover the real button label, then click_element with the exact label.
+        3. To perform an action IN an app: first open_app(app:"<App Name>"), then find_element to discover the real button label, then click_element with the exact label.
         4. ALWAYS discover button labels first: find_element(app:"<App>", role:"AXButton", title:"<guess>") returns the actual AXTitle/AXDescription. Use the EXACT title returned — buttons often have unexpected labels (e.g. Photo Booth's camera button is "take photo" NOT "Take Picture").
         5. If click_element fails with "not found", retry with find_element using a PARTIAL title or just the role to list available buttons, then click with the exact label.
         6. Roles: AXButton, AXTextField, AXLink, AXMenuItem.
         7. Known apps: \(knownApps)
 
-        APPLESCRIPT: tell application "Finder" to open POSIX file "/path"
-
-        SHELL: open /path, ls, git status, etc.
-
         After tool calls succeed, reply with 1 sentence describing what happened.
         """)
 
-        let scriptTool = AppleScriptAppleTool { source in
-            tracker.markCalled()
-            await appendLog("🍎 applescript: \(String(source.prefix(300)))")
-            let result = await MainActor.run { NSAppleScriptService.shared.execute(source: source) }
-            tracker.recordOutput(result.output)
-            await appendLog("🍎 → \(result.success ? "ok" : "FAIL") \(String(result.output.prefix(300)))")
-            if !result.success { tracker.markFailed() }
-            return result.output
-        }
-
-        let shellTool = ShellAppleTool { command in
-            tracker.markCalled()
-            await appendLog("🍎 shell: \(String(command.prefix(300)))")
-            let result = await AgentViewModel.executeTCC(command: command, workingDirectory: projectFolder)
-            let output = result.output.isEmpty ? "(exit \(result.status))" : result.output
-            tracker.recordOutput(output)
-            await appendLog("🍎 → exit=\(result.status) \(String(output.prefix(300)))")
-            if result.status != 0 { tracker.markFailed() }
-            return output
-        }
+        // AppleScript and Shell tools removed — Apple AI handled them poorly (hallucinated
+        // paths like /Users/your_username, wrong directories, malformed scripts). The cloud
+        // LLM handles those reliably. Only accessibility is exposed to Apple AI now.
 
         // Adaptive context: ask Apple AI itself whether the new prompt is a follow-up to the
         // previous one. If yes, reuse the session so references like "take another", "do it
@@ -757,7 +733,10 @@ final class AppleIntelligenceMediator: ObservableObject {
             accessibilityAgentTurnCount += 1
             await appendLog("🍎 (follow-up, reusing context)")
         } else {
-            session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
+            // Only the accessibility tool is exposed to Apple AI. Shell and AppleScript
+            // tools were removed because Apple AI handled them poorly — hallucinating
+            // paths, wrong directories, malformed scripts. The cloud LLM handles those.
+            session = LanguageModelSession(model: .default, tools: [tool], instructions: instructions)
             accessibilityAgentSession = session
             accessibilityAgentTurnCount = 1
         }
@@ -960,47 +939,8 @@ struct AccessibilityArgs: Sendable {
     let text: String?
 }
 
-// MARK: - AppleScript Tool for Apple AI
-
-@Generable
-struct AppleScriptArgs: Sendable {
-    @Guide(description: "AppleScript source code to execute. Use for Finder operations, file opens, app scripting.")
-    let source: String
-}
-
-@Generable
-struct ShellArgs: Sendable {
-    @Guide(description: "Shell command to run. Use for: open /path, ls, find, git, etc.")
-    let command: String
-}
-
-struct ShellAppleTool: FoundationModels.Tool {
-    typealias Output = String
-    let name = "shell"
-    let description = "Run a shell command in-process. Use for: open /path/to/file, ls, find, git status, etc. " +
-        "Prefer this for opening files/folders by path (open /path) and any CLI operation."
-
-    let dispatch: @Sendable (String) async -> String
-
-    func call(arguments: ShellArgs) async throws -> String {
-        return await dispatch(arguments.command)
-    }
-}
-
-struct AppleScriptAppleTool: FoundationModels.Tool {
-    typealias Output = String
-    let name = "applescript"
-    let description = "Run AppleScript for Finder ops, file/folder opens, app automation. " +
-        "Use: tell application \"Finder\" to open POSIX file \"/path\". " +
-        "Use: tell application \"Finder\" to reveal POSIX file \"/path\". " +
-        "Prefer this over accessibility for opening files/folders by path."
-
-    let dispatch: @Sendable (String) async -> String
-
-    func call(arguments: AppleScriptArgs) async throws -> String {
-        return await dispatch(arguments.source)
-    }
-}
+// ShellAppleTool and AppleScriptAppleTool removed — Apple AI handled them poorly
+// (hallucinated paths, wrong directories). The cloud LLM handles shell/applescript now.
 
 struct AccessibilityAppleTool: FoundationModels.Tool {
     typealias Output = String
