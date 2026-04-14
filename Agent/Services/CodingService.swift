@@ -466,6 +466,21 @@ enum CodingService {
         endLine: Int? = nil
     ) -> (output: String, display: String)
     {
+        // Reject diff-formatted input (❌/✅ markers, +/- prefixes) — LLMs must send raw text only
+        let badMarkers = ["❌ ", "✅ "]
+        for marker in badMarkers {
+            if destination.contains(marker) {
+                return ("Error: destination contains '\(marker)' — diff_apply requires raw text only, not diff format. Remove ❌/✅ markers and +/- prefixes. Send the exact final text that should appear in the file.", "")
+            }
+            if let s = source, s.contains(marker) {
+                return ("Error: source contains '\(marker)' — diff_apply requires raw text only, not diff format. Remove ❌/✅ markers and +/- prefixes. Send the exact original text as-is from the file.", "")
+            }
+        }
+        // Reject unified-diff style +/- prefixed lines (common LLM mistake)
+        if destination.components(separatedBy: "\n").filter({ $0.hasPrefix("+ ") || $0.hasPrefix("- ") }).count > 2 {
+            return ("Error: destination looks like a unified diff — diff_apply requires raw text. Remove +/- line prefixes. Send only the final text that should replace the source lines.", "")
+        }
+
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
         // Read the full file

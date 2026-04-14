@@ -213,9 +213,29 @@ extension AgentViewModel {
         case "diff_and_apply":
             let filePath = input["file_path"] as? String ?? ""
             let destination = input["destination"] as? String ?? ""
+            let sourceInput = input["source"] as? String
             let startLine = input["start_line"] as? Int
             let endLine = input["end_line"] as? Int
             let rangeNote = (startLine != nil && endLine != nil) ? " (lines \(startLine!)-\(endLine!))" : ""
+
+            // Reject diff-formatted input (❌/✅ markers, +/- prefixes) — LLMs must send raw text only
+            for marker in ["❌ ", "✅ "] {
+                if destination.contains(marker) {
+                    let err = "Error: destination contains '\(marker)' — diff_apply requires raw text only, not diff format. Remove ❌/✅ markers and +/- prefixes. Send the exact final text."
+                    tab.appendLog(err); tab.flush()
+                    return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
+                }
+                if let s = sourceInput, s.contains(marker) {
+                    let err = "Error: source contains '\(marker)' — diff_apply requires raw text only, not diff format. Remove ❌/✅ markers and +/- prefixes. Send the exact original text."
+                    tab.appendLog(err); tab.flush()
+                    return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
+                }
+            }
+            if destination.components(separatedBy: "\n").filter({ $0.hasPrefix("+ ") || $0.hasPrefix("- ") }).count > 2 {
+                let err = "Error: destination looks like unified diff — diff_apply requires raw text. Remove +/- line prefixes. Send only the final text."
+                tab.appendLog(err); tab.flush()
+                return TabToolResult(toolResult: ["type": "tool_result", "tool_use_id": toolId, "content": err], isComplete: false)
+            }
 
             let expanded = (filePath as NSString).expandingTildeInPath
             guard let daData = FileManager.default.contents(atPath: expanded),

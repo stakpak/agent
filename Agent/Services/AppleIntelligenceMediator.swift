@@ -629,7 +629,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         if isFollowUp, let existing = accessibilityAgentSession {
             session = existing
             accessibilityAgentTurnCount += 1
-            await appendLog("🍎 (follow-up, reusing context)")
+            appendLog("🍎 (follow-up, reusing context)")
         } else {
             // Two tools exposed to Apple AI: accessibility (UI automation) and run_agent
             // (run user-defined scripts). Shell and AppleScript were removed because
