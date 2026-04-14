@@ -80,7 +80,8 @@ final class AppleIntelligenceMediator: ObservableObject {
     private var session: LanguageModelSession?
     private var accessibilityAgentSession: LanguageModelSession?
     private var accessibilityAgentTurnCount = 0
-    private let accessibilityAgentMaxTurns = 8  // Reset after N turns to prevent context bloat
+    private var accessibilityAgentLastMessage: String?
+    private let accessibilityAgentMaxTurns = 7  // Reset after N turns to prevent context bloat
 
     /// Represents an Apple Intelligence annotation
     struct Annotation {
@@ -203,6 +204,38 @@ final class AppleIntelligenceMediator: ObservableObject {
         )
         session = s
         return s
+    }
+
+    /// Ask Apple AI whether the current prompt is a follow-up to the previous one.
+    /// Returns true only if Apple AI says "yes". On timeout or ambiguity, returns false.
+    private func isFollowUpRequest(previous: String, current: String) async -> Bool {
+        let classifier = LanguageModelSession(
+            model: .default,
+            instructions: Instructions("You classify whether a new user message is a follow-up to a previous one. Reply with exactly 'yes' or 'no'. A follow-up refers to the previous action (e.g. 'do it again', 'take another', 'now click X too', pronouns like 'it'/'that'). An unrelated new task is 'no'.")
+        )
+        let prompt = """
+        Previous: "\(previous)"
+        Current: "\(current)"
+        Is Current a follow-up to Previous? Reply only 'yes' or 'no'.
+        """
+        do {
+            let content: String = try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    let response = try await classifier.respond(to: prompt)
+                    return response.content
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(3))
+                    throw CancellationError()
+                }
+                guard let result = try await group.next() else { throw CancellationError() }
+                group.cancelAll()
+                return result
+            }
+            return content.lowercased().trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("yes")
+        } catch {
+            return false
+        }
     }
 
     /// Wraps a session.respond call with timeout.
@@ -707,17 +740,28 @@ final class AppleIntelligenceMediator: ObservableObject {
             return output
         }
 
-        // Reuse session across turns so "take another", "now do X", etc. have context.
-        // Reset every N turns to prevent context window overflow.
+        // Adaptive context: ask Apple AI itself whether the new prompt is a follow-up to the
+        // previous one. If yes, reuse the session so references like "take another", "do it
+        // again", "also click X" have context. If no, start fresh to keep unrelated tasks
+        // from bloating the 4096-token window.
+        var isFollowUp = false
+        if let prev = accessibilityAgentLastMessage,
+           accessibilityAgentSession != nil,
+           accessibilityAgentTurnCount < accessibilityAgentMaxTurns
+        {
+            isFollowUp = await isFollowUpRequest(previous: prev, current: message)
+        }
         let session: LanguageModelSession
-        if let existing = accessibilityAgentSession, accessibilityAgentTurnCount < accessibilityAgentMaxTurns {
+        if isFollowUp, let existing = accessibilityAgentSession {
             session = existing
             accessibilityAgentTurnCount += 1
+            await appendLog("🍎 (follow-up, reusing context)")
         } else {
             session = LanguageModelSession(model: .default, tools: [tool, scriptTool, shellTool], instructions: instructions)
             accessibilityAgentSession = session
             accessibilityAgentTurnCount = 1
         }
+        accessibilityAgentLastMessage = message
 
         // Wrap respond(to:) in task-group timeout. The agent loop runs inside respond(to:), so we need a generous timeout for multiple tool calls.
         let timeoutSeconds: TimeInterval = 30
@@ -831,6 +875,7 @@ final class AppleIntelligenceMediator: ObservableObject {
         session = nil
         accessibilityAgentSession = nil
         accessibilityAgentTurnCount = 0
+        accessibilityAgentLastMessage = nil
         lastUserPrompt = nil
         lastAppleAIMessage = nil
         lastLLMResponse = nil
