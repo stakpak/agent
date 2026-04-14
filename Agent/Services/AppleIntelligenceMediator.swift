@@ -24,7 +24,7 @@ final class AppleIntelligenceMediator: ObservableObject {
     }
 
     /// Whether Apple Intelligence mediation is enabled
-    @Published var isEnabled: Bool = UserDefaults.standard.bool(forKey: "appleIntelligenceMediatorEnabled") {
+    @Published var isEnabled: Bool = UserDefaults.standard.object(forKey: "appleIntelligenceMediatorEnabled") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: "appleIntelligenceMediatorEnabled")
         }
