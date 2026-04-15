@@ -355,6 +355,58 @@ stakpak mcp proxy --disable-secret-redaction
 stakpak mcp proxy --privacy-mode
 ```
 
+#### Configure External MCP Servers
+
+External MCP servers are configured in `mcp.toml` (or `mcp.json`) and loaded by `stakpak mcp proxy`.
+
+Config file discovery order:
+
+1. `~/.stakpak/mcp.toml` or `~/.stakpak/mcp.json`
+2. `.stakpak/mcp.toml` or `.stakpak/mcp.json` (from current directory)
+3. `./mcp.toml` or `./mcp.json`
+
+Add servers via CLI:
+
+```bash
+# Add a stdio MCP server
+stakpak mcp add context7 --command npx --args "-y,@upstash/context7-mcp"
+
+# Add a stdio MCP server with environment variables (repeat --env)
+stakpak mcp add internal-tools --command npx --args "-y,@acme/internal-mcp" --env "MCP_API_KEY=<token>" --env "MCP_REGION=us-east-1"
+
+# Add an HTTP MCP server
+stakpak mcp add github --url https://api.githubcopilot.com/mcp --headers "Authorization=Bearer <token>"
+
+# Inspect and manage servers
+stakpak mcp list
+stakpak mcp get github
+stakpak mcp disable github
+stakpak mcp enable github
+
+# Start the proxy with configured external MCPs
+stakpak mcp proxy
+```
+
+Or define servers directly in `~/.stakpak/mcp.toml`:
+
+```toml
+[mcpServers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+env = { MCP_API_KEY = "<token>", MCP_REGION = "us-east-1" }
+
+[mcpServers.github]
+url = "https://api.githubcopilot.com/mcp"
+headers = { Authorization = "Bearer <token>" }
+
+[mcpServers.optional]
+command = "npx"
+args = ["-y", "some-mcp-server"]
+disabled = true
+```
+
+Use `disabled = true` to keep a server configured without loading it.
+
 ### Agent Client Protocol (ACP)
 
 ACP is a standardized protocol that enables AI agents to integrate directly with code editors like Zed, providing seamless AI-powered development assistance.
