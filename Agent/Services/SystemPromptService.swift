@@ -45,7 +45,7 @@ final class SystemPromptService {
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
     /// Bump this when system prompt content changes to force re-sync of saved prompts.
-    private static let promptRevision = "86"
+    private static let promptRevision = "87"
 
     /// / Anti-hallucination rule appended to every system prompt (full + compact). / Triggered by an observed
     /// real-world failure: the in-app Agent produced a / confident, structured "gap analysis" of its own codebase right after the / 10-consecutive-reads guard fired, citing tools and files it had never / actually read. The lesson: when evidence runs out, models default to / confabulating polished prose rather than admitting "I don't know yet." / This rule forbids that move explicitly.
@@ -80,10 +80,29 @@ final class SystemPromptService {
     instead of fabricating a result.
     """
 
+    /// / Efficient-action rules. Discourages repeated re-reads and over-analysis
+    /// without capping file reads outright. Motivated by observed behavior where
+    /// smaller/local models would read the same file 20–50 times before editing.
+    static let efficientActionRules = """
+
+    EFFICIENT ACTION (high priority):
+    - Do NOT over-analyze. Make quick, smart decisions and keep moving.
+    - Read a file once per task (or twice if it genuinely changed). If you \
+    already read it, rely on what you have and ACT — do not re-read the same \
+    file repeatedly to reassure yourself.
+    - Edit or write code step by step, ONE FILE AT A TIME. Finish the change \
+    on the current file, then move to the next. Do not plan six files in \
+    parallel before making any edits.
+    - Be concise in both prose and code. No multi-paragraph preambles, no \
+    restating the task, no summaries of what you are "about to" do — just do it.
+    - When you have enough evidence to act, act. When the change is done, call \
+    task_complete. Confidence to ship beats another round of confirmation reads.
+    """
+
     /// / Wrap an AgentTools-provided base prompt with the anti-hallucination / rules. Used by both the on-disk
     /// default-prompt seeding and by the local / endpoint code paths in ClaudeService / OpenAICompatibleService that / bypass the on-disk path.
     static func wrapWithRules(_ base: String) -> String {
-        return base + "\n" + antiHallucinationRules
+        return base + "\n" + antiHallucinationRules + "\n" + efficientActionRules
     }
 
     /// Combined version: app version + prompt revision. Change in either triggers re-sync.
