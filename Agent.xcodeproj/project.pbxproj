@@ -155,6 +155,7 @@
 		IDX0000000000000000001 /* NTH-Index.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDX0000000000000000002 /* NTH-Index.swift */; };
 		IDX0000000000000000003 /* ProjectIndexService.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDX0000000000000000004 /* ProjectIndexService.swift */; };
 		MEM0000000000000000001 /* NTH-Memory.swift in Sources */ = {isa = PBXBuildFile; fileRef = MEM0000000000000000002 /* NTH-Memory.swift */; };
+		APP0000000000000000001 /* AgentProjectPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = APP0000000000000000002 /* AgentProjectPaths.swift */; };
 		AA10000000000000000234 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000235 /* Colors.swift */; };
 		AA10000000000000000236 /* DefaultModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000237 /* DefaultModels.swift */; };
 		AA10000000000000000238 /* Init.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000239 /* Init.swift */; };
@@ -430,6 +431,7 @@
 		IDX0000000000000000002 /* NTH-Index.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NTH-Index.swift"; sourceTree = "<group>"; };
 		IDX0000000000000000004 /* ProjectIndexService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectIndexService.swift"; sourceTree = "<group>"; };
 		MEM0000000000000000002 /* NTH-Memory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NTH-Memory.swift"; sourceTree = "<group>"; };
+		APP0000000000000000002 /* AgentProjectPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentProjectPaths.swift"; sourceTree = "<group>"; };
 		AA10000000000000000235 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Colors.swift"; sourceTree = "<group>"; };
 		AA10000000000000000237 /* DefaultModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DefaultModels.swift"; sourceTree = "<group>"; };
 		AA10000000000000000239 /* Init.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Init.swift"; sourceTree = "<group>"; };
@@ -668,6 +670,7 @@
 				1E185ABB626D6FCD3D74523A /* DiffStore.swift */,
 				AA10000000000000000102 /* RecentFoldersService.swift */,
 				IDX0000000000000000004 /* ProjectIndexService.swift */,
+				APP0000000000000000002 /* AgentProjectPaths.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1218,6 +1221,7 @@
 				IDX0000000000000000001 /* NTH-Index.swift in Sources */,
 				IDX0000000000000000003 /* ProjectIndexService.swift in Sources */,
 				MEM0000000000000000001 /* NTH-Memory.swift in Sources */,
+				APP0000000000000000001 /* AgentProjectPaths.swift in Sources */,
 				AA10000000000000000234 /* Colors.swift in Sources */,
 				AA10000000000000000236 /* DefaultModels.swift in Sources */,
 				AA10000000000000000238 /* Init.swift in Sources */,

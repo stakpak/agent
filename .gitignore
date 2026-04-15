@@ -58,10 +58,8 @@ AgentXcode/
 # plan_archivexcode.md, plan_<task>.md.
 plan*.md
 
-# Project-index artifact written by the agent's `index` tool.
-.agent-index/
-
-# Project-scoped memory (scope:"project" on the memory tool) — per-repo
-# notes. These are working state and belong to the local developer, not
-# in version control.
-.agent-memory/
+# Per-project hidden dir used by every agent tool that writes to the
+# project folder. Subdirs: .agent/index/ (project index), .agent/memory/
+# (project-scoped memory), .agent/worktrees/ (git worktrees). One entry
+# covers them all.
+.agent/

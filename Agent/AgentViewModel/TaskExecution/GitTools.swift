@@ -225,10 +225,11 @@ extension AgentViewModel {
                 }
                 // Sanitize branch name
                 let sanitized = branchName.replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "-", options: .regularExpression)
-                let wtPath = "\(dir)/.agent-worktrees/\(sanitized)"
+                let worktreesDir = AgentProjectPaths.path(in: dir, .worktrees)
+                let wtPath = "\(worktreesDir)/\(sanitized)"
                 appendLog("🌳 Creating worktree: \(sanitized)")
                 flushLog()
-                let cmd = "mkdir -p \"\(dir)/.agent-worktrees\" && git worktree add -b \"\(sanitized)\" \"\(wtPath)\" 2>&1"
+                let cmd = "mkdir -p \"\(worktreesDir)\" && git worktree add -b \"\(sanitized)\" \"\(wtPath)\" 2>&1"
                 let result = await executeViaUserAgent(command: cmd, workingDirectory: dir)
                 let output = result.status == 0 ? "Worktree created at \(wtPath) on branch \(sanitized)" : result.output
                 commandsRun.append("git_worktree: create \(sanitized)")
@@ -241,7 +242,7 @@ extension AgentViewModel {
                     toolResults.append(["type": "tool_result", "tool_use_id": toolId, "content": err])
                     return true
                 }
-                let wtPath = "\(dir)/.agent-worktrees/\(branchName)"
+                let wtPath = "\(AgentProjectPaths.path(in: dir, .worktrees))/\(branchName)"
                 appendLog("🌳 Removing worktree: \(branchName)")
                 flushLog()
                 let cmd = "git worktree remove \"\(wtPath)\" --force 2>&1"

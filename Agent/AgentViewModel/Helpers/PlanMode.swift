@@ -6,9 +6,10 @@ import AgentMCP
 
 extension AgentViewModel {
 
-    /// Git repo root for plan files. Plans go directly in the repo root (no subdirectory).
-    /// Returns nil if the project folder is not inside a git repository.
-    private static func planDir(_ projectFolder: String) -> String? {
+    /// Walks up from the project folder to find the enclosing git repo root.
+    /// Plans live under `{gitRoot}/.agent/plans/` — see `plansDir(_:)`.
+    /// Returns nil if no git repo is found.
+    private static func gitRoot(_ projectFolder: String) -> String? {
         let base = projectFolder.isEmpty ? NSHomeDirectory() : resolvedWorkingDirectory(projectFolder)
         var dir = base
         let fm = FileManager.default
@@ -22,9 +23,16 @@ extension AgentViewModel {
         return nil
     }
 
+    /// `{gitRoot}/.agent/plans/` — consolidated under the shared `.agent/`
+    /// hidden tree so plans live alongside index/memory/worktrees.
+    private static func plansDir(_ projectFolder: String) -> String? {
+        guard let root = gitRoot(projectFolder) else { return nil }
+        return AgentProjectPaths.path(in: root, .plans)
+    }
+
     /// Resolve the plan file path for a given plan_id. Returns nil if not in a git repo.
     private static func planFilePath(_ planId: String, projectFolder: String) -> String? {
-        guard let dir = planDir(projectFolder) else { return nil }
+        guard let dir = plansDir(projectFolder) else { return nil }
         return (dir as NSString).appendingPathComponent("plan_\(planId).md")
     }
 
@@ -39,7 +47,7 @@ extension AgentViewModel {
 
     /// Find the most recent plan file in the plans directory.
     private static func mostRecentPlan(_ projectFolder: String) -> (id: String, path: String)? {
-        guard let dir = planDir(projectFolder) else { return nil }
+        guard let dir = plansDir(projectFolder) else { return nil }
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
         let plans = files.filter { $0.hasPrefix("plan_") && $0.hasSuffix(".md") }
@@ -68,9 +76,11 @@ extension AgentViewModel {
     ) -> String {
 
         let fm = FileManager.default
-        guard let dir = planDir(projectFolder) else {
+        guard let dir = plansDir(projectFolder) else {
             return "Error: plan_mode requires a git repository. Set the project folder to a directory inside a git repo."
         }
+        // Ensure the plans directory exists (one-time, per git root).
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         // Accept both "name" and "plan_id" for the plan identifier
         let planIdFromInput = (input["name"] as? String) ?? (input["plan_id"] as? String)

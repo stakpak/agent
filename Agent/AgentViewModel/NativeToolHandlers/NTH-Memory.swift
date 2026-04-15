@@ -56,7 +56,7 @@ extension AgentViewModel {
         case .project:
             let pf = projectFolder.trimmingCharacters(in: .whitespaces)
             guard !pf.isEmpty else { return nil }
-            return URL(fileURLWithPath: pf).appendingPathComponent(".agent-memory", isDirectory: true)
+            return AgentProjectPaths.url(in: pf, .memory)
         }
     }
 

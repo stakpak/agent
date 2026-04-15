@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 /// Writes and reads a portable JSONL project index at
-/// `{projectFolder}/.agent-index/index.jsonl`. One JSON object per line per
+/// `{projectFolder}/.agent/index/index.jsonl`. One JSON object per line per
 /// file, so any LLM can consume the file directly via `read_file`.
 ///
 /// Record shape:
@@ -13,11 +13,10 @@ enum ProjectIndexService {
 
     // MARK: - Paths
 
-    static let indexDirName = ".agent-index"
     static let indexFileName = "index.jsonl"
 
     static func indexDir(in projectFolder: String) -> URL {
-        URL(fileURLWithPath: projectFolder).appendingPathComponent(indexDirName, isDirectory: true)
+        AgentProjectPaths.url(in: projectFolder, .index)
     }
 
     static func indexFile(in projectFolder: String) -> URL {
@@ -41,8 +40,8 @@ enum ProjectIndexService {
     /// Directories we always skip.
     static let skipDirs: Set<String> = [
         ".git", ".build", ".swiftpm", "DerivedData", "build", "node_modules",
-        "Pods", "Carthage", indexDirName, "xcuserdata", ".venv", "venv",
-        "__pycache__", ".next", ".nuxt", "dist", "out",
+        "Pods", "Carthage", AgentProjectPaths.rootDirName, "xcuserdata",
+        ".venv", "venv", "__pycache__", ".next", ".nuxt", "dist", "out",
     ]
 
     static let defaultMaxFileSize: Int = 1_000_000
