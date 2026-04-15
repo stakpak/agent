@@ -44,8 +44,10 @@ final class SystemPromptService {
     /// READ ONLY header prefix for locked prompts (never auto-overwritten, even on version change).
     private static let readOnlyPrefix = "// Agent! READ ONLY v"
 
-    /// Bump this when system prompt content changes to force re-sync of saved prompts.
-    private static let promptRevision = "87"
+    // Prompt revision is no longer hardcoded. `appVersion` below combines the
+    // bundle's marketing version (CFBundleShortVersionString) with the build
+    // number (CFBundleVersion) — every build automatically forces a re-sync of
+    // saved prompts when the build number bumps.
 
     /// / Anti-hallucination rule appended to every system prompt (full + compact). / Triggered by an observed
     /// real-world failure: the in-app Agent produced a / confident, structured "gap analysis" of its own codebase right after the / 10-consecutive-reads guard fired, citing tools and files it had never / actually read. The lesson: when evidence runs out, models default to / confabulating polished prose rather than admitting "I don't know yet." / This rule forbids that move explicitly.
@@ -105,10 +107,14 @@ final class SystemPromptService {
         return base + "\n" + antiHallucinationRules + "\n" + efficientActionRules
     }
 
-    /// Combined version: app version + prompt revision. Change in either triggers re-sync.
+    /// Combined version stamp written into each prompt file's first line.
+    /// Format: `<marketing>.<build>` — e.g. `1.0.68.156`. Any change to either
+    /// component triggers a re-sync of the on-disk defaults on next launch.
     private static let appVersion: String = {
-        let bundleVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        return "\(bundleVersion).\(promptRevision)"
+        let info = Bundle.main.infoDictionary
+        let marketing = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(marketing).\(build)"
     }()
 
     private init() {}
