@@ -57,3 +57,6 @@ AgentXcode/
 # scratchpad / working state, not source. Examples: plan_main.md,
 # plan_archivexcode.md, plan_<task>.md.
 plan*.md
+
+# Project-index artifact written by the agent's `index` tool.
+.agent-index/
