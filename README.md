@@ -27,7 +27,17 @@
 - **Anti-hallucination prompt rule:** Every system prompt now includes explicit guidance against fabricating findings from incomplete tool reads. The 10-consecutive-reads guard pushes the model toward "narrow or call done()" instead of "guess".
 - **Autonomous task loop, Xcode integration, AXorcist desktop automation, privileged daemon, multi-tab LLM config, Ollama pre-warming via `LLMRegistry`** — all the previously-shipped fundamentals are still there.
 
-A native macOS AI agent that controls your apps, writes code, automates workflows, and runs tasks from your iPhone via iMessage. All powered by the AI provider of your choice.
+**One app. Any AI. Total command over your Mac.**
+
+Agent! wires **17 LLM providers** — Claude, GPT, Gemini, Grok, Mistral, DeepSeek, Qwen, Z.ai, BigModel, Hugging Face, Ollama (cloud and local), vLLM, LM Studio, Codestral, Mistral Vibe, and on-device **Apple Intelligence** — into a native macOS app that doesn't just talk about doing things. It does them.
+
+Watch it read your codebase, fix the bug, build the Xcode project, and commit the diff while you make coffee. Tell it to open Safari and text you the price of flights to Tokyo. Say *"Agent!"* from across the room and have it run your test suite by voice. Text your Mac from iMessage and get a polished answer before you reach your car.
+
+It edits files with surgical string-replace diffs — every change one-click undoable from a Time-Machine-style rollback. It drives any Mac app through the Accessibility API — no AppleScript required. It remembers your preferences across sessions. It spawns parallel sub-agents for work that fans out. It indexes entire codebases into a portable JSONL repo-map that any LLM can consume. It runs shell commands as you, or as root via a Launch Daemon you approve exactly once.
+
+Bring your own API key. Run it fully local on Ollama, vLLM, or LM Studio. Or run it free, forever, on Apple Intelligence. No subscription. No telemetry. No vendor lock-in. Your keys, your machine, your data.
+
+Download it. Say what you need. Watch it happen.
 
 ## Quick Start (Download)
 
