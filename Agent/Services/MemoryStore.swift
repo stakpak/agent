@@ -72,6 +72,10 @@ final class MemoryStore {
     private let legacyFileURL: URL
     private let indexURL: URL
 
+    /// Root directory for memory files. Exposed so the Claude-compatible
+    /// `memory` tool can map `/memories/...` paths onto the filesystem.
+    var memoryRoot: URL { memoryDir }
+
     private init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let dir = home.appendingPathComponent("Documents/AgentScript")

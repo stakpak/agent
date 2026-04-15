@@ -35,52 +35,13 @@ extension AgentViewModel {
                 .map { "mcp_\($0.serverName)_\($0.name)" }
             let all = builtIn + (mcpTools.isEmpty ? [] : ["--- MCP Tools ---"] + mcpTools)
             return all.joined(separator: "\n")
-        // Memory tool — persistent typed memories the LLM reads at task start
+        // Memory tool — Claude-compatible (memory_20250818) filesystem-shaped
+        // tool scoped to /memories/*. Maps onto MemoryStore's directory
+        // (~/Documents/AgentScript/memory/). Commands mirror Anthropic's
+        // hosted memory tool so prompts and agents stay portable across
+        // providers; we run it locally rather than server-side.
         case "memory":
-            let action = input["action"] as? String ?? "read"
-            switch action {
-            case "read":
-                let content = MemoryStore.shared.content
-                return content.isEmpty ? "Memory is empty. User can add preferences here." : content
-            case "write":
-                let text = input["text"] as? String ?? ""
-                MemoryStore.shared.write(text)
-                return "Memory updated."
-            case "append":
-                let text = input["text"] as? String ?? ""
-                MemoryStore.shared.append(text)
-                return "Added to memory."
-            case "clear":
-                MemoryStore.shared.write("")
-                return "Memory cleared."
-            case "list":
-                let manifest = MemoryStore.shared.manifest()
-                return manifest.isEmpty ? "No memories stored." : manifest
-            case "save":
-                let id = input["id"] as? String ?? "untitled"
-                let name = input["name"] as? String ?? id
-                let desc = input["description"] as? String ?? ""
-                let typeStr = input["type"] as? String ?? "user"
-                let type = MemoryType(rawValue: typeStr) ?? .user
-                let text = input["text"] as? String ?? ""
-                let entry = MemoryEntry(id: id, name: name, description: desc, type: type, content: text)
-                MemoryStore.shared.save(entry)
-                MemoryStore.shared.rebuildIndex()
-                return "Saved memory '\(name)' [\(type.rawValue)]."
-            case "load":
-                let id = input["id"] as? String ?? ""
-                if let entry = MemoryStore.shared.load(id: id) {
-                    return "[\(entry.type.rawValue)] \(entry.name)\n\(entry.content)"
-                }
-                return "Memory '\(id)' not found."
-            case "delete":
-                let id = input["id"] as? String ?? ""
-                MemoryStore.shared.delete(id: id)
-                MemoryStore.shared.rebuildIndex()
-                return "Deleted memory '\(id)'."
-            default:
-                return "Unknown memory action. Use: read, write, append, clear, list, save, load, delete."
-            }
+            return handleMemoryTool(input: input)
         // Skills — reusable prompt templates
         case "invoke_skill":
             let action = input["action"] as? String ?? "invoke"
