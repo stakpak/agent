@@ -60,3 +60,8 @@ plan*.md
 
 # Project-index artifact written by the agent's `index` tool.
 .agent-index/
+
+# Project-scoped memory (scope:"project" on the memory tool) — per-repo
+# notes. These are working state and belong to the local developer, not
+# in version control.
+.agent-memory/
