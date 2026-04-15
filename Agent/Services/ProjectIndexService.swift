@@ -52,10 +52,18 @@ enum ProjectIndexService {
     struct Record: Codable {
         let path: String
         let size: Int
+        let lines: Int
         let mtime: String
         let language: String
         let sha256: String
+        let doc: String?
+        let symbols: [String]
     }
+
+    /// Max characters of the leading doc comment stored per file.
+    static let docCharCap = 200
+    /// Max number of top-level symbols stored per file.
+    static let symbolCountCap = 100
 
     // MARK: - Public API
 
@@ -196,7 +204,8 @@ enum ProjectIndexService {
         return str + "\n"
     }
 
-    /// Lazy sequence-like walker returning Record values for each eligible file.
+    /// Walks the project tree, reading each eligible file ONCE to extract size,
+    /// sha256, line count, leading doc comment, and top-level symbols.
     private static func walkRecords(
         projectFolder: String,
         extensions: Set<String>,
@@ -215,7 +224,6 @@ enum ProjectIndexService {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         for case let url as URL in enumerator {
-            // Skip ignored dirs by name
             let components = url.pathComponents
             if components.contains(where: { skipDirs.contains($0) }) {
                 if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
@@ -229,15 +237,21 @@ enum ProjectIndexService {
             guard extensions.contains(ext) else { continue }
             let size = vals.fileSize ?? 0
             if size > maxFileSize { continue }
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             let mtime = iso.string(from: vals.contentModificationDate ?? Date())
             let rel = relativePath(of: url, from: root)
-            let hash = sha256(of: url) ?? ""
+            let (lineCount, doc, symbols) = analyze(text: text, language: ext)
             records.append(Record(
                 path: rel,
                 size: size,
+                lines: lineCount,
                 mtime: mtime,
                 language: ext,
-                sha256: hash
+                sha256: sha,
+                doc: doc,
+                symbols: symbols
             ))
         }
         return records
@@ -252,9 +266,169 @@ enum ProjectIndexService {
         return filePath
     }
 
-    private static func sha256(of url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+    // MARK: - Per-File Analysis
+
+    /// Returns (line count, leading doc comment or nil, top-level symbol signatures).
+    static func analyze(text: String, language: String) -> (Int, String?, [String]) {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let lineCount = lines.count
+        let doc = extractLeadingDoc(lines: lines, language: language)
+        let symbols = extractSymbols(lines: lines, language: language)
+        return (lineCount, doc, symbols)
+    }
+
+    /// Captures the leading comment block at the top of the file (skipping
+    /// blank lines and shebang), up to the first non-comment content line.
+    /// Capped at `docCharCap` characters.
+    private static func extractLeadingDoc(lines: [Substring], language: String) -> String? {
+        var collected: [String] = []
+        var started = false
+        var inBlock = false
+        for raw in lines {
+            let line = String(raw).trimmingCharacters(in: .whitespaces)
+            if !started {
+                // Skip leading blank lines and shebang
+                if line.isEmpty { continue }
+                if line.hasPrefix("#!") { started = true; continue }
+                started = true
+            }
+            if inBlock {
+                if line.contains("*/") {
+                    let trimmed = line.replacingOccurrences(of: "*/", with: "")
+                        .replacingOccurrences(of: "*", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty { collected.append(trimmed) }
+                    inBlock = false
+                    continue
+                }
+                let stripped = line.drop(while: { $0 == "*" || $0 == " " })
+                collected.append(String(stripped))
+                continue
+            }
+            if line.hasPrefix("///") {
+                collected.append(String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces))
+            } else if line.hasPrefix("//") {
+                collected.append(String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces))
+            } else if line.hasPrefix("/**") || line.hasPrefix("/*") {
+                if line.contains("*/") {
+                    let inner = line
+                        .replacingOccurrences(of: "/**", with: "")
+                        .replacingOccurrences(of: "/*", with: "")
+                        .replacingOccurrences(of: "*/", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    if !inner.isEmpty { collected.append(inner) }
+                } else {
+                    let inner = line
+                        .replacingOccurrences(of: "/**", with: "")
+                        .replacingOccurrences(of: "/*", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    if !inner.isEmpty { collected.append(inner) }
+                    inBlock = true
+                }
+            } else if line.hasPrefix("#") && (language == "py" || language == "rb" || language == "sh" || language == "bash" || language == "zsh" || language == "fish" || language == "yaml" || language == "yml" || language == "toml") {
+                collected.append(String(line.dropFirst()).trimmingCharacters(in: .whitespaces))
+            } else {
+                break
+            }
+            if collected.map(\.count).reduce(0, +) > docCharCap * 2 { break }
+        }
+        let joined = collected.joined(separator: " ")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+        let collapsed = joined.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        if collapsed.isEmpty { return nil }
+        if collapsed.count <= docCharCap { return collapsed }
+        return String(collapsed.prefix(docCharCap)) + "…"
+    }
+
+    /// Top-level symbol signatures, language-aware regex extraction. Truncates
+    /// each signature to keep the index compact.
+    private static func extractSymbols(lines: [Substring], language: String) -> [String] {
+        let patterns: [NSRegularExpression]
+        switch language {
+        case "swift":
+            patterns = Self.swiftPatterns
+        case "py":
+            patterns = Self.pythonPatterns
+        case "js", "ts", "jsx", "tsx", "mjs", "cjs":
+            patterns = Self.jsPatterns
+        case "go":
+            patterns = Self.goPatterns
+        case "rs":
+            patterns = Self.rustPatterns
+        case "rb":
+            patterns = Self.rubyPatterns
+        case "java", "kt", "scala":
+            patterns = Self.jvmPatterns
+        case "m", "mm", "h", "c", "cpp", "cc", "hpp":
+            patterns = Self.cPatterns
+        default:
+            return []
+        }
+        var out: [String] = []
+        var seen: Set<String> = []
+        for raw in lines {
+            let line = String(raw)
+            if line.count > 240 { continue } // skip obvious non-signatures
+            for rx in patterns {
+                let range = NSRange(line.startIndex..., in: line)
+                guard let match = rx.firstMatch(in: line, range: range) else { continue }
+                let matched = line[Range(match.range, in: line)!]
+                let sig = matched.trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                if sig.isEmpty || seen.contains(sig) { continue }
+                seen.insert(sig)
+                out.append(sig.count > 120 ? String(sig.prefix(120)) + "…" : sig)
+                if out.count >= symbolCountCap { return out }
+                break
+            }
+        }
+        return out
+    }
+
+    // Anchored to line-start with optional leading whitespace — matches
+    // top-level-ish decls plus one indent level. Good enough without a parser.
+    private static let swiftPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,8}(?:public|internal|private|fileprivate|open)?\s*(?:final\s+)?(?:class|struct|enum|protocol|actor)\s+\w+[^{]*"#,
+        #"^\s{0,8}(?:public|internal|private|fileprivate|open)?\s*extension\s+\w+[^{]*"#,
+        #"^\s{0,8}(?:public|internal|private|fileprivate|open)?\s*(?:static\s+)?func\s+\w+[^{]*"#,
+        #"^\s{0,8}(?:public|internal|private|fileprivate|open)?\s*typealias\s+\w+\s*="#,
+    ])
+    private static let pythonPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,4}(?:async\s+)?def\s+\w+\([^)]*\)[^:]*"#,
+        #"^\s{0,4}class\s+\w+[^:]*"#,
+    ])
+    private static let jsPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,4}(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*\w+\s*\([^)]*\)"#,
+        #"^\s{0,4}(?:export\s+)?(?:default\s+)?class\s+\w+[^{]*"#,
+        #"^\s{0,4}(?:export\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|function)"#,
+        #"^\s{0,4}(?:export\s+)?interface\s+\w+[^{]*"#,
+        #"^\s{0,4}(?:export\s+)?type\s+\w+\s*="#,
+    ])
+    private static let goPatterns: [NSRegularExpression] = compile([
+        #"^func\s+(?:\([^)]+\)\s+)?\w+\s*\([^)]*\)[^{]*"#,
+        #"^type\s+\w+\s+(?:struct|interface)"#,
+        #"^type\s+\w+\s+\w+"#,
+    ])
+    private static let rustPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,4}(?:pub\s+)?(?:async\s+)?fn\s+\w+[^{]*"#,
+        #"^\s{0,4}(?:pub\s+)?(?:struct|enum|trait|union)\s+\w+[^{]*"#,
+        #"^\s{0,4}impl(?:<[^>]+>)?\s+\w+[^{]*"#,
+    ])
+    private static let rubyPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,4}(?:def|class|module)\s+\w+[^\n]*"#,
+    ])
+    private static let jvmPatterns: [NSRegularExpression] = compile([
+        #"^\s{0,4}(?:public|private|protected|internal|open)?\s*(?:final|abstract|sealed|data)?\s*(?:class|interface|object|enum)\s+\w+[^{]*"#,
+        #"^\s{0,4}(?:public|private|protected|internal|open|override)?\s*(?:suspend\s+)?fun\s+\w+\s*\([^)]*\)[^{]*"#,
+    ])
+    private static let cPatterns: [NSRegularExpression] = compile([
+        #"^@interface\s+\w+[^\n]*"#,
+        #"^@protocol\s+\w+[^\n]*"#,
+        #"^@implementation\s+\w+[^\n]*"#,
+        #"^(?:static\s+|inline\s+)*[\w\*\s]+\s+\w+\s*\([^)]*\)\s*\{?\s*$"#,
+    ])
+
+    private static func compile(_ patterns: [String]) -> [NSRegularExpression] {
+        patterns.compactMap { try? NSRegularExpression(pattern: $0) }
     }
 }
