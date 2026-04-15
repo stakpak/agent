@@ -35,7 +35,11 @@ final class ToolPreferencesService {
             Tool.skill, "invoke_skill", Tool.file, "file_manager", Tool.folder,
             "project_folder", Tool.webFetch, "web_fetch", Tool.ask, "ask_user"
         ]),
-        Tool.Group.work: Set([Tool.batch, "batch_commands", Tool.multi, "batch_tools"]),
+        Tool.Group.work: Set([
+            Tool.batch, "batch_commands", Tool.multi, "batch_tools",
+            Tool.index, "index_create", "index_read", "index_remove",
+            "index_recreate", "index_append", "index_continue"
+        ]),
         Tool.Group.code: Set([Tool.xc, Tool.git, Tool.agent]),
         Tool.Group.auto: Set([Tool.as, Tool.ax, Tool.js, "jxa", "lookup_sdef", Tool.web]),
         Tool.Group.user: Set([Tool.user, "execute_agent_command"]),

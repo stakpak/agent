@@ -19,6 +19,7 @@ enum Tool {
     // Work
     static let agent = AgentTools.Name.agentScript
     static let plan = AgentTools.Name.planMode
+    static let index = AgentTools.Name.index
     static let git = AgentTools.Name.git
     static let batch = AgentTools.Name.batchCommands
     static let multi = AgentTools.Name.batchTools

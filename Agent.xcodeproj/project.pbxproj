@@ -152,6 +152,8 @@
 		AA10000000000000000228 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000229 /* Conversation.swift */; };
 		AA10000000000000000230 /* Xcode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000231 /* Xcode.swift */; };
 		AA10000000000000000232 /* Git.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000233 /* NTH-Git.swift */; };
+		IDX0000000000000000001 /* NTH-Index.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDX0000000000000000002 /* NTH-Index.swift */; };
+		IDX0000000000000000003 /* ProjectIndexService.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDX0000000000000000004 /* ProjectIndexService.swift */; };
 		AA10000000000000000234 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000235 /* Colors.swift */; };
 		AA10000000000000000236 /* DefaultModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000237 /* DefaultModels.swift */; };
 		AA10000000000000000238 /* Init.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000239 /* Init.swift */; };
@@ -424,6 +426,8 @@
 		AA10000000000000000229 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Conversation.swift"; sourceTree = "<group>"; };
 		AA10000000000000000231 /* Xcode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Xcode.swift"; sourceTree = "<group>"; };
 		AA10000000000000000233 /* NTH-Git.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NTH-Git.swift"; sourceTree = "<group>"; };
+		IDX0000000000000000002 /* NTH-Index.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NTH-Index.swift"; sourceTree = "<group>"; };
+		IDX0000000000000000004 /* ProjectIndexService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectIndexService.swift"; sourceTree = "<group>"; };
 		AA10000000000000000235 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Colors.swift"; sourceTree = "<group>"; };
 		AA10000000000000000237 /* DefaultModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DefaultModels.swift"; sourceTree = "<group>"; };
 		AA10000000000000000239 /* Init.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Init.swift"; sourceTree = "<group>"; };
@@ -661,6 +665,7 @@
 				AA100000000000000000B4 /* ToolPreferencesService.swift */,
 				1E185ABB626D6FCD3D74523A /* DiffStore.swift */,
 				AA10000000000000000102 /* RecentFoldersService.swift */,
+				IDX0000000000000000004 /* ProjectIndexService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -856,6 +861,7 @@
 				AA10000000000000000229 /* Conversation.swift */,
 				AA10000000000000000225 /* File.swift */,
 				AA10000000000000000233 /* NTH-Git.swift */,
+				IDX0000000000000000002 /* NTH-Index.swift */,
 				AA10000000000000000227 /* NTH-Misc.swift */,
 				AA10000000000000000221 /* NTH-Shell.swift */,
 				AA10000000000000000231 /* Xcode.swift */,
@@ -1206,6 +1212,8 @@
 				AA10000000000000000228 /* Conversation.swift in Sources */,
 				AA10000000000000000230 /* Xcode.swift in Sources */,
 				AA10000000000000000232 /* Git.swift in Sources */,
+				IDX0000000000000000001 /* NTH-Index.swift in Sources */,
+				IDX0000000000000000003 /* ProjectIndexService.swift in Sources */,
 				AA10000000000000000234 /* Colors.swift in Sources */,
 				AA10000000000000000236 /* DefaultModels.swift in Sources */,
 				AA10000000000000000238 /* Init.swift in Sources */,

@@ -168,6 +168,17 @@ extension AgentViewModel {
             default: return ("git_status", newInput)
             }
 
+        case "index":
+            switch action {
+            case "create": return ("index_create", newInput)
+            case "read": return ("index_read", newInput)
+            case "remove", "delete": return ("index_remove", newInput)
+            case "recreate", "rebuild": return ("index_recreate", newInput)
+            case "append", "update": return ("index_append", newInput)
+            case "continue", "resume": return ("index_continue", newInput)
+            default: return ("index_read", newInput)
+            }
+
         case "agent_script", "agent":
             switch action {
             case "list": return ("list_agents", newInput)

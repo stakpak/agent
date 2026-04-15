@@ -46,6 +46,7 @@ extension AgentViewModel {
         if let result = await handleConversationNativeTool(name: name, input: input) { return result }
         if let result = await handleXcodeNativeTool(name: name, input: input) { return result }
         if let result = await handleGitNativeTool(name: name, input: input) { return result }
+        if let result = await handleIndexNativeTool(name: name, input: input) { return result }
 
         // Handle ax_ accessibility tools directly (avoid recursion through executeNativeTool)
         if name.hasPrefix("ax_") {

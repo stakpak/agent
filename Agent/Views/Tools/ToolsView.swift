@@ -15,7 +15,7 @@ struct ToolsView: View {
             Tool.chat, Tool.msg, Tool.sh, Tool.plan, Tool.skill, Tool.file,
             Tool.webFetch, Tool.ask
         ].contains($0.name) }, "checkmark.circle"),
-        Tool.Group.work: ({ [Tool.batch, Tool.multi].contains($0.name) }, "flowchart"),
+        Tool.Group.work: ({ [Tool.batch, Tool.multi, Tool.index].contains($0.name) }, "flowchart"),
         Tool.Group.code: ({ [Tool.xc, Tool.git, Tool.agent].contains($0.name) }, "chevron.left.forwardslash.chevron.right"),
         Tool.Group.auto: ({ [Tool.as, Tool.ax, Tool.js, Tool.web].contains($0.name) }, "gearshape.2"),
         Tool.Group.user: ({ $0.name == Tool.user }, "person"),
