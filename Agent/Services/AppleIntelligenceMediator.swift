@@ -519,6 +519,53 @@ final class AppleIntelligenceMediator: ObservableObject {
         return verbs.contains { lower.contains($0) }
     }
 
+    /// First-party / well-known Mac apps whose presence in a prompt genuinely
+    /// signals a UI automation request. Matching is case-insensitive and
+    /// word-bounded — substring matches against other language are avoided by
+    /// the word-boundary regex in `mentionsSystemApp`.
+    private static let systemAppNames: [String] = [
+        "safari", "photos", "photo booth", "music", "messages", "mail",
+        "finder", "terminal", "iterm", "xcode", "calendar", "reminders",
+        "notes", "maps", "system settings", "system preferences",
+        "app store", "preview", "quicktime", "textedit", "numbers",
+        "pages", "keynote", "contacts", "facetime", "podcasts",
+        "stickies", "calculator", "dictionary", "chess", "grapher",
+        "screenshot", "automator", "shortcuts", "iphone mirroring",
+        "chrome", "firefox", "arc", "brave", "edge",
+        "slack", "discord", "zoom", "teams", "spotify",
+    ]
+
+    /// Word-boundary app name match. Avoids false positives like "maps" → "maps to".
+    private static func mentionsSystemApp(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        for name in systemAppNames {
+            // Simple word-boundary check: the name appears surrounded by non-letter chars or string edges.
+            guard let range = lower.range(of: name) else { continue }
+            let before = range.lowerBound == lower.startIndex ? " " : String(lower[lower.index(before: range.lowerBound)])
+            let after = range.upperBound == lower.endIndex ? " " : String(lower[range.upperBound])
+            let beforeOK = before.rangeOfCharacter(from: .letters) == nil
+            let afterOK = after.rangeOfCharacter(from: .letters) == nil
+            if beforeOK && afterOK { return true }
+        }
+        return false
+    }
+
+    /// Return `true` if the prompt should skip the Apple AI accessibility
+    /// triage because the user is clearly working on project code rather than
+    /// driving a system app. The rule: when a project folder is active, only
+    /// allow Apple AI triage when the prompt explicitly names a system app.
+    static func shouldSkipAccessibilityForProject(_ message: String, projectFolder: String) -> Bool {
+        let pf = projectFolder.trimmingCharacters(in: .whitespaces)
+        guard !pf.isEmpty else { return false }
+        // Don't count the home directory as a real project.
+        let home = NSHomeDirectory()
+        if pf == home || pf == "\(home)/" { return false }
+        if pf == "\(home)/Documents" || pf == "\(home)/Documents/" { return false }
+        // If the prompt names a system app, let Apple AI try.
+        if mentionsSystemApp(message) { return false }
+        return true
+    }
+
     /// Run Apple AI as tool-calling agent with accessibility tool. Returns final text on success, or nil if tool wasn't called/failed/timed out.
     /// Quick pattern check for "run agent X" style requests — strict match only.
     /// Only triggers on "run agent {name}" or "run agent {number}" (with optional "the" / quotes).
@@ -730,7 +777,14 @@ final class AppleIntelligenceMediator: ObservableObject {
         // Accessibility agent — let Apple AI try to handle UI automation requests locally with full tool-calling
         // support. Pre-filter on action verbs so we don't spend an AI call on every user message.
         if accessibilityIntentEnabled && (Self.looksLikeAccessibilityRequest(message) || Self.looksLikeRunAgentRequest(message)) {
-            if let result = await runAccessibilityAgent(message, dispatch: axDispatch, runAgent: runAgent, appendLog: appendLog, projectFolder: projectFolder) {
+            // Hard-skip when a project folder is active AND the prompt doesn't
+            // explicitly name a first-party system app. Users in a project are
+            // overwhelmingly working on code/UI of that project — a match on
+            // "drag" / "click" / "arrow tool" is almost never about Photos.
+            // Requires an explicit app name to opt in.
+            if Self.shouldSkipAccessibilityForProject(message, projectFolder: projectFolder) {
+                // Silently fall through to the cloud LLM.
+            } else if let result = await runAccessibilityAgent(message, dispatch: axDispatch, runAgent: runAgent, appendLog: appendLog, projectFolder: projectFolder) {
                 return .accessibilityHandled(result)
             }
         }
