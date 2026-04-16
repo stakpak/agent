@@ -57,7 +57,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             artifact_name: stakpak-linux-aarch64
             features: --features jemalloc
-            docker: rust:1.91-alpine3.21
+            docker: rust:1.94-alpine3.21
           - os: macos-15
             target: x86_64-apple-darwin
             artifact_name: stakpak-darwin-x86_64
@@ -75,7 +75,7 @@ jobs:
 
       - name: Install Rust
         if: ${{ !matrix.docker }}
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@1.94.1
         with:
           targets: ${{ matrix.target }}
 
@@ -208,7 +208,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@1.94.1
 
       - name: Extract version from tag
         id: get_version
