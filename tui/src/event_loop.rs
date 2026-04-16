@@ -1,6 +1,6 @@
 //! Event Loop Module
 //!
-//! Contains the main TUI event loop and related helper functions.
+//! Contains the main TUI event loop and focused helper functions extracted from run_tui.
 
 use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
 use crate::services::banner::BannerMessage;
@@ -104,6 +104,222 @@ fn calculate_message_area_for_tool_call(
     let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
     let message_area_height = outer_chunks[1].height as usize;
     (message_area_height, message_area_width)
+}
+
+/// Renders the tool-result messages produced by a completed tool call and updates related state.
+fn handle_tool_result_event(
+    state: &mut AppState,
+    tool_call_result: &stakpak_shared::models::integrations::openai::ToolCallResult,
+    internal_tx: &Sender<InputEvent>,
+) {
+    clear_streaming_tool_results(state);
+    state.tool_call_state.cancel_requested = false;
+
+    if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != tool_call_uuid);
+    }
+
+    state
+        .session_tool_calls_state
+        .session_tool_calls_queue
+        .insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+    update_session_tool_calls_queue(state, tool_call_result);
+
+    let tool_name = strip_tool_name(&tool_call_result.call.function.name);
+    let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
+
+    if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {
+        state.tool_call_state.latest_tool_call = Some(tool_call_result.call.clone());
+    }
+
+    let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
+    let is_error = tool_call_result.status == ToolCallResultStatus::Error;
+
+    if (is_cancelled || is_error) && !is_fg_cmd {
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_result_border_block(
+                tool_call_result.clone(),
+            ));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::render_full_content_message(
+                tool_call_result.clone(),
+            ));
+    } else {
+        match tool_name {
+            "str_replace" | "create" => {
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_result_border_block(
+                        tool_call_result.clone(),
+                    ));
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_full_content_message(
+                        tool_call_result.clone(),
+                    ));
+            }
+            "run_command_task" | "run_remote_command_task" => {
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_result_border_block(
+                        tool_call_result.clone(),
+                    ));
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_full_content_message(
+                        tool_call_result.clone(),
+                    ));
+            }
+            "run_command" | "run_remote_command" => {
+                let command = crate::services::handlers::shell::extract_command_from_tool_call(
+                    &tool_call_result.call,
+                )
+                .unwrap_or_else(|_| "command".to_string());
+                let run_state = if is_error {
+                    crate::services::bash_block::RunCommandState::Error
+                } else if is_cancelled {
+                    crate::services::bash_block::RunCommandState::Cancelled
+                } else {
+                    crate::services::bash_block::RunCommandState::Completed
+                };
+
+                let run_cmd_msg = Message::render_run_command_block(
+                    command,
+                    Some(tool_call_result.result.clone()),
+                    run_state,
+                    None,
+                );
+                let popup_msg = Message::render_full_content_message(tool_call_result.clone());
+
+                if is_cancelled && state.shell_popup_state.is_visible {
+                    if let Some(shell_msg_id) =
+                        state.shell_session_state.interactive_shell_message_id
+                    {
+                        if let Some(pos) = state
+                            .messages_scrolling_state
+                            .messages
+                            .iter()
+                            .position(|m| m.id == shell_msg_id)
+                        {
+                            state
+                                .messages_scrolling_state
+                                .messages
+                                .insert(pos, popup_msg);
+                            state
+                                .messages_scrolling_state
+                                .messages
+                                .insert(pos, run_cmd_msg);
+                        } else {
+                            state.messages_scrolling_state.messages.push(run_cmd_msg);
+                            state.messages_scrolling_state.messages.push(popup_msg);
+                        }
+                    } else {
+                        state.messages_scrolling_state.messages.push(run_cmd_msg);
+                        state.messages_scrolling_state.messages.push(popup_msg);
+                    }
+                } else {
+                    state.messages_scrolling_state.messages.push(run_cmd_msg);
+                    state.messages_scrolling_state.messages.push(popup_msg);
+                }
+            }
+            "read" | "view" | "read_file" => {
+                let (file_path, grep, glob) =
+                    crate::services::handlers::tool::extract_view_params_from_tool_call(
+                        &tool_call_result.call,
+                    );
+                let file_path = file_path.unwrap_or_else(|| "file".to_string());
+                let total_lines = tool_call_result.result.lines().count();
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_view_file_block(
+                        file_path.clone(),
+                        total_lines,
+                        grep.clone(),
+                        glob.clone(),
+                    ));
+                state.messages_scrolling_state.messages.push(
+                    Message::render_view_file_block_popup(file_path, total_lines, grep, glob),
+                );
+            }
+            _ => {
+                state.messages_scrolling_state.messages.push(
+                    Message::render_collapsed_command_message(tool_call_result.clone()),
+                );
+                state
+                    .messages_scrolling_state
+                    .messages
+                    .push(Message::render_full_content_message(
+                        tool_call_result.clone(),
+                    ));
+            }
+        }
+
+        if !is_cancelled && !is_error {
+            handle_tool_result(state, tool_call_result.clone());
+        }
+    }
+
+    crate::services::message::invalidate_message_lines_cache(state);
+    state.messages_scrolling_state.stay_at_bottom = true;
+    let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
+}
+
+/// Opens an external editor for `file_path`, temporarily disabling mouse capture.
+///
+/// When `pause_input` is `Some(flag)` the input-reader thread is paused for the
+/// duration so it does not steal keystrokes from the editor.
+fn handle_editor_open<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut AppState,
+    file_path: &str,
+    pause_input: Option<&AtomicBool>,
+) {
+    if let Some(flag) = pause_input {
+        flag.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
+    if was_mouse_capture_enabled {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        state.terminal_ui_state.mouse_capture_enabled = false;
+    }
+
+    match crate::services::editor::open_in_editor(
+        terminal,
+        &state.side_panel_state.editor_command,
+        file_path,
+        None,
+    ) {
+        Ok(()) => {}
+        Err(error) => {
+            state.messages_scrolling_state.messages.push(Message::info(
+                format!("Failed to open editor: {}", error),
+                Some(ratatui::style::Style::default().fg(ThemeColors::red())),
+            ));
+        }
+    }
+
+    if was_mouse_capture_enabled {
+        let _ = execute!(std::io::stdout(), EnableMouseCapture);
+        state.terminal_ui_state.mouse_capture_enabled = true;
+    }
+
+    if let Some(flag) = pause_input {
+        flag.store(false, Ordering::Relaxed);
+    }
 }
 
 // Rulebook config struct (re-defined here to avoid circular dependency)
@@ -303,127 +519,7 @@ pub async fn run_tui(
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
-                       clear_streaming_tool_results(&mut state);
-
-                       // Clear cancel_requested now that the final result has arrived
-                       state.tool_call_state.cancel_requested = false;
-
-                       // For run_command, also remove any message that matches the tool call ID
-                       // (handles case where streaming message uses tool_call_id directly)
-                       // The tool call ID is a String, but message IDs are Uuid
-                       if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
-                           state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_uuid);
-                       }
-
-                       state.session_tool_calls_state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
-                       update_session_tool_calls_queue(&mut state, tool_call_result);
-                       let tool_name = strip_tool_name(&tool_call_result.call.function.name);
-
-                       let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
-                       if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {
-                           state.tool_call_state.latest_tool_call = Some(tool_call_result.call.clone());
-                       }
-                       // Determine the state for command tools
-                       let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
-                       let is_error = tool_call_result.status == ToolCallResultStatus::Error;
-
-                       if (is_cancelled || is_error) && !is_fg_cmd {
-                           // For non-command tools with cancelled/error, use old renderer
-                           state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                           state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                       } else {
-                           match tool_name {
-                               "str_replace" | "create" => {
-                                   // TUI: Show diff result block with yellow border (is_collapsed: None)
-                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                                   // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
-                                   // Use render_full_content_message which stores the full ToolCallResult including the result
-                                   // (needed for extracting line numbers from the diff output)
-                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                               }
-                               "run_command_task" | "run_remote_command_task" => {
-                                   // TUI: bordered result block (is_collapsed: None)
-                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                                   // Full screen popup: full content without border (is_collapsed: Some(true))
-                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                               }
-                                "run_command" | "run_remote_command" => {
-                                    // Use unified run command block with appropriate state
-                                    let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
-                                        .unwrap_or_else(|_| "command".to_string());
-                                    let run_state = if is_error {
-                                        crate::services::bash_block::RunCommandState::Error
-                                    } else if is_cancelled {
-                                        // Cancelled could be user rejection or actual cancellation
-                                        // Use Cancelled for now (user pressed ESC during execution)
-                                        crate::services::bash_block::RunCommandState::Cancelled
-                                    } else {
-                                        crate::services::bash_block::RunCommandState::Completed
-                                    };
-
-                                    let run_cmd_msg = Message::render_run_command_block(
-                                        command,
-                                        Some(tool_call_result.result.clone()),
-                                        run_state,
-                                        None,
-                                    );
-                                    let popup_msg = Message::render_full_content_message(tool_call_result.clone());
-
-                                    // If shell is visible/running, insert cancelled block BEFORE the shell message
-                                    // so the order is: cancelled command -> shell box
-                                    if is_cancelled && state.shell_popup_state.is_visible {
-                                        if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
-                                            // Find the position of the shell message
-                                            if let Some(pos) = state.messages_scrolling_state.messages.iter().position(|m| m.id == shell_msg_id) {
-                                                // Insert cancelled block and popup before shell message
-                                                state.messages_scrolling_state.messages.insert(pos, popup_msg);
-                                                state.messages_scrolling_state.messages.insert(pos, run_cmd_msg);
-                                            } else {
-                                                // Shell message not found, just push normally
-                                                state.messages_scrolling_state.messages.push(run_cmd_msg);
-                                                state.messages_scrolling_state.messages.push(popup_msg);
-                                            }
-                                        } else {
-                                            // No shell message ID, just push normally
-                                            state.messages_scrolling_state.messages.push(run_cmd_msg);
-                                            state.messages_scrolling_state.messages.push(popup_msg);
-                                        }
-                                    } else {
-                                        // Normal case: just push to the end
-                                        state.messages_scrolling_state.messages.push(run_cmd_msg);
-                                        state.messages_scrolling_state.messages.push(popup_msg);
-                                    }
-                                }
-                                "read" | "view" | "read_file" => {
-                                    // View file tool - show compact view with file icon and line count
-                                    // Extract file path and optional grep/glob from tool call arguments
-                                    let (file_path, grep, glob) = crate::services::handlers::tool::extract_view_params_from_tool_call(&tool_call_result.call);
-                                    let file_path = file_path.unwrap_or_else(|| "file".to_string());
-                                    let total_lines = tool_call_result.result.lines().count();
-                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
-                                    // Full screen popup: same compact view without borders
-                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
-                                }
-                               _ => {
-                                   // TUI: collapsed command message - last 3 lines (is_collapsed: None)
-                                   state.messages_scrolling_state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
-                                   // Full screen popup: full content (is_collapsed: Some(true))
-                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                               }
-                           }
-
-                           // Handle file changes for the Changeset (only for non-cancelled/error)
-                           if !is_cancelled && !is_error {
-                               handle_tool_result(&mut state, tool_call_result.clone());
-                           }
-                       }
-                       // Invalidate cache and scroll to bottom to show the result
-                       crate::services::message::invalidate_message_lines_cache(&mut state);
-                       state.messages_scrolling_state.stay_at_bottom = true;
-
-                       // Refresh board tasks after tool execution (agent may have updated tasks)
-                       // Always trigger refresh - the handler will extract agent_id from messages if needed
-                       let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
+                       handle_tool_result_event(&mut state, tool_call_result, &internal_tx);
                    }
                    if let InputEvent::ToggleMouseCapture = event {
                        #[cfg(unix)]
@@ -441,36 +537,7 @@ pub async fn run_tui(
                          state.poll_file_search_results();
                         // Handle pending editor open request
                        if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
-                           // Disable mouse capture before opening editor to prevent weird input
-                           let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
-                           if was_mouse_capture_enabled {
-                               let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                               state.terminal_ui_state.mouse_capture_enabled = false;
-                           }
-
-                           match crate::services::editor::open_in_editor(
-                               &mut terminal,
-                               &state.side_panel_state.editor_command,
-                               &file_path,
-                               None,
-                           ) {
-                               Ok(()) => {
-                                   // Editor closed successfully
-                               }
-                               Err(error) => {
-                                   // Show error message
-                                   state.messages_scrolling_state.messages.push(Message::info(
-                                       format!("Failed to open editor: {}", error),
-                                        Some(ratatui::style::Style::default().fg(ThemeColors::red())),
-                                    ));
-                                }
-                            }
-
-                            // Restore mouse capture if it was enabled before
-                            if was_mouse_capture_enabled {
-                                let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                state.terminal_ui_state.mouse_capture_enabled = true;
-                            }
+                           handle_editor_open(&mut terminal, &mut state, &file_path, None);
                         }
                    }
                }
@@ -550,44 +617,7 @@ pub async fn run_tui(
 
                         // Handle pending editor open request
                          if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
-                             // Pause input thread to avoid stealing input from editor
-                             input_paused.store(true, Ordering::Relaxed);
-                             // Small delay to ensure input thread cycle completes
-                             std::thread::sleep(Duration::from_millis(10));
-
-                             // Disable mouse capture before opening editor to prevent weird input
-                             let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
-                             if was_mouse_capture_enabled {
-                                 let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                                 state.terminal_ui_state.mouse_capture_enabled = false;
-                             }
-
-                             match crate::services::editor::open_in_editor(
-                                 &mut terminal,
-                                 &state.side_panel_state.editor_command,
-                                 &file_path,
-                                 None,
-                             ) {
-                                 Ok(()) => {
-                                     // Editor closed successfully
-                                 }
-                                 Err(error) => {
-                                     // Show error message
-                                     state.messages_scrolling_state.messages.push(Message::info(
-                                         format!("Failed to open editor: {}", error),
-                                          Some(ratatui::style::Style::default().fg(ThemeColors::red())),
-                                     ));
-                                 }
-                             }
-
-                             // Restore mouse capture if it was enabled before
-                             if was_mouse_capture_enabled {
-                                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                 state.terminal_ui_state.mouse_capture_enabled = true;
-                             }
-
-                             // Resume input thread
-                             input_paused.store(false, Ordering::Relaxed);
+                             handle_editor_open(&mut terminal, &mut state, &file_path, Some(&input_paused));
                          }
 
                         state.update_session_empty_status();
