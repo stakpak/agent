@@ -19,16 +19,16 @@ pub fn handle_banner_mouse_click(
         && col < banner_area.x + banner_area.width
     {
         // Check dismiss button first
-        if let Some(dismiss) = state.banner_dismiss_region
+        if let Some(dismiss) = state.banner_state.dismiss_region
             && col >= dismiss.x
             && col < dismiss.x + dismiss.width
             && row >= dismiss.y
             && row < dismiss.y + dismiss.height
         {
-            state.banner_message = None;
-            state.banner_click_regions.clear();
-            state.banner_dismiss_region = None;
-            state.banner_area = None;
+            state.banner_state.message = None;
+            state.banner_state.click_regions.clear();
+            state.banner_state.dismiss_region = None;
+            state.banner_state.area = None;
             return;
         }
 

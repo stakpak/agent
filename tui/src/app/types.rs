@@ -444,6 +444,7 @@ pub struct BannerState {
     pub message: Option<BannerMessage>,
     pub area: Option<ratatui::layout::Rect>,
     pub click_regions: Vec<(String, ratatui::layout::Rect)>,
+    pub dismiss_region: Option<ratatui::layout::Rect>,
 }
 
 #[derive(Default)]
