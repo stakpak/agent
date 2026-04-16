@@ -1,5 +1,5 @@
 [package]
-name = "shell-tool-approvals"
+name = "stakpak-shell-tool-approvals"
 version = { workspace = true }
 edition = "2024"
 description = "Shell command parsing and hierarchical scope resolution for tool approval"
