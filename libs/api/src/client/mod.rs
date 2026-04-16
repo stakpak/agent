@@ -123,6 +123,35 @@ pub struct AgentClient {
 }
 
 impl AgentClient {
+    /// Build just the `SessionStorage` backend for a given config, without
+    /// initializing LLM providers, hook registries, or the StakpakApiClient.
+    ///
+    /// Use this for read-only session inspection commands where initializing
+    /// a full `AgentClient` would needlessly refresh OAuth tokens and instantiate
+    /// providers the command never uses.
+    pub async fn build_session_storage(
+        stakpak: Option<StakpakConfig>,
+        store_path: Option<String>,
+    ) -> Result<Arc<dyn SessionStorage>, String> {
+        if let Some(stakpak) = stakpak
+            && !stakpak.api_key.is_empty()
+        {
+            let storage = StakpakStorage::new(&stakpak.api_key, &stakpak.api_endpoint)
+                .map_err(|e| format!("Failed to create Stakpak storage: {}", e))?;
+            Ok(Arc::new(storage))
+        } else {
+            let store_path = store_path.unwrap_or_else(|| {
+                std::env::var("HOME")
+                    .map(|h| format!("{}/{}", h, DEFAULT_STORE_PATH))
+                    .unwrap_or_else(|_| DEFAULT_STORE_PATH.to_string())
+            });
+            let storage = LocalStorage::new(&store_path)
+                .await
+                .map_err(|e| format!("Failed to create local storage: {}", e))?;
+            Ok(Arc::new(storage))
+        }
+    }
+
     /// Create a new AgentClient
     pub async fn new(config: AgentClientConfig) -> Result<Self, String> {
         // 1. Build LLMProviderConfig with Stakpak if configured (only if api_key is not empty)

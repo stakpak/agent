@@ -191,9 +191,18 @@ impl SessionStorage for LocalStorage {
         let limit = query.limit.unwrap_or(100);
         let offset = query.offset.unwrap_or(0);
 
-        let mut sql = "SELECT s.id, s.title, s.visibility, COALESCE(s.status, 'ACTIVE') as status, s.cwd, s.created_at, s.updated_at, 
-            (SELECT COUNT(*) FROM checkpoints c WHERE c.session_id = s.id) as checkpoint_count,
-            (SELECT id FROM checkpoints c WHERE c.session_id = s.id ORDER BY created_at DESC LIMIT 1) as active_checkpoint_id
+        // `message_count` is derived from the latest checkpoint's state JSON using
+        // `json_array_length($.messages)`, so it reflects actual messages rather than
+        // checkpoint revisions (which are not user-facing).
+        let mut sql = "SELECT s.id, s.title, s.visibility, COALESCE(s.status, 'ACTIVE') as status, s.cwd, s.created_at, s.updated_at,
+            COALESCE((
+                SELECT json_array_length(c.state, '$.messages')
+                FROM checkpoints c
+                WHERE c.session_id = s.id
+                ORDER BY c.created_at DESC
+                LIMIT 1
+            ), 0) as message_count,
+            (SELECT id FROM checkpoints c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1) as active_checkpoint_id
             FROM sessions s WHERE 1=1".to_string();
 
         // Use parameterized values for enum filters (safe because they come from
@@ -247,7 +256,7 @@ impl SessionStorage for LocalStorage {
             let updated_at: String = row
                 .get(6)
                 .map_err(|e| StorageError::Internal(e.to_string()))?;
-            let checkpoint_count: i64 = row.get(7).unwrap_or(0);
+            let message_count: i64 = row.get(7).unwrap_or(0);
             let active_checkpoint_id: Option<String> = row.get(8).ok();
 
             sessions.push(SessionSummary {
@@ -258,7 +267,7 @@ impl SessionStorage for LocalStorage {
                 cwd,
                 created_at: parse_datetime(&created_at)?,
                 updated_at: parse_datetime(&updated_at)?,
-                message_count: checkpoint_count as u32,
+                message_count: message_count.max(0) as u32,
                 active_checkpoint_id: active_checkpoint_id.and_then(|id| Uuid::from_str(&id).ok()),
                 last_message_at: None,
             });

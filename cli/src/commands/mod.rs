@@ -15,6 +15,7 @@ pub mod autopilot;
 pub mod board;
 pub mod browser;
 pub mod mcp;
+pub mod sessions;
 pub mod warden;
 pub mod watch;
 
@@ -23,6 +24,7 @@ use autopilot::{StartArgs, StopArgs};
 pub use auth::AuthCommands;
 pub use autopilot::AutopilotCommands;
 pub use mcp::McpCommands;
+pub use sessions::SessionsCommands;
 
 /// Frontmatter structure for rulebook metadata
 #[derive(Deserialize, Serialize)]
@@ -187,6 +189,10 @@ pub enum Commands {
     /// Autonomous 24/7 lifecycle commands
     #[command(subcommand)]
     Autopilot(AutopilotCommands),
+
+    /// List and inspect past sessions
+    #[command(subcommand, alias = "session")]
+    Sessions(SessionsCommands),
 
     /// Start autopilot — auto-configures on first run (alias: stakpak autopilot up)
     Up {
@@ -496,6 +502,9 @@ impl Commands {
             }
             Commands::Autopilot(autopilot_command) => {
                 autopilot_command.run(config).await?;
+            }
+            Commands::Sessions(sessions_command) => {
+                sessions_command.run(config).await?;
             }
             Commands::Up { args } => {
                 AutopilotCommands::Up {
