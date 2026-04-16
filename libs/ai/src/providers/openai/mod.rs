@@ -3,6 +3,7 @@
 pub mod convert;
 mod error;
 mod provider;
+pub mod runtime;
 pub mod stream;
 pub mod types;
 

@@ -18,11 +18,30 @@ pub fn handle_banner_mouse_click(
         && col >= banner_area.x
         && col < banner_area.x + banner_area.width
     {
+        // Check dismiss button first
+        if let Some(dismiss) = state.banner_dismiss_region
+            && col >= dismiss.x
+            && col < dismiss.x + dismiss.width
+            && row >= dismiss.y
+            && row < dismiss.y + dismiss.height
+        {
+            state.banner_message = None;
+            state.banner_click_regions.clear();
+            state.banner_dismiss_region = None;
+            state.banner_area = None;
+            return;
+        }
+
         let clicked_cmd = state
             .banner_state
             .click_regions
             .iter()
-            .find(|(_, rect)| col >= rect.x && col < rect.x + rect.width && row == rect.y)
+            .find(|(_, rect)| {
+                col >= rect.x
+                    && col < rect.x + rect.width
+                    && row >= rect.y
+                    && row < rect.y + rect.height
+            })
             .map(|(cmd, _)| cmd.clone());
 
         if let Some(cmd) = clicked_cmd {

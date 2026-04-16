@@ -323,9 +323,6 @@ async fn build_local_code_index(
     let client = AgentClient::new(AgentClientConfig {
         stakpak,
         providers: app_config.get_llm_provider_config(),
-        eco_model: app_config.eco_model.clone(),
-        recovery_model: app_config.recovery_model.clone(),
-        smart_model: app_config.smart_model.clone(),
         store_path: None,
         hook_registry: None,
     })
@@ -697,9 +694,6 @@ async fn execute_code_index_update(
             let client = AgentClient::new(AgentClientConfig {
                 stakpak,
                 providers: app_config.get_llm_provider_config(),
-                eco_model: app_config.eco_model.clone(),
-                recovery_model: app_config.recovery_model.clone(),
-                smart_model: app_config.smart_model.clone(),
                 store_path: None,
                 hook_registry: None,
             })

@@ -45,7 +45,9 @@ impl ApprovalStateMachine {
         let entries = tool_calls
             .into_iter()
             .map(|tool_call| {
-                let initial_state = match policy.action_for(&tool_call.name) {
+                let initial_state = match policy
+                    .action_for(&tool_call.name, Some(&tool_call.arguments))
+                {
                     ToolApprovalAction::Approve => ApprovalEntryState::Ready(ToolDecision::Accept),
                     ToolApprovalAction::Deny => ApprovalEntryState::Ready(ToolDecision::Reject),
                     ToolApprovalAction::Ask => ApprovalEntryState::PendingUserDecision,

@@ -5,7 +5,6 @@ use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
 use stakpak_shared::models::integrations::gemini::GeminiConfig;
-use stakpak_shared::models::integrations::openai::OpenAIConfig;
 use stakpak_shared::models::llm::{LLMProviderConfig, ProviderConfig};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
@@ -217,6 +216,8 @@ impl AppConfig {
     ) -> Result<ConfigFile, ConfigError> {
         match std::fs::read_to_string(config_path.as_ref()) {
             Ok(content) => {
+                Self::validate_removed_openai_provider_fields(&content)?;
+
                 let config_file = toml::from_str::<ConfigFile>(&content).or_else(|e| {
                     println!("Failed to parse config file in new format: {}", e);
                     Self::migrate_old_config(config_path.as_ref(), &content)
@@ -231,6 +232,46 @@ impl AppConfig {
                 e
             ))),
         }
+    }
+
+    fn validate_removed_openai_provider_fields(content: &str) -> Result<(), ConfigError> {
+        let value = match content.parse::<toml::Value>() {
+            Ok(value) => value,
+            Err(_) => return Ok(()),
+        };
+
+        let Some(profiles) = value.get("profiles").and_then(toml::Value::as_table) else {
+            return Ok(());
+        };
+
+        for (profile_name, profile) in profiles {
+            if let Some(openai) = profile.get("openai").and_then(toml::Value::as_table) {
+                for removed_field in ["custom_headers", "use_responses_api"] {
+                    if openai.contains_key(removed_field) {
+                        return Err(ConfigError::Message(format!(
+                            "profiles.{profile_name}.openai.{removed_field} has been removed; update the OpenAI provider config"
+                        )));
+                    }
+                }
+            }
+
+            if let Some(openai) = profile
+                .get("providers")
+                .and_then(toml::Value::as_table)
+                .and_then(|providers| providers.get("openai"))
+                .and_then(toml::Value::as_table)
+            {
+                for removed_field in ["custom_headers", "use_responses_api"] {
+                    if openai.contains_key(removed_field) {
+                        return Err(ConfigError::Message(format!(
+                            "profiles.{profile_name}.providers.openai.{removed_field} has been removed; update the OpenAI provider config"
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Migrate legacy provider configs (openai, anthropic, gemini)
@@ -446,9 +487,10 @@ impl AppConfig {
             .get(provider)
             .ok_or_else(|| format!("Unknown provider: {}", provider))?;
 
-        // Get OAuth config (use claude-max as default for Anthropic)
+        // Get OAuth config for the provider's default subscription flow.
         let method_id = match provider {
             "anthropic" => "claude-max",
+            "openai" => "chatgpt-plus-pro",
             _ => return Err(format!("OAuth refresh not implemented for {}", provider)),
         };
 
@@ -467,8 +509,16 @@ impl AppConfig {
 
         // Create new auth with updated tokens
         let new_expires = chrono::Utc::now().timestamp_millis() + (tokens.expires_in * 1000);
-        let new_auth =
-            ProviderAuth::oauth(&tokens.access_token, &tokens.refresh_token, new_expires);
+        let new_auth = if let Some(name) = auth.subscription_name() {
+            ProviderAuth::oauth_with_name(
+                &tokens.access_token,
+                &tokens.refresh_token,
+                new_expires,
+                name,
+            )
+        } else {
+            ProviderAuth::oauth(&tokens.access_token, &tokens.refresh_token, new_expires)
+        };
 
         // Save the updated tokens to config.toml
         if let Err(e) = self.save_provider_auth(provider, new_auth.clone()) {
@@ -584,67 +634,41 @@ impl AppConfig {
         None
     }
 
-    /// Get OpenAI config with resolved credentials.
-    pub fn get_openai_config_with_auth(&self) -> Option<OpenAIConfig> {
-        // First check providers HashMap
-        if let Some(ProviderConfig::OpenAI { api_endpoint, .. }) = self.providers.get("openai") {
-            if let Some(auth) = self.resolve_provider_auth("openai") {
-                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
-                    api_key: None,
-                    api_endpoint: None,
-                });
-                config.api_endpoint = api_endpoint.clone();
-                return Some(config);
-            }
-            return None;
-        }
+    fn build_openai_provider_config_with_auth(&self, auth: ProviderAuth) -> ProviderConfig {
+        let api_endpoint = match self.providers.get("openai") {
+            Some(ProviderConfig::OpenAI { api_endpoint, .. }) => api_endpoint.clone(),
+            _ => None,
+        };
 
-        // Fall back to resolve_provider_auth only
-        self.resolve_provider_auth("openai")
-            .and_then(|auth| OpenAIConfig::from_provider_auth(&auth))
+        ProviderConfig::OpenAI {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
+        }
     }
 
-    /// Get OpenAI config with resolved credentials, refreshing OAuth tokens if needed.
-    pub async fn get_openai_config_with_auth_async(&self) -> Option<OpenAIConfig> {
-        // First check providers HashMap
-        if let Some(ProviderConfig::OpenAI { api_endpoint, .. }) = self.providers.get("openai") {
-            if let Some(auth) = self.resolve_provider_auth("openai") {
-                let auth = match self.refresh_provider_auth_if_needed("openai", &auth).await {
-                    Ok(refreshed_auth) => refreshed_auth,
-                    Err(e) => {
-                        eprintln!(
-                            "\x1b[33mWarning: Failed to refresh OpenAI token: {}\x1b[0m",
-                            e
-                        );
-                        auth
-                    }
-                };
-                let mut config = OpenAIConfig::from_provider_auth(&auth).unwrap_or(OpenAIConfig {
-                    api_key: None,
-                    api_endpoint: None,
-                });
-                config.api_endpoint = api_endpoint.clone();
-                return Some(config);
-            }
-            return None;
-        }
+    fn get_openai_provider_config_with_auth(&self) -> Option<ProviderConfig> {
+        self.resolve_provider_auth("openai")
+            .map(|auth| self.build_openai_provider_config_with_auth(auth))
+    }
 
-        // Fall back to resolve_provider_auth only (with refresh)
-        if let Some(auth) = self.resolve_provider_auth("openai") {
-            let auth = match self.refresh_provider_auth_if_needed("openai", &auth).await {
-                Ok(refreshed_auth) => refreshed_auth,
+    async fn get_openai_provider_config_with_auth_async(&self) -> Option<ProviderConfig> {
+        let auth = if let Some(auth) = self.resolve_provider_auth("openai") {
+            match self.refresh_provider_auth_if_needed("openai", &auth).await {
+                Ok(refreshed_auth) => Some(refreshed_auth),
                 Err(e) => {
                     eprintln!(
                         "\x1b[33mWarning: Failed to refresh OpenAI token: {}\x1b[0m",
                         e
                     );
-                    auth
+                    Some(auth)
                 }
-            };
-            return OpenAIConfig::from_provider_auth(&auth);
-        }
+            }
+        } else {
+            None
+        }?;
 
-        None
+        Some(self.build_openai_provider_config_with_auth(auth))
     }
 
     /// Get Gemini config with resolved credentials.
@@ -726,19 +750,12 @@ impl AppConfig {
     fn add_builtin_providers(
         &self,
         config: &mut LLMProviderConfig,
-        openai: Option<OpenAIConfig>,
+        openai: Option<ProviderConfig>,
         anthropic: Option<AnthropicConfig>,
         gemini: Option<GeminiConfig>,
     ) {
         if let Some(openai) = openai {
-            config.add_provider(
-                "openai",
-                ProviderConfig::OpenAI {
-                    api_key: openai.api_key,
-                    api_endpoint: openai.api_endpoint,
-                    auth: None, // Auth is already resolved into api_key
-                },
-            );
+            config.add_provider("openai", openai);
         }
         if let Some(anthropic) = anthropic {
             config.add_provider(
@@ -787,7 +804,7 @@ impl AppConfig {
         self.add_custom_providers(&mut config);
         self.add_builtin_providers(
             &mut config,
-            self.get_openai_config_with_auth(),
+            self.get_openai_provider_config_with_auth(),
             self.get_anthropic_config_with_auth(),
             self.get_gemini_config_with_auth(),
         );
@@ -802,7 +819,7 @@ impl AppConfig {
         self.add_custom_providers(&mut config);
         self.add_builtin_providers(
             &mut config,
-            self.get_openai_config_with_auth_async().await,
+            self.get_openai_provider_config_with_auth_async().await,
             self.get_anthropic_config_with_auth_async().await,
             self.get_gemini_config_with_auth_async().await,
         );

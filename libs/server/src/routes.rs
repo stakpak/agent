@@ -2794,12 +2794,15 @@ mod tests {
             &default,
         );
 
-        assert_eq!(resolved.action_for("view"), ToolApprovalAction::Approve);
         assert_eq!(
-            resolved.action_for("run_command"),
+            resolved.action_for("view", None),
             ToolApprovalAction::Approve
         );
-        assert_eq!(resolved.action_for("create"), ToolApprovalAction::Ask);
+        assert_eq!(
+            resolved.action_for("run_command", None),
+            ToolApprovalAction::Approve
+        );
+        assert_eq!(resolved.action_for("create", None), ToolApprovalAction::Ask);
     }
 
     #[test]
@@ -2814,8 +2817,14 @@ mod tests {
             &default,
         );
 
-        assert_eq!(resolved.action_for("view"), ToolApprovalAction::Approve);
-        assert_eq!(resolved.action_for("run_command"), ToolApprovalAction::Ask);
+        assert_eq!(
+            resolved.action_for("view", None),
+            ToolApprovalAction::Approve
+        );
+        assert_eq!(
+            resolved.action_for("run_command", None),
+            ToolApprovalAction::Ask
+        );
     }
 
     #[test]

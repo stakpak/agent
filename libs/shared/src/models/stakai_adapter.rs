@@ -9,13 +9,15 @@ use crate::models::llm::{
     LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent,
     LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool, ProviderConfig,
 };
+use crate::models::openai_runtime::{OpenAIBackendResolutionInput, resolve_openai_runtime};
 use futures::StreamExt;
 use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
     Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
     StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
-    providers::anthropic::AnthropicConfig as StakaiAnthropicConfig, registry::ProviderRegistry,
+    providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
+    providers::openai::OpenAIConfig as StakaiOpenAIConfig, registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -411,17 +413,27 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
     }
 }
 
+fn resolve_stakai_openai_config(
+    provider_config: &ProviderConfig,
+) -> Result<Option<StakaiOpenAIConfig>, String> {
+    let resolved = resolve_openai_runtime(OpenAIBackendResolutionInput::new(
+        Some(provider_config.clone()),
+        provider_config.get_auth(),
+    ))
+    .map_err(|error| format!("Failed to resolve OpenAI runtime config: {}", error))?;
+
+    Ok(resolved.map(|config| config.to_stakai_config()))
+}
+
 /// Build StakAI InferenceConfig from CLI LLMProviderConfig
 pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceConfig, String> {
     let mut inference_config = InferenceConfig::new();
 
     for (name, provider_config) in &config.providers {
         match provider_config {
-            ProviderConfig::OpenAI { api_endpoint, .. } => {
-                // Use get_auth() to resolve credentials (checks auth field, then legacy api_key)
-                if let Some(api_key) = provider_config.api_key() {
-                    inference_config =
-                        inference_config.openai(api_key.to_string(), api_endpoint.clone());
+            ProviderConfig::OpenAI { .. } => {
+                if let Some(openai_config) = resolve_stakai_openai_config(provider_config)? {
+                    inference_config = inference_config.openai_config(openai_config);
                 }
             }
             ProviderConfig::Anthropic { api_endpoint, .. } => {
@@ -515,12 +527,8 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
 
     for (name, provider_config) in &config.providers {
         match provider_config {
-            ProviderConfig::OpenAI { api_endpoint, .. } => {
-                if let Some(api_key) = provider_config.api_key() {
-                    let mut openai_config = StakaiOpenAIConfig::new(api_key.to_string());
-                    if let Some(endpoint) = api_endpoint {
-                        openai_config = openai_config.with_base_url(endpoint.clone());
-                    }
+            ProviderConfig::OpenAI { .. } => {
+                if let Some(openai_config) = resolve_stakai_openai_config(provider_config)? {
                     let provider = OpenAIProvider::new(openai_config)
                         .map_err(|e| format!("Failed to create OpenAI provider: {}", e))?;
                     registry = registry.register("openai", provider);
@@ -1741,6 +1749,41 @@ mod tests {
         let registry = result.unwrap();
         assert!(registry.has_provider("litellm"));
         assert!(registry.has_provider("ollama"));
+    }
+
+    #[test]
+    fn test_build_provider_registry_registers_openai_from_oauth_auth() {
+        use crate::models::auth::ProviderAuth;
+        use crate::models::llm::ProviderConfig;
+        use base64::Engine;
+
+        let payload = serde_json::json!({
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acct_test_789"
+            }
+        });
+        let encoded_payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+        let access_token = format!("header.{}.signature", encoded_payload);
+
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "openai",
+            ProviderConfig::OpenAI {
+                api_key: None,
+                api_endpoint: None,
+                auth: Some(ProviderAuth::oauth_with_name(
+                    access_token,
+                    "refresh-token",
+                    i64::MAX,
+                    "ChatGPT Plus/Pro",
+                )),
+            },
+        );
+
+        let registry = build_provider_registry_direct(&config).expect("registry should build");
+
+        assert!(registry.has_provider("openai"));
     }
 
     // ==================== Round-trip Tests ====================

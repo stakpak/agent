@@ -29,6 +29,9 @@ pub struct OpenAIConfig {
 }
 
 impl OpenAIConfig {
+    pub const OPENAI_CODEX_BASE_URL: &'static str = "https://chatgpt.com/backend-api/codex";
+    const OPENAI_AUTH_CLAIM: &'static str = "https://api.openai.com/auth";
+
     /// Create config with API key
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
@@ -37,22 +40,31 @@ impl OpenAIConfig {
         }
     }
 
-    /// Create config from ProviderAuth (only supports API key for OpenAI)
-    pub fn from_provider_auth(auth: &crate::models::auth::ProviderAuth) -> Option<Self> {
-        match auth {
-            crate::models::auth::ProviderAuth::Api { key } => Some(Self::with_api_key(key)),
-            crate::models::auth::ProviderAuth::OAuth { .. } => None, // OpenAI doesn't support OAuth
-        }
-    }
+    /// Decode an OpenAI access token and extract the ChatGPT account ID.
+    ///
+    /// This intentionally reads the JWT payload without signature verification.
+    /// The claim is only used for request routing/header construction; OpenAI's
+    /// servers still validate the bearer token on use.
+    pub fn extract_chatgpt_account_id(access_token: &str) -> Option<String> {
+        let claims = crate::jwt::decode_jwt_payload_unverified(access_token)?;
+        let auth_claim = claims.get(Self::OPENAI_AUTH_CLAIM)?;
 
-    /// Merge with credentials from ProviderAuth, preserving existing endpoint
-    pub fn with_provider_auth(mut self, auth: &crate::models::auth::ProviderAuth) -> Option<Self> {
-        match auth {
-            crate::models::auth::ProviderAuth::Api { key } => {
-                self.api_key = Some(key.clone());
-                Some(self)
+        match auth_claim {
+            Value::Object(map) => map
+                .get("chatgpt_account_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            Value::String(raw_json) => {
+                serde_json::from_str::<Value>(raw_json)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("chatgpt_account_id")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    })
             }
-            crate::models::auth::ProviderAuth::OAuth { .. } => None, // OpenAI doesn't support OAuth
+            _ => None,
         }
     }
 }
@@ -87,30 +99,6 @@ impl OpenAIModel {
     pub fn from_string(s: &str) -> Result<Self, String> {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize OpenAI model".to_string())
-    }
-
-    /// Default smart model for OpenAI
-    pub const DEFAULT_SMART_MODEL: OpenAIModel = OpenAIModel::GPT5;
-
-    /// Default eco model for OpenAI
-    pub const DEFAULT_ECO_MODEL: OpenAIModel = OpenAIModel::GPT5Mini;
-
-    /// Default recovery model for OpenAI
-    pub const DEFAULT_RECOVERY_MODEL: OpenAIModel = OpenAIModel::GPT5Mini;
-
-    /// Get default smart model as string
-    pub fn default_smart_model() -> String {
-        Self::DEFAULT_SMART_MODEL.to_string()
-    }
-
-    /// Get default eco model as string
-    pub fn default_eco_model() -> String {
-        Self::DEFAULT_ECO_MODEL.to_string()
-    }
-
-    /// Get default recovery model as string
-    pub fn default_recovery_model() -> String {
-        Self::DEFAULT_RECOVERY_MODEL.to_string()
     }
 }
 
@@ -1262,5 +1250,64 @@ mod tests {
             }
             _ => panic!("Expected List content"),
         }
+    }
+
+    #[test]
+    fn test_extract_chatgpt_account_id_from_access_token() {
+        use base64::Engine;
+
+        let claim = json!({
+            "chatgpt_account_id": "acct_test_123"
+        });
+        let payload = json!({
+            "https://api.openai.com/auth": claim
+        });
+        let encoded_payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+        let access_token = format!("header.{}.signature", encoded_payload);
+
+        assert_eq!(
+            OpenAIConfig::extract_chatgpt_account_id(&access_token),
+            Some("acct_test_123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_chatgpt_account_id_returns_none_for_missing_claim() {
+        use base64::Engine;
+
+        let payload = json!({
+            "sub": "user_123"
+        });
+        let encoded_payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+        let access_token = format!("header.{}.signature", encoded_payload);
+
+        assert_eq!(
+            OpenAIConfig::extract_chatgpt_account_id(&access_token),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_chatgpt_account_id_returns_none_for_invalid_token_shape() {
+        assert_eq!(OpenAIConfig::extract_chatgpt_account_id("not-a-jwt"), None);
+    }
+
+    #[test]
+    fn test_extract_chatgpt_account_id_returns_none_for_invalid_claim_json() {
+        use base64::Engine;
+
+        let payload = json!({
+            "https://api.openai.com/auth": "{not-json}"
+        });
+        let encoded_payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
+        let access_token = format!("header.{}.signature", encoded_payload);
+
+        assert_eq!(
+            OpenAIConfig::extract_chatgpt_account_id(&access_token),
+            None
+        );
     }
 }
