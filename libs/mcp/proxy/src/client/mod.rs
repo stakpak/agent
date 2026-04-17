@@ -169,12 +169,20 @@ impl From<McpConfigFile> for ClientPoolConfig {
                     });
                     ServerConfig::Stdio { command, args, env }
                 }
-                McpServerEntry::UrlBased { url, headers, .. } => ServerConfig::Http {
-                    url,
-                    headers,
-                    certificate_chain: Arc::new(None),
-                    client_tls_config: None,
-                },
+                McpServerEntry::UrlBased { url, headers, .. } => {
+                    let headers = headers.map(|hdrs| {
+                        hdrs.into_iter()
+                            .map(|(k, v)| (k, substitute_env_vars(&v)))
+                            .collect()
+                    });
+
+                    ServerConfig::Http {
+                        url,
+                        headers,
+                        certificate_chain: Arc::new(None),
+                        client_tls_config: None,
+                    }
+                }
             };
 
             servers.insert(name, server_config);

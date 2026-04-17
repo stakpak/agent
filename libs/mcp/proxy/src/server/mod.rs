@@ -20,6 +20,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::paths::stakpak_home_dir;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use std::future::Future;
@@ -336,10 +337,22 @@ impl ProxyServer {
                 if let Some(env_vars) = env {
                     cmd.envs(&env_vars);
                 }
-                let (proc, _) = match TokioChildProcess::builder(cmd)
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
+
+                let log_dir = stakpak_home_dir().join("logs");
+                let _ = std::fs::create_dir_all(&log_dir);
+                let stderr = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log_dir.join(format!("mcp-{}.log", name)))
                 {
+                    Ok(file) => std::process::Stdio::from(file),
+                    Err(e) => {
+                        tracing::warn!("Failed to open MCP log for {}: {:?}", name, e);
+                        std::process::Stdio::null()
+                    }
+                };
+
+                let (proc, _) = match TokioChildProcess::builder(cmd).stderr(stderr).spawn() {
                     Ok(result) => result,
                     Err(e) => {
                         tracing::error!("Failed to create process for {}: {:?}", name, e);

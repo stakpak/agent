@@ -56,9 +56,9 @@ pub enum McpCommands {
         #[arg(long)]
         command: Option<String>,
 
-        /// Comma-separated arguments
-        #[arg(long, allow_hyphen_values = true)]
-        args: Option<String>,
+        /// Argument to pass to the command (repeatable: --arg foo --arg bar)
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        args: Vec<String>,
 
         /// Environment variables (KEY=VALUE, repeatable)
         #[arg(long = "env")]
@@ -78,7 +78,7 @@ pub enum McpCommands {
 
         /// Add in disabled state
         #[arg(long)]
-        disabled: bool,
+        disabled: Option<bool>,
 
         /// Config file path
         #[arg(long = "config-file")]
@@ -175,7 +175,9 @@ impl McpCommands {
                 let entry = if let Some(json_str) = json {
                     let mut entry = serde_json::from_str::<McpServerEntry>(&json_str)
                         .map_err(|e| format!("Invalid JSON config: {e}"))?;
-                    entry.set_disabled(disabled);
+                    if let Some(disabled) = disabled {
+                        entry.set_disabled(disabled);
+                    }
                     entry
                 } else if let Some(url) = url {
                     let headers = parse_key_values(&headers)?;
@@ -186,18 +188,15 @@ impl McpCommands {
                         } else {
                             Some(headers)
                         },
-                        disabled,
+                        disabled: disabled.unwrap_or(false),
                     }
                 } else if let Some(command) = command {
-                    let args = args
-                        .map(|s| s.split(',').map(|a| a.trim().to_string()).collect())
-                        .unwrap_or_default();
                     let env = parse_key_values(&envs)?;
                     McpServerEntry::CommandBased {
                         command,
                         args,
                         env: if env.is_empty() { None } else { Some(env) },
-                        disabled,
+                        disabled: disabled.unwrap_or(false),
                     }
                 } else {
                     return Err(

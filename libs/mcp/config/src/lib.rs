@@ -37,16 +37,16 @@ pub enum McpServerEntry {
     CommandBased {
         command: String,
         args: Vec<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         env: Option<HashMap<String, String>>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         disabled: bool,
     },
     UrlBased {
         url: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         headers: Option<HashMap<String, String>>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         disabled: bool,
     },
 }
@@ -102,21 +102,19 @@ impl McpServerEntry {
 /// Search for an MCP proxy config file in standard locations.
 ///
 /// Priority:
-/// 1. `<stakpak_dir>/mcp.{toml,json}`
+/// 1. `mcp.{toml,json}` (current directory)
 /// 2. `.stakpak/mcp.{toml,json}` (current directory)
-/// 3. `mcp.{toml,json}` in current directory
+/// 3. `<stakpak_dir>/mcp.{toml,json}`
 pub fn find_config_file() -> Result<String, String> {
-    let stakpak_dir = stakpak_home_dir();
-
-    // Priority 1: stakpak dir (typically ~/.stakpak/)
-    let home_toml = stakpak_dir.join("mcp.toml");
-    if home_toml.exists() {
-        return Ok(home_toml.to_string_lossy().to_string());
+    // Priority 1: mcp.{toml,json} in current directory
+    let cwd_toml = PathBuf::from("mcp.toml");
+    if cwd_toml.exists() {
+        return Ok("mcp.toml".to_string());
     }
 
-    let home_json = stakpak_dir.join("mcp.json");
-    if home_json.exists() {
-        return Ok(home_json.to_string_lossy().to_string());
+    let cwd_json = PathBuf::from("mcp.json");
+    if cwd_json.exists() {
+        return Ok("mcp.json".to_string());
     }
 
     // Priority 2: .stakpak/mcp.{toml,json} in current directory
@@ -132,23 +130,24 @@ pub fn find_config_file() -> Result<String, String> {
         return Ok(cwd_stakpak_json.to_string_lossy().to_string());
     }
 
-    // Priority 3: mcp.{toml,json} in current directory (fallback)
-    let cwd_toml = PathBuf::from("mcp.toml");
-    if cwd_toml.exists() {
-        return Ok("mcp.toml".to_string());
+    let stakpak_dir = stakpak_home_dir();
+
+    // Priority 3: stakpak dir (typically ~/.stakpak/)
+    let home_toml = stakpak_dir.join("mcp.toml");
+    if home_toml.exists() {
+        return Ok(home_toml.to_string_lossy().to_string());
     }
 
-    let cwd_json = PathBuf::from("mcp.json");
-    if cwd_json.exists() {
-        return Ok("mcp.json".to_string());
+    let home_json = stakpak_dir.join("mcp.json");
+    if home_json.exists() {
+        return Ok(home_json.to_string_lossy().to_string());
     }
 
     Err(format!(
-        "No MCP proxy config file found. Searched in:\n  \
-        1. {}/mcp.toml or {}/mcp.json\n  \
-        2. .stakpak/mcp.toml or .stakpak/mcp.json\n  \
-        3. mcp.toml or mcp.json\n\n\
-        Create a config file with your MCP servers.",
+        "No MCP config found. Searched:\n\
+         - ./mcp.toml, ./mcp.json\n\
+         - ./.stakpak/mcp.toml, ./.stakpak/mcp.json\n\
+         - {}/mcp.toml, {}/mcp.json",
         stakpak_dir.display(),
         stakpak_dir.display()
     ))
@@ -199,18 +198,16 @@ pub fn load_config(path: &Path) -> Result<McpConfigFile, String> {
 }
 
 pub fn load_config_from_str(content: &str) -> Result<McpConfigFile, String> {
-    let toml_result: Result<McpConfigFile, _> = toml::from_str(content);
-
-    if let Ok(cfg) = toml_result {
-        return Ok(cfg);
+    match toml::from_str::<McpConfigFile>(content) {
+        Ok(cfg) => Ok(cfg),
+        Err(toml_err) => match serde_json::from_str::<McpConfigFile>(content) {
+            Ok(cfg) => Ok(cfg),
+            Err(json_err) => Err(format!(
+                "Failed to parse config:\n- TOML: {}\n- JSON: {}",
+                toml_err, json_err
+            )),
+        },
     }
-
-    let json_result: Result<McpConfigFile, _> = serde_json::from_str(content);
-    if let Ok(cfg) = json_result {
-        return Ok(cfg);
-    }
-
-    Err("Failed to parse config".to_string())
 }
 
 /// Save MCP config to a file, creating parent directories if needed.
@@ -239,6 +236,10 @@ pub fn add_server(
     name: &str,
     entry: McpServerEntry,
 ) -> Result<(), String> {
+    if name == "stakpak" || name == "paks" {
+        return Err(format!("Cannot add server with reserved name '{name}'."));
+    }
+
     if config.servers.contains_key(name) {
         return Err(format!(
             "Server '{name}' already exists. Use 'stakpak mcp remove {name}' first."
@@ -250,6 +251,10 @@ pub fn add_server(
 
 /// Remove a server entry. Fails if name not found.
 pub fn remove_server(config: &mut McpConfigFile, name: &str) -> Result<McpServerEntry, String> {
+    if name == "stakpak" || name == "paks" {
+        return Err(format!("Cannot remove internal server '{name}'."));
+    }
+
     config
         .servers
         .remove(name)
@@ -262,6 +267,10 @@ pub fn set_server_disabled(
     name: &str,
     disabled: bool,
 ) -> Result<(), String> {
+    if name == "stakpak" || name == "paks" {
+        return Err(format!("Cannot modify internal server '{name}'."));
+    }
+
     let entry = config
         .servers
         .get_mut(name)
