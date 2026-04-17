@@ -1,0 +1,17 @@
+[package]
+name = "stakpak-mcp-config"
+version = { workspace = true }
+edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+stakpak-shared = { workspace = true }
+
+[lints]
+workspace = true

@@ -9,6 +9,7 @@ pub mod jwt;
 pub mod local_store;
 pub mod models;
 pub mod oauth;
+pub mod paths;
 pub mod remote_connection;
 pub mod remote_store;
 pub mod secret_manager;
