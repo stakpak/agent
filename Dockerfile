@@ -19,7 +19,7 @@
 #
 # =============================================================================
 
-FROM rust:1.91.0-slim-bookworm AS builder
+FROM rust:1.94.1-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 COPY . .

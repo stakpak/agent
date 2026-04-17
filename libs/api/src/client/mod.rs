@@ -24,17 +24,6 @@ use std::sync::Arc;
 // AgentClient Configuration
 // =============================================================================
 
-/// Model options for the AgentClient
-#[derive(Clone, Debug, Default)]
-pub struct ModelOptions {
-    /// Primary model for complex tasks
-    pub smart_model: Option<String>,
-    /// Economy model for simpler tasks
-    pub eco_model: Option<String>,
-    /// Fallback model when primary providers fail
-    pub recovery_model: Option<String>,
-}
-
 /// Default Stakpak API endpoint
 pub const DEFAULT_STAKPAK_ENDPOINT: &str = "https://apiv2.stakpak.dev";
 
@@ -68,12 +57,6 @@ pub struct AgentClientConfig {
     pub stakpak: Option<StakpakConfig>,
     /// LLM provider configurations
     pub providers: LLMProviderConfig,
-    /// Smart model override
-    pub smart_model: Option<String>,
-    /// Eco model override
-    pub eco_model: Option<String>,
-    /// Recovery model override
-    pub recovery_model: Option<String>,
     /// Local database path (default: ~/.stakpak/data/local.db)
     pub store_path: Option<String>,
     /// Hook registry for lifecycle events
@@ -97,24 +80,6 @@ impl AgentClientConfig {
     /// Set providers
     pub fn with_providers(mut self, providers: LLMProviderConfig) -> Self {
         self.providers = providers;
-        self
-    }
-
-    /// Set smart model
-    pub fn with_smart_model(mut self, model: impl Into<String>) -> Self {
-        self.smart_model = Some(model.into());
-        self
-    }
-
-    /// Set eco model
-    pub fn with_eco_model(mut self, model: impl Into<String>) -> Self {
-        self.eco_model = Some(model.into());
-        self
-    }
-
-    /// Set recovery model
-    pub fn with_recovery_model(mut self, model: impl Into<String>) -> Self {
-        self.recovery_model = Some(model.into());
         self
     }
 
@@ -153,8 +118,6 @@ pub struct AgentClient {
     pub(crate) session_storage: Arc<dyn SessionStorage>,
     /// Hook registry for lifecycle events
     pub(crate) hook_registry: Arc<HookRegistry<AgentState>>,
-    /// Model configuration
-    pub(crate) model_options: ModelOptions,
     /// Stakpak configuration (for reference)
     pub(crate) stakpak: Option<StakpakConfig>,
 }
@@ -219,13 +182,6 @@ impl AgentClient {
             )
         };
 
-        // 5. Parse model options
-        let model_options = ModelOptions {
-            smart_model: config.smart_model,
-            eco_model: config.eco_model,
-            recovery_model: config.recovery_model,
-        };
-
         // 6. Setup hook registry with context management hooks
         let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
@@ -242,7 +198,6 @@ impl AgentClient {
             stakpak_api,
             session_storage,
             hook_registry,
-            model_options,
             stakpak: config.stakpak,
         })
     }
@@ -275,11 +230,6 @@ impl AgentClient {
         &self.hook_registry
     }
 
-    /// Get the model options
-    pub fn model_options(&self) -> &ModelOptions {
-        &self.model_options
-    }
-
     /// Get reference to the session storage
     ///
     /// Use this for all session and checkpoint operations.
@@ -293,7 +243,6 @@ impl std::fmt::Debug for AgentClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentClient")
             .field("has_stakpak", &self.has_stakpak())
-            .field("model_options", &self.model_options)
             .finish_non_exhaustive()
     }
 }

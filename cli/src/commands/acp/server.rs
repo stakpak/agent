@@ -125,10 +125,6 @@ impl StakpakAcpAgent {
             let client = AgentClient::new(AgentClientConfig {
                 stakpak,
                 providers: config.get_llm_provider_config(),
-                // Pass model as smart_model for AgentClient compatibility
-                smart_model: config.model.clone(),
-                eco_model: None,
-                recovery_model: None,
                 store_path: None,
                 hook_registry: None,
             })
@@ -1648,12 +1644,8 @@ impl acp::Agent for StakpakAcpAgent {
                 let new_client = AgentClient::new(AgentClientConfig {
                     stakpak,
                     providers: config.get_llm_provider_config(),
-                    // Pass unified model as smart_model for AgentClient compatibility
-                    smart_model: config.model.clone(),
-                    eco_model: None,
-                    recovery_model: None,
-                    store_path: None,
                     hook_registry: None,
+                    store_path: None,
                 })
                 .await
                 .map_err(|e| {
