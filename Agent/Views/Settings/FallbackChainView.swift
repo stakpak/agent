@@ -248,6 +248,7 @@ struct FallbackChainView: View {
         case .codestral: if !viewModel.codestralModel.isEmpty { return viewModel.codestralModel }
         case .vibe: if !viewModel.vibeModel.isEmpty { return viewModel.vibeModel }
         case .bigModel: if !viewModel.bigModelModel.isEmpty { return viewModel.bigModelModel }
+        case .miniMax: if !viewModel.miniMaxModel.isEmpty { return viewModel.miniMaxModel }
         case .foundationModel: return "Apple Intelligence"
         }
         // Fall back to the first dynamically-fetched model for this provider

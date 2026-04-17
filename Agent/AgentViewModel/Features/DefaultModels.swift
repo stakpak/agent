@@ -120,6 +120,13 @@ extension AgentViewModel {
         OpenAIModelInfo(id: "mistralai/Mistral-Small-24B-Instruct-2501", name: "Mistral Small 24B"),
     ]
 
+    // MARK: - MiniMax
+
+    nonisolated static let defaultMiniMaxModels: [OpenAIModelInfo] = [
+        OpenAIModelInfo(id: "MiniMax-M2.7", name: "MiniMax-M2.7"),
+        OpenAIModelInfo(id: "MiniMax-M2.7-highspeed", name: "MiniMax-M2.7-highspeed"),
+    ]
+
     // MARK: - Ollama (Cloud)
 
     nonisolated static let defaultOllamaModels: [OllamaModelInfo] = [

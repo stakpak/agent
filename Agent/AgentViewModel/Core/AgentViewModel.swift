@@ -292,6 +292,19 @@ final class AgentViewModel {
     var qwenModels: [OpenAIModelInfo] = []
     var isFetchingQwenModels = false
 
+    // MARK: - MiniMax
+
+    var miniMaxAPIKey: String = KeychainService.shared.getMiniMaxAPIKey() ?? "" {
+        didSet { KeychainService.shared.setMiniMaxAPIKey(miniMaxAPIKey) }
+    }
+
+    var miniMaxModel: String = UserDefaults.standard.string(forKey: "miniMaxModel") ?? "MiniMax-M2.7" {
+        didSet { UserDefaults.standard.set(miniMaxModel, forKey: "miniMaxModel") }
+    }
+
+    var miniMaxModels: [OpenAIModelInfo] = Self.defaultMiniMaxModels
+    var isFetchingMiniMaxModels = false
+
     // MARK: - Google Gemini
 
     var geminiAPIKey: String = KeychainService.shared.getGeminiAPIKey() ?? "" {
@@ -419,6 +432,9 @@ final class AgentViewModel {
     }
     var grokTemperature: Double = UserDefaults.standard.object(forKey: "grokTemperature") as? Double ?? 0.2 {
         didSet { UserDefaults.standard.set(grokTemperature, forKey: "grokTemperature") }
+    }
+    var miniMaxTemperature: Double = UserDefaults.standard.object(forKey: "miniMaxTemperature") as? Double ?? 1.0 {
+        didSet { UserDefaults.standard.set(miniMaxTemperature, forKey: "miniMaxTemperature") }
     }
 
     /// Max output tokens per provider. 0 = let provider decide (omit from request).

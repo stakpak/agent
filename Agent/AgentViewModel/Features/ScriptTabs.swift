@@ -72,6 +72,7 @@ extension AgentViewModel {
         case .lmStudio: return lmStudioModel
         case .zAI: return zAIModel.replacingOccurrences(of: ":v", with: "")
         case .bigModel: return bigModelModel.replacingOccurrences(of: ":v", with: "")
+        case .miniMax: return miniMaxModel
         case .qwen: return qwenModel
         case .gemini: return geminiModel
         case .grok: return grokModel
@@ -95,6 +96,7 @@ extension AgentViewModel {
         case .lmStudio: return lmStudioAPIKey
         case .zAI: return zAIAPIKey
         case .bigModel: return bigModelAPIKey
+        case .miniMax: return miniMaxAPIKey
         case .qwen: return qwenAPIKey
         case .gemini: return geminiAPIKey
         case .grok: return grokAPIKey
@@ -141,6 +143,9 @@ extension AgentViewModel {
                 ?? Self.defaultZAIModels.first(where: { $0.id == modelId })?.name ?? modelId
         case .bigModel:
             return modelId
+        case .miniMax:
+            return miniMaxModels.first(where: { $0.id == modelId })?.name
+                ?? Self.defaultMiniMaxModels.first(where: { $0.id == modelId })?.name ?? modelId
         case .qwen:
             return modelId
         case .gemini:

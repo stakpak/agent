@@ -182,6 +182,31 @@ extension AgentViewModel {
         }
     }
 
+    func fetchMiniMaxModels() {
+        guard !miniMaxAPIKey.isEmpty else {
+            miniMaxModels = Self.defaultMiniMaxModels
+            return
+        }
+        isFetchingMiniMaxModels = true
+        Task {
+            defer { isFetchingMiniMaxModels = false }
+            do {
+                let models = try await Self.fetchOpenAICompatibleModels(
+                    baseURL: "https://api.minimax.io/v1",
+                    apiKey: miniMaxAPIKey
+                )
+                miniMaxModels = models.isEmpty ? Self.defaultMiniMaxModels : models
+                let ids = miniMaxModels.map(\.id)
+                if miniMaxModel.isEmpty || (!ids.isEmpty && !ids.contains(miniMaxModel)) {
+                    miniMaxModel = ids.first ?? "MiniMax-M2.7"
+                }
+            } catch {
+                appendLog("Failed to fetch MiniMax models: \(error.localizedDescription)")
+                miniMaxModels = Self.defaultMiniMaxModels
+            }
+        }
+    }
+
     // MARK: - Static API Fetch Helpers
 
     private nonisolated static func fetchOpenAIModelsFromAPI(apiKey: String) async throws -> [OpenAIModelInfo] {
@@ -775,6 +800,7 @@ extension AgentViewModel {
         case .mistral: if force || mistralModels.isEmpty { fetchMistralModels() }
         case .codestral: if force || codestralModels.isEmpty { fetchCodestralModels() }
         case .vibe: if force || vibeModels.isEmpty { fetchVibeModels() }
+        case .miniMax: if force || miniMaxModels.isEmpty { fetchMiniMaxModels() }
         case .bigModel: break
         default: break
         }

@@ -131,6 +131,7 @@ struct ThinkingIndicatorView: View {
         case .grok: return 2_000_000
         case .zAI: return 128_000
         case .bigModel: return 128_000
+        case .miniMax: return 1_000_000
         case .qwen: return 131_072
         case .mistral: return 256_000
         case .codestral: return 256_000

@@ -56,6 +56,9 @@ extension AgentViewModel {
         case .bigModel:
             isVision = bigModelModel.hasSuffix(":v")
             modelName = bigModelModel.replacingOccurrences(of: ":v", with: "")
+        case .miniMax:
+            modelName = miniMaxModel
+            isVision = false
         case .qwen:
             modelName = qwenModel
             isVision = Self.isVisionModel(qwenModel)

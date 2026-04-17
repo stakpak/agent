@@ -70,6 +70,10 @@ final class KeychainService: Sendable {
     func setQwenAPIKey(_ key: String) { set(key: Self.qwenAPIKeyId, value: key) }
     func getQwenAPIKey() -> String? { get(key: Self.qwenAPIKeyId) }
 
+    private static let miniMaxAPIKey = "com.agent.minimax-api-key"
+    func setMiniMaxAPIKey(_ key: String) { set(key: Self.miniMaxAPIKey, value: key) }
+    func getMiniMaxAPIKey() -> String? { get(key: Self.miniMaxAPIKey) }
+
     private func set(key: String, value: String) {
         guard let data = value.data(using: .utf8) else { return }
         delete(key: key)

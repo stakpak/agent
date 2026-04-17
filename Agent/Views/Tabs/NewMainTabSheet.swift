@@ -146,6 +146,14 @@ struct NewMainTabSheet: View {
             TextField("Model (e.g. glm-4.7)", text: $selectedModelId)
                 .textFieldStyle(.roundedBorder)
 
+        case .miniMax:
+            modelPickerWithFetch(
+                models: viewModel.miniMaxModels,
+                fallbackBinding: $selectedModelId,
+                isFetching: viewModel.isFetchingMiniMaxModels,
+                fetch: { viewModel.fetchModelsIfNeeded(for: .miniMax, force: true) }
+            )
+
         case .qwen:
             TextField("Model (e.g. qwen-plus)", text: $selectedModelId)
                 .textFieldStyle(.roundedBorder)
@@ -286,6 +294,7 @@ struct NewMainTabSheet: View {
         case .lmStudio: return viewModel.lmStudioModel
         case .zAI: return viewModel.zAIModel
         case .bigModel: return "glm-4.7"
+        case .miniMax: return viewModel.miniMaxModel.isEmpty ? "MiniMax-M2.7" : viewModel.miniMaxModel
         case .qwen: return "qwen-plus"
         case .gemini: return viewModel.geminiModel
         case .grok: return viewModel.grokModel

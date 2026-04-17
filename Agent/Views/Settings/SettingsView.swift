@@ -17,6 +17,7 @@ struct SettingsView: View {
         case .lmStudio: return $viewModel.lmStudioTemperature
         case .zAI: return $viewModel.zAITemperature
         case .bigModel: return $viewModel.zAITemperature
+        case .miniMax: return $viewModel.miniMaxTemperature
         case .qwen: return $viewModel.openAITemperature
         case .gemini: return $viewModel.geminiTemperature
         case .grok: return $viewModel.grokTemperature
@@ -273,6 +274,48 @@ struct SettingsView: View {
                         Text("Model").font(.caption).foregroundStyle(.secondary)
                         TextField("Model name", text: $viewModel.bigModelModel)
                             .textFieldStyle(.roundedBorder)
+                    }
+                }
+            } else if viewModel.selectedProvider == .miniMax {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("MiniMax API")
+                        .font(.headline)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API Key").font(.caption).foregroundStyle(.secondary)
+                        LockedSecureField(text: $viewModel.miniMaxAPIKey, placeholder: "MiniMax API key", lockKey: "lock.miniMaxAPIKey")
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Model").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            if viewModel.miniMaxModels.isEmpty {
+                                TextField("Model name", text: $viewModel.miniMaxModel)
+                                    .textFieldStyle(.roundedBorder)
+                            } else {
+                                Picker("Model", selection: $viewModel.miniMaxModel) {
+                                    ForEach(viewModel.miniMaxModels) { model in
+                                        Text(model.name).tag(model.id)
+                                    }
+                                }
+                                .labelsHidden()
+                            }
+
+                            Button {
+                                viewModel.fetchMiniMaxModels()
+                            } label: {
+                                if viewModel.isFetchingMiniMaxModels {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(viewModel.isFetchingMiniMaxModels)
+                            .help("Fetch available models")
+                        }
                     }
                 }
             } else if viewModel.selectedProvider == .qwen {
