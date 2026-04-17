@@ -32,15 +32,8 @@ pub struct EventChannels<'a> {
 }
 
 fn take_merged_pending_user_message(state: &mut AppState) -> Option<PendingUserMessage> {
-    let mut merged = state
-        .user_message_queue_state
-        .pending_user_messages
-        .pop_front()?;
-    while let Some(next) = state
-        .user_message_queue_state
-        .pending_user_messages
-        .pop_front()
-    {
+    let mut merged = state.user_message_queue_state.dequeue()?;
+    while let Some(next) = state.user_message_queue_state.dequeue() {
         merged.merge_from(next);
     }
     Some(merged)
@@ -71,10 +64,7 @@ fn flush_pending_user_messages_if_idle(
 
     // Dismiss the onboarding banner once the user sends their first message.
     if state.banner_state.message.is_some() {
-        state.banner_state.message = None;
-        state.banner_state.click_regions.clear();
-        state.banner_state.dismiss_region = None;
-        state.banner_state.area = None;
+        state.banner_state.dismiss();
     }
 
     match output_tx.try_send(OutputEvent::UserMessage(
@@ -107,8 +97,7 @@ fn flush_pending_user_messages_if_idle(
             log::warn!("Failed to flush buffered UserMessage event: output channel unavailable");
             state
                 .user_message_queue_state
-                .pending_user_messages
-                .push_front(PendingUserMessage::new(
+                .requeue_front(PendingUserMessage::new(
                     final_input,
                     shell_tool_calls,
                     image_parts,

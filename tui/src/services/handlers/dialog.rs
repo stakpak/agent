@@ -66,8 +66,7 @@ pub fn update_pending_tool_to_first(
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state
             .messages_scrolling_state
-            .messages
-            .retain(|m| m.id != pending_id);
+            .remove_message_by_id(pending_id);
     }
 
     let tool_name = strip_tool_name(&first_tool.function.name);
@@ -84,13 +83,13 @@ pub fn update_pending_tool_to_first(
         };
 
         let msg = Message::render_run_command_block(command, None, run_state, None);
-        state.tool_call_state.pending_bash_message_id = Some(msg.id);
-        state.messages_scrolling_state.messages.push(msg);
+        state.tool_call_state.set_pending_bash_message(msg.id);
+        state.messages_scrolling_state.push_message(msg);
     } else {
         // For other tools (str_replace, create, etc.), use the standard pending block
         let msg = Message::render_pending_border_block(first_tool.clone(), is_approved, None);
-        state.tool_call_state.pending_bash_message_id = Some(msg.id);
-        state.messages_scrolling_state.messages.push(msg);
+        state.tool_call_state.set_pending_bash_message(msg.id);
+        state.messages_scrolling_state.push_message(msg);
     }
 
     invalidate_message_lines_cache(state);
@@ -110,35 +109,31 @@ pub fn handle_esc_event(
     }
 
     if state.rulebook_switcher_state.show_rulebook_switcher {
-        state.rulebook_switcher_state.show_rulebook_switcher = false;
+        state.rulebook_switcher_state.close();
         return;
     }
     if state.shortcuts_panel_state.is_visible {
-        state.shortcuts_panel_state.is_visible = false;
+        state.shortcuts_panel_state.close();
         state.command_palette_state.search.clear();
         return;
     }
     if state.profile_switcher_state.show_profile_switcher {
-        state.profile_switcher_state.show_profile_switcher = false;
+        state.profile_switcher_state.close();
         return;
     }
     if state.shortcuts_panel_state.is_visible {
-        state.shortcuts_panel_state.is_visible = false;
+        state.shortcuts_panel_state.close();
         return;
     }
     if state.messages_scrolling_state.show_collapsed_messages {
-        state.messages_scrolling_state.show_collapsed_messages = false;
-        state.message_interaction_state.selection =
-            crate::services::text_selection::SelectionState::default();
+        state.messages_scrolling_state.close_collapsed_view();
+        state.message_interaction_state.clear_selection();
         return;
     }
 
     // Common handling for rejection
-    state.dialog_approval_state.message_tool_calls = None;
-    state
-        .session_tool_calls_state
-        .tool_call_execution_order
-        .clear();
+    state.dialog_approval_state.clear_message_tool_calls();
+    state.session_tool_calls_state.clear_execution_order();
     // Store the latest tool call for potential retry (only for command tools)
     if let Some(tool_call) = &state.dialog_approval_state.dialog_command
         && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
@@ -181,13 +176,12 @@ pub fn handle_esc(
     let was_streaming = state.tool_call_state.is_streaming;
     let was_dialog_open = state.dialog_approval_state.is_dialog_open;
     let was_shell_mode = state.shell_popup_state.is_expanded;
-    state.tool_call_state.is_streaming = false;
+    state.tool_call_state.stop_streaming();
     if state.messages_scrolling_state.show_collapsed_messages {
-        state.messages_scrolling_state.show_collapsed_messages = false;
-        state.message_interaction_state.selection =
-            crate::services::text_selection::SelectionState::default();
+        state.messages_scrolling_state.close_collapsed_view();
+        state.message_interaction_state.clear_selection();
     } else if state.input_state.show_helper_dropdown {
-        state.input_state.show_helper_dropdown = false;
+        state.input_state.close_dropdown();
     } else if state.dialog_approval_state.is_dialog_open {
         let tool_call_opt = state.dialog_approval_state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
@@ -202,15 +196,13 @@ pub fn handle_esc(
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
                     state
                         .messages_scrolling_state
-                        .messages
-                        .retain(|m| m.id != tool_call_uuid);
+                        .remove_message_by_id(tool_call_uuid);
                 }
                 // Also remove by pending_bash_message_id
                 if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
                     state
                         .messages_scrolling_state
-                        .messages
-                        .retain(|m| m.id != pending_id);
+                        .remove_message_by_id(pending_id);
                 }
 
                 let command =
@@ -226,10 +218,9 @@ pub fn handle_esc(
 
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_run_command_block(
+                    .push_message(Message::render_run_command_block(
                         command,
-                        message.clone(), // Use rejection message as result
+                        message.clone(),
                         run_state,
                         None,
                     ));
@@ -238,14 +229,12 @@ pub fn handle_esc(
                 if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
                     state
                         .messages_scrolling_state
-                        .messages
-                        .retain(|m| m.id != tool_call_uuid);
+                        .remove_message_by_id(tool_call_uuid);
                 }
                 if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
                     state
                         .messages_scrolling_state
-                        .messages
-                        .retain(|m| m.id != pending_id);
+                        .remove_message_by_id(pending_id);
                 }
 
                 // Then add the rejected block
@@ -253,16 +242,14 @@ pub fn handle_esc(
                 let title = get_command_type_name(tool_call);
                 let rendered_lines =
                     render_bash_block_rejected(&truncated_command, &title, message.clone(), color);
-                state.messages_scrolling_state.messages.push(Message {
+                state.messages_scrolling_state.push_message(Message {
                     id: Uuid::new_v4(),
                     content: MessageContent::StyledBlock(rendered_lines),
                     is_collapsed: None,
                 });
             }
         }
-        state.dialog_approval_state.is_dialog_open = false;
-        state.dialog_approval_state.dialog_command = None;
-        state.dialog_approval_state.dialog_focused = false; // Reset focus when dialog closes
+        state.dialog_approval_state.close();
         state.input_state.text_area.set_text("");
     } else if state.shell_popup_state.is_expanded {
         if state.dialog_approval_state.dialog_command.is_some() {
@@ -297,8 +284,8 @@ pub fn handle_esc(
             }
             state.shell_popup_state.is_tool_call_shell_command = false;
 
-            state.shell_popup_state.is_visible = false;
-            state.shell_popup_state.is_expanded = false;
+            state.shell_popup_state.hide();
+            state.shell_popup_state.collapse();
             state.input_state.text_area.set_shell_mode(false);
             state.input_state.text_area.set_text("");
             state.dialog_approval_state.dialog_command = None;
@@ -320,22 +307,22 @@ pub fn handle_esc(
         // Mark cancel_requested so late streaming events that are already queued
         // in the channel get dropped instead of re-creating content.
         if was_streaming {
-            state.tool_call_state.cancel_requested = true;
+            state.tool_call_state.request_cancel();
         }
         state.input_state.text_area.set_text("");
     }
 
-    state.messages_scrolling_state.messages.retain(|m| {
-        m.id != state
-            .tool_call_state
-            .streaming_tool_result_id
-            .unwrap_or_default()
-            && m.id
-                != state
-                    .tool_call_state
-                    .pending_bash_message_id
-                    .unwrap_or_default()
-    });
+    let streaming_id = state
+        .tool_call_state
+        .streaming_tool_result_id
+        .unwrap_or_default();
+    let pending_id = state
+        .tool_call_state
+        .pending_bash_message_id
+        .unwrap_or_default();
+    state
+        .messages_scrolling_state
+        .retain_messages(|m| m.id != streaming_id && m.id != pending_id);
 
     // Invalidate cache and scroll to bottom when something was actually
     // cancelled/rejected (dialog open, shell resolved, or streaming interrupted).

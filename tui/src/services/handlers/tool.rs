@@ -24,11 +24,7 @@ pub fn handle_stream_tool_result(
 ) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
-    if state
-        .tool_call_state
-        .completed_tool_calls
-        .contains(&tool_call_id)
-    {
+    if state.tool_call_state.is_completed(&tool_call_id) {
         return None;
     }
 
@@ -93,18 +89,12 @@ pub fn handle_stream_tool_result(
 
     // Ensure loading state is true during streaming tool results
     // Only set it if it's not already true to avoid unnecessary state changes
-    if !state.loading_state.is_loading {
-        state.loading_state.is_loading = true;
-    }
-    state.tool_call_state.is_streaming = true;
-    state.tool_call_state.streaming_tool_result_id = Some(tool_call_id);
+    state.loading_state.ensure_loading();
+    state.tool_call_state.start_streaming(tool_call_id);
     // 1. Update the buffer for this tool_call_id (append mode for command output)
     state
         .tool_call_state
-        .streaming_tool_results
-        .entry(tool_call_id)
-        .or_default()
-        .push_str(&format!("{}\n", progress.message));
+        .append_streaming_output(tool_call_id, &format!("{}\n", progress.message));
 
     // 2. Check if this is a run_command - get command from the pending message or dialog_command
     let is_run_command = state
@@ -133,30 +123,26 @@ pub fn handle_stream_tool_result(
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state
             .messages_scrolling_state
-            .messages
-            .retain(|m| m.id != pending_id);
+            .remove_message_by_id(pending_id);
     }
     // Also remove any old streaming message with this id
     state
         .messages_scrolling_state
-        .messages
-        .retain(|m| m.id != tool_call_id);
+        .remove_message_by_id(tool_call_id);
 
     // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
         .tool_call_state
-        .streaming_tool_results
-        .get(&tool_call_id)
-        .cloned()
-        .unwrap_or_default();
+        .get_streaming_output(&tool_call_id)
+        .unwrap_or_default()
+        .to_string();
 
     // 5. Use unified run command block for run_command, otherwise use the default streaming block
     if is_run_command {
         let cmd = command_str.unwrap_or_else(|| "command".to_string());
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_run_command_block(
+            .push_message(Message::render_run_command_block(
                 cmd,
                 Some(buffer_content),
                 crate::services::bash_block::RunCommandState::Running,
@@ -165,8 +151,7 @@ pub fn handle_stream_tool_result(
     } else {
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_streaming_border_block(
+            .push_message(Message::render_streaming_border_block(
                 &buffer_content,
                 "Tool Streaming",
                 "Result",
@@ -178,11 +163,9 @@ pub fn handle_stream_tool_result(
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
-    if !state.messages_scrolling_state.stay_at_bottom {
-        state
-            .messages_scrolling_state
-            .content_changed_while_scrolled_up = true;
-    }
+    state
+        .messages_scrolling_state
+        .mark_content_changed_while_scrolled_up();
 
     None
 }
@@ -195,24 +178,19 @@ fn handle_task_wait_progress(
     let tool_call_id = progress.id;
 
     // Ensure loading state is true
-    if !state.loading_state.is_loading {
-        state.loading_state.is_loading = true;
-    }
-    state.tool_call_state.is_streaming = true;
-    state.tool_call_state.streaming_tool_result_id = Some(tool_call_id);
+    state.loading_state.ensure_loading();
+    state.tool_call_state.start_streaming(tool_call_id);
 
     // Remove the pending message if exists
     if let Some(pending_id) = state.tool_call_state.pending_bash_message_id {
         state
             .messages_scrolling_state
-            .messages
-            .retain(|m| m.id != pending_id);
+            .remove_message_by_id(pending_id);
     }
     // Remove any old message with this id (replace mode)
     state
         .messages_scrolling_state
-        .messages
-        .retain(|m| m.id != tool_call_id);
+        .remove_message_by_id(tool_call_id);
 
     // Use structured task updates if available, otherwise fall back to message
     if let Some(task_updates) = progress.task_updates {
@@ -240,8 +218,7 @@ fn handle_task_wait_progress(
         // Use dedicated task wait block
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_task_wait_block(
+            .push_message(Message::render_task_wait_block(
                 task_updates,
                 overall_progress,
                 target_task_ids,
@@ -257,8 +234,7 @@ fn handle_task_wait_progress(
 
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_streaming_border_block(
+            .push_message(Message::render_streaming_border_block(
                 &progress.message,
                 "Wait for Tasks",
                 "Progress",
@@ -271,11 +247,9 @@ fn handle_task_wait_progress(
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
-    if !state.messages_scrolling_state.stay_at_bottom {
-        state
-            .messages_scrolling_state
-            .content_changed_while_scrolled_up = true;
-    }
+    state
+        .messages_scrolling_state
+        .mark_content_changed_while_scrolled_up();
 
     None
 }
@@ -283,11 +257,10 @@ fn handle_task_wait_progress(
 /// Handle message tool calls event
 pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>) {
     // Clear the streaming preview block now that tool calls are finalized
-    if let Some(preview_id) = state.tool_call_state.tool_call_stream_preview_id.take() {
+    if let Some(preview_id) = state.tool_call_state.take_preview_id() {
         state
             .messages_scrolling_state
-            .messages
-            .retain(|m| m.id != preview_id);
+            .remove_message_by_id(preview_id);
         invalidate_message_lines_cache(state);
     }
 
@@ -295,10 +268,7 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
     let rest_tool_calls = tool_calls
         .into_iter()
         .filter(|tool_call| {
-            !state
-                .session_tool_calls_state
-                .session_tool_calls_queue
-                .contains_key(&tool_call.id)
+            !state.session_tool_calls_state.is_queued(&tool_call.id)
                 || state
                     .session_tool_calls_state
                     .session_tool_calls_queue
@@ -326,39 +296,30 @@ pub fn handle_message_tool_calls(state: &mut AppState, tool_calls: Vec<ToolCall>
 /// Handle streaming tool call progress (tool calls being generated by the LLM)
 /// Uses replace-mode: removes old preview and inserts updated one each time.
 pub fn handle_stream_tool_call_progress(state: &mut AppState, infos: Vec<ToolCallStreamInfo>) {
-    let preview_id = *state
-        .tool_call_state
-        .tool_call_stream_preview_id
-        .get_or_insert_with(uuid::Uuid::new_v4);
+    let preview_id = state.tool_call_state.get_or_create_preview_id();
 
     // Ensure loading state
-    if !state.loading_state.is_loading {
-        state.loading_state.is_loading = true;
-    }
+    state.loading_state.ensure_loading();
     state.tool_call_state.is_streaming = true;
 
     // Remove old preview message (replace mode)
     state
         .messages_scrolling_state
-        .messages
-        .retain(|m| m.id != preview_id);
+        .remove_message_by_id(preview_id);
 
     // Add updated preview
     state
         .messages_scrolling_state
-        .messages
-        .push(Message::render_tool_call_stream_block(
+        .push_message(Message::render_tool_call_stream_block(
             infos,
             Some(preview_id),
         ));
 
     invalidate_message_lines_cache(state);
 
-    if !state.messages_scrolling_state.stay_at_bottom {
-        state
-            .messages_scrolling_state
-            .content_changed_while_scrolled_up = true;
-    }
+    state
+        .messages_scrolling_state
+        .mark_content_changed_while_scrolled_up();
 }
 
 /// Handle retry tool call event
@@ -385,18 +346,14 @@ pub fn handle_retry_tool_call(
             }
         };
         // Enable shell mode and popup
-        state.shell_popup_state.is_visible = true;
-        state.shell_popup_state.is_expanded = true;
+        state.shell_popup_state.expand();
         state.dialog_approval_state.is_dialog_open = false;
         state.shell_popup_state.ondemand_shell_mode = false;
         state.dialog_approval_state.dialog_command = Some(tool_call.clone());
-        if state.shell_popup_state.shell_tool_calls.is_none() {
-            state.shell_popup_state.shell_tool_calls = Some(Vec::new());
-        }
+        state.shell_popup_state.ensure_tool_calls_vec();
 
         // Clear any existing shell state
-        state.shell_popup_state.active_shell_command = None;
-        state.shell_popup_state.active_shell_command_output = None;
+        state.shell_popup_state.reset_command_state();
         state.shell_runtime_state.history_lines.clear(); // Clear history for fresh retry
 
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
@@ -444,9 +401,7 @@ pub fn handle_interactive_stall_detected(
     }
     state.shell_popup_state.ondemand_shell_mode = false;
 
-    if state.shell_popup_state.shell_tool_calls.is_none() {
-        state.shell_popup_state.shell_tool_calls = Some(Vec::new());
-    }
+    state.shell_popup_state.ensure_tool_calls_vec();
 
     // Trigger running the shell with the command - this spawns the user's shell and then executes the command
     let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
@@ -486,31 +441,26 @@ pub fn handle_approval_popup_escape(state: &mut AppState) {
 
 /// Clear streaming tool results
 pub fn clear_streaming_tool_results(state: &mut AppState) {
-    state.tool_call_state.is_streaming = false;
+    state.tool_call_state.stop_streaming();
 
     // Mark the current streaming tool call as completed
     if let Some(tool_call_id) = state.tool_call_state.streaming_tool_result_id {
-        state
-            .tool_call_state
-            .completed_tool_calls
-            .insert(tool_call_id);
+        state.tool_call_state.mark_completed(tool_call_id);
     }
 
     // Clear the streaming data and remove the streaming message and pending bash message id
-    state.tool_call_state.streaming_tool_results.clear();
-    state.messages_scrolling_state.messages.retain(|m| {
-        m.id != state
-            .tool_call_state
-            .streaming_tool_result_id
-            .unwrap_or_default()
-            && m.id
-                != state
-                    .tool_call_state
-                    .pending_bash_message_id
-                    .unwrap_or_default()
-    });
-    state.tool_call_state.latest_tool_call = None;
-    state.tool_call_state.pending_bash_message_id = None;
+    let streaming_id = state
+        .tool_call_state
+        .streaming_tool_result_id
+        .unwrap_or_default();
+    let pending_id = state
+        .tool_call_state
+        .pending_bash_message_id
+        .unwrap_or_default();
+    state
+        .messages_scrolling_state
+        .retain_messages(|m| m.id != streaming_id && m.id != pending_id);
+    state.tool_call_state.clear_streaming();
 }
 
 /// Update session tool calls queue
@@ -522,16 +472,15 @@ pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &
             .iter()
             .position(|id| id == &tool_call_result.call.id)
     {
-        for id in state
+        let ids_to_skip: Vec<String> = state
             .session_tool_calls_state
             .tool_call_execution_order
             .iter()
             .skip(failed_idx + 1)
-        {
-            state
-                .session_tool_calls_state
-                .session_tool_calls_queue
-                .insert(id.clone(), ToolCallStatus::Skipped);
+            .cloned()
+            .collect();
+        for id in ids_to_skip {
+            state.session_tool_calls_state.mark_skipped(&id);
         }
     }
 }
@@ -552,8 +501,7 @@ pub fn execute_command_palette_selection(
     let selected_command = &filtered_commands[state.command_palette_state.is_selected];
 
     // Close command palette
-    state.command_palette_state.is_visible = false;
-    state.command_palette_state.search.clear();
+    state.command_palette_state.close();
 
     // Execute the command - use unified executor for slash commands
     if let Some(command_id) = selected_command.action.to_command_id() {

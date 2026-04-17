@@ -25,7 +25,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::interval;
 
-use crate::app::ToolCallStatus;
 use crate::terminal::TerminalGuard;
 
 /// Computes (message_area_height, message_area_width) for the standard layout
@@ -113,19 +112,17 @@ fn handle_tool_result_event(
     internal_tx: &Sender<InputEvent>,
 ) {
     clear_streaming_tool_results(state);
-    state.tool_call_state.cancel_requested = false;
+    state.tool_call_state.clear_cancel();
 
     if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
         state
             .messages_scrolling_state
-            .messages
-            .retain(|m| m.id != tool_call_uuid);
+            .remove_message_by_id(tool_call_uuid);
     }
 
     state
         .session_tool_calls_state
-        .session_tool_calls_queue
-        .insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+        .mark_executed(&tool_call_result.call.id);
     update_session_tool_calls_queue(state, tool_call_result);
 
     let tool_name = strip_tool_name(&tool_call_result.call.function.name);
@@ -141,14 +138,12 @@ fn handle_tool_result_event(
     if (is_cancelled || is_error) && !is_fg_cmd {
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_result_border_block(
+            .push_message(Message::render_result_border_block(
                 tool_call_result.clone(),
             ));
         state
             .messages_scrolling_state
-            .messages
-            .push(Message::render_full_content_message(
+            .push_message(Message::render_full_content_message(
                 tool_call_result.clone(),
             ));
     } else {
@@ -156,28 +151,24 @@ fn handle_tool_result_event(
             "str_replace" | "create" => {
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_result_border_block(
+                    .push_message(Message::render_result_border_block(
                         tool_call_result.clone(),
                     ));
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_full_content_message(
+                    .push_message(Message::render_full_content_message(
                         tool_call_result.clone(),
                     ));
             }
             "run_command_task" | "run_remote_command_task" => {
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_result_border_block(
+                    .push_message(Message::render_result_border_block(
                         tool_call_result.clone(),
                     ));
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_full_content_message(
+                    .push_message(Message::render_full_content_message(
                         tool_call_result.clone(),
                     ));
             }
@@ -208,29 +199,25 @@ fn handle_tool_result_event(
                     {
                         if let Some(pos) = state
                             .messages_scrolling_state
-                            .messages
-                            .iter()
-                            .position(|m| m.id == shell_msg_id)
+                            .find_message_position(shell_msg_id)
                         {
                             state
                                 .messages_scrolling_state
-                                .messages
-                                .insert(pos, popup_msg);
+                                .insert_message_at(pos, popup_msg);
                             state
                                 .messages_scrolling_state
-                                .messages
-                                .insert(pos, run_cmd_msg);
+                                .insert_message_at(pos, run_cmd_msg);
                         } else {
-                            state.messages_scrolling_state.messages.push(run_cmd_msg);
-                            state.messages_scrolling_state.messages.push(popup_msg);
+                            state.messages_scrolling_state.push_message(run_cmd_msg);
+                            state.messages_scrolling_state.push_message(popup_msg);
                         }
                     } else {
-                        state.messages_scrolling_state.messages.push(run_cmd_msg);
-                        state.messages_scrolling_state.messages.push(popup_msg);
+                        state.messages_scrolling_state.push_message(run_cmd_msg);
+                        state.messages_scrolling_state.push_message(popup_msg);
                     }
                 } else {
-                    state.messages_scrolling_state.messages.push(run_cmd_msg);
-                    state.messages_scrolling_state.messages.push(popup_msg);
+                    state.messages_scrolling_state.push_message(run_cmd_msg);
+                    state.messages_scrolling_state.push_message(popup_msg);
                 }
             }
             "read" | "view" | "read_file" => {
@@ -242,25 +229,28 @@ fn handle_tool_result_event(
                 let total_lines = tool_call_result.result.lines().count();
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_view_file_block(
+                    .push_message(Message::render_view_file_block(
                         file_path.clone(),
                         total_lines,
                         grep.clone(),
                         glob.clone(),
                     ));
-                state.messages_scrolling_state.messages.push(
-                    Message::render_view_file_block_popup(file_path, total_lines, grep, glob),
-                );
+                state
+                    .messages_scrolling_state
+                    .push_message(Message::render_view_file_block_popup(
+                        file_path,
+                        total_lines,
+                        grep,
+                        glob,
+                    ));
             }
             _ => {
-                state.messages_scrolling_state.messages.push(
+                state.messages_scrolling_state.push_message(
                     Message::render_collapsed_command_message(tool_call_result.clone()),
                 );
                 state
                     .messages_scrolling_state
-                    .messages
-                    .push(Message::render_full_content_message(
+                    .push_message(Message::render_full_content_message(
                         tool_call_result.clone(),
                     ));
             }

@@ -261,11 +261,54 @@ impl Default for InputState {
     }
 }
 
+impl InputState {
+    pub fn open_dropdown(&mut self) {
+        self.show_helper_dropdown = true;
+    }
+
+    pub fn close_dropdown(&mut self) {
+        self.show_helper_dropdown = false;
+        self.helper_selected = 0;
+        self.helper_scroll = 0;
+    }
+
+    pub fn select_next_helper(&mut self) {
+        if !self.filtered_helpers.is_empty() {
+            self.helper_selected =
+                (self.helper_selected + 1).min(self.filtered_helpers.len().saturating_sub(1));
+        }
+    }
+
+    pub fn select_prev_helper(&mut self) {
+        self.helper_selected = self.helper_selected.saturating_sub(1);
+    }
+
+    pub fn selected_helper(&self) -> Option<&HelperCommand> {
+        self.filtered_helpers.get(self.helper_selected)
+    }
+}
+
 pub struct LoadingState {
     pub is_loading: bool,
     pub loading_type: LoadingType,
     pub spinner_frame: usize,
     pub loading_manager: LoadingStateManager,
+}
+
+impl LoadingState {
+    pub fn set_loading(&mut self, loading: bool) {
+        self.is_loading = loading;
+    }
+
+    pub fn ensure_loading(&mut self) {
+        if !self.is_loading {
+            self.is_loading = true;
+        }
+    }
+
+    pub fn advance_spinner(&mut self) {
+        self.spinner_frame = self.spinner_frame.wrapping_add(1);
+    }
 }
 
 pub struct MessagesScrollingState {
@@ -331,6 +374,59 @@ impl Default for MessagesScrollingState {
             last_render_width: 0,
             line_to_message_map: Vec::new(),
         }
+    }
+}
+
+impl MessagesScrollingState {
+    pub fn push_message(&mut self, msg: Message) {
+        self.messages.push(msg);
+    }
+
+    pub fn retain_messages<F>(&mut self, predicate: F)
+    where
+        F: FnMut(&Message) -> bool,
+    {
+        self.messages.retain(predicate);
+    }
+
+    pub fn remove_message_by_id(&mut self, id: uuid::Uuid) {
+        self.messages.retain(|m| m.id != id);
+    }
+
+    pub fn pop_last_message(&mut self) -> Option<Message> {
+        self.messages.pop()
+    }
+
+    pub fn insert_message_at(&mut self, pos: usize, msg: Message) {
+        self.messages.insert(pos, msg);
+    }
+
+    pub fn find_message_position(&self, id: uuid::Uuid) -> Option<usize> {
+        self.messages.iter().position(|m| m.id == id)
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.stay_at_bottom = true;
+        self.scroll_to_bottom = true;
+    }
+
+    pub fn request_scroll_to_last_message_start(&mut self) {
+        self.scroll_to_last_message_start = true;
+        self.stay_at_bottom = false;
+    }
+
+    pub fn mark_content_changed_while_scrolled_up(&mut self) {
+        if !self.stay_at_bottom {
+            self.content_changed_while_scrolled_up = true;
+        }
+    }
+
+    pub fn open_collapsed_view(&mut self) {
+        self.show_collapsed_messages = true;
+    }
+
+    pub fn close_collapsed_view(&mut self) {
+        self.show_collapsed_messages = false;
     }
 }
 
@@ -447,9 +543,43 @@ pub struct BannerState {
     pub dismiss_region: Option<ratatui::layout::Rect>,
 }
 
+impl BannerState {
+    pub fn clear(&mut self) {
+        self.message = None;
+        self.area = None;
+        self.click_regions.clear();
+        self.dismiss_region = None;
+    }
+
+    pub fn dismiss(&mut self) {
+        self.message = None;
+        self.click_regions.clear();
+        self.dismiss_region = None;
+        self.area = None;
+    }
+}
+
 #[derive(Default)]
 pub struct UserMessageQueueState {
     pub pending_user_messages: VecDeque<PendingUserMessage>,
+}
+
+impl UserMessageQueueState {
+    pub fn enqueue(&mut self, msg: PendingUserMessage) {
+        self.pending_user_messages.push_back(msg);
+    }
+
+    pub fn requeue_front(&mut self, msg: PendingUserMessage) {
+        self.pending_user_messages.push_front(msg);
+    }
+
+    pub fn dequeue(&mut self) -> Option<PendingUserMessage> {
+        self.pending_user_messages.pop_front()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pending_user_messages.is_empty()
+    }
 }
 
 #[derive(Default)]
@@ -475,6 +605,27 @@ pub struct MessageInteractionState {
     pub selection: SelectionState,
     pub selection_auto_scroll: i32,
     pub input_content_area: Option<ratatui::layout::Rect>,
+}
+
+impl MessageInteractionState {
+    pub fn open_action_popup(&mut self, message_id: Uuid, text: String, position: (u16, u16)) {
+        self.show_message_action_popup = true;
+        self.message_action_target_message_id = Some(message_id);
+        self.message_action_target_text = Some(text);
+        self.message_action_popup_position = Some(position);
+        self.message_action_popup_selected = 0;
+    }
+
+    pub fn close_action_popup(&mut self) {
+        self.show_message_action_popup = false;
+        self.message_action_target_message_id = None;
+        self.message_action_target_text = None;
+        self.message_action_popup_position = None;
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection = SelectionState::default();
+    }
 }
 
 /// Shell popup and shell-command execution UI state.
@@ -504,6 +655,36 @@ pub struct ShellPopupState {
     pub shell_command_typed: bool,
 }
 
+impl ShellPopupState {
+    pub fn show(&mut self) {
+        self.is_visible = true;
+    }
+
+    pub fn hide(&mut self) {
+        self.is_visible = false;
+    }
+
+    pub fn expand(&mut self) {
+        self.is_visible = true;
+        self.is_expanded = true;
+    }
+
+    pub fn collapse(&mut self) {
+        self.is_expanded = false;
+    }
+
+    pub fn ensure_tool_calls_vec(&mut self) {
+        if self.shell_tool_calls.is_none() {
+            self.shell_tool_calls = Some(Vec::new());
+        }
+    }
+
+    pub fn reset_command_state(&mut self) {
+        self.active_shell_command = None;
+        self.active_shell_command_output = None;
+    }
+}
+
 /// Tool-call streaming, retry, and cancellation lifecycle state.
 #[derive(Default)]
 pub struct ToolCallState {
@@ -523,6 +704,68 @@ pub struct ToolCallState {
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
     pub subagent_pause_info: HashMap<String, TaskPauseInfo>,
+}
+
+impl ToolCallState {
+    pub fn start_streaming(&mut self, tool_call_id: uuid::Uuid) {
+        self.is_streaming = true;
+        self.streaming_tool_result_id = Some(tool_call_id);
+    }
+
+    pub fn stop_streaming(&mut self) {
+        self.is_streaming = false;
+    }
+
+    pub fn mark_completed(&mut self, tool_call_id: uuid::Uuid) {
+        self.completed_tool_calls.insert(tool_call_id);
+    }
+
+    pub fn is_completed(&self, tool_call_id: &uuid::Uuid) -> bool {
+        self.completed_tool_calls.contains(tool_call_id)
+    }
+
+    pub fn append_streaming_output(&mut self, tool_call_id: uuid::Uuid, text: &str) {
+        self.streaming_tool_results
+            .entry(tool_call_id)
+            .or_default()
+            .push_str(text);
+    }
+
+    pub fn get_streaming_output(&self, tool_call_id: &uuid::Uuid) -> Option<&str> {
+        self.streaming_tool_results
+            .get(tool_call_id)
+            .map(String::as_str)
+    }
+
+    pub fn clear_streaming(&mut self) {
+        self.is_streaming = false;
+        self.streaming_tool_results.clear();
+        self.streaming_tool_result_id = None;
+        self.pending_bash_message_id = None;
+        self.latest_tool_call = None;
+    }
+
+    pub fn request_cancel(&mut self) {
+        self.cancel_requested = true;
+    }
+
+    pub fn clear_cancel(&mut self) {
+        self.cancel_requested = false;
+    }
+
+    pub fn set_pending_bash_message(&mut self, id: uuid::Uuid) {
+        self.pending_bash_message_id = Some(id);
+    }
+
+    pub fn take_preview_id(&mut self) -> Option<uuid::Uuid> {
+        self.tool_call_stream_preview_id.take()
+    }
+
+    pub fn get_or_create_preview_id(&mut self) -> uuid::Uuid {
+        *self
+            .tool_call_stream_preview_id
+            .get_or_insert_with(uuid::Uuid::new_v4)
+    }
 }
 
 /// Dialog visibility, approval-bar interaction, and tool-approval selection state.
@@ -558,6 +801,28 @@ impl Default for DialogApprovalState {
     }
 }
 
+impl DialogApprovalState {
+    pub fn open(&mut self, tool_call: ToolCall) {
+        self.is_dialog_open = true;
+        self.dialog_command = Some(tool_call);
+        self.dialog_focused = true;
+    }
+
+    pub fn close(&mut self) {
+        self.is_dialog_open = false;
+        self.dialog_command = None;
+        self.dialog_focused = false;
+    }
+
+    pub fn current_tool_call(&self) -> Option<&ToolCall> {
+        self.dialog_command.as_ref()
+    }
+
+    pub fn clear_message_tool_calls(&mut self) {
+        self.message_tool_calls = None;
+    }
+}
+
 #[derive(Default)]
 pub struct SessionsState {
     pub sessions: Vec<SessionInfo>,
@@ -572,6 +837,33 @@ pub struct SessionToolCallsState {
     pub last_message_tool_calls: Vec<ToolCall>,
 }
 
+impl SessionToolCallsState {
+    pub fn mark_executed(&mut self, id: &str) {
+        self.session_tool_calls_queue
+            .insert(id.to_string(), ToolCallStatus::Executed);
+    }
+
+    pub fn mark_skipped(&mut self, id: &str) {
+        self.session_tool_calls_queue
+            .insert(id.to_string(), ToolCallStatus::Skipped);
+    }
+
+    pub fn is_executed(&self, id: &str) -> bool {
+        self.session_tool_calls_queue
+            .get(id)
+            .map(|s| s == &ToolCallStatus::Executed)
+            .unwrap_or(false)
+    }
+
+    pub fn is_queued(&self, id: &str) -> bool {
+        self.session_tool_calls_queue.contains_key(id)
+    }
+
+    pub fn clear_execution_order(&mut self) {
+        self.tool_call_execution_order.clear();
+    }
+}
+
 #[derive(Default)]
 pub struct ProfileSwitcherState {
     pub show_profile_switcher: bool,
@@ -580,6 +872,16 @@ pub struct ProfileSwitcherState {
     pub current_profile_name: String,
     pub switching_in_progress: bool,
     pub switch_status_message: Option<String>,
+}
+
+impl ProfileSwitcherState {
+    pub fn open(&mut self) {
+        self.show_profile_switcher = true;
+    }
+
+    pub fn close(&mut self) {
+        self.show_profile_switcher = false;
+    }
 }
 
 #[derive(Default)]
@@ -593,6 +895,16 @@ pub struct RulebookSwitcherState {
     pub rulebook_config: Option<crate::RulebookConfig>,
 }
 
+impl RulebookSwitcherState {
+    pub fn open(&mut self) {
+        self.show_rulebook_switcher = true;
+    }
+
+    pub fn close(&mut self) {
+        self.show_rulebook_switcher = false;
+    }
+}
+
 #[derive(Default)]
 pub struct ModelSwitcherState {
     pub is_visible: bool,
@@ -604,12 +916,39 @@ pub struct ModelSwitcherState {
     pub recent_models: Vec<String>,
 }
 
+impl ModelSwitcherState {
+    pub fn open(&mut self) {
+        self.is_visible = true;
+        self.is_selected = 0;
+        self.search.clear();
+    }
+
+    pub fn close(&mut self) {
+        self.is_visible = false;
+        self.search.clear();
+    }
+}
+
 #[derive(Default)]
 pub struct CommandPaletteState {
     pub is_visible: bool,
     pub is_selected: usize,
     pub scroll: usize,
     pub search: String,
+}
+
+impl CommandPaletteState {
+    pub fn open(&mut self) {
+        self.is_visible = true;
+        self.is_selected = 0;
+        self.scroll = 0;
+        self.search.clear();
+    }
+
+    pub fn close(&mut self) {
+        self.is_visible = false;
+        self.search.clear();
+    }
 }
 
 #[derive(Default)]
@@ -619,12 +958,36 @@ pub struct ShortcutsPanelState {
     pub mode: ShortcutsPopupMode,
 }
 
+impl ShortcutsPanelState {
+    pub fn open(&mut self) {
+        self.is_visible = true;
+    }
+
+    pub fn close(&mut self) {
+        self.is_visible = false;
+    }
+}
+
 #[derive(Default)]
 pub struct FileChangesPopupState {
     pub is_visible: bool,
     pub is_selected: usize,
     pub scroll: usize,
     pub search: String,
+}
+
+impl FileChangesPopupState {
+    pub fn open(&mut self) {
+        self.is_visible = true;
+        self.is_selected = 0;
+        self.scroll = 0;
+        self.search.clear();
+    }
+
+    pub fn close(&mut self) {
+        self.is_visible = false;
+        self.search.clear();
+    }
 }
 
 pub struct UsageTrackingState {
