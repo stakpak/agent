@@ -9,16 +9,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use tokio::sync::mpsc::Sender;
 
-/// Get the total number of options for a question (including custom if allowed)
-/// Multi-select questions never show the custom input option.
-fn get_total_options(question: &AskUserQuestion) -> usize {
-    if question.allow_custom && !question.multi_select {
-        question.options.len() + 1
-    } else {
-        question.options.len()
-    }
-}
-
 /// Safety-net: send an error response when questions are empty so the backend
 /// never blocks waiting for an `AskUserResponse` that will never arrive.
 pub fn send_empty_questions_error(
@@ -61,46 +51,7 @@ pub fn handle_show_ask_user_popup(
             .retain(|m| m.id != pending_id);
     }
 
-    state.ask_user_state.is_visible = true;
-    state.ask_user_state.is_focused = true;
-    state.ask_user_state.questions = questions.clone();
-    state.ask_user_state.answers.clear();
-    state.ask_user_state.current_tab = 0;
-    state.ask_user_state.selected_option = 0;
-    state.ask_user_state.custom_input.clear();
-    state.ask_user_state.tool_call = Some(tool_call);
-    state.ask_user_state.multi_selections.clear();
-
-    // Initialize multi-select defaults from option.selected flags
-    for q in &questions {
-        if q.multi_select {
-            let defaults: Vec<String> = q
-                .options
-                .iter()
-                .filter(|o| o.selected)
-                .map(|o| o.value.clone())
-                .collect();
-            if !defaults.is_empty() {
-                state
-                    .ask_user_state
-                    .multi_selections
-                    .insert(q.label.clone(), defaults.clone());
-
-                // Also pre-populate the answer so the tab shows as answered
-                let answer_json =
-                    serde_json::to_string(&defaults).unwrap_or_else(|_| "[]".to_string());
-                state.ask_user_state.answers.insert(
-                    q.label.clone(),
-                    AskUserAnswer {
-                        question_label: q.label.clone(),
-                        answer: answer_json,
-                        is_custom: false,
-                        selected_values: defaults,
-                    },
-                );
-            }
-        }
-    }
+    state.ask_user_state.show(questions.clone(), tool_call);
 
     // Create inline message block
     let msg = crate::services::message::Message::render_ask_user_block(
@@ -160,12 +111,7 @@ pub fn handle_ask_user_next_tab(state: &mut AppState) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    let max_tab = state.ask_user_state.questions.len(); // questions.len() is the Submit tab
-    if state.ask_user_state.current_tab < max_tab {
-        state.ask_user_state.current_tab += 1;
-        restore_selection_for_current_tab(state);
-    }
+    state.ask_user_state.next_tab();
     refresh_ask_user_block(state);
 }
 
@@ -174,42 +120,8 @@ pub fn handle_ask_user_prev_tab(state: &mut AppState) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    if state.ask_user_state.current_tab > 0 {
-        state.ask_user_state.current_tab -= 1;
-        restore_selection_for_current_tab(state);
-    }
+    state.ask_user_state.prev_tab();
     refresh_ask_user_block(state);
-}
-
-/// Restore the cursor position when navigating back to a question tab.
-///
-/// If the question was previously answered, place the cursor on the answered
-/// option so the `›` indicator doesn't hide the selection. Otherwise reset to 0.
-fn restore_selection_for_current_tab(state: &mut AppState) {
-    state.ask_user_state.custom_input.clear();
-
-    // Submit tab — nothing to restore
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        state.ask_user_state.selected_option = 0;
-        return;
-    }
-
-    let q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-
-    if let Some(answer) = state.ask_user_state.answers.get(&q.label) {
-        if answer.is_custom {
-            // Custom answer — point to the custom input slot
-            state.ask_user_state.selected_option = q.options.len();
-            state.ask_user_state.custom_input.clone_from(&answer.answer);
-        } else if let Some(idx) = q.options.iter().position(|o| o.value == answer.answer) {
-            state.ask_user_state.selected_option = idx;
-        } else {
-            state.ask_user_state.selected_option = 0;
-        }
-    } else {
-        state.ask_user_state.selected_option = 0;
-    }
 }
 
 /// Navigate to the next option within the current question.
@@ -218,22 +130,11 @@ pub fn handle_ask_user_next_option(state: &mut AppState) -> bool {
     if !state.ask_user_state.is_visible {
         return false;
     }
-
-    // Can't navigate options on Submit tab
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return false;
-    }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    let total_options = get_total_options(current_q);
-
-    if state.ask_user_state.selected_option < total_options.saturating_sub(1) {
-        state.ask_user_state.selected_option += 1;
+    let moved = state.ask_user_state.next_option();
+    if moved {
         refresh_ask_user_block(state);
-        true
-    } else {
-        false
     }
+    moved
 }
 
 /// Navigate to the previous option within the current question.
@@ -242,19 +143,11 @@ pub fn handle_ask_user_prev_option(state: &mut AppState) -> bool {
     if !state.ask_user_state.is_visible {
         return false;
     }
-
-    // Can't navigate options on Submit tab
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return false;
-    }
-
-    if state.ask_user_state.selected_option > 0 {
-        state.ask_user_state.selected_option -= 1;
+    let moved = state.ask_user_state.prev_option();
+    if moved {
         refresh_ask_user_block(state);
-        true
-    } else {
-        false
     }
+    moved
 }
 
 /// Toggle/select the current option WITHOUT advancing to the next question.
@@ -265,96 +158,12 @@ pub fn handle_ask_user_select_option(state: &mut AppState, output_tx: &Sender<Ou
     }
 
     // If on Submit tab, submit (Space on submit = submit)
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
+    if state.ask_user_state.is_on_submit_tab() {
         handle_ask_user_submit(state, output_tx);
         return;
     }
 
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    let question_label = current_q.label.clone();
-
-    // --- Multi-select mode: toggle the option ---
-    if current_q.multi_select {
-        // Custom input is not supported in multi-select mode (allow_custom is ignored)
-        if state.ask_user_state.selected_option < current_q.options.len() {
-            let opt_value = current_q.options[state.ask_user_state.selected_option]
-                .value
-                .clone();
-            let selections = state
-                .ask_user_state
-                .multi_selections
-                .entry(question_label.clone())
-                .or_default();
-
-            // Toggle: add if absent, remove if present
-            if selections.contains(&opt_value) {
-                selections.retain(|v| v != &opt_value);
-            } else {
-                selections.push(opt_value);
-            }
-
-            // Build the answer from current selections
-            let selected = state
-                .ask_user_state
-                .multi_selections
-                .get(&question_label)
-                .cloned()
-                .unwrap_or_default();
-
-            let answer_json = serde_json::to_string(&selected).unwrap_or_else(|_| "[]".to_string());
-
-            let answer = AskUserAnswer {
-                question_label: question_label.clone(),
-                answer: answer_json,
-                is_custom: false,
-                selected_values: selected,
-            };
-
-            if answer.selected_values.is_empty() {
-                // No selections — remove the answer so "required" validation works
-                state.ask_user_state.answers.remove(&question_label);
-            } else {
-                state.ask_user_state.answers.insert(question_label, answer);
-            }
-        }
-        refresh_ask_user_block(state);
-        return;
-    }
-
-    // --- Single-select mode: select without advancing ---
-
-    // Check if custom input is selected
-    if current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len() {
-        // Custom input selected - save the custom answer if not empty (no advance)
-        if !state.ask_user_state.custom_input.is_empty() {
-            let answer = AskUserAnswer {
-                question_label: question_label.clone(),
-                answer: state.ask_user_state.custom_input.clone(),
-                is_custom: true,
-                selected_values: vec![],
-            };
-            state
-                .ask_user_state
-                .answers
-                .insert(current_q.label.clone(), answer);
-        }
-        refresh_ask_user_block(state);
-        return;
-    }
-
-    // Regular option selected (no advance)
-    if let Some(opt) = current_q.options.get(state.ask_user_state.selected_option) {
-        let answer = AskUserAnswer {
-            question_label,
-            answer: opt.value.clone(),
-            is_custom: false,
-            selected_values: vec![],
-        };
-        state
-            .ask_user_state
-            .answers
-            .insert(current_q.label.clone(), answer);
-    }
+    state.ask_user_state.select_current_option();
     refresh_ask_user_block(state);
 }
 
@@ -367,30 +176,13 @@ pub fn handle_ask_user_confirm_question(state: &mut AppState, output_tx: &Sender
     }
 
     // If on Submit tab, submit
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
+    if state.ask_user_state.is_on_submit_tab() {
         handle_ask_user_submit(state, output_tx);
         return;
     }
 
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-
-    // If custom input is selected and has text, save it before advancing
-    if !current_q.multi_select
-        && current_q.allow_custom
-        && state.ask_user_state.selected_option == current_q.options.len()
-        && !state.ask_user_state.custom_input.is_empty()
-    {
-        let answer = AskUserAnswer {
-            question_label: current_q.label.clone(),
-            answer: state.ask_user_state.custom_input.clone(),
-            is_custom: true,
-            selected_values: vec![],
-        };
-        state
-            .ask_user_state
-            .answers
-            .insert(current_q.label.clone(), answer);
-    }
+    // Save any pending custom input before advancing
+    state.ask_user_state.save_custom_answer_if_pending();
 
     // Just advance — don't select anything
     handle_ask_user_next_tab(state);
@@ -401,20 +193,15 @@ pub fn handle_ask_user_custom_input_paste(state: &mut AppState, text: &str) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
+    if !state.ask_user_state.is_custom_input_active() {
         return;
     }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    if current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len() {
-        let redacted = state
-            .configuration_state
-            .secret_manager
-            .redact_and_store_secrets(text, None);
-        state.ask_user_state.custom_input.push_str(&redacted);
-        refresh_ask_user_block(state);
-    }
+    let redacted = state
+        .configuration_state
+        .secret_manager
+        .redact_and_store_secrets(text, None);
+    state.ask_user_state.custom_input_push_str(&redacted);
+    refresh_ask_user_block(state);
 }
 
 /// Handle character input for custom answer
@@ -422,15 +209,9 @@ pub fn handle_ask_user_custom_input_changed(state: &mut AppState, c: char) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return;
-    }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    if current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len() {
-        state.ask_user_state.custom_input.push(c);
+    let changed = state.ask_user_state.is_custom_input_active();
+    state.ask_user_state.custom_input_push(c);
+    if changed {
         refresh_ask_user_block(state);
     }
 }
@@ -440,15 +221,9 @@ pub fn handle_ask_user_custom_input_backspace(state: &mut AppState) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return;
-    }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    if current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len() {
-        state.ask_user_state.custom_input.pop();
+    let active = state.ask_user_state.is_custom_input_active();
+    state.ask_user_state.custom_input_pop();
+    if active {
         refresh_ask_user_block(state);
     }
 }
@@ -458,15 +233,9 @@ pub fn handle_ask_user_custom_input_delete(state: &mut AppState) {
     if !state.ask_user_state.is_visible {
         return;
     }
-
-    // Only accept input if on a question tab and custom option is selected
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return;
-    }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    if current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len() {
-        state.ask_user_state.custom_input.clear();
+    let active = state.ask_user_state.is_custom_input_active();
+    state.ask_user_state.custom_input_clear();
+    if active {
         refresh_ask_user_block(state);
     }
 }
@@ -480,9 +249,8 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
     // Build the structured result as documented in the tool description
     let answers: Vec<AskUserAnswer> = state
         .ask_user_state
-        .questions
-        .iter()
-        .filter_map(|q| state.ask_user_state.answers.get(&q.label).cloned())
+        .collect_answers()
+        .into_iter()
         .map(|mut answer| {
             answer.answer = state
                 .configuration_state
@@ -503,7 +271,7 @@ pub fn handle_ask_user_submit(state: &mut AppState, output_tx: &Sender<OutputEve
         .unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize result: {}\"}}", e));
 
     // Send the result back
-    if let Some(tool_call) = state.ask_user_state.tool_call.take() {
+    if let Some(tool_call) = state.ask_user_state.take_tool_call() {
         let tool_result = ToolCallResult {
             call: tool_call,
             result: display_result,
@@ -524,7 +292,7 @@ pub fn handle_ask_user_cancel(state: &mut AppState, output_tx: &Sender<OutputEve
     }
 
     // Send the cancelled result back as JSON (matching the documented format)
-    if let Some(tool_call) = state.ask_user_state.tool_call.take() {
+    if let Some(tool_call) = state.ask_user_state.take_tool_call() {
         let result = AskUserResult {
             answers: vec![],
             completed: false,
@@ -557,15 +325,7 @@ fn close_ask_user_popup(state: &mut AppState) {
             .retain(|m| m.id != msg_id);
     }
 
-    state.ask_user_state.is_visible = false;
-    state.ask_user_state.is_focused = false;
-    state.ask_user_state.questions.clear();
-    state.ask_user_state.answers.clear();
-    state.ask_user_state.current_tab = 0;
-    state.ask_user_state.selected_option = 0;
-    state.ask_user_state.custom_input.clear();
-    state.ask_user_state.tool_call = None;
-    state.ask_user_state.multi_selections.clear();
+    state.ask_user_state.clear();
 
     // Invalidate cache to update display
     crate::services::message::invalidate_message_lines_cache(state);
@@ -573,16 +333,7 @@ fn close_ask_user_popup(state: &mut AppState) {
 
 /// Check if the current question has custom input selected
 pub fn is_custom_input_selected(state: &AppState) -> bool {
-    if !state.ask_user_state.is_visible {
-        return false;
-    }
-
-    if state.ask_user_state.current_tab >= state.ask_user_state.questions.len() {
-        return false;
-    }
-
-    let current_q = &state.ask_user_state.questions[state.ask_user_state.current_tab];
-    current_q.allow_custom && state.ask_user_state.selected_option == current_q.options.len()
+    state.ask_user_state.is_visible && state.ask_user_state.is_custom_input_active()
 }
 
 #[cfg(test)]
@@ -1292,10 +1043,6 @@ mod tests {
         let tool_call = create_test_tool_call();
 
         handle_show_ask_user_popup(&mut state, tool_call, questions);
-
-        // Total options should be 2 (no custom slot)
-        let q = &state.ask_user_state.questions[0];
-        assert_eq!(get_total_options(q), 2);
 
         // Can't navigate beyond last option
         handle_ask_user_next_option(&mut state);

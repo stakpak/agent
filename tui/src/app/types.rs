@@ -15,7 +15,7 @@ use ratatui::text::Line;
 use stakai::Model;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
-    ContentPart, TaskPauseInfo, ToolCall, ToolCallResult,
+    AskUserAnswer, AskUserQuestion, ContentPart, TaskPauseInfo, ToolCall, ToolCallResult,
 };
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::secret_manager::SecretManager;
@@ -700,6 +700,326 @@ pub struct AskUserState {
     pub is_focused: bool,
     /// Multi-select toggle state: question label -> list of currently selected option values
     pub multi_selections: HashMap<String, Vec<String>>,
+}
+
+impl AskUserState {
+    pub fn clear(&mut self) {
+        self.is_visible = false;
+        self.questions.clear();
+        self.answers.clear();
+        self.current_tab = 0;
+        self.selected_option = 0;
+        self.custom_input.clear();
+        self.tool_call = None;
+        self.message_id = None;
+        self.is_focused = false;
+        self.multi_selections.clear();
+    }
+
+    /// Activate the ask-user interaction with the given questions and tool call.
+    /// Initialises all fields and pre-populates multi-select defaults.
+    pub fn show(&mut self, questions: Vec<AskUserQuestion>, tool_call: ToolCall) {
+        self.is_visible = true;
+        self.is_focused = true;
+        self.answers.clear();
+        self.current_tab = 0;
+        self.selected_option = 0;
+        self.custom_input.clear();
+        self.tool_call = Some(tool_call);
+        self.multi_selections.clear();
+
+        // Pre-populate multi-select defaults from option.selected flags
+        for q in &questions {
+            if q.multi_select {
+                let defaults: Vec<String> = q
+                    .options
+                    .iter()
+                    .filter(|o| o.selected)
+                    .map(|o| o.value.clone())
+                    .collect();
+                if !defaults.is_empty() {
+                    self.multi_selections
+                        .insert(q.label.clone(), defaults.clone());
+
+                    let answer_json =
+                        serde_json::to_string(&defaults).unwrap_or_else(|_| "[]".to_string());
+                    self.answers.insert(
+                        q.label.clone(),
+                        AskUserAnswer {
+                            question_label: q.label.clone(),
+                            answer: answer_json,
+                            is_custom: false,
+                            selected_values: defaults,
+                        },
+                    );
+                }
+            }
+        }
+
+        self.questions = questions;
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+
+    /// Returns `true` when the cursor is on the Submit tab (past all questions).
+    pub fn is_on_submit_tab(&self) -> bool {
+        self.current_tab >= self.questions.len()
+    }
+
+    /// Returns `true` when the custom-input slot is the active selection on the
+    /// current question tab.
+    pub fn is_custom_input_active(&self) -> bool {
+        if self.is_on_submit_tab() {
+            return false;
+        }
+        let q = &self.questions[self.current_tab];
+        q.allow_custom && !q.multi_select && self.selected_option == q.options.len()
+    }
+
+    /// Advance to the next tab (question or Submit).
+    /// Returns `true` if the tab actually changed.
+    pub fn next_tab(&mut self) -> bool {
+        let max_tab = self.questions.len(); // questions.len() == Submit tab index
+        if self.current_tab < max_tab {
+            self.current_tab += 1;
+            self.restore_selection_for_current_tab();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Go back to the previous tab.
+    /// Returns `true` if the tab actually changed.
+    pub fn prev_tab(&mut self) -> bool {
+        if self.current_tab > 0 {
+            self.current_tab -= 1;
+            self.restore_selection_for_current_tab();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Restore the cursor position when switching to a question tab.
+    ///
+    /// If the question was previously answered, place the cursor on the answered
+    /// option so the `›` indicator doesn't hide the selection. Otherwise reset to 0.
+    fn restore_selection_for_current_tab(&mut self) {
+        self.custom_input.clear();
+
+        if self.is_on_submit_tab() {
+            self.selected_option = 0;
+            return;
+        }
+
+        let q = &self.questions[self.current_tab];
+        if let Some(answer) = self.answers.get(&q.label) {
+            if answer.is_custom {
+                self.selected_option = q.options.len();
+                self.custom_input = answer.answer.clone();
+            } else if let Some(idx) = q.options.iter().position(|o| o.value == answer.answer) {
+                self.selected_option = idx;
+            } else {
+                self.selected_option = 0;
+            }
+        } else {
+            self.selected_option = 0;
+        }
+    }
+
+    /// Move the cursor to the next option within the current question.
+    /// Returns `true` if the cursor moved, `false` if already at the boundary.
+    pub fn next_option(&mut self) -> bool {
+        if self.is_on_submit_tab() {
+            return false;
+        }
+        let total = self.total_options_for_current_question();
+        if self.selected_option < total.saturating_sub(1) {
+            self.selected_option += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move the cursor to the previous option within the current question.
+    /// Returns `true` if the cursor moved, `false` if already at the boundary.
+    pub fn prev_option(&mut self) -> bool {
+        if self.is_on_submit_tab() {
+            return false;
+        }
+        if self.selected_option > 0 {
+            self.selected_option -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Total selectable options for the current question tab (including the
+    /// custom-input slot when applicable).
+    fn total_options_for_current_question(&self) -> usize {
+        if self.is_on_submit_tab() {
+            return 0;
+        }
+        let q = &self.questions[self.current_tab];
+        if q.allow_custom && !q.multi_select {
+            q.options.len() + 1
+        } else {
+            q.options.len()
+        }
+    }
+
+    // ── Answer recording ──────────────────────────────────────────────────────
+
+    /// Toggle/select the currently highlighted option on the current question.
+    ///
+    /// - Multi-select: toggles the option in `multi_selections` and rebuilds the answer.
+    /// - Single-select (custom slot): saves the custom input text as the answer.
+    /// - Single-select (regular): records the option value as the answer.
+    ///
+    /// Returns `true` if an answer was recorded or changed.
+    pub fn select_current_option(&mut self) -> bool {
+        if self.is_on_submit_tab() {
+            return false;
+        }
+
+        let q = &self.questions[self.current_tab];
+        let question_label = q.label.clone();
+
+        if q.multi_select {
+            if self.selected_option >= q.options.len() {
+                return false;
+            }
+            let opt_value = q.options[self.selected_option].value.clone();
+            let selections = self
+                .multi_selections
+                .entry(question_label.clone())
+                .or_default();
+
+            if selections.contains(&opt_value) {
+                selections.retain(|v| v != &opt_value);
+            } else {
+                selections.push(opt_value);
+            }
+
+            let selected = self
+                .multi_selections
+                .get(&question_label)
+                .cloned()
+                .unwrap_or_default();
+            let answer_json =
+                serde_json::to_string(&selected).unwrap_or_else(|_| "[]".to_string());
+            let answer = AskUserAnswer {
+                question_label: question_label.clone(),
+                answer: answer_json,
+                is_custom: false,
+                selected_values: selected,
+            };
+
+            if answer.selected_values.is_empty() {
+                self.answers.remove(&question_label);
+            } else {
+                self.answers.insert(question_label, answer);
+            }
+            return true;
+        }
+
+        // Single-select: custom slot
+        if q.allow_custom && self.selected_option == q.options.len() {
+            if !self.custom_input.is_empty() {
+                let answer = AskUserAnswer {
+                    question_label: question_label.clone(),
+                    answer: self.custom_input.clone(),
+                    is_custom: true,
+                    selected_values: vec![],
+                };
+                self.answers.insert(q.label.clone(), answer);
+                return true;
+            }
+            return false;
+        }
+
+        // Single-select: regular option
+        if let Some(opt) = q.options.get(self.selected_option) {
+            let answer = AskUserAnswer {
+                question_label,
+                answer: opt.value.clone(),
+                is_custom: false,
+                selected_values: vec![],
+            };
+            self.answers.insert(q.label.clone(), answer);
+            return true;
+        }
+
+        false
+    }
+
+    /// If the current question has a non-empty custom input selected, save it as
+    /// the answer. Called before advancing tabs via Enter.
+    pub fn save_custom_answer_if_pending(&mut self) {
+        if self.is_on_submit_tab() {
+            return;
+        }
+        let q = &self.questions[self.current_tab];
+        if !q.multi_select
+            && q.allow_custom
+            && self.selected_option == q.options.len()
+            && !self.custom_input.is_empty()
+        {
+            let answer = AskUserAnswer {
+                question_label: q.label.clone(),
+                answer: self.custom_input.clone(),
+                is_custom: true,
+                selected_values: vec![],
+            };
+            self.answers.insert(q.label.clone(), answer);
+        }
+    }
+
+    /// Collect the final ordered list of answers (one per question, in question order).
+    pub fn collect_answers(&self) -> Vec<AskUserAnswer> {
+        self.questions
+            .iter()
+            .filter_map(|q| self.answers.get(&q.label).cloned())
+            .collect()
+    }
+
+    /// Take the stored tool call out of the state (leaves `None` behind).
+    pub fn take_tool_call(&mut self) -> Option<ToolCall> {
+        self.tool_call.take()
+    }
+
+    // ── Custom input mutations ────────────────────────────────────────────────
+
+    /// Append a character to the custom input (only when custom slot is active).
+    pub fn custom_input_push(&mut self, c: char) {
+        if self.is_custom_input_active() {
+            self.custom_input.push(c);
+        }
+    }
+
+    /// Append a string slice to the custom input (only when custom slot is active).
+    pub fn custom_input_push_str(&mut self, s: &str) {
+        if self.is_custom_input_active() {
+            self.custom_input.push_str(s);
+        }
+    }
+
+    /// Remove the last character from the custom input (only when custom slot is active).
+    pub fn custom_input_pop(&mut self) {
+        if self.is_custom_input_active() {
+            self.custom_input.pop();
+        }
+    }
+
+    /// Clear the entire custom input (only when custom slot is active).
+    pub fn custom_input_clear(&mut self) {
+        if self.is_custom_input_active() {
+            self.custom_input.clear();
+        }
+    }
 }
 
 impl Default for UsageTrackingState {
