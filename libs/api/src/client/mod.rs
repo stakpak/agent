@@ -132,12 +132,17 @@ impl AgentClient {
     pub async fn build_session_storage(
         stakpak: Option<StakpakConfig>,
         store_path: Option<String>,
+        profile_name: Option<String>,
     ) -> Result<Arc<dyn SessionStorage>, String> {
         if let Some(stakpak) = stakpak
             && !stakpak.api_key.is_empty()
         {
-            let storage = StakpakStorage::new(&stakpak.api_key, &stakpak.api_endpoint)
-                .map_err(|e| format!("Failed to create Stakpak storage: {}", e))?;
+            let storage = StakpakStorage::new_with_profile(
+                &stakpak.api_key,
+                &stakpak.api_endpoint,
+                profile_name,
+            )
+            .map_err(|e| format!("Failed to create Stakpak storage: {}", e))?;
             Ok(Arc::new(storage))
         } else {
             let store_path = store_path.unwrap_or_else(|| {

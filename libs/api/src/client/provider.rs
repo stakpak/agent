@@ -601,6 +601,10 @@ fn sort_models_by_recency(models: &mut [stakai::Model]) {
 
 #[async_trait]
 impl crate::storage::SessionStorage for super::AgentClient {
+    fn backend_info(&self) -> crate::storage::BackendInfo {
+        self.session_storage.backend_info()
+    }
+
     async fn list_sessions(
         &self,
         query: &crate::storage::ListSessionsQuery,

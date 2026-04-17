@@ -1,7 +1,9 @@
 //! Human + JSON renderers for the `stakpak sessions` subcommands.
 
 use serde::Serialize;
-use stakpak_api::{Session, SessionStatus, SessionSummary, SessionVisibility};
+use stakpak_api::{
+    BackendInfo, BackendKind, Session, SessionStatus, SessionSummary, SessionVisibility,
+};
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::utils::sanitize_text_output;
 
@@ -22,38 +24,49 @@ impl OutputMode {
 // List output
 // =============================================================================
 
-pub fn render_list(sessions: &[SessionSummary], mode: OutputMode) -> String {
+pub fn render_list(sessions: &[SessionSummary], backend: &BackendInfo, mode: OutputMode) -> String {
     match mode {
-        OutputMode::Json => render_list_json(sessions),
-        OutputMode::Human => render_list_human(sessions),
+        OutputMode::Json => render_list_json(sessions, backend),
+        OutputMode::Human => render_list_human(sessions, backend),
     }
 }
 
-fn render_list_json(sessions: &[SessionSummary]) -> String {
-    serde_json::to_string_pretty(sessions).unwrap_or_else(|_| "[]".to_string())
+#[derive(Debug, Serialize)]
+struct ListOutput<'a> {
+    backend: &'a BackendInfo,
+    sessions: &'a [SessionSummary],
 }
 
-fn render_list_human(sessions: &[SessionSummary]) -> String {
+fn render_list_json(sessions: &[SessionSummary], backend: &BackendInfo) -> String {
+    let out = ListOutput { backend, sessions };
+    serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn render_list_human(sessions: &[SessionSummary], backend: &BackendInfo) -> String {
+    let mut out = format!("{}\n", render_backend_header(backend));
     if sessions.is_empty() {
-        return "No sessions found.".to_string();
+        out.push_str("No sessions found.");
+        return out;
     }
 
     // Column widths
     let id_w = 36;
     let msgs_w = 5;
     let time_w = 20;
-    let title_w = sessions
+    let titles: Vec<String> = sessions
         .iter()
         .map(|s| {
-            truncate(&sanitize_text_output(&s.title), 50)
-                .chars()
-                .count()
+            let sanitized = sanitize_text_output(&s.title);
+            truncate(&collapse_whitespace(&sanitized), 50)
         })
+        .collect();
+    let title_w = titles
+        .iter()
+        .map(|t| t.chars().count())
         .max()
         .unwrap_or(5)
         .max(5);
 
-    let mut out = String::new();
     out.push_str(&format!(
         "{:<id_w$}  {:<title_w$}  {:>msgs_w$}  {:<time_w$}\n",
         "ID",
@@ -73,8 +86,7 @@ fn render_list_human(sessions: &[SessionSummary]) -> String {
         "-".repeat(time_w),
     ));
 
-    for s in sessions {
-        let title = truncate(&sanitize_text_output(&s.title), 50);
+    for (s, title) in sessions.iter().zip(titles.iter()) {
         let last = s
             .last_message_at
             .unwrap_or(s.updated_at)
@@ -111,21 +123,23 @@ pub struct ShowOutput<'a> {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub active_checkpoint_id: Option<uuid::Uuid>,
     pub messages: &'a [ChatMessage],
+    pub backend: &'a BackendInfo,
 }
 
 pub fn render_show(
     session: &Session,
     messages: &[ChatMessage],
+    backend: &BackendInfo,
     profile: Option<&str>,
     mode: OutputMode,
 ) -> String {
     match mode {
-        OutputMode::Json => render_show_json(session, messages),
-        OutputMode::Human => render_show_human(session, messages, profile),
+        OutputMode::Json => render_show_json(session, messages, backend),
+        OutputMode::Human => render_show_human(session, messages, backend, profile),
     }
 }
 
-fn render_show_json(session: &Session, messages: &[ChatMessage]) -> String {
+fn render_show_json(session: &Session, messages: &[ChatMessage], backend: &BackendInfo) -> String {
     let out = ShowOutput {
         id: session.id,
         title: &session.title,
@@ -136,16 +150,23 @@ fn render_show_json(session: &Session, messages: &[ChatMessage]) -> String {
         updated_at: session.updated_at,
         active_checkpoint_id: session.active_checkpoint.as_ref().map(|c| c.id),
         messages,
+        backend,
     };
     serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn render_show_human(session: &Session, messages: &[ChatMessage], profile: Option<&str>) -> String {
-    let mut out = String::new();
+fn render_show_human(
+    session: &Session,
+    messages: &[ChatMessage],
+    backend: &BackendInfo,
+    profile: Option<&str>,
+) -> String {
+    let mut out = format!("{}\n", render_backend_header(backend));
     out.push_str(&format!("ID:          {}\n", session.id));
+    let sanitized_title = sanitize_text_output(&session.title);
     out.push_str(&format!(
         "Title:       {}\n",
-        sanitize_text_output(&session.title)
+        collapse_whitespace(&sanitized_title)
     ));
     out.push_str(&format!("Status:      {}\n", session.status));
     out.push_str(&format!("Visibility:  {}\n", session.visibility));
@@ -237,6 +258,55 @@ pub fn render_error(message: &str, code: &str, mode: OutputMode) -> String {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+fn render_backend_header(backend: &BackendInfo) -> String {
+    match (
+        &backend.kind,
+        &backend.profile,
+        &backend.endpoint,
+        &backend.store_path,
+    ) {
+        (BackendKind::StakpakApi, Some(profile), Some(endpoint), _) => {
+            format!("Backend: stakpak-api (profile: {profile}, endpoint: {endpoint})")
+        }
+        (BackendKind::StakpakApi, None, Some(endpoint), _) => {
+            format!("Backend: stakpak-api (endpoint: {endpoint})")
+        }
+        (BackendKind::Local, _, _, Some(store_path)) => {
+            format!("Backend: local ({store_path})")
+        }
+        _ => "Backend: unknown".to_string(),
+    }
+}
+
+fn collapse_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_space = false;
+
+    for ch in s.chars() {
+        let normalized = match ch {
+            '\r' | '\n' | '\t' => ' ',
+            other => other,
+        };
+
+        if normalized == ' ' {
+            if !last_was_space && !out.is_empty() {
+                out.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+
+        out.push(normalized);
+        last_was_space = false;
+    }
+
+    if out.ends_with(' ') {
+        out.pop();
+    }
+
+    out
+}
 
 fn truncate(s: &str, max_chars: usize) -> String {
     if max_chars == 0 {

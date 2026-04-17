@@ -277,6 +277,28 @@ mod local_storage_tests {
     }
 
     #[tokio::test]
+    async fn test_list_then_get_session_roundtrip_returns_same_session() {
+        let storage = create_test_storage().await;
+        let created = storage
+            .create_session(&session_request("Round Trip", vec![user_msg("hi")]))
+            .await
+            .unwrap();
+
+        let listed = storage
+            .list_sessions(&ListSessionsQuery::new().with_limit(10))
+            .await
+            .unwrap();
+        let first_id = listed.sessions.first().expect("first session from list").id;
+
+        let fetched = storage
+            .get_session(first_id)
+            .await
+            .expect("get session by listed id");
+        assert_eq!(fetched.id, created.session_id);
+        assert_eq!(fetched.title, "Round Trip");
+    }
+
+    #[tokio::test]
     async fn test_list_sessions_message_count_reflects_messages_not_checkpoints() {
         let storage = create_test_storage().await;
         let created = storage

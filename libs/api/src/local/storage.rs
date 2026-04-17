@@ -3,10 +3,10 @@
 //! Implements SessionStorage using local SQLite database.
 
 use crate::storage::{
-    Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest, CreateSessionRequest,
-    CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult, ListSessionsQuery,
-    ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary, SessionVisibility,
-    StorageError, UpdateSessionRequest,
+    BackendInfo, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
+    CreateSessionRequest, CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult,
+    ListSessionsQuery, ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary,
+    SessionVisibility, StorageError, UpdateSessionRequest,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -22,6 +22,7 @@ use uuid::Uuid;
 /// operation to avoid libsql connection-sharing hazards under concurrency.
 pub struct LocalStorage {
     db: Database,
+    backend_info: BackendInfo,
     /// Owns temporary backing storage for in-memory mode and cleans it on drop.
     _temp_dir: Option<TempDir>,
 }
@@ -54,6 +55,7 @@ impl LocalStorage {
 
         let storage = Self {
             db,
+            backend_info: BackendInfo::local(db_path.to_string()),
             _temp_dir: temp_dir,
         };
         storage.configure_database_pragmas().await?;
@@ -72,6 +74,7 @@ impl LocalStorage {
     ) -> Result<Self, StorageError> {
         let storage = Self {
             db,
+            backend_info: BackendInfo::local(":memory:"),
             _temp_dir: None,
         };
         storage.configure_database_pragmas().await?;
@@ -184,6 +187,10 @@ impl LocalStorage {
 
 #[async_trait]
 impl SessionStorage for LocalStorage {
+    fn backend_info(&self) -> BackendInfo {
+        self.backend_info.clone()
+    }
+
     async fn list_sessions(
         &self,
         query: &ListSessionsQuery,

@@ -4,10 +4,10 @@
 
 use crate::stakpak::{self as stakpak_api, StakpakApiClient, StakpakApiConfig};
 use crate::storage::{
-    Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest, CreateSessionRequest,
-    CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult, ListSessionsQuery,
-    ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary, SessionVisibility,
-    StorageError, UpdateSessionRequest,
+    BackendInfo, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
+    CreateSessionRequest, CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult,
+    ListSessionsQuery, ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary,
+    SessionVisibility, StorageError, UpdateSessionRequest,
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -16,18 +16,30 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct StakpakStorage {
     client: StakpakApiClient,
+    backend_info: BackendInfo,
 }
 
 impl StakpakStorage {
     /// Create a new Stakpak storage client
     pub fn new(api_key: &str, api_endpoint: &str) -> Result<Self, StorageError> {
+        Self::new_with_profile(api_key, api_endpoint, None)
+    }
+
+    pub fn new_with_profile(
+        api_key: &str,
+        api_endpoint: &str,
+        profile: Option<String>,
+    ) -> Result<Self, StorageError> {
         let client = StakpakApiClient::new(&StakpakApiConfig {
             api_key: api_key.to_string(),
             api_endpoint: api_endpoint.to_string(),
         })
         .map_err(StorageError::Connection)?;
 
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            backend_info: BackendInfo::stakpak_api(profile, api_endpoint.to_string()),
+        })
     }
 
     /// Get the underlying API client
@@ -38,6 +50,10 @@ impl StakpakStorage {
 
 #[async_trait]
 impl SessionStorage for StakpakStorage {
+    fn backend_info(&self) -> BackendInfo {
+        self.backend_info.clone()
+    }
+
     async fn list_sessions(
         &self,
         query: &ListSessionsQuery,
@@ -323,5 +339,122 @@ fn map_api_error(error: String) -> StorageError {
         StorageError::InvalidRequest(error)
     } else {
         StorageError::Internal(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{Json, Router, extract::Path, routing::get};
+    use chrono::Utc;
+    use serde_json::json;
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn listed_remote_session_id_is_fetchable_via_get_session() {
+        let session_id = Uuid::new_v4();
+        let checkpoint_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        let list_body = json!({
+            "sessions": [
+                {
+                    "id": session_id,
+                    "title": "Round Trip",
+                    "visibility": "PRIVATE",
+                    "status": "ACTIVE",
+                    "cwd": "/tmp/project",
+                    "created_at": now,
+                    "updated_at": now,
+                    "message_count": 1,
+                    "active_checkpoint_id": checkpoint_id,
+                    "last_message_at": now
+                }
+            ]
+        });
+        let show_body = json!({
+            "session": {
+                "id": session_id,
+                "title": "Round Trip",
+                "visibility": "PRIVATE",
+                "status": "ACTIVE",
+                "cwd": "/tmp/project",
+                "created_at": now,
+                "updated_at": now,
+                "deleted_at": null,
+                "active_checkpoint": {
+                    "id": checkpoint_id,
+                    "session_id": session_id,
+                    "parent_id": null,
+                    "state": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "hi"
+                            }
+                        ],
+                        "metadata": null
+                    },
+                    "created_at": now,
+                    "updated_at": now
+                }
+            }
+        });
+
+        let app = Router::new()
+            .route(
+                "/v1/sessions",
+                get({
+                    let list_body = list_body.clone();
+                    move || {
+                        let list_body = list_body.clone();
+                        async move { Json(list_body) }
+                    }
+                }),
+            )
+            .route(
+                "/v1/sessions/{id}",
+                get({
+                    let show_body = show_body.clone();
+                    move |Path(id): Path<Uuid>| {
+                        let show_body = show_body.clone();
+                        async move {
+                            assert_eq!(id, session_id, "show should request listed session id");
+                            Json(show_body)
+                        }
+                    }
+                }),
+            );
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+
+        let storage = StakpakStorage::new("test-key", &format!("http://{addr}"))
+            .expect("storage should build");
+        let listed = storage
+            .list_sessions(&ListSessionsQuery::new().with_limit(10))
+            .await
+            .expect("list sessions should succeed");
+        let first_id = listed.sessions.first().expect("session from list").id;
+        let fetched = storage
+            .get_session(first_id)
+            .await
+            .expect("get_session should accept listed id");
+
+        assert_eq!(fetched.id, session_id);
+        assert_eq!(fetched.title, "Round Trip");
+        assert_eq!(fetched.cwd.as_deref(), Some("/tmp/project"));
+
+        server.abort();
+        if let Err(join_err) = server.await
+            && !join_err.is_cancelled()
+        {
+            panic!("server task failed: {join_err}");
+        }
     }
 }

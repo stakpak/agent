@@ -2,17 +2,19 @@
 //! `LocalStorage`, so we exercise real storage + filtering + rendering without
 //! spinning up the CLI binary or an HTTP server.
 
+use std::sync::Arc;
+
 use stakpak_api::{
-    Checkpoint, CheckpointState, ListSessionsQuery, LocalStorage, Session, SessionStatus,
-    SessionStorage, SessionVisibility, StorageCreateSessionRequest as CreateSessionRequest,
-    StorageError,
+    BackendInfo, Checkpoint, CheckpointState, ListSessionsQuery, LocalStorage, Session,
+    SessionStatus, SessionStorage, SessionVisibility,
+    StorageCreateSessionRequest as CreateSessionRequest, StorageError,
 };
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use uuid::Uuid;
 
 use super::classify_storage_error;
 use super::messages::{RoleFilter, filter_messages};
-use super::output::{OutputMode, render_error, render_list, render_show};
+use super::output::{self, OutputMode, render_error};
 
 async fn in_memory_storage() -> LocalStorage {
     LocalStorage::new(":memory:")
@@ -46,6 +48,27 @@ fn assistant_tool_call_msg(name: &str, tool_call_id: &str) -> ChatMessage {
     }
 }
 
+fn local_backend() -> BackendInfo {
+    BackendInfo::local("/tmp/.stakpak/data/local.db")
+}
+
+fn remote_backend() -> BackendInfo {
+    BackendInfo::stakpak_api(Some("dev".to_string()), "https://api.stakpak.test")
+}
+
+fn render_list(sessions: &[stakpak_api::SessionSummary], mode: OutputMode) -> String {
+    output::render_list(sessions, &local_backend(), mode)
+}
+
+fn render_show(
+    session: &Session,
+    messages: &[ChatMessage],
+    profile: Option<&str>,
+    mode: OutputMode,
+) -> String {
+    output::render_show(session, messages, &local_backend(), profile, mode)
+}
+
 // =============================================================================
 // 5.2 — `stakpak sessions list --json` end-to-end
 // =============================================================================
@@ -77,7 +100,26 @@ async fn sessions_list_json_emits_array_of_session_summaries() {
 
     let rendered = render_list(&result.sessions, OutputMode::Json);
     let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-    let arr = value.as_array().expect("array at top level");
+    let obj = value.as_object().expect("object at top level");
+    let backend = obj
+        .get("backend")
+        .and_then(serde_json::Value::as_object)
+        .expect("backend object");
+    assert_eq!(
+        backend.get("kind").and_then(serde_json::Value::as_str),
+        Some("local")
+    );
+    assert_eq!(
+        backend
+            .get("store_path")
+            .and_then(serde_json::Value::as_str),
+        Some("/tmp/.stakpak/data/local.db")
+    );
+
+    let arr = obj
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .expect("sessions array at top level");
     assert_eq!(arr.len(), 2);
 
     for s in arr {
@@ -110,7 +152,14 @@ async fn sessions_list_json_empty_storage_is_empty_array() {
 
     let rendered = render_list(&result.sessions, OutputMode::Json);
     let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-    assert!(value.as_array().unwrap().is_empty());
+    let obj = value.as_object().expect("object at top level");
+    assert!(
+        obj.get("sessions")
+            .and_then(serde_json::Value::as_array)
+            .expect("sessions array")
+            .is_empty()
+    );
+    assert_eq!(obj["backend"]["kind"].as_str(), Some("local"));
 }
 
 #[tokio::test]
@@ -138,8 +187,9 @@ async fn sessions_list_json_respects_search_filter() {
 
     let rendered = render_list(&result.sessions, OutputMode::Json);
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-    let arr = value.as_array().unwrap();
+    let arr = value["sessions"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
+    assert_eq!(value["backend"]["kind"].as_str(), Some("local"));
     assert!(
         arr[0]["title"]
             .as_str()
@@ -165,6 +215,7 @@ async fn sessions_list_human_shows_header_when_non_empty() {
         .await
         .unwrap();
     let rendered = render_list(&result.sessions, OutputMode::Human);
+    assert!(rendered.starts_with("Backend: local (/tmp/.stakpak/data/local.db)\n"));
     assert!(rendered.contains("ID"));
     assert!(rendered.contains("TITLE"));
     assert!(rendered.contains("MSGS"));
@@ -174,7 +225,32 @@ async fn sessions_list_human_shows_header_when_non_empty() {
 #[tokio::test]
 async fn sessions_list_human_empty_storage_is_friendly_message() {
     let rendered = render_list(&[], OutputMode::Human);
+    assert!(rendered.starts_with("Backend: local (/tmp/.stakpak/data/local.db)\n"));
     assert!(rendered.contains("No sessions found"));
+}
+
+#[test]
+fn render_list_human_includes_local_backend_header() {
+    let rendered = output::render_list(&[], &local_backend(), OutputMode::Human);
+    assert!(rendered.starts_with("Backend: local (/tmp/.stakpak/data/local.db)\n"));
+}
+
+#[test]
+fn render_show_human_includes_remote_backend_header() {
+    let session = fake_session(Uuid::new_v4(), true);
+    let rendered = output::render_show(
+        &session,
+        &[],
+        &remote_backend(),
+        Some("dev"),
+        OutputMode::Human,
+    );
+    assert!(
+        rendered.starts_with(
+            "Backend: stakpak-api (profile: dev, endpoint: https://api.stakpak.test)\n"
+        ),
+        "unexpected header: {rendered}"
+    );
 }
 
 // =============================================================================
@@ -226,6 +302,7 @@ async fn sessions_show_role_assistant_last_json_returns_one_assistant_message() 
         "created_at",
         "updated_at",
         "messages",
+        "backend",
     ] {
         assert!(
             obj.contains_key(*field),
@@ -233,6 +310,7 @@ async fn sessions_show_role_assistant_last_json_returns_one_assistant_message() 
             field
         );
     }
+    assert_eq!(obj["backend"]["kind"].as_str(), Some("local"));
 
     let messages = obj.get("messages").unwrap().as_array().unwrap();
     assert_eq!(messages.len(), 1);
@@ -269,6 +347,7 @@ async fn sessions_show_human_includes_resume_hint_and_metadata() {
         None,
         OutputMode::Human,
     );
+    assert!(rendered.starts_with("Backend: local (/tmp/.stakpak/data/local.db)\n"));
     assert!(rendered.contains(&format!("Resume: stakpak --session {}", session_id)));
     assert!(rendered.contains("demo"));
     assert!(rendered.contains("/tmp/proj"));
@@ -326,6 +405,44 @@ async fn sessions_show_json_is_object_not_array() {
         value.is_object(),
         "show JSON must be an object, not an array"
     );
+    assert_eq!(value["backend"]["kind"].as_str(), Some("local"));
+}
+
+#[tokio::test]
+async fn sessions_cli_json_roundtrip_list_then_show_does_not_surface_not_found() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new(
+            "round trip",
+            vec![msg(Role::User, "hello")],
+        ))
+        .await
+        .unwrap();
+
+    let list_json = super::list_sessions_output(storage.clone(), None, 20, 0, OutputMode::Json)
+        .await
+        .expect("list output should succeed");
+    let list_value: serde_json::Value = serde_json::from_str(&list_json).expect("valid list JSON");
+    let session_id = list_value["sessions"][0]["id"]
+        .as_str()
+        .expect("session id in list output");
+
+    let show_json = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        false,
+        None,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output should succeed");
+    let show_value: serde_json::Value = serde_json::from_str(&show_json).expect("valid show JSON");
+
+    assert_eq!(session_id, created.session_id.to_string());
+    assert_eq!(show_value["id"].as_str(), Some(session_id));
+    assert_eq!(show_value["title"].as_str(), Some("round trip"));
 }
 
 // =============================================================================
@@ -406,12 +523,68 @@ async fn render_list_human_truncates_long_titles_with_ellipsis() {
     );
 }
 
+#[tokio::test]
+async fn render_list_human_collapses_multiline_titles_to_single_row() {
+    let storage = in_memory_storage().await;
+    let _ = storage
+        .create_session(&CreateSessionRequest::new(
+            "deploy\n\tprod\r\ncluster",
+            vec![msg(Role::User, "hi")],
+        ))
+        .await
+        .unwrap();
+
+    let result = storage
+        .list_sessions(&ListSessionsQuery::new())
+        .await
+        .unwrap();
+    let rendered = render_list(&result.sessions, OutputMode::Human);
+    let lines: Vec<&str> = rendered.lines().collect();
+
+    assert_eq!(
+        lines.len(),
+        4,
+        "expected backend header, table header, separator, and one row"
+    );
+    assert!(
+        rendered.contains("deploy prod cluster"),
+        "expected collapsed title in one cell, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("deploy\n") && !rendered.contains("\n\tprod"),
+        "title cell must not contain stray line breaks: {rendered}"
+    );
+}
+
 #[test]
 fn render_show_human_with_no_active_checkpoint_notes_none() {
     let session = fake_session(Uuid::new_v4(), false);
     let rendered = render_show(&session, &[], None, OutputMode::Human);
     assert!(rendered.contains("Checkpoint:  (none)"));
     assert!(rendered.contains("(no messages)"));
+}
+
+#[test]
+fn render_show_human_collapses_multiline_title_without_shifting_metadata() {
+    let mut session = fake_session(Uuid::new_v4(), true);
+    session.title = "deploy\n\tprod\r\ncluster".to_string();
+
+    let rendered = render_show(&session, &[], None, OutputMode::Human);
+    let lines: Vec<&str> = rendered.lines().collect();
+    let title_line = lines
+        .iter()
+        .find(|line| line.starts_with("Title:"))
+        .copied()
+        .expect("title line");
+    let status_index = lines
+        .iter()
+        .position(|line| line.starts_with("Status:"))
+        .expect("status line");
+
+    assert_eq!(title_line, "Title:       deploy prod cluster");
+    assert_eq!(lines[status_index - 1], title_line);
+    assert_eq!(lines[status_index], "Status:      ACTIVE");
+    assert!(rendered.contains("Checkpoint:"));
 }
 
 #[test]
