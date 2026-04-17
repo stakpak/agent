@@ -23,6 +23,8 @@ use std::sync::LazyLock;
 /// `us.anthropic.{id}-v1:0` which works for most Anthropic models on Bedrock.
 static ANTHROPIC_TO_BEDROCK: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
+        // Claude 4.7 (no -v1:0 or -v1 suffix — AWS ships this family without a version suffix)
+        ("claude-opus-4-7", "us.anthropic.claude-opus-4-7"),
         // Claude 4.6
         ("claude-opus-4-6", "us.anthropic.claude-opus-4-6-v1"),
         // Claude 4.5
@@ -290,6 +292,22 @@ mod tests {
         assert_eq!(
             resolve_bedrock_model_id("claude-future-model-20260101"),
             "us.anthropic.claude-future-model-20260101-v1:0"
+        );
+    }
+
+    #[test]
+    fn test_opus_4_7_short_id_drops_version_suffix() {
+        assert_eq!(
+            resolve_bedrock_model_id("claude-opus-4-7"),
+            "us.anthropic.claude-opus-4-7"
+        );
+    }
+
+    #[test]
+    fn test_opus_4_7_cross_region_id_passes_through() {
+        assert_eq!(
+            resolve_bedrock_model_id("us.anthropic.claude-opus-4-7"),
+            "us.anthropic.claude-opus-4-7"
         );
     }
 }

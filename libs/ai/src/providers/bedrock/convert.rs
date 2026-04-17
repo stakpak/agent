@@ -279,6 +279,27 @@ mod tests {
     }
 
     #[test]
+    fn test_opus_4_7_strips_temperature_and_resolves_model_id() {
+        use crate::types::GenerateOptions;
+
+        let mut request = GenerateRequest::new(
+            Model::custom("claude-opus-4-7", "bedrock"),
+            vec![Message::new(Role::User, "Hello")],
+        );
+        request.options = GenerateOptions::default();
+        request.options.temperature = Some(0.0);
+
+        let result = to_bedrock_body(&request, &dummy_anthropic_config()).unwrap();
+
+        assert!(
+            result.body.get("temperature").is_none(),
+            "Opus 4.7 Bedrock body must not contain `temperature`, got: {:?}",
+            result.body
+        );
+        assert_eq!(result.model_id, "us.anthropic.claude-opus-4-7");
+    }
+
+    #[test]
     fn test_cross_region_model_id_passthrough() {
         let request = GenerateRequest::new(
             Model::custom("us.anthropic.claude-sonnet-4-5-20250929-v1:0", "bedrock"),

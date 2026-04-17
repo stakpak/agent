@@ -8,12 +8,25 @@ use super::types::{
 };
 use crate::error::{Error, Result};
 use crate::types::{
-    CacheContext, CacheControlValidator, CacheWarning, ContentPart, FinishReason, FinishReasonKind,
-    GenerateRequest, GenerateResponse, InputTokenDetails, Message, OutputTokenDetails,
-    ResponseContent, Role, Usage,
+    CacheContext, CacheControlValidator, CacheWarning, CacheWarningType, ContentPart, FinishReason,
+    FinishReasonKind, GenerateRequest, GenerateResponse, InputTokenDetails, Message,
+    OutputTokenDetails, ResponseContent, Role, Usage,
 };
 use serde_json::json;
 use std::collections::HashSet;
+
+/// Check whether the target model belongs to the Opus 4.7 (or later) family.
+///
+/// Opus 4.7 dropped `temperature`, `top_p`, `top_k`, and `thinking.budget_tokens` from
+/// the Messages API. This helper centralizes detection so the conversion layer can shape
+/// requests to the subset of parameters those models still accept. Case-insensitive prefix
+/// match, mirroring `is_reasoning_model` in `providers/openai/convert.rs`.
+///
+/// See: https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7
+fn is_opus_4_7_or_later(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    id.starts_with("claude-opus-4-7")
+}
 
 /// Result of converting a request to Anthropic format
 pub struct AnthropicConversionResult {
@@ -94,12 +107,22 @@ pub fn to_anthropic_request(
         }),
     });
 
-    // Convert thinking config from provider options to Anthropic format
+    let is_opus_47 = is_opus_4_7_or_later(&req.model.id);
+
     let thinking = req.provider_options.as_ref().and_then(|opts| {
         if let crate::types::ProviderOptions::Anthropic(anthropic) = opts {
-            anthropic.thinking.as_ref().map(|t| AnthropicThinking {
-                type_: "enabled".to_string(),
-                budget_tokens: t.budget_tokens.max(1024),
+            anthropic.thinking.as_ref().map(|t| {
+                if is_opus_47 {
+                    AnthropicThinking {
+                        type_: "adaptive".to_string(),
+                        budget_tokens: None,
+                    }
+                } else {
+                    AnthropicThinking {
+                        type_: "enabled".to_string(),
+                        budget_tokens: Some(t.budget_tokens.max(1024)),
+                    }
+                }
             })
         } else {
             None
@@ -107,7 +130,24 @@ pub fn to_anthropic_request(
     });
 
     let has_cache_control = validator.breakpoint_count() > 0;
-    let warnings = validator.take_warnings();
+    let mut warnings = validator.take_warnings();
+
+    // top_k is already None at the struct level; only cover temperature/top_p on input.
+    let (temperature, top_p) = if is_opus_47 {
+        if req.options.temperature.is_some() {
+            warnings.push(opus_47_strip_warning("temperature"));
+        }
+        if req.options.top_p.is_some() {
+            warnings.push(opus_47_strip_warning("top_p"));
+        }
+        (None, None)
+    } else {
+        (req.options.temperature, req.options.top_p)
+    };
+
+    if is_opus_47 && thinking.is_some() {
+        warnings.push(opus_47_thinking_rewrite_warning());
+    }
 
     Ok(AnthropicConversionResult {
         request: AnthropicRequest {
@@ -115,8 +155,8 @@ pub fn to_anthropic_request(
             messages,
             max_tokens,
             system,
-            temperature: req.options.temperature,
-            top_p: req.options.top_p,
+            temperature,
+            top_p,
             top_k: None,
             metadata: None,
             stop_sequences: req.options.stop_sequences.clone(),
@@ -128,6 +168,24 @@ pub fn to_anthropic_request(
         warnings,
         has_cache_control,
     })
+}
+
+fn opus_47_strip_warning(param: &str) -> CacheWarning {
+    CacheWarning::new(
+        CacheWarningType::UnsupportedContext,
+        format!(
+            "Claude Opus 4.7 removed the `{}` sampling parameter; it was dropped from the outgoing request.",
+            param
+        ),
+    )
+}
+
+fn opus_47_thinking_rewrite_warning() -> CacheWarning {
+    CacheWarning::new(
+        CacheWarningType::UnsupportedContext,
+        "Claude Opus 4.7 removed `thinking.budget_tokens`; request rewritten to `thinking: {type: \"adaptive\"}`."
+            .to_string(),
+    )
 }
 
 /// Build system content with smart caching and OAuth handling
@@ -2628,5 +2686,168 @@ mod tests {
         // Empty user removed → whitespace assistant removed → just "Hello"
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");
+    }
+
+    // ---- Opus 4.7 helper ----------------------------------------------------
+
+    #[test]
+    fn test_is_opus_4_7_or_later_matches_canonical_id() {
+        assert!(is_opus_4_7_or_later("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn test_is_opus_4_7_or_later_is_case_insensitive() {
+        assert!(is_opus_4_7_or_later("CLAUDE-OPUS-4-7"));
+    }
+
+    #[test]
+    fn test_is_opus_4_7_or_later_rejects_opus_4_6() {
+        assert!(!is_opus_4_7_or_later("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn test_is_opus_4_7_or_later_rejects_sonnet_4_6() {
+        assert!(!is_opus_4_7_or_later("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn test_is_opus_4_7_or_later_rejects_empty() {
+        assert!(!is_opus_4_7_or_later(""));
+    }
+
+    // ---- Opus 4.7 request shaping ------------------------------------------
+
+    fn request_for(model_id: &str) -> crate::types::GenerateRequest {
+        crate::types::GenerateRequest::new(
+            crate::types::Model::custom(model_id, "anthropic"),
+            vec![crate::types::Message::new(
+                crate::types::Role::User,
+                "Hello",
+            )],
+        )
+    }
+
+    fn anthropic_config() -> crate::providers::anthropic::types::AnthropicConfig {
+        crate::providers::anthropic::types::AnthropicConfig::new("key")
+    }
+
+    #[test]
+    fn test_opus_4_7_strips_temperature_and_top_p() {
+        let mut req = request_for("claude-opus-4-7");
+        req.options.temperature = Some(0.0);
+        req.options.top_p = Some(0.9);
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert_eq!(result.request.temperature, None);
+        assert_eq!(result.request.top_p, None);
+        assert_eq!(result.request.top_k, None);
+    }
+
+    #[test]
+    fn test_opus_4_6_preserves_temperature_and_top_p() {
+        let mut req = request_for("claude-opus-4-6");
+        req.options.temperature = Some(0.7);
+        req.options.top_p = Some(0.95);
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert_eq!(result.request.temperature, Some(0.7));
+        assert_eq!(result.request.top_p, Some(0.95));
+    }
+
+    #[test]
+    fn test_opus_4_7_none_temperature_stays_none() {
+        let req = request_for("claude-opus-4-7");
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert_eq!(result.request.temperature, None);
+    }
+
+    // ---- Thinking rewrite --------------------------------------------------
+
+    fn anthropic_thinking_options(budget_tokens: u32) -> crate::types::ProviderOptions {
+        crate::types::ProviderOptions::Anthropic(crate::types::AnthropicOptions {
+            thinking: Some(crate::types::ThinkingOptions::new(budget_tokens)),
+            effort: None,
+        })
+    }
+
+    #[test]
+    fn test_opus_4_7_thinking_serializes_to_adaptive_only() {
+        let mut req = request_for("claude-opus-4-7");
+        req.provider_options = Some(anthropic_thinking_options(32000));
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        let thinking_json = serde_json::to_value(result.request.thinking.unwrap()).unwrap();
+        assert_eq!(thinking_json, serde_json::json!({"type": "adaptive"}));
+    }
+
+    #[test]
+    fn test_opus_4_6_preserves_enabled_thinking_budget() {
+        let mut req = request_for("claude-opus-4-6");
+        req.provider_options = Some(anthropic_thinking_options(32000));
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        let thinking_json = serde_json::to_value(result.request.thinking.unwrap()).unwrap();
+        assert_eq!(
+            thinking_json,
+            serde_json::json!({"type": "enabled", "budget_tokens": 32000})
+        );
+    }
+
+    // ---- Warning surfacing --------------------------------------------------
+
+    fn has_opus_47_warning(warnings: &[CacheWarning], needle: &str) -> bool {
+        warnings
+            .iter()
+            .any(|w| w.message.contains("Opus 4.7") && w.message.contains(needle))
+    }
+
+    #[test]
+    fn test_opus_4_7_emits_warning_when_temperature_stripped() {
+        let mut req = request_for("claude-opus-4-7");
+        req.options.temperature = Some(0.0);
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert!(
+            has_opus_47_warning(&result.warnings, "temperature"),
+            "expected Opus-4.7 temperature warning, got {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn test_opus_4_7_emits_no_warning_when_nothing_supplied() {
+        let req = request_for("claude-opus-4-7");
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("Opus 4.7")),
+            "expected no Opus-4.7 warnings, got {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn test_opus_4_7_emits_warning_when_thinking_rewritten() {
+        let mut req = request_for("claude-opus-4-7");
+        req.provider_options = Some(anthropic_thinking_options(32000));
+
+        let result = to_anthropic_request(&req, &anthropic_config(), false).unwrap();
+
+        assert!(
+            has_opus_47_warning(&result.warnings, "adaptive"),
+            "expected Opus-4.7 thinking-rewrite warning, got {:?}",
+            result.warnings
+        );
     }
 }
