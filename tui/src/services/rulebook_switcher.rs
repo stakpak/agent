@@ -356,4 +356,3 @@ fn clean_uri_for_display(uri: &str) -> String {
 
     cleaned
 }
-

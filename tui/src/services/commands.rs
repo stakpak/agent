@@ -1131,4 +1131,3 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     // Render the border with title last (so it's on top)
     f.render_widget(block, area);
 }
-

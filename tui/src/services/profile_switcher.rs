@@ -168,4 +168,3 @@ pub fn render_profile_switch_overlay(f: &mut Frame, state: &AppState) {
 
     f.render_widget(paragraph, area);
 }
-

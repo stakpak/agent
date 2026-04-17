@@ -494,4 +494,3 @@ fn get_provider_display_name(provider: &str) -> &str {
         other => other,
     }
 }
-

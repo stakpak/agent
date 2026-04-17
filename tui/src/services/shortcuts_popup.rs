@@ -873,4 +873,3 @@ fn render_sessions_section(
 
     f.render_widget(help, help_area);
 }
-
