@@ -302,12 +302,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     render_toast(f, state);
 
     // Render "existing plan found" modal
-    if state.plan_mode_state.existing_prompt.is_some() {
+    if state.plan_mode_state.has_existing_prompt() {
         render_existing_plan_modal(f, state);
     }
 
     // Render plan review overlay (full-screen, on top of everything)
-    if state.plan_review_state.is_visible {
+    if state.plan_review_state.is_visible() {
         crate::services::plan_review::render_plan_review(f, state, f.area());
     }
 }

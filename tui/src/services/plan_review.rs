@@ -56,13 +56,13 @@ pub fn open_plan_review(state: &mut AppState) {
     state.plan_review_state.resolved_anchors.clear();
     state.plan_review_state.comments = None;
 
-    state.plan_review_state.is_visible = true;
+    state.plan_review_state.show();
 }
 
 /// Close the plan review overlay.
 pub fn close_plan_review(state: &mut AppState) {
-    state.plan_review_state.is_visible = false;
-    state.plan_review_state.confirm = None;
+    state.plan_review_state.hide();
+    state.plan_review_state.dismiss_confirm();
 }
 
 /// Move cursor up in the plan review.
@@ -1668,11 +1668,13 @@ pub fn open_submit_confirm(state: &mut AppState) {
         .unwrap_or(0);
 
     if unresolved_count > 0 {
-        state.plan_review_state.confirm = Some(ConfirmAction::Feedback {
-            count: unresolved_count,
-        });
+        state
+            .plan_review_state
+            .set_confirm(ConfirmAction::Feedback {
+                count: unresolved_count,
+            });
     } else {
-        state.plan_review_state.confirm = Some(ConfirmAction::Approve);
+        state.plan_review_state.set_confirm(ConfirmAction::Approve);
     }
 }
 
@@ -1693,10 +1695,12 @@ pub fn open_delete_confirm(state: &mut AppState) {
         return; // No comments on this line
     }
 
-    state.plan_review_state.confirm = Some(ConfirmAction::DeleteComments {
-        line: cursor,
-        comment_ids,
-    });
+    state
+        .plan_review_state
+        .set_confirm(ConfirmAction::DeleteComments {
+            line: cursor,
+            comment_ids,
+        });
 }
 
 /// Execute the confirmed action and close the dialog.
@@ -1704,7 +1708,7 @@ pub fn execute_confirm(
     state: &mut AppState,
     output_tx: &tokio::sync::mpsc::Sender<crate::app::OutputEvent>,
 ) {
-    let Some(action) = state.plan_review_state.confirm.take() else {
+    let Some(action) = state.plan_review_state.take_confirm() else {
         return;
     };
 
@@ -1738,31 +1742,30 @@ pub fn close_comment_modal(state: &mut AppState) {
     state.plan_review_state.selected_comment = None;
     state.plan_review_state.modal_kind = None;
 }
-
 /// Handle a character input in the comment modal.
 pub fn modal_input_char(state: &mut AppState, c: char) {
-    if state.plan_review_state.show_comment_modal {
+    if state.plan_review_state.has_comment_modal() {
         state.plan_review_state.comment_input.push(c);
     }
 }
 
 /// Handle backspace in the comment modal.
 pub fn modal_input_backspace(state: &mut AppState) {
-    if state.plan_review_state.show_comment_modal {
+    if state.plan_review_state.has_comment_modal() {
         state.plan_review_state.comment_input.pop();
     }
 }
 
 /// Handle newline in the comment modal (Enter key adds newline).
 pub fn modal_input_newline(state: &mut AppState) {
-    if state.plan_review_state.show_comment_modal {
+    if state.plan_review_state.has_comment_modal() {
         state.plan_review_state.comment_input.push('\n');
     }
 }
 
 /// Render the comment modal overlay.
 pub fn render_comment_modal(f: &mut Frame, state: &AppState, area: Rect) {
-    if !state.plan_review_state.show_comment_modal {
+    if !state.plan_review_state.has_comment_modal() {
         return;
     }
 

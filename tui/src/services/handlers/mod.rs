@@ -201,11 +201,11 @@ pub fn update(
     }
 
     // Intercept keys for "existing plan found" modal
-    if state.plan_mode_state.existing_prompt.is_some() && !skip_popup_interception {
+    if state.plan_mode_state.has_existing_prompt() && !skip_popup_interception {
         match event {
             InputEvent::InputChanged('u') => {
                 // Use existing plan — proceed with plan mode, keep plan.md
-                if let Some(prompt) = state.plan_mode_state.existing_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.take_existing_prompt() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -215,7 +215,7 @@ pub fn update(
                 // Start new — archive existing plan, then activate
                 let session_dir = std::path::Path::new(".stakpak/session");
                 crate::services::plan::archive_plan_file(session_dir);
-                if let Some(prompt) = state.plan_mode_state.existing_prompt.take() {
+                if let Some(prompt) = state.plan_mode_state.take_existing_prompt() {
                     let _ =
                         output_tx.try_send(OutputEvent::PlanModeActivated(prompt.inline_prompt));
                 }
@@ -223,7 +223,7 @@ pub fn update(
             }
             InputEvent::HandleEsc => {
                 // Cancel — dismiss modal, don't enter plan mode
-                state.plan_mode_state.existing_prompt = None;
+                state.plan_mode_state.dismiss_existing_prompt();
                 return;
             }
             InputEvent::AttemptQuit | InputEvent::Quit => {
@@ -236,9 +236,9 @@ pub fn update(
     }
 
     // Intercept keys for Plan Review overlay
-    if state.plan_review_state.is_visible && !skip_popup_interception {
+    if state.plan_review_state.is_visible() && !skip_popup_interception {
         // Sub-intercept: comment modal is open
-        if state.plan_review_state.show_comment_modal {
+        if state.plan_review_state.has_comment_modal() {
             match event {
                 InputEvent::HandleEsc => {
                     crate::services::plan_review::close_comment_modal(state);
@@ -269,11 +269,11 @@ pub fn update(
                     return; // Consume everything else
                 }
             }
-        } else if state.plan_review_state.confirm.is_some() {
+        } else if state.plan_review_state.has_confirm() {
             // Confirmation dialog is open — y/Enter confirms, n/Esc cancels
             match event {
                 InputEvent::HandleEsc | InputEvent::InputChanged('n') => {
-                    state.plan_review_state.confirm = None;
+                    state.plan_review_state.dismiss_confirm();
                     return;
                 }
                 InputEvent::InputSubmitted
@@ -1436,8 +1436,8 @@ pub fn update(
         InputEvent::PlanModeChanged(active) => {
             use crate::services::helper_block::push_styled_message;
 
-            let was_active = state.plan_mode_state.is_active;
-            state.plan_mode_state.is_active = active;
+            let was_active = state.plan_mode_state.is_active();
+            state.plan_mode_state.set_active(active);
 
             // Show system message when entering plan mode
             if active && !was_active {
@@ -1453,14 +1453,14 @@ pub fn update(
         InputEvent::ExistingPlanFound(prompt) => {
             // Backend detected an existing plan at --plan startup.
             // Show the modal so the user can choose to resume or start fresh.
-            state.plan_mode_state.existing_prompt = Some(prompt);
+            state.plan_mode_state.set_existing_prompt(prompt);
         }
 
         // Plan review events
         InputEvent::TogglePlanReview => {
-            if state.plan_review_state.is_visible {
+            if state.plan_review_state.is_visible() {
                 crate::services::plan_review::close_plan_review(state);
-            } else if state.plan_mode_state.is_active {
+            } else if state.plan_mode_state.is_active() {
                 crate::services::plan_review::open_plan_review(state);
             } else {
                 // Fall through to command palette when not in plan mode

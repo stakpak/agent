@@ -47,7 +47,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let footer_height = 7; // Separator, session ID line, empty, version, empty, shortcuts (2 lines)
 
     // Plan section is only visible when plan mode is active
-    let plan_active = state.plan_mode_state.is_active;
+    let plan_active = state.plan_mode_state.is_active();
     let plan_collapsed = state
         .side_panel_state
         .is_collapsed
@@ -187,7 +187,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
 
     // Derive phase badge from plan_metadata status
-    let phase_badge = match state.plan_mode_state.metadata.as_ref().map(|m| m.status) {
+    let phase_badge = match state.plan_mode_state.plan_status() {
         Some(PlanStatus::Drafting) => "",
         Some(PlanStatus::PendingReview) => "",
         Some(PlanStatus::Approved) => "",
@@ -227,8 +227,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     };
 
     // Phase row — derived from plan_metadata status
-    let (phase_label, phase_color) = match state.plan_mode_state.metadata.as_ref().map(|m| m.status)
-    {
+    let (phase_label, phase_color) = match state.plan_mode_state.plan_status() {
         Some(PlanStatus::Drafting) => ("Drafting", ThemeColors::yellow()),
         Some(PlanStatus::PendingReview) => ("Pending Review", ThemeColors::cyan()),
         Some(PlanStatus::Approved) => ("Approved", ThemeColors::green()),
@@ -237,7 +236,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     lines.push(make_row("Phase", phase_label.to_string(), phase_color));
 
     // Plan metadata (from polled file)
-    if let Some(ref meta) = state.plan_mode_state.metadata {
+    if let Some(meta) = state.plan_mode_state.plan_metadata() {
         // Title — truncate to fit
         let avail_for_title = (area.width as usize).saturating_sub(12);
         let title = truncate_string(&meta.title, avail_for_title);

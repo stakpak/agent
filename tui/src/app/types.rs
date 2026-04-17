@@ -650,6 +650,61 @@ pub struct PlanModeState {
     pub existing_prompt: Option<ExistingPlanPrompt>,
 }
 
+impl PlanModeState {
+    pub fn clear(&mut self) {
+        self.is_active = false;
+        self.metadata = None;
+        self.content_hash = None;
+        self.previous_status = None;
+        self.review_auto_opened = false;
+        self.existing_prompt = None;
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active
+    }
+
+    pub fn set_active(&mut self, active: bool) {
+        self.is_active = active;
+    }
+
+    pub fn has_existing_prompt(&self) -> bool {
+        self.existing_prompt.is_some()
+    }
+
+    pub fn take_existing_prompt(&mut self) -> Option<ExistingPlanPrompt> {
+        self.existing_prompt.take()
+    }
+
+    pub fn set_existing_prompt(&mut self, prompt: ExistingPlanPrompt) {
+        self.existing_prompt = Some(prompt);
+    }
+
+    pub fn dismiss_existing_prompt(&mut self) {
+        self.existing_prompt = None;
+    }
+
+    pub fn plan_status(&self) -> Option<crate::services::plan::PlanStatus> {
+        self.metadata.as_ref().map(|m| m.status)
+    }
+
+    pub fn plan_metadata(&self) -> Option<&crate::services::plan::PlanMetadata> {
+        self.metadata.as_ref()
+    }
+
+    pub fn was_review_auto_opened(&self) -> bool {
+        self.review_auto_opened
+    }
+
+    pub fn mark_review_auto_opened(&mut self) {
+        self.review_auto_opened = true;
+    }
+
+    pub fn reset_review_auto_opened(&mut self) {
+        self.review_auto_opened = false;
+    }
+}
+
 #[derive(Default)]
 pub struct PlanReviewState {
     /// Whether the plan review overlay is visible
@@ -676,6 +731,55 @@ pub struct PlanReviewState {
     pub modal_kind: Option<crate::services::plan_review::CommentModalKind>,
     /// Confirmation dialog currently shown (approve, feedback, delete)
     pub confirm: Option<crate::services::plan_review::ConfirmAction>,
+}
+
+impl PlanReviewState {
+    pub fn clear(&mut self) {
+        self.is_visible = false;
+        self.scroll = 0;
+        self.cursor_line = 0;
+        self.content.clear();
+        self.lines.clear();
+        self.comments = None;
+        self.resolved_anchors.clear();
+        self.show_comment_modal = false;
+        self.comment_input.clear();
+        self.selected_comment = None;
+        self.modal_kind = None;
+        self.confirm = None;
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.is_visible
+    }
+
+    pub fn show(&mut self) {
+        self.is_visible = true;
+    }
+
+    pub fn hide(&mut self) {
+        self.is_visible = false;
+    }
+
+    pub fn has_comment_modal(&self) -> bool {
+        self.show_comment_modal
+    }
+
+    pub fn has_confirm(&self) -> bool {
+        self.confirm.is_some()
+    }
+
+    pub fn set_confirm(&mut self, action: crate::services::plan_review::ConfirmAction) {
+        self.confirm = Some(action);
+    }
+
+    pub fn dismiss_confirm(&mut self) {
+        self.confirm = None;
+    }
+
+    pub fn take_confirm(&mut self) -> Option<crate::services::plan_review::ConfirmAction> {
+        self.confirm.take()
+    }
 }
 
 #[derive(Default)]
@@ -909,8 +1013,7 @@ impl AskUserState {
                 .get(&question_label)
                 .cloned()
                 .unwrap_or_default();
-            let answer_json =
-                serde_json::to_string(&selected).unwrap_or_else(|_| "[]".to_string());
+            let answer_json = serde_json::to_string(&selected).unwrap_or_else(|_| "[]".to_string());
             let answer = AskUserAnswer {
                 question_label: question_label.clone(),
                 answer: answer_json,

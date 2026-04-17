@@ -279,7 +279,7 @@ impl AppState {
         use crate::services::plan;
 
         // Only poll when plan mode is active
-        if !self.plan_mode_state.is_active {
+        if !self.plan_mode_state.is_active() {
             return None;
         }
 
