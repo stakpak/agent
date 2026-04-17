@@ -1514,6 +1514,54 @@ mod tests {
     }
 
     #[test]
+    fn test_telegram_bot_token_redaction_bare() {
+        // Bare Telegram bot token without any surrounding context — this was
+        // previously missed because the gitleaks rule requires "telegr" + assignment.
+        let token = "8797664862:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4";
+        let result = redact_secrets(token, None, &HashMap::new(), false);
+
+        assert!(
+            !result.redaction_map.is_empty(),
+            "Should redact bare Telegram bot token. Got: {}",
+            result.redacted_string
+        );
+        assert!(
+            !result.redacted_string.contains(token),
+            "Token should be replaced with redaction placeholder"
+        );
+        assert!(
+            result
+                .redacted_string
+                .contains("[REDACTED_SECRET:telegram-bot-token-standalone:"),
+            "Should use telegram-bot-token-standalone rule. Got: {}",
+            result.redacted_string
+        );
+
+        // Verify round-trip restoration
+        let restored = restore_secrets(&result.redacted_string, &result.redaction_map);
+        assert_eq!(restored, token);
+    }
+
+    #[test]
+    fn test_telegram_bot_token_redaction_in_context() {
+        // Token embedded in a config-style line with "telegram" keyword — should
+        // be caught by either the standalone rule or the original gitleaks rule.
+        let input = "TELEGRAM_BOT_TOKEN=8797664862:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4";
+        let result = redact_secrets(input, None, &HashMap::new(), false);
+
+        assert!(
+            !result.redaction_map.is_empty(),
+            "Should redact Telegram bot token in config context"
+        );
+        assert!(
+            !result
+                .redacted_string
+                .contains("8797664862:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4"),
+            "Token should be replaced with redaction placeholder"
+        );
+    }
+
+    #[test]
     fn test_huawei_cloud_credentials_detection() {
         // Test Huawei Cloud credentials in CSV format
         // Using obviously fake test values (TESTHUAWEI prefix) to avoid GitHub push protection
