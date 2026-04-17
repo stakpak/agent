@@ -9,6 +9,7 @@ members = [
   "libs/agent-core",
   "libs/server",
   "libs/gateway",
+  "libs/ak",
   "libs/mcp/client",
   "libs/mcp/server",
   "libs/mcp/proxy",
@@ -34,6 +35,7 @@ stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.73" }
 stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.73" }
 stakpak-agent-core = { path = "libs/agent-core", version = "0.3.73" }
 stakpak-gateway = { path = "libs/gateway", version = "0.3.73" }
+stakpak-ak = { path = "libs/ak", version = "0.3.73" }
 stakpak-server = { path = "libs/server", version = "0.3.73" }
 stakpak-tui = { path = "tui", version = "0.3.73" }
 stakpak-shared = { path = "libs/shared", version = "0.3.73" }
