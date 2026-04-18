@@ -1,18 +1,15 @@
 //! Login command - authenticate with LLM providers
 
-use crate::config::AppConfig;
 use crate::config::{ProfileConfig, ProviderType};
+use crate::onboarding::auth_flow::{AuthFlowConfig, run_provider_auth_flow};
 use crate::onboarding::config_templates::{
     generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
     generate_openai_profile,
 };
-use crate::onboarding::menu::{prompt_password, select_option_no_header};
+use crate::onboarding::menu::select_option_no_header;
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::save_to_profile;
 use stakpak_shared::models::auth::ProviderAuth;
-use stakpak_shared::models::llm::ProviderConfig;
-use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
-use std::io::{self, Write};
 use std::path::Path;
 
 /// AWS/Bedrock-specific login parameters
@@ -83,75 +80,28 @@ pub async fn handle_login(
         None => select_profile_for_auth(config_dir).await?,
     };
 
-    let registry = ProviderRegistry::new();
+    let config_path = config_dir.join("config.toml");
+    let config_path = config_path
+        .to_str()
+        .ok_or_else(|| "Invalid config path".to_string())?
+        .to_string();
 
-    // Always prompt for provider selection in interactive mode
-    let providers = registry.list();
-    let options: Vec<(String, String, bool)> = providers
-        .iter()
-        .map(|p| (p.id().to_string(), p.name().to_string(), false))
-        .collect();
-
-    let options_refs: Vec<(String, &str, bool)> = options
-        .iter()
-        .map(|(id, name, recommended)| (id.clone(), name.as_str(), *recommended))
-        .collect();
-
-    println!();
-    println!("Select provider:");
-    println!();
-
-    let provider_id = match select_option_no_header(&options_refs, false) {
-        NavResult::Forward(selected) => selected,
-        NavResult::Back | NavResult::Cancel => {
-            println!("Cancelled.");
-            return Ok(());
-        }
-    };
-
-    let provider = registry
-        .get(&provider_id)
-        .ok_or_else(|| format!("Unknown provider: {}", provider_id))?;
-
-    // Select authentication method
-    let methods = provider.auth_methods();
-    let options: Vec<(String, String, bool)> = methods
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (m.id.clone(), m.display(), i == 0)) // First option is recommended
-        .collect();
-
-    let options_refs: Vec<(String, &str, bool)> = options
-        .iter()
-        .map(|(id, display, recommended)| (id.clone(), display.as_str(), *recommended))
-        .collect();
-
-    println!();
-    println!("Select authentication method:");
-    println!();
-
-    let method_id = match select_option_no_header(&options_refs, true) {
-        NavResult::Forward(selected) => selected,
-        NavResult::Back | NavResult::Cancel => {
-            println!("Cancelled.");
-            return Ok(());
-        }
-    };
-
-    let method = methods
-        .iter()
-        .find(|m| m.id == method_id)
-        .ok_or_else(|| format!("Unknown method: {}", method_id))?;
-
-    match method.method_type {
-        AuthMethodType::OAuth => {
-            handle_oauth_login(config_dir, provider, &method_id, &profile).await
-        }
-        AuthMethodType::ApiKey => handle_api_key_login(config_dir, provider, &profile).await,
-        AuthMethodType::DeviceFlow => {
-            handle_device_flow_login(config_dir, provider, &method_id, &profile).await
-        }
+    if run_provider_auth_flow(AuthFlowConfig {
+        profile_name: profile,
+        config_path,
+        step_offset: 1,
+        total_steps: 4,
+        show_preview: true,
+        include_special_options: false,
+        preserve_existing_profile: true,
+    })
+    .await
+    .is_none()
+    {
+        println!("Cancelled.");
     }
+
+    Ok(())
 }
 
 /// Select profile interactively for auth commands
@@ -190,131 +140,7 @@ async fn select_profile_for_auth(config_dir: &Path) -> Result<String, String> {
     }
 }
 
-/// Handle Device Authorization Grant (RFC 8628) login.
-async fn handle_device_flow_login(
-    config_dir: &Path,
-    provider: &dyn OAuthProvider,
-    method_id: &str,
-    profile: &str,
-) -> Result<(), String> {
-    // Step 1: request device code and display instructions to the user.
-    let (flow, device_code) = provider
-        .request_device_code(method_id)
-        .await
-        .map_err(|e| format!("Device flow failed: {}", e))?;
-
-    println!();
-    println!("To authenticate with {}:", provider.name());
-    println!();
-    // Use OSC 8 escape sequence for a clickable hyperlink in supported terminals
-    println!(
-        "  1. Visit: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
-        device_code.verification_uri, device_code.verification_uri
-    );
-    println!("  2. Enter code: {}", device_code.user_code);
-    println!();
-
-    // Try to open the browser automatically
-    let _ = open::that(&device_code.verification_uri);
-
-    println!("Waiting for authorisation...");
-
-    // Step 2: poll using the same HTTP client that was built in step 1.
-    let token = provider
-        .wait_for_token(&flow, &device_code)
-        .await
-        .map_err(|e| format!("Device flow failed: {}", e))?;
-
-    let auth = provider
-        .post_device_authorize(method_id, &token)
-        .await
-        .map_err(|e| format!("Post-authorization failed: {}", e))?;
-
-    save_auth_to_config(config_dir, provider, profile, auth)
-}
-
-/// Handle OAuth login flow
-async fn handle_oauth_login(
-    config_dir: &Path,
-    provider: &dyn OAuthProvider,
-    method_id: &str,
-    profile: &str,
-) -> Result<(), String> {
-    let oauth_config = provider
-        .oauth_config(method_id)
-        .ok_or("OAuth not supported for this method")?;
-
-    let mut flow = OAuthFlow::new(oauth_config.clone());
-    let auth_url = flow.generate_auth_url();
-
-    println!();
-    println!("Opening browser for {} authentication...", provider.name());
-    println!();
-    println!("If browser doesn't open, visit:");
-    // Use OSC 8 escape sequence to make the URL clickable in supported terminals
-    println!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", auth_url, auth_url);
-    println!();
-
-    let callback = if should_wait_for_local_oauth_callback(&oauth_config.redirect_url) {
-        println!(
-            "Waiting for OAuth callback on {}...",
-            oauth_config.redirect_url
-        );
-
-        let callback_listener =
-            bind_local_oauth_callback_listener(oauth_config.redirect_url.clone()).await?;
-
-        // Try to open browser after the listener is ready.
-        let _ = open::that(&auth_url);
-
-        OAuthCallback::FromRedirect(
-            callback_listener
-                .wait(std::time::Duration::from_secs(300))
-                .await?,
-        )
-    } else {
-        // Try to open browser
-        let _ = open::that(&auth_url);
-
-        // Prompt for authorization code
-        print!("Paste the authorization code: ");
-        io::stdout().flush().map_err(|e| e.to_string())?;
-
-        let mut code = String::new();
-        io::stdin()
-            .read_line(&mut code)
-            .map_err(|e| format!("Failed to read input: {}", e))?;
-        let code = code.trim().to_string();
-
-        if code.is_empty() {
-            println!("Cancelled.");
-            return Ok(());
-        }
-
-        OAuthCallback::Manual(code)
-    };
-
-    println!();
-    println!("Exchanging code for tokens...");
-
-    let tokens = match callback {
-        OAuthCallback::Manual(code) => flow.exchange_code(&code).await,
-        OAuthCallback::FromRedirect(callback) => {
-            flow.exchange_code_with_state(&callback.code, &callback.state)
-                .await
-        }
-    }
-    .map_err(|e| format!("Token exchange failed: {}", e))?;
-
-    let auth = provider
-        .post_authorize(method_id, &tokens)
-        .await
-        .map_err(|e| format!("Post-authorization failed: {}", e))?;
-
-    save_auth_to_config(config_dir, provider, profile, auth)
-}
-
-fn should_wait_for_local_oauth_callback(redirect_url: &str) -> bool {
+pub(crate) fn should_wait_for_local_oauth_callback(redirect_url: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(redirect_url) else {
         return false;
     };
@@ -322,24 +148,24 @@ fn should_wait_for_local_oauth_callback(redirect_url: &str) -> bool {
     matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
 }
 
-enum OAuthCallback {
+pub(crate) enum OAuthCallback {
     Manual(String),
     FromRedirect(LocalOAuthCallback),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct LocalOAuthCallback {
-    code: String,
-    state: String,
+pub(crate) struct LocalOAuthCallback {
+    pub(crate) code: String,
+    pub(crate) state: String,
 }
 
-struct LocalOAuthCallbackListener {
+pub(crate) struct LocalOAuthCallbackListener {
     callback_rx: tokio::sync::oneshot::Receiver<Result<LocalOAuthCallback, String>>,
     server_task: tokio::task::JoinHandle<()>,
 }
 
 impl LocalOAuthCallbackListener {
-    async fn wait(
+    pub(crate) async fn wait(
         self,
         timeout_duration: std::time::Duration,
     ) -> Result<LocalOAuthCallback, String> {
@@ -360,7 +186,7 @@ impl LocalOAuthCallbackListener {
     }
 }
 
-async fn bind_local_oauth_callback_listener(
+pub(crate) async fn bind_local_oauth_callback_listener(
     redirect_url: String,
 ) -> Result<LocalOAuthCallbackListener, String> {
     let parsed = reqwest::Url::parse(&redirect_url)
@@ -478,59 +304,6 @@ fn build_local_oauth_callback_listener(
         callback_rx: code_rx,
         server_task,
     })
-}
-
-/// Persist a `ProviderAuth` into the config file for the given profile.
-///
-/// Shared by all login flows (OAuth, device flow, API key).  Handles
-/// creating the provider config entry if it doesn't exist yet, syncing the
-/// readonly profile, saving to disk, and printing the success message.
-fn save_auth_to_config(
-    config_dir: &Path,
-    provider: &dyn OAuthProvider,
-    profile: &str,
-    auth: ProviderAuth,
-) -> Result<(), String> {
-    let config_path = config_dir.join("config.toml");
-    let mut config_file = AppConfig::load_config_file(&config_path)
-        .map_err(|e| format!("Failed to load config file: {}", e))?;
-
-    let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
-
-    let provider_config = profile_config
-        .providers
-        .entry(provider.id().to_string())
-        .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::Anthropic {
-                api_key: None,
-                api_endpoint: None,
-                access_token: None,
-                auth: None,
-            })
-        });
-
-    provider_config.set_auth(auth);
-
-    // Keep readonly profile in sync when modifying the default profile
-    if profile == "default" {
-        config_file.update_readonly();
-    }
-
-    config_file
-        .save_to(&config_path)
-        .map_err(|e| format!("Failed to save credentials: {}", e))?;
-
-    println!();
-    println!("Successfully logged in to {}!", provider.name());
-
-    if profile == "all" {
-        println!("Credentials saved as shared default (all profiles).");
-    } else {
-        println!("Credentials saved for profile '{}'.", profile);
-    }
-    println!("Config saved to: {}", config_path.display());
-
-    Ok(())
 }
 
 fn validate_login_endpoint(endpoint: Option<String>) -> Result<Option<String>, String> {
@@ -786,77 +559,6 @@ async fn handle_bedrock_setup(
     println!("  4. EC2/ECS instance roles");
     println!();
     println!("No AWS credentials are stored by stakpak.");
-
-    Ok(())
-}
-
-/// Handle API key login
-async fn handle_api_key_login(
-    config_dir: &Path,
-    provider: &dyn OAuthProvider,
-    profile: &str,
-) -> Result<(), String> {
-    use crate::config::AppConfig;
-    use stakpak_shared::models::llm::ProviderConfig;
-
-    println!();
-
-    let key = match prompt_password("Enter API key", true) {
-        NavResult::Forward(Some(key)) => key,
-        NavResult::Forward(None) => {
-            println!("API key is required.");
-            return Ok(());
-        }
-        NavResult::Back | NavResult::Cancel => {
-            println!("Cancelled.");
-            return Ok(());
-        }
-    };
-
-    let auth = ProviderAuth::api_key(key);
-
-    // Load config using the standard pipeline (handles migrations, old formats, etc.)
-    let config_path = config_dir.join("config.toml");
-    let mut config_file = AppConfig::load_config_file(&config_path)
-        .map_err(|e| format!("Failed to load config file: {}", e))?;
-
-    // Get or create profile
-    let profile_config = config_file.profiles.entry(profile.to_string()).or_default();
-
-    // Get or create provider config
-    let provider_config = profile_config
-        .providers
-        .entry(provider.id().to_string())
-        .or_insert_with(|| {
-            ProviderConfig::empty_for_provider(provider.id()).unwrap_or(ProviderConfig::OpenAI {
-                api_key: None,
-                api_endpoint: None,
-                auth: None,
-            })
-        });
-
-    // Set auth on provider config
-    provider_config.set_auth(auth);
-
-    // Keep readonly profile in sync when modifying the default profile
-    if profile == "default" {
-        config_file.update_readonly();
-    }
-
-    // Save config file
-    config_file
-        .save_to(&config_path)
-        .map_err(|e| format!("Failed to save credentials: {}", e))?;
-
-    println!();
-    println!("Successfully saved {} API key!", provider.name());
-
-    if profile == "all" {
-        println!("Credentials saved as shared default (all profiles).");
-    } else {
-        println!("Credentials saved for profile '{}'.", profile);
-    }
-    println!("Config saved to: {}", config_path.display());
 
     Ok(())
 }
