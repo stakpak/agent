@@ -489,14 +489,20 @@ Your deployment procedures and guidelines here...
 Enable tab-completion for every `stakpak` subcommand, flag, and argument.
 
 ```bash
-# Bash – add to ~/.bashrc
-source <(stakpak completion bash)
+# Bash
+echo 'source <(stakpak completion bash)' >> ~/.bashrc
 
-# Zsh – add to ~/.zshrc
-source <(stakpak completion zsh)
+# Elvish
+echo 'eval (stakpak completion elvish | slurp)' >> ~/.elvish/rc.elv
 
 # Fish
-stakpak completion fish > ~/.config/fish/completions/stakpak.fish
+echo 'stakpak completion fish | source' > ~/.config/fish/completions/stakpak.fish
+
+# PowerShell
+echo 'stakpak completion powershell | Out-String | Invoke-Expression' >> $PROFILE
+
+# Zsh
+echo 'source <(stakpak completion zsh)' >> ~/.zshrc
 ```
 
 Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
