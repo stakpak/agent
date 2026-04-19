@@ -70,11 +70,11 @@ fn flush_pending_user_messages_if_idle(
     let revert_index = state.message_revert_state.pending_revert_index.take();
 
     // Dismiss the onboarding banner once the user sends their first message.
-    if state.banner_message.is_some() {
-        state.banner_message = None;
-        state.banner_click_regions.clear();
-        state.banner_dismiss_region = None;
-        state.banner_area = None;
+    if state.banner_state.message.is_some() {
+        state.banner_state.message = None;
+        state.banner_state.click_regions.clear();
+        state.banner_state.dismiss_region = None;
+        state.banner_state.area = None;
     }
 
     match output_tx.try_send(OutputEvent::UserMessage(

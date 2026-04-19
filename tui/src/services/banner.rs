@@ -234,7 +234,7 @@ pub fn render_banner(f: &mut Frame, area: Rect, state: &mut AppState) {
     let dismiss_width: u16 = 5;
     let dismiss_x = area.x + area.width.saturating_sub(2 + dismiss_width); // border(1) + padding(1) + target
     let dismiss_y = area.y; // cover the full banner height for easier clicking
-    state.banner_dismiss_region = Some(Rect::new(
+    state.banner_state.dismiss_region = Some(Rect::new(
         dismiss_x,
         dismiss_y,
         dismiss_width + 2,
