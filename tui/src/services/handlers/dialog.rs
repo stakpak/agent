@@ -122,10 +122,6 @@ pub fn handle_esc_event(
         state.profile_switcher_state.show_profile_switcher = false;
         return;
     }
-    if state.shortcuts_panel_state.is_visible {
-        state.shortcuts_panel_state.is_visible = false;
-        return;
-    }
     if state.messages_scrolling_state.show_collapsed_messages {
         state.messages_scrolling_state.show_collapsed_messages = false;
         state.message_interaction_state.selection =
