@@ -576,7 +576,7 @@ pub struct SessionToolCallsState {
 pub struct ProfileSwitcherState {
     pub show_profile_switcher: bool,
     pub available_profiles: Vec<String>,
-    pub is_selected: usize,
+    pub selected_index: usize,
     pub current_profile_name: String,
     pub switching_in_progress: bool,
     pub switch_status_message: Option<String>,

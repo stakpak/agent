@@ -75,7 +75,7 @@ pub fn handle_show_profile_switcher(state: &mut AppState) {
     }
 
     state.profile_switcher_state.show_profile_switcher = true;
-    state.profile_switcher_state.is_selected = 0;
+    state.profile_switcher_state.selected_index = 0;
 
     // Pre-select current profile
     if let Some(idx) = state
@@ -84,7 +84,7 @@ pub fn handle_show_profile_switcher(state: &mut AppState) {
         .iter()
         .position(|p| p == &state.profile_switcher_state.current_profile_name)
     {
-        state.profile_switcher_state.is_selected = idx;
+        state.profile_switcher_state.selected_index = idx;
     }
 }
 
@@ -99,7 +99,7 @@ pub fn handle_profile_switcher_select(state: &mut AppState, output_tx: &Sender<O
         && !state.profile_switcher_state.available_profiles.is_empty()
     {
         let selected_profile = state.profile_switcher_state.available_profiles
-            [state.profile_switcher_state.is_selected]
+            [state.profile_switcher_state.selected_index]
             .clone();
 
         // Don't switch if already on this profile
@@ -135,7 +135,7 @@ pub fn handle_profile_switch_requested(state: &mut AppState, profile: String) {
     state.profile_switcher_state.show_profile_switcher = false;
 
     // Clear profile switcher state immediately to prevent stray selects
-    state.profile_switcher_state.is_selected = 0;
+    state.profile_switcher_state.selected_index = 0;
 
     state.profile_switcher_state.switch_status_message =
         Some(format!("🔄 Switching to profile: {}", profile));
@@ -212,7 +212,7 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
 
     // CRITICAL: Close profile switcher to prevent stray selects
     state.profile_switcher_state.show_profile_switcher = false;
-    state.profile_switcher_state.is_selected = 0;
+    state.profile_switcher_state.selected_index = 0;
 
     // Update profile info
     state.profile_switcher_state.current_profile_name = profile.clone();

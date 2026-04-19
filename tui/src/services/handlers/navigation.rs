@@ -112,10 +112,10 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
     if state.profile_switcher_state.show_profile_switcher {
-        if state.profile_switcher_state.is_selected > 0 {
-            state.profile_switcher_state.is_selected -= 1;
+        if state.profile_switcher_state.selected_index > 0 {
+            state.profile_switcher_state.selected_index -= 1;
         } else {
-            state.profile_switcher_state.is_selected = state
+            state.profile_switcher_state.selected_index = state
                 .profile_switcher_state
                 .available_profiles
                 .len()
@@ -215,16 +215,16 @@ pub fn handle_down_navigation(
     message_area_width: usize,
 ) {
     if state.profile_switcher_state.show_profile_switcher {
-        if state.profile_switcher_state.is_selected
+        if state.profile_switcher_state.selected_index
             < state
                 .profile_switcher_state
                 .available_profiles
                 .len()
                 .saturating_sub(1)
         {
-            state.profile_switcher_state.is_selected += 1;
+            state.profile_switcher_state.selected_index += 1;
         } else {
-            state.profile_switcher_state.is_selected = 0;
+            state.profile_switcher_state.selected_index = 0;
         }
         return;
     }
