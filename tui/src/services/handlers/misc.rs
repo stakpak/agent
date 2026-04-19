@@ -146,7 +146,7 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 fn handle_tab_normal(state: &mut AppState) {
     // If side panel is visible and input is empty, cycle sections
     if state.side_panel_state.is_shown && state.input_state.text_area.text().is_empty() {
-        state.side_panel_state.is_focused = state.side_panel_state.is_focused.next();
+        state.side_panel_state.focused_section = state.side_panel_state.focused_section.next();
         return;
     }
 

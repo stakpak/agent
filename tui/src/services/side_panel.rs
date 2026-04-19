@@ -50,7 +50,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let plan_active = state.plan_mode_state.is_active;
     let plan_collapsed = state
         .side_panel_state
-        .is_collapsed
+        .collapsed_sections
         .get(&SidePanelSection::Plan)
         .copied()
         .unwrap_or(false);
@@ -66,25 +66,25 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
         .side_panel_state
-        .is_collapsed
+        .collapsed_sections
         .get(&SidePanelSection::Context)
         .copied()
         .unwrap_or(false);
     let billing_collapsed = state
         .side_panel_state
-        .is_collapsed
+        .collapsed_sections
         .get(&SidePanelSection::Billing)
         .copied()
         .unwrap_or(false);
     let tasks_collapsed = state
         .side_panel_state
-        .is_collapsed
+        .collapsed_sections
         .get(&SidePanelSection::Tasks)
         .copied()
         .unwrap_or(false);
     let changeset_collapsed = state
         .side_panel_state
-        .is_collapsed
+        .collapsed_sections
         .get(&SidePanelSection::Changeset)
         .copied()
         .unwrap_or(false);
@@ -181,7 +181,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
     use crate::services::plan::PlanStatus;
 
-    let focused = state.side_panel_state.is_focused == SidePanelSection::Plan;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Plan;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -268,7 +268,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
 
 /// Render the Context section
 fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_state.is_focused == SidePanelSection::Context;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Context;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -376,7 +376,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
 /// Render the Billing section
 fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_state.is_focused == SidePanelSection::Billing;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Billing;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -455,7 +455,7 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
 /// Render the Tasks section
 fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_state.is_focused == SidePanelSection::Tasks;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Tasks;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -587,7 +587,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
 
 /// Render the Changeset section
 fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_state.is_focused == SidePanelSection::Changeset;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Changeset;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };

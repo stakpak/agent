@@ -571,7 +571,7 @@ pub fn handle_toggle_side_panel(
 /// Handle side panel section navigation
 pub fn handle_side_panel_next_section(state: &mut AppState) {
     if state.side_panel_state.is_shown {
-        state.side_panel_state.is_focused = state.side_panel_state.is_focused.next();
+        state.side_panel_state.focused_section = state.side_panel_state.focused_section.next();
     }
 }
 
@@ -580,14 +580,14 @@ pub fn handle_side_panel_toggle_section(state: &mut AppState) {
     if state.side_panel_state.is_shown {
         let current = state
             .side_panel_state
-            .is_collapsed
-            .get(&state.side_panel_state.is_focused)
+            .collapsed_sections
+            .get(&state.side_panel_state.focused_section)
             .copied()
             .unwrap_or(false);
         state
             .side_panel_state
-            .is_collapsed
-            .insert(state.side_panel_state.is_focused, !current);
+            .collapsed_sections
+            .insert(state.side_panel_state.focused_section, !current);
     }
 }
 
@@ -608,7 +608,7 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
     }
 
     if let Some(section) = clicked_section {
-        state.side_panel_state.is_focused = section;
+        state.side_panel_state.focused_section = section;
 
         // Special handling for Changeset section
         if section == crate::services::changeset::SidePanelSection::Changeset {
@@ -621,19 +621,19 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
             if relative_y == 0 {
                 let current = state
                     .side_panel_state
-                    .is_collapsed
+                    .collapsed_sections
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
                 state
                     .side_panel_state
-                    .is_collapsed
+                    .collapsed_sections
                     .insert(section, !current);
             } else {
                 // Content click - if not collapsed, open file changes popup
                 let collapsed = state
                     .side_panel_state
-                    .is_collapsed
+                    .collapsed_sections
                     .get(&section)
                     .copied()
                     .unwrap_or(false);
@@ -654,13 +654,13 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
         } else {
             let current = state
                 .side_panel_state
-                .is_collapsed
+                .collapsed_sections
                 .get(&section)
                 .copied()
                 .unwrap_or(false);
             state
                 .side_panel_state
-                .is_collapsed
+                .collapsed_sections
                 .insert(section, !current);
         }
     }

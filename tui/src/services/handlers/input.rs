@@ -248,14 +248,14 @@ pub fn handle_input_submitted_event(
     {
         let current = state
             .side_panel_state
-            .is_collapsed
-            .get(&state.side_panel_state.is_focused)
+            .collapsed_sections
+            .get(&state.side_panel_state.focused_section)
             .copied()
             .unwrap_or(false);
         state
             .side_panel_state
-            .is_collapsed
-            .insert(state.side_panel_state.is_focused, !current);
+            .collapsed_sections
+            .insert(state.side_panel_state.focused_section, !current);
         return;
     }
 

@@ -336,8 +336,8 @@ impl Default for MessagesScrollingState {
 
 pub struct SidePanelState {
     pub is_shown: bool,
-    pub is_focused: crate::services::changeset::SidePanelSection,
-    pub is_collapsed: HashMap<crate::services::changeset::SidePanelSection, bool>,
+    pub focused_section: crate::services::changeset::SidePanelSection,
+    pub collapsed_sections: HashMap<crate::services::changeset::SidePanelSection, bool>,
     pub areas: HashMap<crate::services::changeset::SidePanelSection, ratatui::layout::Rect>,
     pub session_id: String,
     pub session_id_copied_at: Option<std::time::Instant>,
@@ -365,8 +365,8 @@ impl Default for SidePanelState {
 
         Self {
             is_shown: false,
-            is_focused: crate::services::changeset::SidePanelSection::Context,
-            is_collapsed: collapsed,
+            focused_section: crate::services::changeset::SidePanelSection::Context,
+            collapsed_sections: collapsed,
             areas: HashMap::new(),
             session_id: String::new(),
             session_id_copied_at: None,
