@@ -558,10 +558,16 @@ pub fn to_responses_request(req: &GenerateRequest, stream: bool) -> ResponsesReq
         req.options.top_p
     };
 
+    let store = match &req.provider_options {
+        Some(ProviderOptions::OpenAI(opts)) => opts.store,
+        _ => None,
+    };
+
     ResponsesRequest {
         model: req.model.id.clone(),
         input,
         instructions: None, // System message is in input array
+        store,
         max_output_tokens: req.options.max_tokens,
         temperature,
         top_p,
@@ -866,6 +872,21 @@ mod tests {
         let responses_req = to_responses_request(&req, false);
 
         assert_eq!(responses_req.service_tier, Some("flex".to_string()));
+    }
+
+    #[test]
+    fn test_to_responses_request_with_store_flag() {
+        let req = make_request(
+            "gpt-4o",
+            Some(ProviderOptions::OpenAI(OpenAIOptions {
+                api_config: Some(OpenAIApiConfig::Responses(ResponsesConfig::default())),
+                store: Some(true),
+                ..Default::default()
+            })),
+        );
+        let responses_req = to_responses_request(&req, false);
+
+        assert_eq!(responses_req.store, Some(true));
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //! - `stakpak auth list` - List configured credentials
 
 mod list;
-mod login;
+pub(crate) mod login;
 mod logout;
 
 use crate::config::AppConfig;

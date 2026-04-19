@@ -50,5 +50,5 @@ pub use error::{OAuthError, OAuthResult};
 pub use flow::{OAuthFlow, TokenResponse};
 pub use pkce::PkceChallenge;
 pub use provider::{AuthMethod, AuthMethodType, OAuthProvider};
-pub use providers::{AnthropicProvider, GitHubCopilotProvider};
+pub use providers::{AnthropicProvider, GitHubCopilotProvider, OpenAICodexProvider};
 pub use registry::ProviderRegistry;

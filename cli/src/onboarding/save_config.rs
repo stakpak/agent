@@ -1,8 +1,6 @@
 //! Configuration saving utilities
 
 use crate::config::{ConfigFile, ProfileConfig, ProviderType};
-use crate::onboarding::config_templates::config_to_toml_preview;
-use crate::onboarding::styled_output;
 use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use std::fs;
 use std::path::PathBuf;
@@ -73,26 +71,4 @@ pub fn save_to_profile(
         anonymous_id: config_file.settings.anonymous_id,
         collect_telemetry: config_file.settings.collect_telemetry,
     })
-}
-
-/// Show configuration preview and confirm before saving to a named profile
-pub fn preview_and_save_to_profile(
-    config_path: &str,
-    profile_name: &str,
-    profile: ProfileConfig,
-) -> Result<TelemetrySettings, String> {
-    // Show preview
-    styled_output::render_config_preview(&config_to_toml_preview(&profile, profile_name));
-
-    // Save
-    let telemetry_settings = save_to_profile(config_path, profile_name, profile)?;
-
-    println!();
-    styled_output::render_success(&format!(
-        "✓ Configuration saved successfully to [profiles.{}]",
-        profile_name
-    ));
-    println!();
-
-    Ok(telemetry_settings)
 }

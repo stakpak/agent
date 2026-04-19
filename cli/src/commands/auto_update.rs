@@ -335,7 +335,7 @@ async fn update_binary_atomic(
 
     // 1. Set up PluginConfig for the CLI itself
     let cli_name = "stakpak";
-    let base_url = "https://github.com/stakpak/agent/releases/download";
+    let base_url = "https://github.com/stakpak/agent";
     let version = version.unwrap_or_default();
 
     // 2. Map OS/arch to plugin target
@@ -357,6 +357,7 @@ async fn update_binary_atomic(
         repo: Some("agent".to_string()),
         owner: Some("stakpak".to_string()),
         version_arg: None,
+        prefer_server_version: false,
     };
 
     // 3. Get current executable path

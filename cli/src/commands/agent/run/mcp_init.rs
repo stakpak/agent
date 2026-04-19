@@ -205,7 +205,42 @@ fn build_proxy_config(
         },
     );
 
+    // Load external servers from config file (skip mcp_servers with reserved names)
+    if let Ok(config_path) = stakpak_mcp_config::find_config_file() {
+        match load_external_servers(&config_path) {
+            Ok(external_servers) => {
+                let mut loaded_servers = 0;
+                for (name, config) in external_servers {
+                    if name == "stakpak" || name == "paks" {
+                        tracing::warn!(
+                            "Skipping external MCP server {} (reserved for stakpak's internal use)",
+                            name
+                        );
+                        continue;
+                    }
+                    loaded_servers += 1;
+                    servers.insert(name, config);
+                }
+                tracing::info!(
+                    "Loaded {} external MCP servers from {}",
+                    loaded_servers,
+                    config_path
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load MCP config from {}: {}", config_path, e);
+            }
+        }
+    }
+
     ClientPoolConfig::with_servers(servers)
+}
+
+/// Load external MCP servers from a config file (TOML or JSON).
+fn load_external_servers(config_path: &str) -> Result<HashMap<String, ServerConfig>, String> {
+    let config = stakpak_mcp_config::load_config(config_path.as_ref())?;
+    let pool_config = ClientPoolConfig::from(config);
+    Ok(pool_config.servers)
 }
 
 /// Start the proxy server

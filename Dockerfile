@@ -19,7 +19,7 @@
 #
 # =============================================================================
 
-FROM rust:1.91.0-slim-bookworm AS builder
+FROM rust:1.94.1-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 COPY . .
@@ -31,7 +31,7 @@ LABEL org.opencontainers.image.source="https://github.com/stakpak/agent" \
     org.opencontainers.image.description="Stakpak Agent" \
     maintainer="contact@stakpak.dev"
 
-# Install basic dependencies
+# Install basic dependencies + gosu for entrypoint privilege dropping
 RUN apt-get update -y && apt-get install -y \
     curl \
     unzip \
@@ -43,6 +43,7 @@ RUN apt-get update -y && apt-get install -y \
     wget \
     dnsutils \
     sudo \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
@@ -60,8 +61,15 @@ RUN install -m 0755 -d /etc/apt/keyrings \
 COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
 
-# Create agent user and group
-RUN groupadd -r agent && useradd -r -g agent -s /bin/bash -m agent && mkdir -p /agent && chown -R agent:agent /agent
+# Create agent user and group with explicit UID/GID 1000 (standard first
+# non-root user on most Linux distributions).  This ensures bind-mounted host
+# files are writable without remapping in the common case.  When the host UID
+# differs, the sandbox starts the container with --user 0:0 and passes the
+# target UID/GID via STAKPAK_TARGET_UID / STAKPAK_TARGET_GID env vars.  The
+# entrypoint script then patches /etc/passwd, chowns writable paths, and
+# drops to the target user via gosu.
+RUN groupadd -g 1000 agent && useradd -u 1000 -g 1000 -s /bin/bash -m agent \
+    && mkdir -p /agent && chown -R agent:agent /agent
 # Create docker group and add agent user to it
 RUN groupadd -r docker && usermod -aG docker agent
 
@@ -97,6 +105,7 @@ COPY --chown=agent:agent scripts/gcloud-wrapper.sh /home/agent/.local/bin/gcloud
 COPY --chown=agent:agent scripts/gsutil-wrapper.sh /home/agent/.local/bin/gsutil
 COPY --chown=agent:agent scripts/bq-wrapper.sh /home/agent/.local/bin/bq
 COPY --chown=agent:agent scripts/az-wrapper.sh /home/agent/.local/bin/az
+COPY --chown=agent:agent scripts/entrypoint.sh /home/agent/.local/bin/entrypoint.sh
 
 RUN chmod +x /home/agent/.local/bin/*
 
@@ -107,4 +116,4 @@ WORKDIR /agent/
 
 USER agent
 
-ENTRYPOINT ["/usr/local/bin/stakpak"]
+ENTRYPOINT ["/home/agent/.local/bin/entrypoint.sh", "/usr/local/bin/stakpak"]

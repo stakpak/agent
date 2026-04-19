@@ -44,6 +44,18 @@ use tokio::sync::{broadcast, watch};
 /// Environment variable used to pass the client CA cert PEM to the container.
 const TRUSTED_CLIENT_CA_ENV: &str = "STAKPAK_MCP_CLIENT_CA";
 
+/// Path to the entrypoint script inside the agent container image.
+///
+/// The entrypoint handles UID/GID remapping when the container is started as
+/// root (via `--user 0:0`) with `STAKPAK_TARGET_UID`/`STAKPAK_TARGET_GID` env
+/// vars.  It patches `/etc/passwd`, chowns `$HOME`, and drops privileges via
+/// gosu before exec-ing the real command.
+///
+/// This path is part of the image contract — it must match the `COPY` in the
+/// Dockerfile.  If the image is stale and missing this script, the container
+/// will fail to start with a clear "No such file" error.
+const CONTAINER_ENTRYPOINT: &str = "/home/agent/.local/bin/entrypoint.sh";
+
 // ── Sandbox mode ────────────────────────────────────────────────────────────
 
 /// Controls how sandbox containers are managed across sessions.
@@ -530,13 +542,6 @@ impl SandboxedMcpServer {
     }
 }
 
-fn sandbox_user_arg(user_mapping: &SandboxUserMapping) -> Option<String> {
-    match user_mapping {
-        SandboxUserMapping::ImageDefault => None,
-        SandboxUserMapping::HostUser { uid, gid } => Some(format!("{uid}:{gid}")),
-    }
-}
-
 /// Build the argument list for `warden wrap`.
 ///
 /// All options come before the positional `<IMAGE>` argument, then `--` and the
@@ -563,9 +568,19 @@ fn build_warden_argv(
         }
     }
 
-    if let Some(user_arg) = sandbox_user_arg(&config.user_mapping) {
-        args.push("--user".to_string());
-        args.push(user_arg);
+    // When host-user mapping is requested, start the container as root so the
+    // entrypoint script can patch /etc/passwd, chown $HOME, and then drop
+    // privileges via gosu.  The target UID/GID are passed as env vars.
+    match &config.user_mapping {
+        SandboxUserMapping::HostUser { uid, gid } => {
+            args.push("--user".to_string());
+            args.push("0:0".to_string());
+            args.push("--env".to_string());
+            args.push(format!("STAKPAK_TARGET_UID={uid}"));
+            args.push("--env".to_string());
+            args.push(format!("STAKPAK_TARGET_GID={gid}"));
+        }
+        SandboxUserMapping::ImageDefault => {}
     }
 
     args.push("-p".to_string());
@@ -589,8 +604,11 @@ fn build_warden_argv(
     args.push(config.image.clone());
 
     // --- command after `--` ---
+    // Run through the entrypoint script so that /etc/passwd is patched when
+    // the container is started as root with STAKPAK_TARGET_UID/GID set.
     args.push("--".to_string());
-    args.push("stakpak".to_string());
+    args.push(CONTAINER_ENTRYPOINT.to_string());
+    args.push("/usr/local/bin/stakpak".to_string());
     args.push("mcp".to_string());
     args.push("start".to_string());
 
@@ -1021,16 +1039,23 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
     }
 
     #[test]
-    fn sandbox_user_arg_formats_host_mapping() {
-        let user_arg = super::sandbox_user_arg(&super::SandboxUserMapping::HostUser {
-            uid: 1000,
-            gid: 1001,
-        });
-        assert_eq!(user_arg.as_deref(), Some("1000:1001"));
-        assert_eq!(
-            super::sandbox_user_arg(&super::SandboxUserMapping::ImageDefault),
-            None
-        );
+    fn host_user_mapping_starts_as_root_with_target_env() {
+        let config = super::SandboxConfig {
+            warden_path: "warden".to_string(),
+            image: "img:latest".to_string(),
+            volumes: vec![],
+            mode: super::SandboxMode::Persistent,
+            user_mapping: super::SandboxUserMapping::HostUser {
+                uid: 1001,
+                gid: 1001,
+            },
+        };
+        let argv = super::build_warden_argv(&config, 8080, "CA", &[]);
+        // Container starts as root
+        assert!(argv.contains(&"0:0".to_string()));
+        // Target UID/GID passed as env vars for the entrypoint
+        assert!(argv.contains(&"STAKPAK_TARGET_UID=1001".to_string()));
+        assert!(argv.contains(&"STAKPAK_TARGET_GID=1001".to_string()));
     }
 
     #[test]
@@ -1114,14 +1139,25 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
         // Image must come before `--`
         assert!(image_pos < dash_pos, "image must come before -- separator");
 
-        // Command after `--` must be `stakpak mcp start`
+        // Command after `--` must be `entrypoint.sh stakpak mcp start`
         let command_section: Vec<&str> = argv[dash_pos + 1..].iter().map(|s| s.as_str()).collect();
-        assert_eq!(command_section, vec!["stakpak", "mcp", "start"]);
+        assert_eq!(
+            command_section,
+            vec![
+                "/home/agent/.local/bin/entrypoint.sh",
+                "/usr/local/bin/stakpak",
+                "mcp",
+                "start"
+            ]
+        );
 
         // Verify specific options are present
         assert!(argv.contains(&"--volume".to_string()));
+        // HostUser mapping starts container as root; target UID/GID are env vars
         assert!(argv.contains(&"--user".to_string()));
-        assert!(argv.contains(&"1000:1001".to_string()));
+        assert!(argv.contains(&"0:0".to_string()));
+        assert!(argv.contains(&"STAKPAK_TARGET_UID=1000".to_string()));
+        assert!(argv.contains(&"STAKPAK_TARGET_GID=1001".to_string()));
         assert!(argv.contains(&"-p".to_string()));
     }
 
@@ -1137,6 +1173,9 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
 
         let argv = super::build_warden_argv(&config, 8080, "CA", &[]);
         assert!(!argv.contains(&"--user".to_string()));
+        // No target UID/GID env vars either
+        assert!(!argv.iter().any(|a| a.starts_with("STAKPAK_TARGET_UID")));
+        assert!(!argv.iter().any(|a| a.starts_with("STAKPAK_TARGET_GID")));
     }
 
     #[test]

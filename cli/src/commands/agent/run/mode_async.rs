@@ -233,10 +233,6 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
         );
     }
-    // Pass unified model as smart_model for AgentClient compatibility
-    if let Some(model) = &ctx.model {
-        client_config = client_config.with_smart_model(model.clone());
-    }
 
     let client = AgentClient::new(client_config)
         .await
@@ -339,6 +335,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                             None,
                             current_session_id,
                             Some(config.model.id.clone()),
+                            Some(config.model.provider.clone()),
                         )
                         .await
                     };
@@ -687,6 +684,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                         None,
                         current_session_id,
                         Some(config.model.id.clone()),
+                        Some(config.model.provider.clone()),
                     )
                     .await
                 };

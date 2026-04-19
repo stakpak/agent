@@ -1089,9 +1089,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.46"
+version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b97463e1064cb1b1c1384ad0a0b9c8abd0988e2a91f52606c80ef14aadb63e36"
+checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2198,9 +2198,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.5"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
+checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flate2"
@@ -5742,6 +5742,7 @@ version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
+ "indexmap 2.12.0",
  "itoa",
  "memchr",
  "ryu",
@@ -6066,7 +6067,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stakai"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6095,7 +6096,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
@@ -6133,9 +6134,11 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "stakai",
+ "stakpak-ak",
  "stakpak-api",
  "stakpak-gateway",
  "stakpak-mcp-client",
+ "stakpak-mcp-config",
  "stakpak-mcp-proxy",
  "stakpak-mcp-server",
  "stakpak-server",
@@ -6161,13 +6164,14 @@ dependencies = [
 
 [[package]]
 name = "stakpak-agent-core"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "async-trait",
  "chrono",
  "serde",
  "serde_json",
  "stakai",
+ "stakpak-shell-tool-approvals",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
@@ -6175,8 +6179,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-ak"
+version = "0.3.74"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "stakpak-api"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6202,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-gateway"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6231,7 +6247,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "futures",
@@ -6247,8 +6263,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-mcp-config"
+version = "0.3.72"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stakpak-shared",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "stakpak-mcp-proxy"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6259,6 +6285,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "stakpak-mcp-config",
  "stakpak-shared",
  "tokio",
  "toml 0.8.23",
@@ -6267,7 +6294,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -6299,7 +6326,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-server"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6330,7 +6357,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6376,8 +6403,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-shell-tool-approvals"
+version = "0.3.74"
+dependencies = [
+ "globset",
+ "log",
+ "regex",
+ "tree-sitter",
+ "tree-sitter-bash",
+]
+
+[[package]]
 name = "stakpak-tui"
-version = "0.3.69"
+version = "0.3.74"
 dependencies = [
  "ansi-to-tui",
  "arboard",
@@ -6404,6 +6442,7 @@ dependencies = [
  "stakai",
  "stakpak-api",
  "stakpak-shared",
+ "stakpak-shell-tool-approvals",
  "syntect",
  "tempfile",
  "textwrap",
@@ -6420,6 +6459,12 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "strsim"
@@ -7212,6 +7257,36 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
+
+[[package]]
+name = "tree-sitter"
+version = "0.26.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13f456d2108c3fef07342ba4689a8503ec1fb5beed245e2b9be93096ef394848"
+dependencies = [
+ "cc",
+ "regex",
+ "regex-syntax",
+ "serde_json",
+ "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-bash"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-language"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "try-lock"

@@ -295,9 +295,10 @@ pub async fn run_interactive(
             .map(|ctx| ctx.apps_md.is_none())
             .unwrap_or(true)
         {
-            Some(stakpak_tui::BannerMessage::new(
-                "❕ System not scanned - /init to generate an APPS.md file with your context",
+            Some(stakpak_tui::BannerMessage::persistent_with_action(
+                "Run /init to auto-discover your apps, infra, and dependencies. Stakpak works better with context.",
                 stakpak_tui::BannerStyle::Info,
+                "/init",
             ))
         } else {
             None
@@ -369,10 +370,6 @@ pub async fn run_interactive(
                     stakpak_api::StakpakConfig::new(key.clone())
                         .with_endpoint(api_endpoint_for_client.clone()),
                 );
-            }
-            // Pass unified model as smart_model for AgentClient compatibility
-            if let Some(model) = &ctx_clone.model {
-                client_config = client_config.with_smart_model(model.clone());
             }
 
             let client: Arc<dyn AgentProvider> = Arc::new(
@@ -790,6 +787,7 @@ pub async fn run_interactive(
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
                                 Some(model.id.clone()),
+                                Some(model.provider.clone()),
                             )
                             .await?
                         } else {
@@ -1308,6 +1306,19 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
+                    OutputEvent::InitCommandCalled => {
+                        if let Some(ref anonymous_id) = ctx_clone.anonymous_id
+                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                        {
+                            capture_event(
+                                anonymous_id,
+                                ctx_clone.machine_name.as_deref(),
+                                true,
+                                TelemetryEvent::InitCommandCalled,
+                            );
+                        }
+                        continue;
+                    }
                     OutputEvent::PlanFeedback(feedback_text) => {
                         // User submitted feedback from plan review.
                         // Inject as direct user message — the feedback already contains
@@ -1632,10 +1643,6 @@ pub async fn run_interactive(
                         .with_endpoint(new_config.api_endpoint.clone()),
                 );
             }
-            // Pass unified model as smart_model for AgentClient compatibility
-            if let Some(model) = &new_config.model {
-                new_client_config = new_client_config.with_smart_model(model.clone());
-            }
 
             let client: Box<dyn AgentProvider> = Box::new(
                 AgentClient::new(new_client_config)
@@ -1702,10 +1709,6 @@ pub async fn run_interactive(
             final_client_config = final_client_config.with_stakpak(
                 stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
             );
-        }
-        // Pass unified model as smart_model for AgentClient compatibility
-        if let Some(model) = &ctx.model {
-            final_client_config = final_client_config.with_smart_model(model.clone());
         }
 
         let client: Box<dyn AgentProvider> = Box::new(

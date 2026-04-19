@@ -17,6 +17,7 @@ pub mod helper_block;
 pub mod helper_dropdown;
 pub mod hint_helper;
 pub mod image_upload;
+pub mod layout;
 pub mod markdown_renderer;
 pub mod message;
 pub mod message_action_popup;
