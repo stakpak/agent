@@ -214,6 +214,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             profile_name: Some(ctx.profile_name.clone()),
             config_path: Some(ctx.config_path.clone()),
         },
+        ..McpInitConfig::default()
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;

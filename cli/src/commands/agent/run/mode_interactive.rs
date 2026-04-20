@@ -29,6 +29,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
+use stakpak_shared::task_manager::TaskManager;
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
@@ -257,6 +258,18 @@ pub async fn run_interactive(
         let (shutdown_tx, _shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
         let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
 
+        // Create TaskManager early so both TUI and MCP server can share the handle
+        let task_manager = TaskManager::new();
+        let task_manager_handle = task_manager.handle();
+        tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        // Clone For TUI
+        let task_manager_handle_for_tui = task_manager_handle.clone();
+        // Clone for MCP init 
+        let task_manager_handle_for_mcp = task_manager_handle.clone();
+
         // Spawn TUI task
         let shutdown_tx_for_tui = shutdown_tx.clone();
         let current_profile_for_tui = ctx.profile_name.clone();
@@ -326,6 +339,7 @@ pub async fn run_interactive(
                 send_init_prompt_on_start,
                 recent_models_for_tui,
                 banner_message,
+                task_manager_handle_for_tui,
             )
             .await
             .map_err(|e| e.to_string())
@@ -391,6 +405,7 @@ pub async fn run_interactive(
                     profile_name: Some(ctx_clone.profile_name.clone()),
                     config_path: Some(ctx_clone.config_path.clone()),
                 },
+                task_manager_handle: Some(task_manager_handle_for_mcp),
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)
             let (mcp_client, mcp_tools, tools, _server_shutdown_tx, _proxy_shutdown_tx) =

@@ -115,6 +115,7 @@ pub async fn run_server(
                 config_path: Some(config.config_path.clone()),
             },
             server_tls_config,
+            task_manager_handle: None,
         },
         Some(listener),
         None,

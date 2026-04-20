@@ -139,6 +139,10 @@ pub struct MCPServerConfig {
     /// instead of building one from `certificate_chain`.
     pub server_tls_config: Option<Arc<rustls::ServerConfig>>,
     pub subagent_config: SubagentConfig,
+    /// Optional pre-created TaskManagerHandle. When provided, the server uses this
+    /// instead of creating its own. This allows external code (e.g., the TUI) to
+    /// query task status directly.
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
 /// Create graceful shutdown handler
@@ -293,14 +297,17 @@ async fn start_server_internal(
     tcp_listener: TcpListener,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    // Create and start TaskManager
-    let task_manager = TaskManager::new();
-    let task_manager_handle = task_manager.handle();
-
-    // Spawn the task manager to run in background_manager_handle_for_
-    tokio::spawn(async move {
-        task_manager.run().await;
-    });
+    // Use provided TaskManagerHandle or create a new one
+    let task_manager_handle = if let Some(handle) = config.task_manager_handle.clone() {
+        handle
+    } else {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+        tokio::spawn(async move {
+            task_manager.run().await;
+        });
+        handle.clone()
+    };
 
     let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
 

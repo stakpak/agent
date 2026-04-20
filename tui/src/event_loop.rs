@@ -17,6 +17,7 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakai::Model;
 use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
+use stakpak_shared::task_manager::TaskManagerHandle;
 use stakpak_shared::utils::strip_tool_name;
 use std::io;
 use std::sync::Arc;
@@ -58,6 +59,7 @@ pub async fn run_tui(
     send_init_prompt_on_start: bool,
     recent_models: Vec<String>,
     banner_message: Option<BannerMessage>,
+    task_manager_handle: Arc<TaskManagerHandle>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -100,6 +102,7 @@ pub async fn run_tui(
         board_agent_id,
         init_prompt_content,
         recent_models,
+        task_manager_handle: Some(task_manager_handle),
     });
 
     state.banner_message = banner_message;

@@ -30,7 +30,9 @@ use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::task_manager::TaskManagerHandle;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -308,6 +310,8 @@ pub struct AppState {
     /// Used to display what subagents want to do in the approval bar
     pub subagent_pause_info:
         HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    /// Handle to the TaskManager for querying background task status (e.g., running subagents)
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
     /// Buffered user messages waiting to be sent after streaming completes
     pub pending_user_messages: VecDeque<PendingUserMessage>,
 
@@ -402,6 +406,8 @@ pub struct AppStateOptions<'a> {
     pub init_prompt_content: Option<String>,
     /// Recently used model IDs (most recent first)
     pub recent_models: Vec<String>,
+    /// Handle to the TaskManager for querying background task status
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
 impl AppState {
@@ -477,6 +483,7 @@ impl AppState {
             board_agent_id,
             init_prompt_content,
             recent_models,
+            task_manager_handle,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -732,6 +739,7 @@ impl AppState {
             plan_review_modal_kind: None,
             plan_review_confirm: None,
             subagent_pause_info: HashMap::new(),
+            task_manager_handle,
             init_prompt_content,
 
             // Message revert state initialization
