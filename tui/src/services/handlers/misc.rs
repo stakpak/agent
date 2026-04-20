@@ -255,6 +255,28 @@ pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::S
         state.text_area.set_text("");
         state.ctrl_c_pressed_once = true;
         state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
+
+        // Query running background tasks count asynchronously
+        if let Some(handle) = state.task_manager_handle.clone() {
+            let input_tx_clone = input_tx.clone();
+            tokio::spawn(async move {
+                let count = match handle.get_all_tasks().await {
+                    Ok(tasks) => tasks
+                        .iter()
+                        .filter(|t| {
+                            matches!(
+                                t.status,
+                                stakpak_shared::task_manager::TaskStatus::Running
+                                | stakpak_shared::task_manager::TaskStatus::Pending
+                                | stakpak_shared::task_manager::TaskStatus::Paused
+                            )
+                        })
+                        .count(),
+                    Err(_) => 0,
+                };
+                let _ = input_tx_clone.try_send(InputEvent::RunningBackgroundTasksCount(count));
+            });
+        }
     } else {
         // Second press within 2s: trigger quit
         state.ctrl_c_pressed_once = false;

@@ -312,6 +312,8 @@ pub struct AppState {
         HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
     /// Handle to the TaskManager for querying background task status (e.g., running subagents)
     pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
+    /// Cached count of running/pending background tasks (refreshed on Ctrl+C press)
+    pub running_background_tasks: usize,
     /// Buffered user messages waiting to be sent after streaming completes
     pub pending_user_messages: VecDeque<PendingUserMessage>,
 
@@ -740,6 +742,7 @@ impl AppState {
             plan_review_confirm: None,
             subagent_pause_info: HashMap::new(),
             task_manager_handle,
+            running_background_tasks: 0,
             init_prompt_content,
 
             // Message revert state initialization

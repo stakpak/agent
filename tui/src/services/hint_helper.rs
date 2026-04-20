@@ -19,8 +19,21 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
     if state.ctrl_c_pressed_once && state.ctrl_c_timer.is_some() {
+        let hint_text = if state.running_background_tasks > 0 {
+            format!(
+                "Press Ctrl+C again to exit Stakpak ({} background task{} running)",
+                state.running_background_tasks,
+                if state.running_background_tasks == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+        } else {
+            "Press Ctrl+C again to exit Stakpak".to_string()
+        };
         let hint = Paragraph::new(Span::styled(
-            "Press Ctrl+C again to exit Stakpak",
+            hint_text,
             Style::default().fg(ThemeColors::dark_gray()),
         ));
         f.render_widget(hint, area);

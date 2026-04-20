@@ -221,6 +221,9 @@ pub enum InputEvent {
 
     // Session events
     SetSessionId(String),
+
+    // Background task status
+    RunningBackgroundTasksCount(usize),
 }
 
 impl InputEvent {
@@ -267,6 +270,7 @@ impl InputEvent {
                 | InputEvent::RecentModelsUpdated(_)
                 | InputEvent::RulebooksLoaded(_)
                 | InputEvent::CurrentRulebooksLoaded(_)
+                | InputEvent::RunningBackgroundTasksCount(_)
         )
     }
 }

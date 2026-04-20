@@ -1465,6 +1465,9 @@ pub fn update(
             // These are handled in the intercept block above when popup is visible
             // If we reach here, the popup is not visible, so ignore
         }
+        InputEvent::RunningBackgroundTasksCount(count) => {
+            state.running_background_tasks = count;
+        }
     }
 
     flush_pending_user_messages_if_idle(state, input_tx, output_tx);
@@ -1498,6 +1501,7 @@ mod tests {
             board_agent_id: None,
             init_prompt_content: None,
             recent_models: Vec::new(),
+            task_manager_handle: None,
         })
     }
 
