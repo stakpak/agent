@@ -267,8 +267,8 @@ pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::S
                             matches!(
                                 t.status,
                                 stakpak_shared::task_manager::TaskStatus::Running
-                                | stakpak_shared::task_manager::TaskStatus::Pending
-                                | stakpak_shared::task_manager::TaskStatus::Paused
+                                    | stakpak_shared::task_manager::TaskStatus::Pending
+                                    | stakpak_shared::task_manager::TaskStatus::Paused
                             )
                         })
                         .count(),

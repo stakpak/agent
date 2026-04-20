@@ -267,7 +267,7 @@ pub async fn run_interactive(
 
         // Clone For TUI
         let task_manager_handle_for_tui = task_manager_handle.clone();
-        // Clone for MCP init 
+        // Clone for MCP init
         let task_manager_handle_for_mcp = task_manager_handle.clone();
 
         // Spawn TUI task
