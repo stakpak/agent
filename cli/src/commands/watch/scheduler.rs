@@ -114,9 +114,7 @@ impl Scheduler {
             Box::pin(async move {
                 debug!(schedule = %schedule_name, "Schedule fired");
 
-                let event = SchedulerEvent {
-                    schedule,
-                };
+                let event = SchedulerEvent { schedule };
 
                 if let Err(e) = tx.send(event).await {
                     error!(
