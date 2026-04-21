@@ -1,59 +1,17 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
 
 use clap::Subcommand;
 use stakpak_mcp_server::ToolMode;
 
 use crate::config::AppConfig;
 
+use stakpak_mcp_config::{
+    McpServerEntry, add_server, find_config_file, load_config, remove_server, resolve_config_path,
+    save_config, set_server_disabled,
+};
+
 pub mod proxy;
 pub mod server;
-
-fn find_mcp_proxy_config_file() -> Result<String, String> {
-    // Priority 1: ~/.stakpak/mcp.{toml,json}
-    let config_path = AppConfig::get_config_path::<&str>(None);
-    if let Some(home_stakpak) = config_path.parent() {
-        let home_toml = home_stakpak.join("mcp.toml");
-        if home_toml.exists() {
-            return Ok(home_toml.to_string_lossy().to_string());
-        }
-
-        let home_json = home_stakpak.join("mcp.json");
-        if home_json.exists() {
-            return Ok(home_json.to_string_lossy().to_string());
-        }
-    }
-
-    // Priority 2: .stakpak/mcp.{toml,json} in current directory
-    let cwd_stakpak = PathBuf::from(".stakpak");
-
-    let cwd_stakpak_toml = cwd_stakpak.join("mcp.toml");
-    if cwd_stakpak_toml.exists() {
-        return Ok(cwd_stakpak_toml.to_string_lossy().to_string());
-    }
-
-    let cwd_stakpak_json = cwd_stakpak.join("mcp.json");
-    if cwd_stakpak_json.exists() {
-        return Ok(cwd_stakpak_json.to_string_lossy().to_string());
-    }
-
-    // Priority 3: mcp.{toml,json} in current directory (fallback)
-    let cwd_toml = PathBuf::from("mcp.toml");
-    if cwd_toml.exists() {
-        return Ok("mcp.toml".to_string());
-    }
-
-    let cwd_json = PathBuf::from("mcp.json");
-    if cwd_json.exists() {
-        return Ok("mcp.json".to_string());
-    }
-
-    Err("No MCP proxy config file found. Searched in:\n  \
-        1. ~/.stakpak/mcp.toml or ~/.stakpak/mcp.json\n  \
-        2. .stakpak/mcp.toml or .stakpak/mcp.json\n  \
-        3. mcp.toml or mcp.json\n\n\
-        Create a config file with your MCP servers."
-        .to_string())
-}
 
 #[derive(Subcommand, PartialEq)]
 pub enum McpCommands {
@@ -89,6 +47,89 @@ pub enum McpCommands {
         #[arg(long = "privacy-mode", default_value_t = false)]
         privacy_mode: bool,
     },
+    /// Add an MCP server to config
+    Add {
+        /// Server name (unique identifier)
+        name: String,
+
+        /// Command for stdio transport
+        #[arg(long)]
+        command: Option<String>,
+
+        /// Argument to pass to the command (repeatable: --arg foo --arg bar)
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        args: Vec<String>,
+
+        /// Environment variables (KEY=VALUE, repeatable)
+        #[arg(long = "env")]
+        envs: Vec<String>,
+
+        /// HTTP URL for remote transport
+        #[arg(long)]
+        url: Option<String>,
+
+        /// HTTP headers (KEY=VALUE, repeatable)
+        #[arg(long = "headers")]
+        headers: Vec<String>,
+
+        /// JSON config string (alternative to --command/--url)
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Add in disabled state
+        #[arg(long)]
+        disabled: Option<bool>,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
+    /// Remove an MCP server from config
+    Remove {
+        /// Server name to remove
+        name: String,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
+    /// List configured MCP servers
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
+    /// Show details for a specific MCP server
+    Get {
+        /// Server name
+        name: String,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
+    /// Enable a MCP server
+    Enable {
+        /// Server name to enable
+        name: String,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
+    /// Disable an MCP server without removing it
+    Disable {
+        /// Server name to disable
+        name: String,
+
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
+    },
 }
 
 impl McpCommands {
@@ -116,10 +157,153 @@ impl McpCommands {
             } => {
                 let config_path = match config_file {
                     Some(path) => path,
-                    None => find_mcp_proxy_config_file()?,
+                    None => find_config_file()?,
                 };
                 proxy::run_proxy(config_path, disable_secret_redaction, privacy_mode).await
             }
+            McpCommands::Add {
+                name,
+                command,
+                args,
+                envs,
+                url,
+                headers,
+                json,
+                disabled,
+                config_file,
+            } => {
+                let entry = if let Some(json_str) = json {
+                    let mut entry = serde_json::from_str::<McpServerEntry>(&json_str)
+                        .map_err(|e| format!("Invalid JSON config: {e}"))?;
+                    if let Some(disabled) = disabled {
+                        entry.set_disabled(disabled);
+                    }
+                    entry
+                } else if let Some(url) = url {
+                    let headers = parse_key_values(&headers)?;
+                    McpServerEntry::UrlBased {
+                        url,
+                        headers: if headers.is_empty() {
+                            None
+                        } else {
+                            Some(headers)
+                        },
+                        disabled: disabled.unwrap_or(false),
+                    }
+                } else if let Some(command) = command {
+                    let env = parse_key_values(&envs)?;
+                    McpServerEntry::CommandBased {
+                        command,
+                        args,
+                        env: if env.is_empty() { None } else { Some(env) },
+                        disabled: disabled.unwrap_or(false),
+                    }
+                } else {
+                    return Err(
+                        "Must specify --command, --url, or --json. See 'stakpak mcp add --help'."
+                            .to_string(),
+                    );
+                };
+
+                let path = resolve_config_path(config_file.as_deref());
+                let mut cfg = load_config(&path)?;
+                add_server(&mut cfg, &name, entry)?;
+                save_config(&cfg, &path)?;
+
+                println!("Added MCP server '{name}' to {}", path.display());
+                Ok(())
+            }
+            McpCommands::Remove { name, config_file } => {
+                let path = resolve_config_path(config_file.as_deref());
+                let mut cfg = load_config(&path)?;
+                remove_server(&mut cfg, &name)?;
+                save_config(&cfg, &path)?;
+
+                println!("Removed MCP server '{name}'.");
+                Ok(())
+            }
+            McpCommands::List { json, config_file } => {
+                let path = resolve_config_path(config_file.as_deref());
+                let cfg = load_config(&path)?;
+
+                if cfg.servers.is_empty() {
+                    println!("No MCP servers configured.");
+                    return Ok(());
+                }
+
+                if json {
+                    let output = serde_json::to_string_pretty(&cfg.servers)
+                        .map_err(|e| format!("Failed to serialize: {e}"))?;
+                    println!("{output}");
+                    return Ok(());
+                }
+
+                let name_header = "NAME";
+                let type_header = "TYPE";
+                let cmd_header = "COMMAND/URL";
+                let status_header = "STATUS";
+                println!("{name_header:<20} {type_header:<8} {cmd_header:<50} {status_header}");
+                for (name, entry) in &cfg.servers {
+                    let status = if entry.is_disabled() {
+                        "disabled"
+                    } else {
+                        "enabled"
+                    };
+                    println!(
+                        "{:<20} {:<8} {:<50} {}",
+                        name,
+                        entry.entry_type(),
+                        entry.summary_truncated(50),
+                        status,
+                    );
+                }
+
+                Ok(())
+            }
+            McpCommands::Get { name, config_file } => {
+                let path = resolve_config_path(config_file.as_deref());
+                let cfg = load_config(&path)?;
+
+                let entry = cfg
+                    .servers
+                    .get(&name)
+                    .ok_or_else(|| format!("Server '{name}' not found."))?;
+
+                let json = serde_json::to_string_pretty(&entry)
+                    .map_err(|e| format!("Failed to serialize: {e}"))?;
+                println!("{json}");
+                Ok(())
+            }
+            McpCommands::Enable { name, config_file } => {
+                let path = resolve_config_path(config_file.as_deref());
+                let mut cfg = load_config(&path)?;
+                set_server_disabled(&mut cfg, &name, false)?;
+                save_config(&cfg, &path)?;
+
+                println!("Enabled MCP server '{name}'.");
+                Ok(())
+            }
+            McpCommands::Disable { name, config_file } => {
+                let path = resolve_config_path(config_file.as_deref());
+                let mut cfg = load_config(&path)?;
+                set_server_disabled(&mut cfg, &name, true)?;
+                save_config(&cfg, &path)?;
+
+                println!("Disabled MCP server '{name}'.");
+                Ok(())
+            }
         }
     }
+}
+
+/// Parse KEY=VALUE pairs from a vec of strings.
+fn parse_key_values(pairs: &[String]) -> Result<HashMap<String, String>, String> {
+    let mut map = HashMap::new();
+    for pair in pairs {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("Invalid KEY=VALUE pair: '{pair}'"))?;
+        map.insert(key.to_string(), value.to_string());
+    }
+    Ok(map)
 }

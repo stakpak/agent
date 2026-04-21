@@ -1,0 +1,21 @@
+[package]
+name = "stakpak-ak"
+version = { workspace = true }
+edition = { workspace = true }
+description = "Agent knowledge store library"
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+walkdir = { workspace = true }
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

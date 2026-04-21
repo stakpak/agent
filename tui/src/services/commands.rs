@@ -17,6 +17,7 @@ use crate::services::helper_block::{
     push_memorize_message, push_status_message, push_styled_message, push_support_message,
     push_usage_message, render_system_message, welcome_messages,
 };
+use crate::services::layout::centered_rect;
 use crate::services::message::{Message, MessageContent};
 use crate::{InputEvent, OutputEvent};
 use ratatui::{
@@ -1129,26 +1130,4 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
 
     // Render the border with title last (so it's on top)
     f.render_widget(block, area);
-}
-
-/// Helper function to create a centered rectangle
-#[allow(dead_code)]
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }

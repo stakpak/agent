@@ -321,11 +321,17 @@ pub struct AnthropicRequest {
 }
 
 /// Thinking/reasoning configuration
+///
+/// `budget_tokens` is `Some(N)` for the classic `{"type": "enabled", "budget_tokens": N}`
+/// form (Opus 4.6 and earlier) and `None` for Opus 4.7's `{"type": "adaptive"}` form,
+/// which rejects `budget_tokens` entirely. The `skip_serializing_if` attribute ensures
+/// the adaptive variant produces exactly `{"type": "adaptive"}` on the wire.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnthropicThinkingConfig {
     #[serde(rename = "type")]
     pub type_: String,
-    pub budget_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
 }
 
 /// Anthropic message

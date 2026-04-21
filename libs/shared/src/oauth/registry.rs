@@ -2,7 +2,7 @@
 
 use super::provider::OAuthProvider;
 use super::providers::{
-    AnthropicProvider, GitHubCopilotProvider, OpenAICodexProvider, StakpakProvider,
+    AnthropicProvider, GeminiProvider, GitHubCopilotProvider, OpenAICodexProvider, StakpakProvider,
 };
 use std::collections::HashMap;
 
@@ -22,6 +22,7 @@ impl ProviderRegistry {
         registry.register(Box::new(StakpakProvider::new()));
         registry.register(Box::new(AnthropicProvider::new()));
         registry.register(Box::new(OpenAICodexProvider::new()));
+        registry.register(Box::new(GeminiProvider::new()));
         registry.register(Box::new(GitHubCopilotProvider::new()));
 
         registry
@@ -119,5 +120,19 @@ mod tests {
 
         assert!(methods.iter().any(|method| method.id == "chatgpt-plus-pro"));
         assert!(methods.iter().any(|method| method.id == "api-key"));
+    }
+
+    #[test]
+    fn test_registry_registers_gemini_with_api_key_auth_method() {
+        let registry = ProviderRegistry::new();
+        let provider = registry.get("gemini").expect("gemini provider");
+        let methods = provider.auth_methods();
+        let providers = registry.list();
+
+        assert!(providers.iter().any(|candidate| candidate.id() == "gemini"));
+        assert_eq!(provider.id(), "gemini");
+        assert_eq!(provider.name(), "Google (Gemini)");
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].id, "api-key");
     }
 }

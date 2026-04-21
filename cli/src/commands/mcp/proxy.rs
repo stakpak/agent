@@ -8,11 +8,8 @@ pub async fn run_proxy(
     disable_secret_redaction: bool,
     privacy_mode: bool,
 ) -> Result<(), String> {
-    let config = match ClientPoolConfig::from_toml_file(&config_path) {
-        Ok(config) => config,
-        Err(_) => ClientPoolConfig::from_json_file(&config_path)
-            .map_err(|e| format!("Failed to load config from {}: {}", config_path, e))?,
-    };
+    let config = ClientPoolConfig::from_file(&config_path)
+        .map_err(|e| format!("Failed to load config from {}: {}", config_path, e))?;
 
     let server = ProxyServer::new(config, !disable_secret_redaction, privacy_mode)
         .serve(stdio())

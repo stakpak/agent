@@ -9,7 +9,9 @@ members = [
   "libs/agent-core",
   "libs/server",
   "libs/gateway",
+  "libs/ak",
   "libs/mcp/client",
+  "libs/mcp/config",
   "libs/mcp/server",
   "libs/mcp/proxy",
   "libs/shell-tool-approvals",
@@ -18,7 +20,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.73"
+version = "0.3.74"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -27,17 +29,19 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.73" }
-stakpak-api = { path = "libs/api", version = "0.3.73" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.73" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.73" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.73" }
-stakpak-agent-core = { path = "libs/agent-core", version = "0.3.73" }
-stakpak-gateway = { path = "libs/gateway", version = "0.3.73" }
-stakpak-server = { path = "libs/server", version = "0.3.73" }
-stakpak-tui = { path = "tui", version = "0.3.73" }
-stakpak-shared = { path = "libs/shared", version = "0.3.73" }
-stakpak-shell-tool-approvals = { path = "libs/shell-tool-approvals", version = "0.3.73" }
+stakai = { path = "libs/ai", version = "0.3.74" }
+stakpak-api = { path = "libs/api", version = "0.3.74" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.74" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.74" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.74" }
+stakpak-mcp-config = { path = "libs/mcp/config", version = "0.3.74" }
+stakpak-agent-core = { path = "libs/agent-core", version = "0.3.74" }
+stakpak-gateway = { path = "libs/gateway", version = "0.3.74" }
+stakpak-ak = { path = "libs/ak", version = "0.3.74" }
+stakpak-server = { path = "libs/server", version = "0.3.74" }
+stakpak-tui = { path = "tui", version = "0.3.74" }
+stakpak-shared = { path = "libs/shared", version = "0.3.74" }
+stakpak-shell-tool-approvals = { path = "libs/shell-tool-approvals", version = "0.3.74" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
