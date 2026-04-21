@@ -28,8 +28,6 @@ fn to_six_part_cron(expr: &str) -> String {
 /// Message sent when a schedule fires.
 #[derive(Debug, Clone)]
 pub struct SchedulerEvent {
-    /// Name of the schedule that fired.
-    pub schedule_name: String,
     /// The schedule configuration.
     pub schedule: Schedule,
 }
@@ -117,7 +115,6 @@ impl Scheduler {
                 debug!(schedule = %schedule_name, "Schedule fired");
 
                 let event = SchedulerEvent {
-                    schedule_name: schedule_name.clone(),
                     schedule,
                 };
 
@@ -145,21 +142,6 @@ impl Scheduler {
         self.job_ids.push(job_id);
 
         Ok(job_id)
-    }
-
-    /// Register multiple schedules.
-    pub async fn register_schedules(
-        &mut self,
-        schedules: Vec<Schedule>,
-    ) -> Result<Vec<Uuid>, SchedulerError> {
-        let mut job_ids = Vec::new();
-
-        for schedule in schedules {
-            let job_id = self.register_schedule(schedule).await?;
-            job_ids.push(job_id);
-        }
-
-        Ok(job_ids)
     }
 
     /// Start the scheduler.
@@ -287,9 +269,11 @@ mod tests {
             create_test_schedule("schedule-3", "0 0 * * *"), // Daily at midnight
         ];
 
-        let result = scheduler.register_schedules(schedules).await;
+        for schedule in schedules {
+            let result = scheduler.register_schedule(schedule).await;
+            assert!(result.is_ok());
+        }
 
-        assert!(result.is_ok());
         assert_eq!(scheduler.job_count(), 3);
     }
 
@@ -384,7 +368,7 @@ mod tests {
         assert!(event.is_some(), "Channel closed without receiving event");
 
         let event = event.unwrap();
-        assert_eq!(event.schedule_name, "fast-schedule");
+        assert_eq!(event.schedule.name, "fast-schedule");
     }
 
     #[tokio::test]
