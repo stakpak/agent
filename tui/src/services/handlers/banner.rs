@@ -12,28 +12,29 @@ pub fn handle_banner_mouse_click(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    if let Some(banner_area) = state.banner_area
+    if let Some(banner_area) = state.banner_state.area
         && row >= banner_area.y
         && row < banner_area.y + banner_area.height
         && col >= banner_area.x
         && col < banner_area.x + banner_area.width
     {
         // Check dismiss button first
-        if let Some(dismiss) = state.banner_dismiss_region
+        if let Some(dismiss) = state.banner_state.dismiss_region
             && col >= dismiss.x
             && col < dismiss.x + dismiss.width
             && row >= dismiss.y
             && row < dismiss.y + dismiss.height
         {
-            state.banner_message = None;
-            state.banner_click_regions.clear();
-            state.banner_dismiss_region = None;
-            state.banner_area = None;
+            state.banner_state.message = None;
+            state.banner_state.click_regions.clear();
+            state.banner_state.dismiss_region = None;
+            state.banner_state.area = None;
             return;
         }
 
         let clicked_cmd = state
-            .banner_click_regions
+            .banner_state
+            .click_regions
             .iter()
             .find(|(_, rect)| {
                 col >= rect.x
@@ -53,10 +54,10 @@ pub fn handle_banner_mouse_click(
                 crate::services::helper_block::push_error_message(state, &e, None);
             } else {
                 // Clear banner after successful command execution
-                state.banner_message = None;
-                state.banner_click_regions.clear();
-                state.banner_dismiss_region = None;
-                state.banner_area = None;
+                state.banner_state.message = None;
+                state.banner_state.click_regions.clear();
+                state.banner_state.area = None;
+                state.banner_state.dismiss_region = None;
             }
         }
     }

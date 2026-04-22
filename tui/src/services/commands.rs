@@ -337,36 +337,36 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
     match command_id {
         "/help" => {
             push_help_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/model" => {
             // Show model switcher popup
-            ctx.state.show_model_switcher = true;
-            ctx.state.model_switcher_selected = 0;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.model_switcher_state.is_visible = true;
+            ctx.state.model_switcher_state.is_selected = 0;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             // Request available models from the output handler
             let _ = ctx.output_tx.try_send(OutputEvent::RequestAvailableModels);
             Ok(())
         }
         "/clear" => {
             push_clear_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/status" => {
             push_status_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/sessions" => {
             let _ = ctx.output_tx.try_send(OutputEvent::ListSessions);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/resume" => {
@@ -380,77 +380,83 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         "/memorize" => {
             push_memorize_message(ctx.state);
             let _ = ctx.output_tx.try_send(OutputEvent::Memorize);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/summarize" => {
             let prompt = build_summarize_prompt(ctx.state);
-            ctx.state.messages.push(Message::info("".to_string(), None));
-            ctx.state.messages.push(Message::info(
-                "Requesting session summary (summary.md)...",
-                Some(Style::default().fg(ThemeColors::cyan())),
-            ));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::info("".to_string(), None));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::info(
+                    "Requesting session summary (summary.md)...",
+                    Some(Style::default().fg(ThemeColors::cyan())),
+                ));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
                 None,       // No revert index
             ));
-            ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/usage" => {
             push_usage_message(ctx.state);
             let _ = ctx.output_tx.try_send(OutputEvent::RequestTotalUsage);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/issue" => {
             push_issue_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/support" => {
             push_support_message(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/quit" => {
-            ctx.state.show_helper_dropdown = false;
-            ctx.state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
             let _ = ctx.input_tx.try_send(InputEvent::Quit);
             Ok(())
         }
         "/toggle_auto_approve" => {
             // Special case: keep input for user to specify tool name
             let input = "/toggle_auto_approve ".to_string();
-            ctx.state.text_area.set_text(&input);
-            ctx.state.text_area.set_cursor(input.len());
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text(&input);
+            ctx.state.input_state.text_area.set_cursor(input.len());
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/profiles" => {
-            ctx.state.show_profile_switcher = true;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.profile_switcher_state.show_profile_switcher = true;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowProfileSwitcher);
             Ok(())
         }
         "/list_approved_tools" => {
             list_auto_approved_tools(ctx.state);
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/mouse_capture" => {
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ToggleMouseCapture);
             Ok(())
         }
@@ -479,38 +485,38 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 };
 
                 if resolved_path.exists() {
-                    ctx.state.pending_editor_open =
+                    ctx.state.side_panel_state.pending_editor_open =
                         Some(resolved_path.to_string_lossy().to_string());
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                 } else {
                     push_error_message(
                         ctx.state,
                         &format!("File not found: {}", resolved_path.display()),
                         None,
                     );
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                 }
             } else {
                 // No path provided - keep /editor with space so user can type path
                 // This makes /editor a standalone feature, not tied to changeset
                 let new_text = "/editor ";
-                ctx.state.text_area.set_text(new_text);
-                ctx.state.text_area.set_cursor(new_text.len());
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text(new_text);
+                ctx.state.input_state.text_area.set_cursor(new_text.len());
+                ctx.state.input_state.show_helper_dropdown = false;
             }
             Ok(())
         }
         "/shortcuts" => {
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
         "/plan" => {
             // Already in plan mode? Show a message instead
-            if ctx.state.plan_mode_active {
+            if ctx.state.plan_mode_state.is_active {
                 crate::services::helper_block::push_styled_message(
                     ctx.state,
                     " Already in plan mode. Use ctrl+p to review the plan.",
@@ -518,8 +524,8 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                     "⚠ ",
                     ThemeColors::yellow(),
                 );
-                ctx.state.text_area.set_text("");
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text("");
+                ctx.state.input_state.show_helper_dropdown = false;
                 return Ok(());
             }
 
@@ -531,14 +537,14 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
 
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
 
             // Check for existing plan — show modal if one exists
             let session_dir = std::path::Path::new(".stakpak/session");
             if crate::services::plan::plan_file_exists(session_dir) {
                 let meta = crate::services::plan::read_plan_file(session_dir).map(|(m, _)| m);
-                ctx.state.existing_plan_prompt = Some(crate::app::ExistingPlanPrompt {
+                ctx.state.plan_mode_state.existing_prompt = Some(crate::app::ExistingPlanPrompt {
                     inline_prompt,
                     metadata: meta,
                 });
@@ -552,7 +558,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
 
         "/init" => {
             //  init prompt is always available (embedded at compile time)
-            let prompt = match ctx.state.init_prompt_content.as_deref() {
+            let prompt = match ctx.state.configuration_state.init_prompt_content.as_deref() {
                 Some(p) if !p.trim().is_empty() => p.to_string(),
                 _ => {
                     push_error_message(
@@ -560,23 +566,26 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                         "Internal error: init prompt not available",
                         None,
                     );
-                    ctx.state.text_area.set_text("");
-                    ctx.state.show_helper_dropdown = false;
+                    ctx.state.input_state.text_area.set_text("");
+                    ctx.state.input_state.show_helper_dropdown = false;
                     return Ok(());
                 }
             };
 
             let _ = ctx.output_tx.try_send(OutputEvent::InitCommandCalled);
-            ctx.state.messages.push(Message::user(prompt.clone(), None));
+            ctx.state
+                .messages_scrolling_state
+                .messages
+                .push(Message::user(prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt,
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(), // No image parts for command
                 None,       // No revert index
             ));
-            ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
@@ -590,6 +599,7 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             // the placeholder is replaced at runtime. Otherwise extra text is appended.
             let prompt_match = ctx
                 .state
+                .input_state
                 .helpers
                 .iter()
                 .find(|h| h.command == command_id)
@@ -625,9 +635,9 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             // firing so the user can append a ref / argument.
             if has_input_placeholder && extra.is_none() && raw_input.trim() == command_id {
                 let new_text = format!("{} ", command_id);
-                ctx.state.text_area.set_text(&new_text);
-                ctx.state.text_area.set_cursor(new_text.len());
-                ctx.state.show_helper_dropdown = false;
+                ctx.state.input_state.text_area.set_text(&new_text);
+                ctx.state.input_state.text_area.set_cursor(new_text.len());
+                ctx.state.input_state.show_helper_dropdown = false;
                 return Ok(());
             }
 
@@ -646,17 +656,18 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             };
 
             ctx.state
+                .messages_scrolling_state
                 .messages
                 .push(Message::user(full_prompt.clone(), None));
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 full_prompt,
-                ctx.state.shell_tool_calls.clone(),
+                ctx.state.shell_popup_state.shell_tool_calls.clone(),
                 Vec::new(),
                 None,
             ));
-            ctx.state.shell_tool_calls = None;
-            ctx.state.text_area.set_text("");
-            ctx.state.show_helper_dropdown = false;
+            ctx.state.shell_popup_state.shell_tool_calls = None;
+            ctx.state.input_state.text_area.set_text("");
+            ctx.state.input_state.show_helper_dropdown = false;
             crate::services::message::invalidate_message_lines_cache(ctx.state);
             Ok(())
         }
@@ -667,70 +678,82 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
 
 /// Terminate any active shell command before switching sessions
 fn terminate_active_shell(state: &mut AppState) {
-    if let Some(cmd) = &state.active_shell_command {
+    if let Some(cmd) = &state.shell_popup_state.active_shell_command {
         // Kill the running command
         let _ = cmd.kill();
     }
 
     // Remove the shell message box if it exists
-    if let Some(shell_msg_id) = state.interactive_shell_message_id {
-        state.messages.retain(|m| m.id != shell_msg_id);
+    if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != shell_msg_id);
     }
 
     // Reset all shell-related state
-    state.active_shell_command = None;
-    state.active_shell_command_output = None;
-    state.interactive_shell_message_id = None;
-    state.show_shell_mode = false;
-    state.shell_popup_visible = false;
-    state.shell_popup_expanded = false;
-    state.waiting_for_shell_input = false;
-    state.shell_pending_command_executed = false;
-    state.shell_pending_command_value = None;
-    state.shell_pending_command_output = None;
-    state.shell_pending_command_output_count = 0;
-    state.dialog_command = None;
-    state.text_area.set_shell_mode(false);
+    state.shell_popup_state.active_shell_command = None;
+    state.shell_popup_state.active_shell_command_output = None;
+    state.shell_session_state.interactive_shell_message_id = None;
+    state.shell_popup_state.is_visible = false;
+    state.shell_popup_state.is_expanded = false;
+    state.shell_popup_state.waiting_for_shell_input = false;
+    state.shell_popup_state.pending_command_executed = false;
+    state.shell_popup_state.pending_command_value = None;
+    state.shell_popup_state.pending_command_output = None;
+    state.shell_popup_state.pending_command_output_count = 0;
+    state.dialog_approval_state.dialog_command = None;
+    state.input_state.text_area.set_shell_mode(false);
 }
 
 pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // Terminate any active shell before switching sessions
     terminate_active_shell(state);
 
-    state.message_tool_calls = None;
-    state.message_approved_tools.clear();
-    state.message_rejected_tools.clear();
-    state.tool_call_execution_order.clear();
-    state.session_tool_calls_queue.clear();
-    state.approval_bar.clear();
-    state.toggle_approved_message = true;
-
-    state.messages.clear();
+    state.dialog_approval_state.message_tool_calls = None;
+    state.dialog_approval_state.message_approved_tools.clear();
+    state.dialog_approval_state.message_rejected_tools.clear();
     state
+        .session_tool_calls_state
+        .tool_call_execution_order
+        .clear();
+    state
+        .session_tool_calls_state
+        .session_tool_calls_queue
+        .clear();
+    state.dialog_approval_state.approval_bar.clear();
+    state.dialog_approval_state.toggle_approved_message = true;
+
+    state.messages_scrolling_state.messages.clear();
+    state
+        .messages_scrolling_state
         .messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
+        .extend(welcome_messages(
+            state.configuration_state.latest_version.clone(),
+            state,
+        ));
     render_system_message(state, "Resuming last session.");
 
     // Reset scroll state to show bottom when messages are loaded
-    state.scroll = 0;
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll = 0;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
-    state.changeset = crate::services::changeset::Changeset::default();
-    state.todos.clear();
+    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+    state.side_panel_state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the resumed session
-    state.total_session_usage = LLMTokenUsage {
+    state.usage_tracking_state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
         prompt_tokens_details: None,
     };
-    state.current_message_usage = LLMTokenUsage {
+    state.usage_tracking_state.current_message_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
@@ -739,24 +762,24 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
+    state.input_state.text_area.set_text("");
+    state.input_state.show_helper_dropdown = false;
 
     // Clear plan mode state
-    state.plan_mode_active = false;
-    state.plan_metadata = None;
-    state.plan_content_hash = None;
-    state.plan_previous_status = None;
-    state.plan_review_auto_opened = false;
-    state.show_plan_review = false;
-    state.plan_review_content.clear();
-    state.plan_review_lines.clear();
-    state.plan_review_comments = None;
-    state.plan_review_resolved_anchors.clear();
-    state.plan_review_show_comment_modal = false;
-    state.plan_review_comment_input.clear();
-    state.plan_review_selected_comment = None;
-    state.plan_review_modal_kind = None;
+    state.plan_mode_state.is_active = false;
+    state.plan_mode_state.metadata = None;
+    state.plan_mode_state.content_hash = None;
+    state.plan_mode_state.previous_status = None;
+    state.plan_mode_state.review_auto_opened = false;
+    state.plan_review_state.is_visible = false;
+    state.plan_review_state.content.clear();
+    state.plan_review_state.lines.clear();
+    state.plan_review_state.comments = None;
+    state.plan_review_state.resolved_anchors.clear();
+    state.plan_review_state.show_comment_modal = false;
+    state.plan_review_state.comment_input.clear();
+    state.plan_review_state.selected_comment = None;
+    state.plan_review_state.modal_kind = None;
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
@@ -764,50 +787,58 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     terminate_active_shell(state);
 
     let _ = output_tx.try_send(OutputEvent::NewSession);
-    state.text_area.set_text("");
-    state.messages.clear();
+    state.input_state.text_area.set_text("");
+    state.messages_scrolling_state.messages.clear();
     state
+        .messages_scrolling_state
         .messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
+        .extend(welcome_messages(
+            state.configuration_state.latest_version.clone(),
+            state,
+        ));
     render_system_message(state, "New session started.");
 
     // Reset scroll state
-    state.scroll = 0;
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll = 0;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Clear changeset and todos from previous session
-    state.changeset = crate::services::changeset::Changeset::default();
-    state.todos.clear();
+    state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
+    state.side_panel_state.todos.clear();
 
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the new session
-    state.total_session_usage = LLMTokenUsage {
+    state.usage_tracking_state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
         prompt_tokens_details: None,
     };
-    state.current_message_usage = LLMTokenUsage {
+    state.usage_tracking_state.current_message_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
         prompt_tokens_details: None,
     };
 
-    state.show_helper_dropdown = false;
+    state.input_state.show_helper_dropdown = false;
 }
 
 pub fn build_summarize_prompt(state: &AppState) -> String {
-    let usage = &state.total_session_usage;
+    let usage = &state.usage_tracking_state.total_session_usage;
     let total_tokens = usage.total_tokens;
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
 
     // Use current_model if set (from streaming), otherwise use default model
-    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let active_model = state
+        .model_switcher_state
+        .current_model
+        .as_ref()
+        .unwrap_or(&state.configuration_state.model);
     let max_tokens = active_model.limit.context as u32;
 
     let context_usage_pct = if max_tokens > 0 {
@@ -823,7 +854,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     prompt.push_str("Session snapshot:\n");
     prompt.push_str(&format!(
         "- Active profile: {}\n",
-        state.current_profile_name
+        state.profile_switcher_state.current_profile_name
     ));
     prompt.push_str(&format!(
         "- Total tokens used: {} (prompt: {}, completion: {})\n",
@@ -856,7 +887,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
 
 fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
     let mut entries = Vec::new();
-    for message in state.messages.iter().rev() {
+    for message in state.messages_scrolling_state.messages.iter().rev() {
         match &message.content {
             MessageContent::Plain(text, _) | MessageContent::PlainText(text) => {
                 let trimmed = text.trim();
@@ -877,7 +908,7 @@ fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
 }
 
 pub fn list_auto_approved_tools(state: &mut AppState) {
-    let config = state.auto_approve_manager.get_config();
+    let config = state.configuration_state.auto_approve_manager.get_config();
     let mut auto_approved_tools: Vec<_> = config
         .tools
         .iter()
@@ -885,7 +916,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
         .collect();
 
     // Filter by allowed_tools if configured
-    if let Some(allowed_tools) = &state.allowed_tools
+    if let Some(allowed_tools) = &state.configuration_state.allowed_tools
         && !allowed_tools.is_empty()
     {
         auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
@@ -893,6 +924,7 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
 
     if auto_approved_tools.is_empty() {
         let message = if state
+            .configuration_state
             .allowed_tools
             .as_ref()
             .is_some_and(|tools| !tools.is_empty())
@@ -909,7 +941,10 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
             .collect::<Vec<_>>()
             .join(", ");
         // add a spacing marker
-        state.messages.push(Message::plain_text(""));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::plain_text(""));
         push_styled_message(
             state,
             &format!("Tools currently set to auto-approve: {}", tool_list),
@@ -970,7 +1005,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.command_palette_search.is_empty() {
+    let search_spans = if state.command_palette_state.search.is_empty() {
         vec![
             Span::raw(" "), // Small space before
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -985,7 +1020,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.command_palette_search,
+                &state.command_palette_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -1004,17 +1039,17 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     f.render_widget(search_paragraph, chunks[1]);
 
     // Get filtered commands
-    let filtered_commands = filter_commands(&state.command_palette_search);
+    let filtered_commands = filter_commands(&state.command_palette_state.search);
     let total_commands = filtered_commands.len();
     let height = chunks[2].height as usize;
 
     // Calculate scroll position
     use crate::constants::SCROLL_BUFFER_LINES;
     let max_scroll = total_commands.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
-    let scroll = if state.command_palette_scroll > max_scroll {
+    let scroll = if state.command_palette_state.scroll > max_scroll {
         max_scroll
     } else {
-        state.command_palette_scroll
+        state.command_palette_state.scroll
     };
 
     // Add top arrow indicator if there are hidden items above
@@ -1033,7 +1068,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
         if line_index < total_commands {
             let command = &filtered_commands[line_index];
             let available_width = area.width as usize - 2; // Account for borders
-            let is_selected = line_index == state.command_palette_selected;
+            let is_selected = line_index == state.command_palette_state.is_selected;
             let bg_color = if is_selected {
                 ThemeColors::highlight_bg()
             } else {

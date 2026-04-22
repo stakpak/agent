@@ -102,13 +102,13 @@ pub async fn run_tui(
         recent_models,
     });
 
-    state.banner_message = banner_message;
+    state.banner_state.message = banner_message;
 
     // Mouse capture is always enabled
-    state.mouse_capture_enabled = true;
+    state.terminal_ui_state.mouse_capture_enabled = true;
 
     // Set initial terminal size
-    state.terminal_size = ratatui::layout::Size {
+    state.terminal_ui_state.terminal_size = ratatui::layout::Size {
         width: term_size.width,
         height: term_size.height,
     };
@@ -120,25 +120,30 @@ pub async fn run_tui(
     });
 
     // Set the current profile name and rulebook config
-    state.current_profile_name = current_profile_name;
-    state.rulebook_config = rulebook_config;
+    state.profile_switcher_state.current_profile_name = current_profile_name;
+    state.rulebook_switcher_state.rulebook_config = rulebook_config;
 
     // Add welcome messages after state is created
-    let welcome_msg =
-        crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
-    state.messages.extend(welcome_msg);
+    let welcome_msg = crate::services::helper_block::welcome_messages(
+        state.configuration_state.latest_version.clone(),
+        &state,
+    );
+    state.messages_scrolling_state.messages.extend(welcome_msg);
 
     // Trigger initial board tasks refresh if agent ID is configured
-    if state.board_agent_id.is_some() {
+    if state.side_panel_state.board_agent_id.is_some() {
         let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
     }
 
     // When started via `stakpak init`, add init prompt as user message and send to backend
     if send_init_prompt_on_start
-        && let Some(prompt) = state.init_prompt_content.clone()
+        && let Some(prompt) = state.configuration_state.init_prompt_content.clone()
         && !prompt.trim().is_empty()
     {
-        state.messages.push(Message::user(prompt.clone(), None));
+        state
+            .messages_scrolling_state
+            .messages
+            .push(Message::user(prompt.clone(), None));
         crate::services::message::invalidate_message_lines_cache(&mut state);
         let _ = output_tx.try_send(OutputEvent::UserMessage(prompt, None, Vec::new(), None));
     }
@@ -187,12 +192,12 @@ pub async fn run_tui(
 
     loop {
         // Check if double Ctrl+C timer expired
-        if state.ctrl_c_pressed_once
-            && let Some(timer) = state.ctrl_c_timer
+        if state.quit_intent_state.ctrl_c_pressed_once
+            && let Some(timer) = state.quit_intent_state.ctrl_c_timer
             && std::time::Instant::now() > timer
         {
-            state.ctrl_c_pressed_once = false;
-            state.ctrl_c_timer = None;
+            state.quit_intent_state.ctrl_c_pressed_once = false;
+            state.quit_intent_state.ctrl_c_timer = None;
         }
         tokio::select! {
                event = input_rx.recv() => {
@@ -212,21 +217,21 @@ pub async fn run_tui(
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        // Calculate actual message area dimensions (same as view.rs)
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1)
                        } else {
                            term_size.width
                        };
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let margin_height: u16 = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                        let hint_height = if dropdown_showing { 0 } else { margin_height };
 
                        // Account for approval bar height (will be shown after this tool call)
                        // The approval bar will be visible, so input and dropdown are hidden
-                       let approval_bar_height = state.approval_bar.calculate_height(term_rect.width).max(7); // Use expected height
+                       let approval_bar_height = state.dialog_approval_state.approval_bar.calculate_height(term_rect.width).max(7); // Use expected height
 
                        let banner_h = crate::services::banner::banner_height(&state);
                         let outer_chunks = ratatui::layout::Layout::default()
@@ -254,22 +259,22 @@ pub async fn run_tui(
                        clear_streaming_tool_results(&mut state);
 
                        // Clear cancel_requested now that the final result has arrived
-                       state.cancel_requested = false;
+                       state.tool_call_state.cancel_requested = false;
 
                        // For run_command, also remove any message that matches the tool call ID
                        // (handles case where streaming message uses tool_call_id directly)
                        // The tool call ID is a String, but message IDs are Uuid
                        if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
-                           state.messages.retain(|m| m.id != tool_call_uuid);
+                           state.messages_scrolling_state.messages.retain(|m| m.id != tool_call_uuid);
                        }
 
-                       state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+                       state.session_tool_calls_state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
                        let tool_name = strip_tool_name(&tool_call_result.call.function.name);
 
                        let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {
-                           state.latest_tool_call = Some(tool_call_result.call.clone());
+                           state.tool_call_state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
                        // Determine the state for command tools
                        let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
@@ -277,23 +282,23 @@ pub async fn run_tui(
 
                        if (is_cancelled || is_error) && !is_fg_cmd {
                            // For non-command tools with cancelled/error, use old renderer
-                           state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                           state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                           state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                           state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                        } else {
                            match tool_name {
                                "str_replace" | "create" => {
                                    // TUI: Show diff result block with yellow border (is_collapsed: None)
-                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
                                    // Use render_full_content_message which stores the full ToolCallResult including the result
                                    // (needed for extracting line numbers from the diff output)
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                "run_command_task" | "run_remote_command_task" => {
                                    // TUI: bordered result block (is_collapsed: None)
-                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: full content without border (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                 "run_command" | "run_remote_command" => {
                                     // Use unified run command block with appropriate state
@@ -319,27 +324,27 @@ pub async fn run_tui(
 
                                     // If shell is visible/running, insert cancelled block BEFORE the shell message
                                     // so the order is: cancelled command -> shell box
-                                    if is_cancelled && state.shell_popup_visible {
-                                        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                                    if is_cancelled && state.shell_popup_state.is_visible {
+                                        if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
                                             // Find the position of the shell message
-                                            if let Some(pos) = state.messages.iter().position(|m| m.id == shell_msg_id) {
+                                            if let Some(pos) = state.messages_scrolling_state.messages.iter().position(|m| m.id == shell_msg_id) {
                                                 // Insert cancelled block and popup before shell message
-                                                state.messages.insert(pos, popup_msg);
-                                                state.messages.insert(pos, run_cmd_msg);
+                                                state.messages_scrolling_state.messages.insert(pos, popup_msg);
+                                                state.messages_scrolling_state.messages.insert(pos, run_cmd_msg);
                                             } else {
                                                 // Shell message not found, just push normally
-                                                state.messages.push(run_cmd_msg);
-                                                state.messages.push(popup_msg);
+                                                state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                                state.messages_scrolling_state.messages.push(popup_msg);
                                             }
                                         } else {
                                             // No shell message ID, just push normally
-                                            state.messages.push(run_cmd_msg);
-                                            state.messages.push(popup_msg);
+                                            state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                            state.messages_scrolling_state.messages.push(popup_msg);
                                         }
                                     } else {
                                         // Normal case: just push to the end
-                                        state.messages.push(run_cmd_msg);
-                                        state.messages.push(popup_msg);
+                                        state.messages_scrolling_state.messages.push(run_cmd_msg);
+                                        state.messages_scrolling_state.messages.push(popup_msg);
                                     }
                                 }
                                 "read" | "view" | "read_file" => {
@@ -348,15 +353,15 @@ pub async fn run_tui(
                                     let (file_path, grep, glob) = crate::services::handlers::tool::extract_view_params_from_tool_call(&tool_call_result.call);
                                     let file_path = file_path.unwrap_or_else(|| "file".to_string());
                                     let total_lines = tool_call_result.result.lines().count();
-                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
+                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
                                     // Full screen popup: same compact view without borders
-                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
+                                    state.messages_scrolling_state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
                                 }
                                _ => {
                                    // TUI: collapsed command message - last 3 lines (is_collapsed: None)
-                                   state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
                                    // Full screen popup: full content (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                                   state.messages_scrolling_state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                            }
 
@@ -367,7 +372,7 @@ pub async fn run_tui(
                        }
                        // Invalidate cache and scroll to bottom to show the result
                        crate::services::message::invalidate_message_lines_cache(&mut state);
-                       state.stay_at_bottom = true;
+                       state.messages_scrolling_state.stay_at_bottom = true;
 
                        // Refresh board tasks after tool execution (agent may have updated tasks)
                        // Always trigger refresh - the handler will extract agent_id from messages if needed
@@ -384,7 +389,7 @@ pub async fn run_tui(
                    }
                    else {
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -392,11 +397,11 @@ pub async fn run_tui(
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                         let dropdown_height = if dropdown_showing {
-                            state.filtered_helpers.len() as u16
+                            state.input_state.filtered_helpers.len() as u16
                         } else {
                             0
                         };
@@ -419,17 +424,17 @@ pub async fn run_tui(
                          crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                          state.poll_file_search_results();
                         // Handle pending editor open request
-                       if let Some(file_path) = state.pending_editor_open.take() {
+                       if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
                            // Disable mouse capture before opening editor to prevent weird input
-                           let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                           let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
                            if was_mouse_capture_enabled {
                                let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                               state.mouse_capture_enabled = false;
+                               state.terminal_ui_state.mouse_capture_enabled = false;
                            }
 
                            match crate::services::editor::open_in_editor(
                                &mut terminal,
-                               &state.editor_command,
+                               &state.side_panel_state.editor_command,
                                &file_path,
                                None,
                            ) {
@@ -438,7 +443,7 @@ pub async fn run_tui(
                                }
                                Err(error) => {
                                    // Show error message
-                                   state.messages.push(Message::info(
+                                   state.messages_scrolling_state.messages.push(Message::info(
                                        format!("Failed to open editor: {}", error),
                                         Some(ratatui::style::Style::default().fg(ThemeColors::red())),
                                     ));
@@ -448,7 +453,7 @@ pub async fn run_tui(
                             // Restore mouse capture if it was enabled before
                             if was_mouse_capture_enabled {
                                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                state.mouse_capture_enabled = true;
+                                state.terminal_ui_state.mouse_capture_enabled = true;
                             }
                         }
                    }
@@ -471,7 +476,7 @@ pub async fn run_tui(
                    else {
                        let term_size = terminal.size()?;
                        // Calculate main area width accounting for side panel
-                       let main_area_width = if state.show_side_panel {
+                       let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
                        } else {
                            term_size.width
@@ -479,11 +484,11 @@ pub async fn run_tui(
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
+                       let dropdown_showing = state.input_state.show_helper_dropdown
+                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.input_state.filtered_files.is_empty());
                        let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
+                           state.input_state.filtered_helpers.len() as u16
                        } else {
                            0
                        };
@@ -559,22 +564,22 @@ pub async fn run_tui(
                    state.poll_file_search_results();
 
                         // Handle pending editor open request
-                         if let Some(file_path) = state.pending_editor_open.take() {
+                         if let Some(file_path) = state.side_panel_state.pending_editor_open.take() {
                              // Pause input thread to avoid stealing input from editor
                              input_paused.store(true, Ordering::Relaxed);
                              // Small delay to ensure input thread cycle completes
                              std::thread::sleep(Duration::from_millis(10));
 
                              // Disable mouse capture before opening editor to prevent weird input
-                             let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                             let was_mouse_capture_enabled = state.terminal_ui_state.mouse_capture_enabled;
                              if was_mouse_capture_enabled {
                                  let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                                 state.mouse_capture_enabled = false;
+                                 state.terminal_ui_state.mouse_capture_enabled = false;
                              }
 
                              match crate::services::editor::open_in_editor(
                                  &mut terminal,
-                                 &state.editor_command,
+                                 &state.side_panel_state.editor_command,
                                  &file_path,
                                  None,
                              ) {
@@ -583,7 +588,7 @@ pub async fn run_tui(
                                  }
                                  Err(error) => {
                                      // Show error message
-                                     state.messages.push(Message::info(
+                                     state.messages_scrolling_state.messages.push(Message::info(
                                          format!("Failed to open editor: {}", error),
                                           Some(ratatui::style::Style::default().fg(ThemeColors::red())),
                                      ));
@@ -593,7 +598,7 @@ pub async fn run_tui(
                              // Restore mouse capture if it was enabled before
                              if was_mouse_capture_enabled {
                                  let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                 state.mouse_capture_enabled = true;
+                                 state.terminal_ui_state.mouse_capture_enabled = true;
                              }
 
                              // Resume input thread
@@ -605,13 +610,13 @@ pub async fn run_tui(
                 }
                _ = spinner_interval.tick() => {
                    // Also check double Ctrl+C timer expiry on every tick
-                   if state.ctrl_c_pressed_once
-                       && let Some(timer) = state.ctrl_c_timer
+                   if state.quit_intent_state.ctrl_c_pressed_once
+                       && let Some(timer) = state.quit_intent_state.ctrl_c_timer
                            && std::time::Instant::now() > timer {
-                               state.ctrl_c_pressed_once = false;
-                               state.ctrl_c_timer = None;
+                               state.quit_intent_state.ctrl_c_pressed_once = false;
+                               state.quit_intent_state.ctrl_c_timer = None;
                            }
-                   state.spinner_frame = state.spinner_frame.wrapping_add(1);
+                   state.loading_state.spinner_frame = state.loading_state.spinner_frame.wrapping_add(1);
                    // Update shell cursor blink (toggles every ~5 ticks = 500ms)
                    crate::services::shell_popup::update_cursor_blink(&mut state);
                    state.poll_file_search_results();
@@ -622,8 +627,8 @@ pub async fn run_tui(
                        match new_status {
                            PlanStatus::PendingReview => {
                                // Auto-open plan review when agent sets status to pending_review
-                               if !state.plan_review_auto_opened {
-                                   state.plan_review_auto_opened = true;
+                               if !state.plan_mode_state.review_auto_opened {
+                                   state.plan_mode_state.review_auto_opened = true;
                                    crate::services::plan_review::open_plan_review(&mut state);
                                    // Show system message
                                    crate::services::helper_block::push_styled_message(
@@ -641,7 +646,7 @@ pub async fn run_tui(
                            }
                            PlanStatus::Drafting => {
                                // New revision — reset auto-open flag so next pending_review triggers it
-                               state.plan_review_auto_opened = false;
+                               state.plan_mode_state.review_auto_opened = false;
                            }
                        }
                    }
@@ -656,8 +661,8 @@ pub async fn run_tui(
             break;
         }
         // Check if terminal clear was requested (e.g., after shell popup closes)
-        if state.needs_terminal_clear {
-            state.needs_terminal_clear = false;
+        if state.shell_popup_state.needs_terminal_clear {
+            state.shell_popup_state.needs_terminal_clear = false;
             emergency_clear_and_redraw(&mut terminal, &mut state)?;
         }
         state.poll_file_search_results();

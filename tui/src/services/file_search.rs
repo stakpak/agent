@@ -311,20 +311,20 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     }
 
     // Load files if not already loaded
-    if state.file_search.file_suggestions.is_empty()
+    if state.input_state.file_search.file_suggestions.is_empty()
         && let Ok(current_dir) = std::env::current_dir()
     {
-        state.file_search.scan_directory(&current_dir);
+        state.input_state.file_search.scan_directory(&current_dir);
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
-    state.file_search.filter_files(&current_word);
+    state.input_state.file_search.filter_files(&current_word);
 
-    if !state.file_search.filtered_files.is_empty() {
-        state.file_search.is_file_mode = true;
-        state.file_search.trigger_char = None;
-        state.show_helper_dropdown = true;
-        state.helper_selected = 0;
+    if !state.input_state.file_search.filtered_files.is_empty() {
+        state.input_state.file_search.is_file_mode = true;
+        state.input_state.file_search.trigger_char = None;
+        state.input_state.show_helper_dropdown = true;
+        state.input_state.helper_selected = 0;
         return true;
     }
     false
@@ -344,15 +344,16 @@ pub fn handle_at_trigger(input: &str, cursor_pos: usize, file_search: &mut FileS
 
 /// Handle file selection and update input string
 pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
-    match state.file_search.trigger_char {
+    match state.input_state.file_search.trigger_char {
         Some('@') => {
             // Replace from @ to cursor with selected file
             if let Some(at_pos) = find_at_trigger(state.input(), state.cursor_position()) {
                 let before_at = state.input()[..at_pos].to_string();
                 let after_cursor = state.input()[state.cursor_position()..].to_string();
                 let new_text = format!("{}{}{}", before_at, selected_file, after_cursor);
-                state.text_area.set_text(&new_text);
+                state.input_state.text_area.set_text(&new_text);
                 state
+                    .input_state
                     .text_area
                     .set_cursor(before_at.len() + selected_file.len());
             }
@@ -365,26 +366,27 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
                 let before_word = &state.input()[..word_start + 1];
                 let after_cursor = &state.input()[state.cursor_position()..];
                 let new_text = format!("{}{}{}", before_word, selected_file, after_cursor);
-                state.text_area.set_text(&new_text);
+                state.input_state.text_area.set_text(&new_text);
                 state
+                    .input_state
                     .text_area
                     .set_cursor(word_start + 1 + selected_file.len());
             } else {
                 // Replace from beginning
                 let after_cursor = &state.input()[state.cursor_position()..];
                 let new_text = format!("{}{}", selected_file, after_cursor);
-                state.text_area.set_text(&new_text);
-                state.text_area.set_cursor(selected_file.len());
+                state.input_state.text_area.set_text(&new_text);
+                state.input_state.text_area.set_cursor(selected_file.len());
             }
         }
         _ => {}
     }
 
     // Reset file_search state
-    state.file_search.reset();
-    state.show_helper_dropdown = false;
-    state.filtered_helpers.clear();
-    state.helper_selected = 0;
+    state.input_state.file_search.reset();
+    state.input_state.show_helper_dropdown = false;
+    state.input_state.filtered_helpers.clear();
+    state.input_state.helper_selected = 0;
 }
 
 #[derive(Debug, Clone)]

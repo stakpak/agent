@@ -374,8 +374,6 @@ mod tests {
     // ── Resolve ──────────────────────────────────────────────────────────
 
     #[test]
-    // ── Resolve ──────────────────────────────────────────────────────────
-    #[test]
     fn test_resolve_comment() {
         let mut pc = sample_plan_comments();
         add_comment(

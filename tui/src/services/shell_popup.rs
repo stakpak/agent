@@ -22,12 +22,12 @@ pub const SHELL_POPUP_MAX_HEIGHT_PERCENT: f32 = 0.6;
 
 /// Calculate the popup height based on state and content
 pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
-    if !state.shell_popup_visible {
+    if !state.shell_popup_state.is_visible {
         return 0;
     }
 
     // Count actual non-empty lines from the screen for dynamic sizing
-    let screen = state.shell_screen.screen();
+    let screen = state.shell_runtime_state.screen.screen();
     let (rows, cols) = screen.size();
 
     // Count non-empty rows from the end
@@ -54,7 +54,7 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
     }
 
     // Collapsed state logic
-    if !state.shell_popup_expanded {
+    if !state.shell_popup_state.is_expanded {
         if content_lines > 2 {
             // 3 lines content (header + 2 history) + 2 borders = 5
             return 5;
@@ -83,15 +83,17 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
 
 /// Render the shell popup above the input area
 pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
-    if !state.shell_popup_visible {
+    if !state.shell_popup_state.is_visible {
         return;
     }
 
     // Determine colors based on state
-    let (border_color, title_suffix) = if state.shell_popup_expanded {
-        if state.active_shell_command.is_some() {
+    let (border_color, title_suffix) = if state.shell_popup_state.is_expanded {
+        if state.shell_popup_state.active_shell_command.is_some() {
             // Check if command has been executed yet (initializing vs active)
-            if !state.shell_pending_command_executed && state.is_tool_call_shell_command {
+            if !state.shell_popup_state.pending_command_executed
+                && state.shell_popup_state.is_tool_call_shell_command
+            {
                 (ThemeColors::yellow(), "[Initializing...]")
             } else {
                 (ThemeColors::cyan(), "[Active] . Option + ↑/↓ to scroll")
@@ -105,7 +107,8 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Build title with truncated command (max 50 chars)
     let command_name = state
-        .shell_pending_command_value
+        .shell_popup_state
+        .pending_command_value
         .as_ref()
         .map(|c| {
             if c.chars().count() > 50 {
@@ -141,7 +144,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     // Get styled screen content - the PTY already shows the prompt and command naturally
-    let screen_lines = capture_styled_screen(&mut state.shell_screen);
+    let screen_lines = capture_styled_screen(&mut state.shell_runtime_state.screen);
 
     // Build display lines directly from screen content
     // We trim trailing empty lines for display so we don't "scroll to bottom" of empty lines
@@ -153,43 +156,45 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Calculate visible lines based on scroll position
     // shell_popup_scroll represents how many lines from bottom we've scrolled up
     let max_scroll = total_lines.saturating_sub(inner_height);
-    let scroll_from_bottom = state.shell_popup_scroll.min(max_scroll);
+    let scroll_from_bottom = state.shell_popup_state.scroll.min(max_scroll);
     let skip = max_scroll.saturating_sub(scroll_from_bottom);
 
-    let visible_lines: Vec<Line<'static>> = if !state.shell_popup_expanded && total_lines > 2 {
-        // Collapsed mode with overflow: show indicator + last 2 lines
-        let mut lines = Vec::new();
-        let hidden_count = total_lines.saturating_sub(2);
-        lines.push(Line::from(Span::styled(
-            format!(" + {} hidden lines", hidden_count),
-            Style::default().fg(ThemeColors::dark_gray()),
-        )));
-        // Add last 2 lines
-        let start = total_lines.saturating_sub(2);
-        for line in display_lines.iter().skip(start) {
-            lines.push(line.clone());
-        }
-        lines
-    } else {
-        // Standard behavior
-        display_lines
-            .into_iter()
-            .skip(skip)
-            .take(inner_height)
-            .collect()
-    };
+    let visible_lines: Vec<Line<'static>> =
+        if !state.shell_popup_state.is_expanded && total_lines > 2 {
+            // Collapsed mode with overflow: show indicator + last 2 lines
+            let mut lines = Vec::new();
+            let hidden_count = total_lines.saturating_sub(2);
+            lines.push(Line::from(Span::styled(
+                format!(" + {} hidden lines", hidden_count),
+                Style::default().fg(ThemeColors::dark_gray()),
+            )));
+            // Add last 2 lines
+            let start = total_lines.saturating_sub(2);
+            for line in display_lines.iter().skip(start) {
+                lines.push(line.clone());
+            }
+            lines
+        } else {
+            // Standard behavior
+            display_lines
+                .into_iter()
+                .skip(skip)
+                .take(inner_height)
+                .collect()
+        };
 
     let content = Paragraph::new(visible_lines);
     f.render_widget(content, inner_area);
 
     // Render cursor when shell is active and expanded (only if at bottom - scroll = 0)
-    if state.shell_popup_expanded
-        && state.active_shell_command.is_some()
-        && state.shell_popup_scroll == 0
+    if state.shell_popup_state.is_expanded
+        && state.shell_popup_state.active_shell_command.is_some()
+        && state.shell_popup_state.scroll == 0
     {
         // Only show cursor if it should be visible (blink state)
-        if state.shell_cursor_visible {
-            let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
+        if state.shell_popup_state.cursor_visible {
+            let (cursor_row, cursor_col) =
+                state.shell_runtime_state.screen.screen().cursor_position();
 
             // Calculate screen position for cursor (directly from PTY cursor position)
             let cursor_line_in_content = cursor_row as usize;
@@ -212,16 +217,17 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
 /// Update cursor blink state (call this from event loop tick)
 pub fn update_cursor_blink(state: &mut AppState) {
-    state.shell_cursor_blink_timer = state.shell_cursor_blink_timer.wrapping_add(1);
+    state.shell_popup_state.cursor_blink_timer =
+        state.shell_popup_state.cursor_blink_timer.wrapping_add(1);
 
     // Toggle every 5 frames (~500ms at 10fps / 100ms interval)
-    if state.shell_cursor_blink_timer.is_multiple_of(5) {
-        state.shell_cursor_visible = !state.shell_cursor_visible;
+    if state.shell_popup_state.cursor_blink_timer.is_multiple_of(5) {
+        state.shell_popup_state.cursor_visible = !state.shell_popup_state.cursor_visible;
     }
 }
 
 /// Reset cursor to visible (call when input is received)
 pub fn reset_cursor_blink(state: &mut AppState) {
-    state.shell_cursor_visible = true;
-    state.shell_cursor_blink_timer = 0;
+    state.shell_popup_state.cursor_visible = true;
+    state.shell_popup_state.cursor_blink_timer = 0;
 }
