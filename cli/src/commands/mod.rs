@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::config::AppConfig;
-use clap::Subcommand;
+use clap::{CommandFactory, Subcommand};
 use serde::{Deserialize, Serialize};
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 
@@ -209,6 +209,16 @@ pub enum Commands {
         #[command(flatten)]
         args: StopArgs,
     },
+
+    /// Generate shell completion scripts
+    ///
+    /// Prints a completion script for the given shell to stdout. Source or
+    /// install it according to your shell's documentation.
+    Completion {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 async fn build_agent_client(config: &AppConfig) -> Result<AgentClient, String> {
@@ -253,6 +263,7 @@ impl Commands {
                 | Commands::Set { .. }
                 | Commands::Config(_)
                 | Commands::Version
+                | Commands::Completion { .. }
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
@@ -570,6 +581,14 @@ impl Commands {
                     eprintln!("ACP agent failed: {}", e);
                     std::process::exit(1);
                 }
+            }
+            Commands::Completion { shell } => {
+                clap_complete::generate(
+                    shell,
+                    &mut crate::Cli::command(),
+                    "stakpak",
+                    &mut std::io::stdout(),
+                );
             }
         }
         Ok(())
