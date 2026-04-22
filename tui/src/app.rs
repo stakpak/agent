@@ -52,6 +52,7 @@ pub struct AppState {
     pub plan_mode_state: PlanModeState,
     pub plan_review_state: PlanReviewState,
     pub ask_user_state: AskUserState,
+    pub tool_approval_popup_state: AutoApprovePopupState,
 }
 
 pub struct AppStateOptions<'a> {
@@ -222,6 +223,9 @@ impl AppState {
 
             // File changes popup initialization
             file_changes_popup_state: FileChangesPopupState::default(),
+
+            // tool approval popup initialization
+            tool_approval_popup_state: AutoApprovePopupState::default(),
 
             // Usage tracking
             usage_tracking_state: UsageTrackingState::default(),

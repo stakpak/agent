@@ -82,6 +82,7 @@ pub enum InputEvent {
     AttemptQuit,
     ToggleCollapsedMessages,
     ShowFileChangesPopup,
+    ShowAutoApprovePopup,
     FileChangesRevertFile,
     FileChangesRevertAll,
     FileChangesOpenEditor,

@@ -2,7 +2,8 @@
 //!
 //! Handles all popup-related events including profile switcher, rulebook switcher, model switcher, command palette, shortcuts, collapsed messages, and context popup.
 
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, AutoApprovePopupRow, InputEvent, OutputEvent};
+use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::changeset::Changeset;
 use crate::services::detect_term::ThemeColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
@@ -664,6 +665,170 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
                 .insert(section, !current);
         }
     }
+}
+
+// ========= Auto-Approve Popup Handlers ==========
+
+fn next_policy(policy: &AutoApprovePolicy) -> AutoApprovePolicy {
+    match policy {
+        AutoApprovePolicy::Prompt => AutoApprovePolicy::Auto,
+        AutoApprovePolicy::Auto => AutoApprovePolicy::Never,
+        AutoApprovePolicy::Never => AutoApprovePolicy::Prompt,
+    }
+}
+
+fn prev_policy(policy: &AutoApprovePolicy) -> AutoApprovePolicy {
+    match policy {
+        AutoApprovePolicy::Prompt => AutoApprovePolicy::Never,
+        AutoApprovePolicy::Auto => AutoApprovePolicy::Prompt,
+        AutoApprovePolicy::Never => AutoApprovePolicy::Auto,
+    }
+}
+
+fn sync_auto_approve_popup_scroll(state: &mut AppState) {
+    const VISIBLE_ROWS: usize = 12;
+    let total = state.tool_approval_popup_state.rows.len();
+    if total == 0 {
+        state.tool_approval_popup_state.row_selected = 0;
+        state.tool_approval_popup_state.scroll = 0;
+        return;
+    }
+
+    if state.tool_approval_popup_state.row_selected >= total {
+        state.tool_approval_popup_state.row_selected = total - 1;
+    }
+
+    if state.tool_approval_popup_state.row_selected < state.tool_approval_popup_state.scroll {
+        state.tool_approval_popup_state.scroll = state.tool_approval_popup_state.row_selected;
+    } else if state.tool_approval_popup_state.row_selected
+        >= state.tool_approval_popup_state.scroll + VISIBLE_ROWS
+    {
+        state.tool_approval_popup_state.scroll = state
+            .tool_approval_popup_state
+            .row_selected
+            .saturating_sub(VISIBLE_ROWS - 1);
+    }
+}
+
+pub fn handle_show_auto_approve_popup(state: &mut AppState) {
+    if state.profile_switcher_state.switching_in_progress
+        || state.dialog_approval_state.is_dialog_open
+        || state.dialog_approval_state.approval_bar.is_visible()
+    {
+        return;
+    }
+
+    let mut rows: Vec<AutoApprovePopupRow> = state
+        .configuration_state
+        .auto_approve_manager
+        .get_config()
+        .tools
+        .iter()
+        .map(|(tool_name, policy)| AutoApprovePopupRow {
+            tool_name: tool_name.clone(),
+            policy: policy.clone(),
+            original_policy: policy.clone(),
+        })
+        .collect();
+
+    rows.sort_by(|a, b| a.tool_name.cmp(&b.tool_name));
+
+    state.tool_approval_popup_state.is_visible = true;
+    state.tool_approval_popup_state.rows = rows;
+    state.tool_approval_popup_state.row_selected = 0;
+    state.tool_approval_popup_state.scroll = 0;
+    state.tool_approval_popup_state.filter_text.clear();
+    state.tool_approval_popup_state.filtered_rows.clear();
+}
+
+pub fn handle_auto_approve_popup_cancel(state: &mut AppState) {
+    state.tool_approval_popup_state.reset();
+}
+
+pub fn handle_auto_approve_popup_up(state: &mut AppState) {
+    if state.tool_approval_popup_state.visible_count() == 0 {
+        return;
+    }
+
+    if state.tool_approval_popup_state.row_selected > 0 {
+        state.tool_approval_popup_state.row_selected -= 1;
+    }
+    sync_auto_approve_popup_scroll(state);
+}
+
+pub fn handle_auto_approve_popup_down(state: &mut AppState) {
+    if state.tool_approval_popup_state.visible_count() == 0 {
+        return;
+    }
+
+    if state.tool_approval_popup_state.row_selected + 1
+        < state.tool_approval_popup_state.visible_count()
+    {
+        state.tool_approval_popup_state.row_selected += 1;
+    }
+    sync_auto_approve_popup_scroll(state);
+}
+
+pub fn handle_auto_approve_popup_left(state: &mut AppState) {
+    if let Some(row_idx) = state
+        .tool_approval_popup_state
+        .get_row_index(state.tool_approval_popup_state.row_selected)
+        && let Some(row) = state.tool_approval_popup_state.rows.get_mut(row_idx)
+    {
+        row.policy = prev_policy(&row.policy);
+    }
+}
+
+pub fn handle_auto_approve_popup_right(state: &mut AppState) {
+    if let Some(row_idx) = state
+        .tool_approval_popup_state
+        .get_row_index(state.tool_approval_popup_state.row_selected)
+        && let Some(row) = state.tool_approval_popup_state.rows.get_mut(row_idx)
+    {
+        row.policy = next_policy(&row.policy);
+    }
+}
+
+pub fn handle_auto_approve_popup_apply(state: &mut AppState) {
+    let changes: Vec<(String, AutoApprovePolicy)> = state
+        .tool_approval_popup_state
+        .rows
+        .iter()
+        .filter(|row| row.policy != row.original_policy)
+        .map(|row| (row.tool_name.clone(), row.policy.clone()))
+        .collect();
+
+    if changes.is_empty() {
+        state.tool_approval_popup_state.reset();
+        return;
+    }
+
+    for (tool_name, policy) in changes {
+        if let Err(e) = state
+            .configuration_state
+            .auto_approve_manager
+            .update_tool_policy(&tool_name, policy)
+        {
+            push_error_message(
+                state,
+                &format!(
+                    "Failed to update auto-approve policy for {}: {}",
+                    tool_name, e
+                ),
+                None,
+            );
+            return;
+        }
+    }
+
+    state.tool_approval_popup_state.reset();
+    push_styled_message(
+        state,
+        "Auto-approve settings updated",
+        ThemeColors::green(),
+        "",
+        ThemeColors::green(),
+    );
 }
 
 // ========== File Changes Popup Handlers ==========
