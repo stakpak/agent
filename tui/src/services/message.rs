@@ -945,11 +945,12 @@ fn compute_cache_key(state: &AppState, width: usize) -> u64 {
     width.hash(&mut hasher);
 
     // Include visibility states
-    state.shell_popup_visible.hash(&mut hasher);
-    state.show_side_panel.hash(&mut hasher);
+    state.shell_popup_state.is_visible.hash(&mut hasher);
+    state.side_panel_state.is_shown.hash(&mut hasher);
 
     // Include message count (filters out collapsed messages)
     let visible_messages: Vec<&Message> = state
+        .messages_scrolling_state
         .messages
         .iter()
         .filter(|m| m.is_collapsed.is_none())
@@ -975,7 +976,8 @@ fn compute_cache_key(state: &AppState, width: usize) -> u64 {
 pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
     let cache_key = compute_cache_key(state, width);
 
-    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
+    if let Some((cached_key, ref cached_lines, _)) =
+        state.messages_scrolling_state.assembled_lines_cache
         && cached_key == cache_key
     {
         return Some(cached_lines.len());
@@ -996,10 +998,10 @@ pub fn get_visible_lines_arc(
     // Ensure assembled cache is populated first
     ensure_cache_populated(state, width);
 
-    let generation = state.cache_generation;
+    let generation = state.messages_scrolling_state.cache_generation;
 
     // FAST PATH: Check if visible lines cache is still valid
-    if let Some(ref cache) = state.visible_lines_cache
+    if let Some(ref cache) = state.messages_scrolling_state.visible_lines_cache
         && cache.scroll == start
         && cache.width == width
         && cache.height == count
@@ -1010,7 +1012,9 @@ pub fn get_visible_lines_arc(
     }
 
     // MEDIUM PATH: Assembled cache is valid, just need to slice
-    let visible = if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
+    let visible = if let Some((_, ref cached_lines, _)) =
+        state.messages_scrolling_state.assembled_lines_cache
+    {
         let end = (start + count).min(cached_lines.len());
         let mut visible = Vec::with_capacity(count);
         for line in cached_lines.iter().take(end).skip(start) {
@@ -1028,7 +1032,7 @@ pub fn get_visible_lines_arc(
     let arc_visible = Arc::new(visible);
 
     // Update visible lines cache
-    state.visible_lines_cache = Some(crate::app::VisibleLinesCache {
+    state.messages_scrolling_state.visible_lines_cache = Some(crate::app::VisibleLinesCache {
         scroll: start,
         width,
         height: count,
@@ -1053,7 +1057,7 @@ pub fn get_visible_lines_owned(
     ensure_cache_populated(state, width);
 
     // Slice from assembled cache
-    if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
+    if let Some((_, ref cached_lines, _)) = state.messages_scrolling_state.assembled_lines_cache {
         let end = (start + count).min(cached_lines.len());
         let mut visible = Vec::with_capacity(count);
         for line in cached_lines.iter().take(end).skip(start) {
@@ -1075,7 +1079,7 @@ pub fn get_visible_lines_owned(
 fn ensure_cache_populated(state: &mut AppState, width: usize) {
     let cache_key = compute_cache_key(state, width);
 
-    if let Some((cached_key, _, _)) = &state.assembled_lines_cache
+    if let Some((cached_key, _, _)) = &state.messages_scrolling_state.assembled_lines_cache
         && *cached_key == cache_key
     {
         return; // Cache is valid
@@ -1101,7 +1105,8 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     // and first/last message IDs to detect changes from resume, streaming, etc.
     let cache_key = compute_cache_key(state, width);
 
-    if let Some((cached_key, cached_lines, _)) = &state.assembled_lines_cache
+    if let Some((cached_key, cached_lines, _)) =
+        &state.messages_scrolling_state.assembled_lines_cache
         && *cached_key == cache_key
     {
         // Cache hit - return immediately without any processing
@@ -1114,8 +1119,9 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     let mut cache_misses = 0usize;
 
     // Filter messages based on shell popup visibility
-    let message_refs: Vec<&Message> = if state.shell_popup_visible {
+    let message_refs: Vec<&Message> = if state.shell_popup_state.is_visible {
         state
+            .messages_scrolling_state
             .messages
             .iter()
             .filter(|m| !matches!(&m.content, MessageContent::RenderRefreshedTerminal(..)))
@@ -1123,6 +1129,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             .collect()
     } else {
         state
+            .messages_scrolling_state
             .messages
             .iter()
             .filter(|m| m.is_collapsed.is_none())
@@ -1153,7 +1160,10 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
         };
 
         // Check if we have a valid cached render for this message
-        if let Some(cached) = state.per_message_cache.get(&msg.id)
+        if let Some(cached) = state
+            .messages_scrolling_state
+            .per_message_cache
+            .get(&msg.id)
             && cached.width == width
             && cached.content_hash == content_hash
         {
@@ -1166,7 +1176,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             let rendered_lines = render_single_message(msg, width);
 
             // Store in per-message cache
-            state.per_message_cache.insert(
+            state.messages_scrolling_state.per_message_cache.insert(
                 msg.id,
                 RenderedMessageCache {
                     content_hash,
@@ -1250,22 +1260,25 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     }
 
     // Increment generation counter and update the assembled cache
-    state.cache_generation = state.cache_generation.wrapping_add(1);
-    state.assembled_lines_cache = Some((
+    state.messages_scrolling_state.cache_generation = state
+        .messages_scrolling_state
+        .cache_generation
+        .wrapping_add(1);
+    state.messages_scrolling_state.assembled_lines_cache = Some((
         cache_key,
         all_processed_lines.clone(),
-        state.cache_generation,
+        state.messages_scrolling_state.cache_generation,
     ));
     // Invalidate visible lines cache since source changed
-    state.visible_lines_cache = None;
-    state.last_render_width = width;
+    state.messages_scrolling_state.visible_lines_cache = None;
+    state.messages_scrolling_state.last_render_width = width;
 
     // Update line-to-message map for click detection
-    state.line_to_message_map = line_to_message_map.clone();
+    state.messages_scrolling_state.line_to_message_map = line_to_message_map.clone();
 
     // Record performance metrics
     let render_time_us = render_start.elapsed().as_micros() as u64;
-    state.render_metrics.record_render(
+    state.messages_scrolling_state.render_metrics.record_render(
         render_time_us,
         cache_hits,
         cache_misses,
@@ -1837,35 +1850,44 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
 pub fn invalidate_message_lines_cache(state: &mut AppState) {
     // If user has scrolled up (reading old messages), don't invalidate cache
     // This prevents jitter when new streaming chunks arrive while scrolled up
-    if !state.stay_at_bottom && state.is_streaming {
+    if !state.messages_scrolling_state.stay_at_bottom && state.tool_call_state.is_streaming {
         return;
     }
 
     // Invalidate both assembled and visible caches
-    state.assembled_lines_cache = None;
-    state.visible_lines_cache = None;
+    state.messages_scrolling_state.assembled_lines_cache = None;
+    state.messages_scrolling_state.visible_lines_cache = None;
 
     // Legacy cache invalidation for backwards compatibility
-    state.message_lines_cache = None;
-    state.collapsed_message_lines_cache = None;
+    state.messages_scrolling_state.message_lines_cache = None;
+    state.messages_scrolling_state.collapsed_message_lines_cache = None;
 }
 
 /// Invalidate cache for a specific message (e.g., during streaming).
 /// This is more efficient than invalidating the entire cache.
 pub fn invalidate_message_cache(state: &mut AppState, message_id: Uuid) {
     // Remove the specific message from per-message cache
-    state.per_message_cache.remove(&message_id);
+    state
+        .messages_scrolling_state
+        .per_message_cache
+        .remove(&message_id);
     // Invalidate assembled and visible caches since they need rebuilding
-    state.assembled_lines_cache = None;
-    state.visible_lines_cache = None;
+    state.messages_scrolling_state.assembled_lines_cache = None;
+    state.messages_scrolling_state.visible_lines_cache = None;
 }
 
 /// Clean up stale entries from the per-message cache.
 /// Call this periodically or when messages are removed.
 #[allow(dead_code)]
 pub fn cleanup_message_cache(state: &mut AppState) {
-    let valid_ids: std::collections::HashSet<Uuid> = state.messages.iter().map(|m| m.id).collect();
+    let valid_ids: std::collections::HashSet<Uuid> = state
+        .messages_scrolling_state
+        .messages
+        .iter()
+        .map(|m| m.id)
+        .collect();
     state
+        .messages_scrolling_state
         .per_message_cache
         .retain(|id, _| valid_ids.contains(id));
 }
@@ -1876,6 +1898,7 @@ pub fn get_wrapped_collapsed_message_lines_cached(
 ) -> Vec<Line<'static>> {
     // Get only collapsed messages
     let collapsed_messages: Vec<Message> = state
+        .messages_scrolling_state
         .messages
         .iter()
         .filter(|m| m.is_collapsed == Some(true))
@@ -1883,18 +1906,19 @@ pub fn get_wrapped_collapsed_message_lines_cached(
         .collect();
 
     // Check if cache is valid
-    let cache_valid =
-        if let Some((cached_messages, cached_width, _)) = &state.collapsed_message_lines_cache {
-            cached_messages.len() == collapsed_messages.len()
-                && *cached_width == width
-                && (collapsed_messages.is_empty()
-                    || cached_messages
-                        .iter()
-                        .zip(collapsed_messages.iter())
-                        .all(|(a, b)| a.id == b.id))
-        } else {
-            false
-        };
+    let cache_valid = if let Some((cached_messages, cached_width, _)) =
+        &state.messages_scrolling_state.collapsed_message_lines_cache
+    {
+        cached_messages.len() == collapsed_messages.len()
+            && *cached_width == width
+            && (collapsed_messages.is_empty()
+                || cached_messages
+                    .iter()
+                    .zip(collapsed_messages.iter())
+                    .all(|(a, b)| a.id == b.id))
+    } else {
+        false
+    };
 
     if !cache_valid {
         // Calculate and cache the processed lines directly
@@ -1905,12 +1929,14 @@ pub fn get_wrapped_collapsed_message_lines_cached(
                 .map(|(line, _style)| line)
                 .collect();
 
-        state.collapsed_message_lines_cache =
+        state.messages_scrolling_state.collapsed_message_lines_cache =
             Some((collapsed_messages.to_vec(), width, processed_lines.clone()));
         processed_lines
     } else {
         // Return cached processed lines immediately
-        if let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache {
+        if let Some((_, _, cached_lines)) =
+            &state.messages_scrolling_state.collapsed_message_lines_cache
+        {
             cached_lines.clone()
         } else {
             // Fallback if cache is somehow invalid
