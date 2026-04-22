@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::config::AppConfig;
-use clap::Subcommand;
+use clap::{CommandFactory, Subcommand};
 use serde::{Deserialize, Serialize};
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 
@@ -582,9 +582,13 @@ impl Commands {
                     std::process::exit(1);
                 }
             }
-            Commands::Completion { .. } => {
-                // Handled in main before AppConfig::load() so Cli::command() is in scope.
-                unreachable!("stakpak completion is handled before Commands::run()")
+            Commands::Completion { shell } => {
+                clap_complete::generate(
+                    shell,
+                    &mut crate::Cli::command(),
+                    "stakpak",
+                    &mut std::io::stdout(),
+                );
             }
         }
         Ok(())
