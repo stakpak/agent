@@ -6206,6 +6206,7 @@ version = "0.3.74"
 dependencies = [
  "async-stream",
  "async-trait",
+ "axum 0.8.7",
  "chrono",
  "eventsource-stream",
  "futures-util",

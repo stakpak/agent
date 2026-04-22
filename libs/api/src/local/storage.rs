@@ -3,10 +3,10 @@
 //! Implements SessionStorage using local SQLite database.
 
 use crate::storage::{
-    Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest, CreateSessionRequest,
-    CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult, ListSessionsQuery,
-    ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary, SessionVisibility,
-    StorageError, UpdateSessionRequest,
+    BackendInfo, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
+    CreateSessionRequest, CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult,
+    ListSessionsQuery, ListSessionsResult, Session, SessionStatus, SessionStorage, SessionSummary,
+    SessionVisibility, StorageError, UpdateSessionRequest,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -22,6 +22,7 @@ use uuid::Uuid;
 /// operation to avoid libsql connection-sharing hazards under concurrency.
 pub struct LocalStorage {
     db: Database,
+    backend_info: BackendInfo,
     /// Owns temporary backing storage for in-memory mode and cleans it on drop.
     _temp_dir: Option<TempDir>,
 }
@@ -54,6 +55,7 @@ impl LocalStorage {
 
         let storage = Self {
             db,
+            backend_info: BackendInfo::local(db_path.to_string()),
             _temp_dir: temp_dir,
         };
         storage.configure_database_pragmas().await?;
@@ -72,6 +74,7 @@ impl LocalStorage {
     ) -> Result<Self, StorageError> {
         let storage = Self {
             db,
+            backend_info: BackendInfo::local(":memory:"),
             _temp_dir: None,
         };
         storage.configure_database_pragmas().await?;
@@ -184,6 +187,10 @@ impl LocalStorage {
 
 #[async_trait]
 impl SessionStorage for LocalStorage {
+    fn backend_info(&self) -> BackendInfo {
+        self.backend_info.clone()
+    }
+
     async fn list_sessions(
         &self,
         query: &ListSessionsQuery,
@@ -191,9 +198,18 @@ impl SessionStorage for LocalStorage {
         let limit = query.limit.unwrap_or(100);
         let offset = query.offset.unwrap_or(0);
 
-        let mut sql = "SELECT s.id, s.title, s.visibility, COALESCE(s.status, 'ACTIVE') as status, s.cwd, s.created_at, s.updated_at, 
-            (SELECT COUNT(*) FROM checkpoints c WHERE c.session_id = s.id) as checkpoint_count,
-            (SELECT id FROM checkpoints c WHERE c.session_id = s.id ORDER BY created_at DESC LIMIT 1) as active_checkpoint_id
+        // `message_count` is derived from the latest checkpoint's state JSON using
+        // `json_array_length($.messages)`, so it reflects actual messages rather than
+        // checkpoint revisions (which are not user-facing).
+        let mut sql = "SELECT s.id, s.title, s.visibility, COALESCE(s.status, 'ACTIVE') as status, s.cwd, s.created_at, s.updated_at,
+            COALESCE((
+                SELECT json_array_length(c.state, '$.messages')
+                FROM checkpoints c
+                WHERE c.session_id = s.id
+                ORDER BY c.created_at DESC
+                LIMIT 1
+            ), 0) as message_count,
+            (SELECT id FROM checkpoints c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1) as active_checkpoint_id
             FROM sessions s WHERE 1=1".to_string();
 
         // Use parameterized values for enum filters (safe because they come from
@@ -247,7 +263,7 @@ impl SessionStorage for LocalStorage {
             let updated_at: String = row
                 .get(6)
                 .map_err(|e| StorageError::Internal(e.to_string()))?;
-            let checkpoint_count: i64 = row.get(7).unwrap_or(0);
+            let message_count: i64 = row.get(7).unwrap_or(0);
             let active_checkpoint_id: Option<String> = row.get(8).ok();
 
             sessions.push(SessionSummary {
@@ -258,7 +274,7 @@ impl SessionStorage for LocalStorage {
                 cwd,
                 created_at: parse_datetime(&created_at)?,
                 updated_at: parse_datetime(&updated_at)?,
-                message_count: checkpoint_count as u32,
+                message_count: message_count.max(0) as u32,
                 active_checkpoint_id: active_checkpoint_id.and_then(|id| Uuid::from_str(&id).ok()),
                 last_message_at: None,
             });

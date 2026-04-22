@@ -29,5 +29,8 @@ once_cell = "1.21.3"
 regex.workspace = true
 tempfile = { workspace = true }
 
+[dev-dependencies]
+axum = { workspace = true }
+
 [lints.clippy]
 string_slice = "deny"
