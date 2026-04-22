@@ -41,9 +41,9 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
         let width = (terminal_area.width * 90 / 100)
             .max(110)
             .min(terminal_area.width);
-        // borders(2) + title(1) + filter(1) + status(1) + header(1) + rows + footer(1)
-        let desired_height = (VISIBLE_ROWS + 7) as u16;
-        let height = desired_height.clamp(9, terminal_area.height);
+        // borders(2) + title(1) + filter(3) + status(1) + header(1) + rows + footer(1)
+        let desired_height = (VISIBLE_ROWS + 9) as u16;
+        let height = desired_height.min(terminal_area.height);
         let x = terminal_area.width.saturating_sub(width) / 2;
         let y = terminal_area.height.saturating_sub(height) / 2;
         Rect::new(x, y, width, height)
@@ -67,7 +67,7 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),                // 0: title
-            Constraint::Length(1),                // 1: filter input
+            Constraint::Length(3),                // 1: filter input
             Constraint::Length(1),                // 2: status
             Constraint::Length(1),                // 3: column headers
             Constraint::Min(VISIBLE_ROWS as u16), // 4: rows (fills remaining space)
@@ -88,24 +88,37 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
 
     // --- Filter input ---
     let filter_text = &state.tool_approval_popup_state.filter_text;
-    let filter_line = if filter_text.is_empty() {
-        Line::from(vec![
-            Span::styled(" Search: ", Style::default().fg(ThemeColors::dark_gray())),
-            Span::styled("_", Style::default().fg(ThemeColors::dark_gray())),
-        ])
+    let filter_spans = if filter_text.is_empty() {
+        vec![
+            Span::raw(" "),
+            Span::styled(">", Style::default().fg(ThemeColors::magenta())),
+            Span::raw(" "),
+            Span::styled("|", Style::default().fg(ThemeColors::cyan())),
+            Span::styled(
+                "Type to filter tools",
+                Style::default().fg(ThemeColors::dark_gray()),
+            ),
+        ]
     } else {
-        Line::from(vec![
-            Span::styled(" Search: ", Style::default().fg(ThemeColors::dark_gray())),
+        vec![
+            Span::raw(" "),
+            Span::styled(">", Style::default().fg(ThemeColors::magenta())),
+            Span::raw(" "),
             Span::styled(
                 filter_text.as_str(),
                 Style::default()
-                    .fg(ThemeColors::cyan())
+                    .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("▌", Style::default().fg(ThemeColors::cyan())),
-        ])
+            Span::styled("|", Style::default().fg(ThemeColors::cyan())),
+        ]
     };
-    f.render_widget(Paragraph::new(filter_line), chunks[1]);
+    let filter_text_widget = ratatui::text::Text::from(vec![
+        Line::from(""),
+        Line::from(filter_spans),
+        Line::from(""),
+    ]);
+    f.render_widget(Paragraph::new(filter_text_widget), chunks[1]);
 
     // --- Status ---
     let changed_count = state
