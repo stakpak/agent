@@ -1,6 +1,6 @@
 //! Message filtering for `stakpak sessions show`.
 //!
-//! Applies `--role`, `--limit`, and `--last` flags to a checkpoint's messages.
+//! Applies `--role`, `--limit`, and `--offset` flags to a checkpoint's messages.
 
 use stakpak_shared::models::integrations::openai::{ChatMessage, Role};
 
@@ -40,26 +40,17 @@ impl std::str::FromStr for RoleFilter {
     }
 }
 
-/// Apply `--role`, `--last`, and `--limit` to a checkpoint's messages.
+/// Apply `--role`, `--limit`, and `--offset` to a checkpoint's messages.
 ///
-/// Ordering: filter by role first, then `--last` narrows to the final message,
-/// then `--limit` keeps at most N most recent messages (preserving chronological order).
+/// Ordering: filter by role first, then compute a chronological window anchored at
+/// the newest end of the filtered list.
 pub fn filter_messages(
     messages: Vec<ChatMessage>,
     role: Option<RoleFilter>,
-    last: bool,
     limit: Option<u32>,
-) -> Vec<ChatMessage> {
-    if last {
-        return messages
-            .into_iter()
-            .rev()
-            .find(|m| role.map(|f| f.matches(&m.role)).unwrap_or(true))
-            .map(|m| vec![m])
-            .unwrap_or_default();
-    }
-
-    let mut filtered: Vec<ChatMessage> = match role {
+    offset: u32,
+) -> (Vec<ChatMessage>, u32) {
+    let filtered: Vec<ChatMessage> = match role {
         Some(filter) => messages
             .into_iter()
             .filter(|m| filter.matches(&m.role))
@@ -67,15 +58,24 @@ pub fn filter_messages(
         None => messages,
     };
 
-    if let Some(n) = limit {
-        let n = n as usize;
-        if filtered.len() > n {
-            let start = filtered.len() - n;
-            filtered = filtered.split_off(start);
-        }
+    let total = filtered.len() as u32;
+    if offset >= total {
+        return (Vec::new(), total);
     }
 
-    filtered
+    let end = total - offset;
+    let start = match limit {
+        Some(count) => end.saturating_sub(count),
+        None => 0,
+    };
+
+    let window = filtered
+        .into_iter()
+        .skip(start as usize)
+        .take((end - start) as usize)
+        .collect();
+
+    (window, total)
 }
 
 #[cfg(test)]
@@ -102,97 +102,140 @@ mod tests {
         ]
     }
 
-    #[test]
-    fn role_filter_user_keeps_only_user_messages() {
-        let out = filter_messages(sample(), Some(RoleFilter::User), false, None);
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|m| m.role == Role::User));
+    fn contents(messages: &[ChatMessage]) -> Vec<&str> {
+        messages
+            .iter()
+            .map(|message| match &message.content {
+                Some(MessageContent::String(content)) => content.as_str(),
+                other => panic!("expected string content, got {other:?}"),
+            })
+            .collect()
     }
 
     #[test]
-    fn role_filter_assistant_keeps_only_assistant_messages() {
-        let out = filter_messages(sample(), Some(RoleFilter::Assistant), false, None);
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|m| m.role == Role::Assistant));
+    fn role_filter_user_keeps_only_user_messages_and_reports_total() {
+        let (out, total) = filter_messages(sample(), Some(RoleFilter::User), None, 0);
+        assert_eq!(contents(&out), vec!["u1", "u2"]);
+        assert_eq!(total, 2);
     }
 
     #[test]
-    fn role_filter_system_includes_developer() {
+    fn role_filter_assistant_keeps_only_assistant_messages_and_reports_total() {
+        let (out, total) = filter_messages(sample(), Some(RoleFilter::Assistant), None, 0);
+        assert_eq!(contents(&out), vec!["a1", "a2"]);
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn role_filter_system_includes_developer_and_reports_total() {
         let mut msgs = sample();
         msgs.push(msg(Role::Developer, "dev"));
-        let out = filter_messages(msgs, Some(RoleFilter::System), false, None);
-        assert_eq!(out.len(), 2);
+        let (out, total) = filter_messages(msgs, Some(RoleFilter::System), None, 0);
+        assert_eq!(contents(&out), vec!["sys", "dev"]);
+        assert_eq!(total, 2);
     }
 
     #[test]
-    fn last_returns_single_most_recent_message_of_any_role() {
-        let out = filter_messages(sample(), None, true, None);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].role, Role::Assistant);
-        if let Some(MessageContent::String(s)) = &out[0].content {
-            assert_eq!(s, "a2");
-        } else {
-            panic!("unexpected content");
-        }
+    fn limit_only_keeps_most_recent_n_messages_in_chronological_order() {
+        let (out, total) = filter_messages(sample(), None, Some(3), 0);
+        assert_eq!(contents(&out), vec!["t1", "u2", "a2"]);
+        assert_eq!(total, 6);
     }
 
     #[test]
-    fn last_combined_with_role_returns_last_of_that_role() {
-        let out = filter_messages(sample(), Some(RoleFilter::User), true, None);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].role, Role::User);
-        if let Some(MessageContent::String(s)) = &out[0].content {
-            assert_eq!(s, "u2");
-        } else {
-            panic!("unexpected content");
-        }
+    fn offset_only_drops_messages_from_newest_end_and_returns_remaining_prefix() {
+        let (out, total) = filter_messages(sample(), None, None, 2);
+        assert_eq!(contents(&out), vec!["sys", "u1", "a1", "t1"]);
+        assert_eq!(total, 6);
     }
 
     #[test]
-    fn limit_keeps_most_recent_n_messages_in_order() {
-        let out = filter_messages(sample(), None, false, Some(3));
-        assert_eq!(out.len(), 3);
-        // Should be the last 3 in chronological order: t1, u2, a2
-        assert_eq!(out[0].role, Role::Tool);
-        assert_eq!(out[1].role, Role::User);
-        assert_eq!(out[2].role, Role::Assistant);
+    fn limit_and_offset_return_mid_range_window() {
+        let (out, total) = filter_messages(sample(), None, Some(2), 2);
+        assert_eq!(contents(&out), vec!["a1", "t1"]);
+        assert_eq!(total, 6);
     }
 
     #[test]
-    fn limit_larger_than_len_returns_all() {
-        let out = filter_messages(sample(), None, false, Some(100));
-        assert_eq!(out.len(), 6);
-    }
-
-    #[test]
-    fn last_takes_precedence_over_limit() {
-        let out = filter_messages(sample(), None, true, Some(3));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].role, Role::Assistant);
-    }
-
-    #[test]
-    fn last_on_empty_returns_empty() {
-        let out = filter_messages(vec![], None, true, None);
+    fn offset_past_end_returns_empty_and_preserves_total() {
+        let (out, total) = filter_messages(sample(), None, Some(2), 99);
         assert!(out.is_empty());
+        assert_eq!(total, 6);
     }
 
     #[test]
-    fn role_filter_with_no_matches_returns_empty() {
+    fn limit_larger_than_remaining_returns_all_remaining_messages() {
+        let (out, total) = filter_messages(sample(), None, Some(100), 2);
+        assert_eq!(contents(&out), vec!["sys", "u1", "a1", "t1"]);
+        assert_eq!(total, 6);
+    }
+
+    #[test]
+    fn role_filter_applies_before_offset_and_limit() {
+        let messages = vec![
+            msg(Role::User, "u1"),
+            msg(Role::Assistant, "a1"),
+            msg(Role::User, "u2"),
+            msg(Role::User, "u3"),
+            msg(Role::Assistant, "a2"),
+            msg(Role::User, "u4"),
+        ];
+
+        let (out, total) = filter_messages(messages, Some(RoleFilter::Assistant), Some(1), 0);
+        assert_eq!(contents(&out), vec!["a2"]);
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn role_filter_with_offset_and_limit_uses_filtered_list_for_windowing() {
+        let messages = vec![
+            msg(Role::Assistant, "a1"),
+            msg(Role::User, "u1"),
+            msg(Role::Assistant, "a2"),
+            msg(Role::User, "u2"),
+            msg(Role::Assistant, "a3"),
+            msg(Role::User, "u3"),
+            msg(Role::Assistant, "a4"),
+        ];
+
+        let (out, total) = filter_messages(messages, Some(RoleFilter::Assistant), Some(2), 1);
+        assert_eq!(contents(&out), vec!["a2", "a3"]);
+        assert_eq!(total, 4);
+    }
+
+    #[test]
+    fn empty_input_returns_empty_window_and_zero_total() {
+        let (out, total) = filter_messages(vec![], None, Some(10), 0);
+        assert!(out.is_empty());
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn role_filter_with_no_matches_returns_empty_and_zero_total() {
         let msgs = vec![msg(Role::User, "u1"), msg(Role::User, "u2")];
-        let out = filter_messages(msgs, Some(RoleFilter::Assistant), false, None);
+        let (out, total) = filter_messages(msgs, Some(RoleFilter::Assistant), Some(1), 0);
         assert!(out.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]
     fn from_str_parses_valid_roles() {
-        assert_eq!("user".parse::<RoleFilter>().unwrap(), RoleFilter::User);
         assert_eq!(
-            "Assistant".parse::<RoleFilter>().unwrap(),
+            "user".parse::<RoleFilter>().expect("user role"),
+            RoleFilter::User
+        );
+        assert_eq!(
+            "Assistant".parse::<RoleFilter>().expect("assistant role"),
             RoleFilter::Assistant
         );
-        assert_eq!("TOOL".parse::<RoleFilter>().unwrap(), RoleFilter::Tool);
-        assert_eq!("system".parse::<RoleFilter>().unwrap(), RoleFilter::System);
+        assert_eq!(
+            "TOOL".parse::<RoleFilter>().expect("tool role"),
+            RoleFilter::Tool
+        );
+        assert_eq!(
+            "system".parse::<RoleFilter>().expect("system role"),
+            RoleFilter::System
+        );
     }
 
     #[test]

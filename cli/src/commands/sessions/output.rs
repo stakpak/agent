@@ -112,6 +112,14 @@ fn render_list_human(sessions: &[SessionSummary], backend: &BackendInfo) -> Stri
 // Show output
 // =============================================================================
 
+#[derive(Debug, Clone, Copy)]
+pub struct ShowRenderOptions<'a> {
+    pub message_count: u32,
+    pub limit: Option<u32>,
+    pub offset: u32,
+    pub profile: Option<&'a str>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ShowOutput<'a> {
     pub id: uuid::Uuid,
@@ -122,6 +130,7 @@ pub struct ShowOutput<'a> {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub active_checkpoint_id: Option<uuid::Uuid>,
+    pub message_count: u32,
     pub messages: &'a [ChatMessage],
     pub backend: &'a BackendInfo,
 }
@@ -130,16 +139,29 @@ pub fn render_show(
     session: &Session,
     messages: &[ChatMessage],
     backend: &BackendInfo,
-    profile: Option<&str>,
+    options: ShowRenderOptions<'_>,
     mode: OutputMode,
 ) -> String {
     match mode {
-        OutputMode::Json => render_show_json(session, messages, backend),
-        OutputMode::Human => render_show_human(session, messages, backend, profile),
+        OutputMode::Json => render_show_json(session, messages, options.message_count, backend),
+        OutputMode::Human => render_show_human(
+            session,
+            messages,
+            options.message_count,
+            options.limit,
+            options.offset,
+            backend,
+            options.profile,
+        ),
     }
 }
 
-fn render_show_json(session: &Session, messages: &[ChatMessage], backend: &BackendInfo) -> String {
+fn render_show_json(
+    session: &Session,
+    messages: &[ChatMessage],
+    message_count: u32,
+    backend: &BackendInfo,
+) -> String {
     let out = ShowOutput {
         id: session.id,
         title: &session.title,
@@ -149,6 +171,7 @@ fn render_show_json(session: &Session, messages: &[ChatMessage], backend: &Backe
         created_at: session.created_at,
         updated_at: session.updated_at,
         active_checkpoint_id: session.active_checkpoint.as_ref().map(|c| c.id),
+        message_count,
         messages,
         backend,
     };
@@ -158,6 +181,9 @@ fn render_show_json(session: &Session, messages: &[ChatMessage], backend: &Backe
 fn render_show_human(
     session: &Session,
     messages: &[ChatMessage],
+    message_count: u32,
+    limit: Option<u32>,
+    offset: u32,
     backend: &BackendInfo,
     profile: Option<&str>,
 ) -> String {
@@ -218,6 +244,12 @@ fn render_show_human(
                     sanitize_text_output(&tc.function.name),
                     sanitize_text_output(&tc.id),
                 ));
+                out.push_str("      arguments:\n");
+                for line in format_tool_call_arguments(&tc.function.arguments).lines() {
+                    out.push_str("        ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
             }
         }
         if let Some(tc_id) = &m.tool_call_id {
@@ -226,6 +258,18 @@ fn render_show_human(
                 sanitize_text_output(tc_id)
             ));
         }
+    }
+
+    if let Some(limit) = limit
+        && !messages.is_empty()
+        && (messages.len() as u32) < message_count
+    {
+        let end = message_count.saturating_sub(offset);
+        let start = end.saturating_sub(messages.len() as u32).saturating_add(1);
+        let next = offset.saturating_add(limit);
+        out.push_str(&format!(
+            "\nshowing messages {start}–{end} of {message_count} (use --offset {next} for an older page)\n"
+        ));
     }
 
     out
@@ -277,6 +321,14 @@ fn render_backend_header(backend: &BackendInfo) -> String {
         }
         _ => "Backend: unknown".to_string(),
     }
+}
+
+fn format_tool_call_arguments(arguments: &str) -> String {
+    let rendered = match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
+        Err(_) => arguments.to_string(),
+    };
+    sanitize_text_output(&rendered)
 }
 
 fn collapse_whitespace(s: &str) -> String {

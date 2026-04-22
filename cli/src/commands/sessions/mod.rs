@@ -21,7 +21,7 @@ pub mod output;
 mod tests;
 
 use messages::{RoleFilter, filter_messages};
-use output::{OutputMode, render_error, render_list, render_show};
+use output::{OutputMode, ShowRenderOptions, render_error, render_list, render_show};
 
 const DEFAULT_LIST_LIMIT: u32 = 20;
 
@@ -59,13 +59,13 @@ pub enum SessionsCommands {
         #[arg(long, value_name = "ROLE")]
         role: Option<String>,
 
-        /// Keep only the last message (combine with `--role` for role-filtered last)
-        #[arg(long)]
-        last: bool,
+        /// Maximum number of messages to show from a newest-anchored chronological window (default: 50, use 0 for unlimited)
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
 
-        /// Maximum number of messages to show (keeps the most recent)
-        #[arg(long)]
-        limit: Option<u32>,
+        /// Skip N role-filtered messages from the newest end before taking the chronological window
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
 
         /// Output machine-readable JSON
         #[arg(long)]
@@ -88,12 +88,13 @@ impl SessionsCommands {
             SessionsCommands::Show {
                 id,
                 role,
-                last,
                 limit,
+                offset,
                 json,
             } => {
                 let mode = OutputMode::from_flag(json);
-                run_show(&config, &id, role.as_deref(), last, limit, mode).await
+                let limit = if limit == 0 { None } else { Some(limit) };
+                run_show(&config, &id, role.as_deref(), limit, offset, mode).await
             }
         }
     }
@@ -148,8 +149,8 @@ pub(crate) async fn show_session_output(
     client: Arc<dyn SessionStorage>,
     session_id: Uuid,
     role_filter: Option<RoleFilter>,
-    last: bool,
     limit: Option<u32>,
+    offset: u32,
     profile: Option<&str>,
     mode: OutputMode,
 ) -> Result<String, StorageError> {
@@ -159,18 +160,29 @@ pub(crate) async fn show_session_output(
         .as_ref()
         .map(|cp| cp.state.messages.clone())
         .unwrap_or_default();
-    let messages = filter_messages(raw_messages, role_filter, last, limit);
+    let (messages, message_count) = filter_messages(raw_messages, role_filter, limit, offset);
     let backend = client.backend_info();
 
-    Ok(render_show(&session, &messages, &backend, profile, mode))
+    Ok(render_show(
+        &session,
+        &messages,
+        &backend,
+        ShowRenderOptions {
+            message_count,
+            limit,
+            offset,
+            profile,
+        },
+        mode,
+    ))
 }
 
 async fn run_show(
     config: &AppConfig,
     id_str: &str,
     role: Option<&str>,
-    last: bool,
     limit: Option<u32>,
+    offset: u32,
     mode: OutputMode,
 ) -> Result<(), String> {
     let session_id = match Uuid::parse_str(id_str) {
@@ -199,8 +211,8 @@ async fn run_show(
         client,
         session_id,
         role_filter,
-        last,
         limit,
+        offset,
         Some(config.profile_name.as_str()),
         mode,
     )

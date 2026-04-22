@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::classify_storage_error;
 use super::messages::{RoleFilter, filter_messages};
-use super::output::{self, OutputMode, render_error};
+use super::output::{self, OutputMode, ShowRenderOptions, render_error};
 
 async fn in_memory_storage() -> LocalStorage {
     LocalStorage::new(":memory:")
@@ -31,6 +31,14 @@ fn msg(role: Role, text: &str) -> ChatMessage {
 }
 
 fn assistant_tool_call_msg(name: &str, tool_call_id: &str) -> ChatMessage {
+    assistant_tool_call_msg_with_args(name, tool_call_id, "{}")
+}
+
+fn assistant_tool_call_msg_with_args(
+    name: &str,
+    tool_call_id: &str,
+    arguments: &str,
+) -> ChatMessage {
     use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
     ChatMessage {
         role: Role::Assistant,
@@ -40,12 +48,27 @@ fn assistant_tool_call_msg(name: &str, tool_call_id: &str) -> ChatMessage {
             r#type: "function".to_string(),
             function: FunctionCall {
                 name: name.to_string(),
-                arguments: "{}".to_string(),
+                arguments: arguments.to_string(),
             },
             metadata: None,
         }]),
         ..Default::default()
     }
+}
+
+fn numbered_messages(count: u32) -> Vec<ChatMessage> {
+    (1..=count)
+        .map(|index| msg(Role::User, &format!("m{index}")))
+        .collect()
+}
+
+fn alternating_assistant_user_messages(assistant_count: u32) -> Vec<ChatMessage> {
+    let mut messages = Vec::with_capacity((assistant_count * 2) as usize);
+    for index in 1..=assistant_count {
+        messages.push(msg(Role::User, &format!("u{index}")));
+        messages.push(msg(Role::Assistant, &format!("a{index}")));
+    }
+    messages
 }
 
 fn local_backend() -> BackendInfo {
@@ -63,10 +86,24 @@ fn render_list(sessions: &[stakpak_api::SessionSummary], mode: OutputMode) -> St
 fn render_show(
     session: &Session,
     messages: &[ChatMessage],
+    message_count: u32,
+    limit: Option<u32>,
+    offset: u32,
     profile: Option<&str>,
     mode: OutputMode,
 ) -> String {
-    output::render_show(session, messages, &local_backend(), profile, mode)
+    output::render_show(
+        session,
+        messages,
+        &local_backend(),
+        ShowRenderOptions {
+            message_count,
+            limit,
+            offset,
+            profile,
+        },
+        mode,
+    )
 }
 
 // =============================================================================
@@ -242,7 +279,12 @@ fn render_show_human_includes_remote_backend_header() {
         &session,
         &[],
         &remote_backend(),
-        Some("dev"),
+        ShowRenderOptions {
+            message_count: 0,
+            limit: Some(50),
+            offset: 0,
+            profile: Some("dev"),
+        },
         OutputMode::Human,
     );
     assert!(
@@ -254,11 +296,11 @@ fn render_show_human_includes_remote_backend_header() {
 }
 
 // =============================================================================
-// 5.3 — `stakpak sessions show <id> --role assistant --last --json` end-to-end
+// 5.3 — `stakpak sessions show <id> --role assistant --limit 1 --json` end-to-end
 // =============================================================================
 
 #[tokio::test]
-async fn sessions_show_role_assistant_last_json_returns_one_assistant_message() {
+async fn sessions_show_role_assistant_limit_one_json_returns_one_assistant_message() {
     let storage = in_memory_storage().await;
 
     let result = storage
@@ -280,16 +322,24 @@ async fn sessions_show_role_assistant_last_json_returns_one_assistant_message() 
     let session = storage.get_session(session_id).await.unwrap();
     let checkpoint = storage.get_active_checkpoint(session_id).await.unwrap();
 
-    let filtered = filter_messages(
+    let (filtered, message_count) = filter_messages(
         checkpoint.state.messages,
         Some(RoleFilter::Assistant),
-        true,
-        None,
+        Some(1),
+        0,
     );
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].role, Role::Assistant);
 
-    let rendered = render_show(&session, &filtered, None, OutputMode::Json);
+    let rendered = render_show(
+        &session,
+        &filtered,
+        message_count,
+        Some(1),
+        0,
+        None,
+        OutputMode::Json,
+    );
     let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
 
     // Object-shaped (not an array).
@@ -344,6 +394,9 @@ async fn sessions_show_human_includes_resume_hint_and_metadata() {
     let rendered = render_show(
         &session,
         &checkpoint.state.messages,
+        checkpoint.state.messages.len() as u32,
+        None,
+        0,
         None,
         OutputMode::Human,
     );
@@ -373,7 +426,15 @@ async fn sessions_show_json_roundtrip_preserves_tool_calls() {
     let session = storage.get_session(session_id).await.unwrap();
     let checkpoint = storage.get_active_checkpoint(session_id).await.unwrap();
 
-    let rendered = render_show(&session, &checkpoint.state.messages, None, OutputMode::Json);
+    let rendered = render_show(
+        &session,
+        &checkpoint.state.messages,
+        checkpoint.state.messages.len() as u32,
+        None,
+        0,
+        None,
+        OutputMode::Json,
+    );
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
     let messages = value["messages"].as_array().unwrap();
     let assistant = messages.iter().find(|m| m["role"] == "assistant").unwrap();
@@ -384,6 +445,208 @@ async fn sessions_show_json_roundtrip_preserves_tool_calls() {
         tool_calls[0]["function"]["name"].as_str().unwrap(),
         "run_command"
     );
+}
+
+#[tokio::test]
+async fn sessions_show_json_limit_one_returns_most_recent_message_and_total_count() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(30)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        Some(1),
+        0,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output");
+
+    let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+    let messages = value["messages"].as_array().expect("messages array");
+    assert_eq!(value["message_count"].as_u64(), Some(30));
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["content"].as_str(), Some("m30"));
+}
+
+#[tokio::test]
+async fn sessions_show_json_limit_one_offset_one_returns_second_to_last_message() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(30)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        Some(1),
+        1,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output");
+
+    let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+    let messages = value["messages"].as_array().expect("messages array");
+    assert_eq!(value["message_count"].as_u64(), Some(30));
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["content"].as_str(), Some("m29"));
+}
+
+#[tokio::test]
+async fn sessions_show_json_limit_ten_offset_ten_returns_middle_window_from_newest_end() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(30)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        Some(10),
+        10,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output");
+
+    let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+    let messages = value["messages"].as_array().expect("messages array");
+    let contents: Vec<&str> = messages
+        .iter()
+        .map(|message| message["content"].as_str().expect("string content"))
+        .collect();
+    assert_eq!(value["message_count"].as_u64(), Some(30));
+    let expected: Vec<String> = (11..=20).map(|index| format!("m{index}")).collect();
+    assert_eq!(
+        contents,
+        expected
+            .iter()
+            .map(std::string::String::as_str)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn sessions_show_json_offset_beyond_total_returns_empty_messages_and_full_count() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(30)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        Some(10),
+        30,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output");
+
+    let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+    assert_eq!(value["message_count"].as_u64(), Some(30));
+    assert!(
+        value["messages"]
+            .as_array()
+            .expect("messages array")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn sessions_show_human_default_limit_prints_footer_for_large_sessions() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(60)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        Some(50),
+        0,
+        Some("default"),
+        OutputMode::Human,
+    )
+    .await
+    .expect("show output");
+
+    assert!(rendered.contains("Messages (50):"));
+    assert!(rendered.contains("showing messages 11–60 of 60 (use --offset 50 for an older page)"));
+}
+
+#[tokio::test]
+async fn sessions_show_human_limit_zero_returns_all_messages_without_footer() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new("window", numbered_messages(60)))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        None,
+        None,
+        0,
+        Some("default"),
+        OutputMode::Human,
+    )
+    .await
+    .expect("show output");
+
+    assert!(rendered.contains("Messages (60):"));
+    assert!(!rendered.contains("showing messages"));
+}
+
+#[tokio::test]
+async fn sessions_show_json_role_filter_pagination_reports_filtered_message_count() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(in_memory_storage().await);
+    let created = storage
+        .create_session(&CreateSessionRequest::new(
+            "window",
+            alternating_assistant_user_messages(30),
+        ))
+        .await
+        .expect("create session");
+
+    let rendered = super::show_session_output(
+        storage,
+        created.session_id,
+        Some(RoleFilter::Assistant),
+        Some(5),
+        10,
+        Some("default"),
+        OutputMode::Json,
+    )
+    .await
+    .expect("show output");
+
+    let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+    let messages = value["messages"].as_array().expect("messages array");
+    let contents: Vec<&str> = messages
+        .iter()
+        .map(|message| message["content"].as_str().expect("string content"))
+        .collect();
+    assert_eq!(value["message_count"].as_u64(), Some(30));
+    assert_eq!(contents, vec!["a16", "a17", "a18", "a19", "a20"]);
 }
 
 #[tokio::test]
@@ -399,7 +662,15 @@ async fn sessions_show_json_is_object_not_array() {
         .await
         .unwrap();
 
-    let rendered = render_show(&session, &cp.state.messages, None, OutputMode::Json);
+    let rendered = render_show(
+        &session,
+        &cp.state.messages,
+        cp.state.messages.len() as u32,
+        None,
+        0,
+        None,
+        OutputMode::Json,
+    );
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
     assert!(
         value.is_object(),
@@ -431,8 +702,8 @@ async fn sessions_cli_json_roundtrip_list_then_show_does_not_surface_not_found()
         storage,
         created.session_id,
         None,
-        false,
         None,
+        0,
         Some("default"),
         OutputMode::Json,
     )
@@ -559,7 +830,7 @@ async fn render_list_human_collapses_multiline_titles_to_single_row() {
 #[test]
 fn render_show_human_with_no_active_checkpoint_notes_none() {
     let session = fake_session(Uuid::new_v4(), false);
-    let rendered = render_show(&session, &[], None, OutputMode::Human);
+    let rendered = render_show(&session, &[], 0, None, 0, None, OutputMode::Human);
     assert!(rendered.contains("Checkpoint:  (none)"));
     assert!(rendered.contains("(no messages)"));
 }
@@ -569,7 +840,7 @@ fn render_show_human_collapses_multiline_title_without_shifting_metadata() {
     let mut session = fake_session(Uuid::new_v4(), true);
     session.title = "deploy\n\tprod\r\ncluster".to_string();
 
-    let rendered = render_show(&session, &[], None, OutputMode::Human);
+    let rendered = render_show(&session, &[], 0, None, 0, None, OutputMode::Human);
     let lines: Vec<&str> = rendered.lines().collect();
     let title_line = lines
         .iter()
@@ -590,7 +861,7 @@ fn render_show_human_collapses_multiline_title_without_shifting_metadata() {
 #[test]
 fn render_show_human_with_empty_messages_and_checkpoint_shows_no_messages_marker() {
     let session = fake_session(Uuid::new_v4(), true);
-    let rendered = render_show(&session, &[], None, OutputMode::Human);
+    let rendered = render_show(&session, &[], 0, None, 0, None, OutputMode::Human);
     assert!(rendered.contains("Messages (0):"));
     assert!(rendered.contains("(no messages)"));
 }
@@ -604,7 +875,7 @@ fn render_show_human_renders_tool_call_id_line_for_tool_messages() {
         tool_call_id: Some("tc_42".to_string()),
         ..Default::default()
     };
-    let rendered = render_show(&session, &[tool_msg], None, OutputMode::Human);
+    let rendered = render_show(&session, &[tool_msg], 1, None, 0, None, OutputMode::Human);
     assert!(rendered.contains("[tool_call_id] tc_42"));
     assert!(rendered.contains("tool output"));
 }
@@ -613,8 +884,35 @@ fn render_show_human_renders_tool_call_id_line_for_tool_messages() {
 fn render_show_human_renders_tool_call_line_for_assistant_messages() {
     let session = fake_session(Uuid::new_v4(), true);
     let asst = assistant_tool_call_msg("run_cmd", "tc_7");
-    let rendered = render_show(&session, &[asst], None, OutputMode::Human);
+    let rendered = render_show(&session, &[asst], 1, None, 0, None, OutputMode::Human);
     assert!(rendered.contains("[tool_call] run_cmd (tc_7)"));
+}
+
+#[test]
+fn render_show_human_renders_pretty_printed_tool_call_arguments() {
+    let session = fake_session(Uuid::new_v4(), true);
+    let asst = assistant_tool_call_msg_with_args(
+        "run_cmd",
+        "tc_7",
+        r#"{"cmd":"ls","nested":{"depth":2}}"#,
+    );
+    let rendered = render_show(&session, &[asst], 1, Some(1), 0, None, OutputMode::Human);
+    assert!(rendered.contains("[tool_call] run_cmd (tc_7)"));
+    assert!(rendered.contains("      arguments:"));
+    assert!(rendered.contains("        {"));
+    assert!(rendered.contains("          \"cmd\": \"ls\","));
+    assert!(rendered.contains("          \"nested\": {"));
+    assert!(rendered.contains("            \"depth\": 2"));
+}
+
+#[test]
+fn render_show_human_renders_raw_non_json_tool_call_arguments() {
+    let session = fake_session(Uuid::new_v4(), true);
+    let asst = assistant_tool_call_msg_with_args("run_cmd", "tc_7", "not-json --flag raw");
+    let rendered = render_show(&session, &[asst], 1, Some(1), 0, None, OutputMode::Human);
+    assert!(rendered.contains("[tool_call] run_cmd (tc_7)"));
+    assert!(rendered.contains("      arguments:"));
+    assert!(rendered.contains("        not-json --flag raw"));
 }
 
 // =============================================================================
@@ -647,7 +945,7 @@ fn render_show_human_strips_terminal_escape_sequences() {
         ..Default::default()
     };
 
-    let rendered = render_show(&session, &[tool_msg], None, OutputMode::Human);
+    let rendered = render_show(&session, &[tool_msg], 1, None, 0, None, OutputMode::Human);
     assert!(
         !rendered.contains('\x1b'),
         "human output must not contain ESC (0x1B); got: {:?}",
@@ -691,7 +989,7 @@ fn render_show_json_preserves_raw_content_including_escapes() {
         content: Some(MessageContent::String("hi\x1b[2Jhidden".to_string())),
         ..Default::default()
     };
-    let rendered = render_show(&session, &[m], None, OutputMode::Json);
+    let rendered = render_show(&session, &[m], 1, None, 0, None, OutputMode::Json);
     let v: serde_json::Value = serde_json::from_str(&rendered).unwrap();
     assert_eq!(
         v["messages"][0]["content"].as_str().unwrap(),
@@ -706,7 +1004,15 @@ fn render_show_json_preserves_raw_content_including_escapes() {
 #[test]
 fn render_show_human_resume_hint_omits_default_profile() {
     let session = fake_session(Uuid::new_v4(), true);
-    let rendered = render_show(&session, &[], Some("default"), OutputMode::Human);
+    let rendered = render_show(
+        &session,
+        &[],
+        0,
+        None,
+        0,
+        Some("default"),
+        OutputMode::Human,
+    );
     assert!(rendered.contains(&format!("Resume: stakpak --session {}", session.id)));
     assert!(!rendered.contains("--profile"));
 }
@@ -714,7 +1020,7 @@ fn render_show_human_resume_hint_omits_default_profile() {
 #[test]
 fn render_show_human_resume_hint_includes_non_default_profile() {
     let session = fake_session(Uuid::new_v4(), true);
-    let rendered = render_show(&session, &[], Some("local"), OutputMode::Human);
+    let rendered = render_show(&session, &[], 0, None, 0, Some("local"), OutputMode::Human);
     assert!(rendered.contains(&format!(
         "Resume: stakpak --profile local --session {}",
         session.id
@@ -724,7 +1030,7 @@ fn render_show_human_resume_hint_includes_non_default_profile() {
 #[test]
 fn render_show_human_resume_hint_with_no_profile_omits_flag() {
     let session = fake_session(Uuid::new_v4(), true);
-    let rendered = render_show(&session, &[], None, OutputMode::Human);
+    let rendered = render_show(&session, &[], 0, None, 0, None, OutputMode::Human);
     assert!(rendered.contains(&format!("Resume: stakpak --session {}", session.id)));
     assert!(!rendered.contains("--profile"));
 }
