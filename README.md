@@ -498,11 +498,11 @@ echo 'eval (stakpak completion elvish | slurp)' >> ~/.elvish/rc.elv
 # Fish
 echo 'stakpak completion fish | source' > ~/.config/fish/completions/stakpak.fish
 
-# PowerShell
-echo 'stakpak completion powershell | Out-String | Invoke-Expression' >> $PROFILE
-
 # Zsh
 echo 'source <(stakpak completion zsh)' >> ~/.zshrc
+
+# PowerShell
+Add-Content -Path $PROFILE -Value 'stakpak completion powershell | Out-String | Invoke-Expression'
 ```
 
 Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
