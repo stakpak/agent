@@ -694,6 +694,18 @@ mod tests {
     }
 
     #[test]
+    fn resolve_shell_scope_plugin_escape_hatch_no_longer_bypassable() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::stakpak::ak".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        let tc = make_run_command_tool_call("stakpak browser ak visit example.com");
+        let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
     fn resolve_shell_scope_run_command_task_rule_overrides_shared_scope() {
         let mut rules = HashMap::new();
         rules.insert("run_command_task".to_string(), AutoApprovePolicy::Never);
