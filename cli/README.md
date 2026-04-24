@@ -154,6 +154,16 @@ stakpak autopilot schedule add health-check \
 `check` script paths support `~`, which resolves against the HOME of the user running autopilot.
 For systemd/launchd/container deployments, prefer absolute paths (for example, `/home/ec2-user/.stakpak/checks/endpoints.sh`).
 
+### Example: nightly retrospect
+
+`stakpak ak skill retrospect` prints a prompt that walks the agent through turning past `stakpak sessions` into durable entries in the `ak` store. Schedule it nightly so knowledge accumulates without manual effort:
+
+```bash
+stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)"
+```
+
+Each retrospect run processes candidate sessions newest-first and cites its sources in frontmatter. Idempotency falls out of those citations: sessions already cited are skipped on subsequent runs, so the schedule is safe to re-trigger and scale-insensitive to how many sessions have accumulated. See `stakpak ak skill retrospect` for the full workflow.
+
 ### Add channels with profile
 
 ```bash
