@@ -131,8 +131,8 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
 
     // --- Column headers ---
     let policy_columns = [
-        AutoApprovePolicy::Prompt,
         AutoApprovePolicy::Auto,
+        AutoApprovePolicy::Prompt,
         AutoApprovePolicy::Never,
     ];
     let policy_width = 17usize;

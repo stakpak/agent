@@ -673,17 +673,17 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
 
 fn next_policy(policy: &AutoApprovePolicy) -> AutoApprovePolicy {
     match policy {
-        AutoApprovePolicy::Prompt => AutoApprovePolicy::Auto,
-        AutoApprovePolicy::Auto => AutoApprovePolicy::Never,
-        AutoApprovePolicy::Never => AutoApprovePolicy::Prompt,
+        AutoApprovePolicy::Prompt => AutoApprovePolicy::Never,
+        AutoApprovePolicy::Auto => AutoApprovePolicy::Prompt,
+        AutoApprovePolicy::Never => AutoApprovePolicy::Auto,
     }
 }
 
 fn prev_policy(policy: &AutoApprovePolicy) -> AutoApprovePolicy {
     match policy {
-        AutoApprovePolicy::Prompt => AutoApprovePolicy::Never,
-        AutoApprovePolicy::Auto => AutoApprovePolicy::Prompt,
-        AutoApprovePolicy::Never => AutoApprovePolicy::Auto,
+        AutoApprovePolicy::Prompt => AutoApprovePolicy::Auto,
+        AutoApprovePolicy::Auto => AutoApprovePolicy::Never,
+        AutoApprovePolicy::Never => AutoApprovePolicy::Prompt,
     }
 }
 
