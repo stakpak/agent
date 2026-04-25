@@ -2,7 +2,9 @@
 //!
 //! Handles all popup-related events including profile switcher, rulebook switcher, model switcher, command palette, shortcuts, collapsed messages, and context popup.
 
-use crate::app::{AppState, AutoApprovePopupRow, InputEvent, OutputEvent, ApprovalSettingsPersistenceTrigger};
+use crate::app::{
+    AppState, ApprovalSettingsPersistenceTrigger, AutoApprovePopupRow, InputEvent, OutputEvent,
+};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::changeset::Changeset;
 use crate::services::detect_term::ThemeColors;
