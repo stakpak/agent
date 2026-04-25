@@ -120,39 +120,13 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
     ]);
     f.render_widget(Paragraph::new(filter_text_widget), chunks[1]);
 
-    // --- Status ---
-    let changed_count = state
-        .tool_approval_popup_state
-        .rows
-        .iter()
-        .filter(|row| row.policy != row.original_policy)
-        .count();
     let visible_count = state.tool_approval_popup_state.visible_count();
     let total_count = state.tool_approval_popup_state.rows.len();
-    let status_line = if changed_count > 0 {
-        Line::from(vec![
-            Span::styled(
-                " Pending changes: ",
-                Style::default().fg(ThemeColors::dark_gray()),
-            ),
-            Span::styled(
-                changed_count.to_string(),
-                Style::default()
-                    .fg(ThemeColors::accent())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" · ", Style::default().fg(ThemeColors::dark_gray())),
-            Span::styled(
-                format!("{}/{} tools", visible_count, total_count),
-                Style::default().fg(ThemeColors::cyan()),
-            ),
-        ])
-    } else {
-        Line::from(vec![Span::styled(
-            format!(" {}/{} tools", visible_count, total_count),
-            Style::default().fg(ThemeColors::dark_gray()),
-        )])
-    };
+    let status_line = Line::from(vec![Span::styled(
+        format!(" {}/{} tools", visible_count, total_count),
+        Style::default().fg(ThemeColors::dark_gray()),
+    )]);
+
     f.render_widget(Paragraph::new(status_line), chunks[2]);
 
     // --- Column headers ---
@@ -295,9 +269,9 @@ pub fn render_auto_approve_popup(f: &mut Frame, state: &AppState) {
         Span::styled("type", Style::default().fg(ThemeColors::cyan())),
         Span::styled(" filter  ", Style::default().fg(ThemeColors::dark_gray())),
         Span::styled("enter", Style::default().fg(ThemeColors::cyan())),
-        Span::styled(" apply  ", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" save  ", Style::default().fg(ThemeColors::dark_gray())),
         Span::styled("esc", Style::default().fg(ThemeColors::cyan())),
-        Span::styled(" cancel", Style::default().fg(ThemeColors::dark_gray())),
+        Span::styled(" discard", Style::default().fg(ThemeColors::dark_gray())),
     ]));
     f.render_widget(footer, chunks[5]);
 }

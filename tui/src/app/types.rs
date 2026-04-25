@@ -802,6 +802,23 @@ pub struct AutoApprovePopupState {
     pub filtered_rows: Vec<usize>,
 }
 
+/// What triggered the persistence modal — determines the action after save/discard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApprovalSettingsPersistenceTrigger {
+    #[default]
+    Quit,
+    NewSession,
+}
+
+#[derive(Debug, Default)]
+pub struct ApprovalSettingsPersistenceModal {
+    pub is_visible: bool,
+    /// Currently selected option (0 = Profile, 1 = Project Directory, 2 = Discard).
+    pub selected: usize,
+    /// What action to take after the user makes their choice.
+    pub trigger: ApprovalSettingsPersistenceTrigger,
+}
+
 impl AutoApprovePopupState {
     pub fn reset(&mut self) {
         self.is_visible = false;

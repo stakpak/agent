@@ -248,6 +248,36 @@ pub fn update(
         }
     }
 
+    // Intercept keys for Policy Persistence Modal (unsaved auto-approve changes on quit)
+    if state.approval_settings_persistence_state.is_visible && !skip_popup_interception {
+        match event {
+            InputEvent::Up | InputEvent::ScrollUp => {
+                state.approval_settings_persistence_state.selected = state
+                    .approval_settings_persistence_state
+                    .selected
+                    .saturating_sub(1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                if state.approval_settings_persistence_state.selected < 2 {
+                    state.approval_settings_persistence_state.selected += 1;
+                }
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_policy_persistence_confirm(state, output_tx, input_tx);
+                return;
+            }
+            InputEvent::HandleEsc => {
+                popup::handle_policy_persistence_cancel(state);
+                return;
+            }
+            _ => {
+                return;
+            }
+        }
+    }
+
     // Intercept keys for "existing plan found" modal
     if state.plan_mode_state.existing_prompt.is_some() && !skip_popup_interception {
         match event {
@@ -1568,6 +1598,11 @@ pub fn update(
             // These are handled in the intercept block above when popup is visible
             // If we reach here, the popup is not visible, so ignore
         }
+        // Policy persistence modal events are handled in the intercept block above
+        InputEvent::ShowApprovalSettingsPersistenceModal
+        | InputEvent::ApprovalSettingsPersistenceNavigate(_)
+        | InputEvent::ApprovalSettingsPersistenceConfirm
+        | InputEvent::ApprovalSettingsPersistenceCancel => {}
     }
 
     flush_pending_user_messages_if_idle(state, input_tx, output_tx);

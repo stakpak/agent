@@ -2,7 +2,7 @@
 //!
 //! Handles all popup-related events including profile switcher, rulebook switcher, model switcher, command palette, shortcuts, collapsed messages, and context popup.
 
-use crate::app::{AppState, AutoApprovePopupRow, InputEvent, OutputEvent};
+use crate::app::{AppState, AutoApprovePopupRow, InputEvent, OutputEvent, ApprovalSettingsPersistenceTrigger};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::changeset::Changeset;
 use crate::services::detect_term::ThemeColors;
@@ -824,11 +824,90 @@ pub fn handle_auto_approve_popup_apply(state: &mut AppState) {
     state.tool_approval_popup_state.reset();
     push_styled_message(
         state,
-        "Auto-approve settings updated",
+        "Auto-approve settings updated (this session only)",
         ThemeColors::green(),
         "",
         ThemeColors::green(),
     );
+}
+
+// ========== Policy Persistence Modal Handlers ==========
+
+pub fn handle_policy_persistence_confirm(
+    state: &mut AppState,
+    output_tx: &Sender<OutputEvent>,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
+    let selected = state.approval_settings_persistence_state.selected;
+    let trigger = state.approval_settings_persistence_state.trigger;
+    state.approval_settings_persistence_state.is_visible = false;
+
+    match selected {
+        0 => {
+            // Save to Profile
+            state
+                .configuration_state
+                .auto_approve_manager
+                .save_to_profile(output_tx);
+            state.configuration_state.auto_approve_manager.snapshot();
+            push_styled_message(
+                state,
+                "Auto-approve settings saved to profile",
+                ThemeColors::green(),
+                " ✓ ",
+                ThemeColors::green(),
+            );
+        }
+        1 => {
+            // Save to Project Directory
+            if let Err(e) = state
+                .configuration_state
+                .auto_approve_manager
+                .save_to_project()
+            {
+                push_error_message(
+                    state,
+                    &format!("Failed to save to project directory: {}", e),
+                    None,
+                );
+            } else {
+                state.configuration_state.auto_approve_manager.snapshot();
+                push_styled_message(
+                    state,
+                    "Auto-approve settings saved to project",
+                    ThemeColors::green(),
+                    " ✓ ",
+                    ThemeColors::green(),
+                );
+            }
+        }
+        2 => {
+            // Discard — reset to original config
+            let original = state
+                .configuration_state
+                .auto_approve_manager
+                .get_original_config()
+                .clone();
+            state.configuration_state.auto_approve_manager.config = original;
+        }
+        _ => {}
+    }
+
+    // Resume the action that was interrupted
+    match trigger {
+        ApprovalSettingsPersistenceTrigger::Quit => {
+            let _ = input_tx.try_send(InputEvent::Quit);
+        }
+        ApprovalSettingsPersistenceTrigger::NewSession => {
+            crate::services::commands::new_session(state, output_tx);
+        }
+    }
+}
+
+pub fn handle_policy_persistence_cancel(state: &mut AppState) {
+    state.approval_settings_persistence_state.is_visible = false;
+    state.quit_intent_state.ctrl_c_pressed_once = false;
+    state.quit_intent_state.ctrl_c_timer = None;
 }
 
 // ========== File Changes Popup Handlers ==========

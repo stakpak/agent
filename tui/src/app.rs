@@ -53,6 +53,7 @@ pub struct AppState {
     pub plan_review_state: PlanReviewState,
     pub ask_user_state: AskUserState,
     pub tool_approval_popup_state: AutoApprovePopupState,
+    pub approval_settings_persistence_state: ApprovalSettingsPersistenceModal,
 }
 
 pub struct AppStateOptions<'a> {
@@ -226,6 +227,9 @@ impl AppState {
 
             // tool approval popup initialization
             tool_approval_popup_state: AutoApprovePopupState::default(),
+
+            // Policy persistence modal initialization
+            approval_settings_persistence_state: ApprovalSettingsPersistenceModal::default(),
 
             // Usage tracking
             usage_tracking_state: UsageTrackingState::default(),

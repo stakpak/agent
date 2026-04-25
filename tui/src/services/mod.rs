@@ -25,12 +25,12 @@ pub mod message_action_popup;
 pub mod message_pattern;
 pub mod model_switcher;
 pub mod placeholder_prompts;
-pub mod profile_switcher;
-pub mod rulebook_switcher;
-
 pub mod plan;
 pub mod plan_comments;
 pub mod plan_review;
+pub mod policy_persistence_popup;
+pub mod profile_switcher;
+pub mod rulebook_switcher;
 pub mod shell_mode;
 pub mod shell_popup;
 pub mod shortcuts_popup;

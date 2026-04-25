@@ -789,6 +789,19 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Check for unsaved auto-approve changes — show persistence modal if needed
+    if state
+        .configuration_state
+        .auto_approve_manager
+        .has_unsaved_changes()
+    {
+        state.approval_settings_persistence_state.is_visible = true;
+        state.approval_settings_persistence_state.selected = 0;
+        state.approval_settings_persistence_state.trigger =
+            crate::app::ApprovalSettingsPersistenceTrigger::NewSession;
+        return;
+    }
+
     // Terminate any active shell before starting new session
     terminate_active_shell(state);
 
