@@ -65,7 +65,7 @@ pub fn render_policy_persistence_popup(f: &mut Frame, state: &AppState) {
     // Description
     f.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
-            "Where would you like to save them?",
+            " Where would you like to save them?",
             Style::default().fg(ThemeColors::text()),
         )])),
         chunks[1],
