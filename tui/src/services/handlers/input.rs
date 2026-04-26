@@ -466,7 +466,7 @@ fn handle_input_submitted(
                 );
             }
         } else {
-            push_error_message(state, "Usage: /toggle_auto_approve <tool_name>", None);
+            let _ = input_tx.try_send(InputEvent::ShowAutoApprovePopup);
         }
         state.input_state.text_area.set_text("");
         state.input_state.show_helper_dropdown = false;

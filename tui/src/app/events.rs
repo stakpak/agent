@@ -82,6 +82,8 @@ pub enum InputEvent {
     AttemptQuit,
     ToggleCollapsedMessages,
     ShowFileChangesPopup,
+    // Auto-approve popup events
+    ShowAutoApprovePopup,
     FileChangesRevertFile,
     FileChangesRevertAll,
     FileChangesOpenEditor,
@@ -221,6 +223,12 @@ pub enum InputEvent {
 
     // Session events
     SetSessionId(String),
+
+    // Approval settings persistence modal events
+    ShowApprovalSettingsPersistenceModal,
+    ApprovalSettingsPersistenceNavigate(i32),
+    ApprovalSettingsPersistenceConfirm,
+    ApprovalSettingsPersistenceCancel,
 }
 
 impl InputEvent {
@@ -307,4 +315,6 @@ pub enum OutputEvent {
     InitCommandCalled,
     /// Response from ask_user popup with the tool call and result
     AskUserResponse(ToolCallResult),
+    /// Save auto-approve settings to the profile config (tool names set to Auto)
+    SaveAutoApproveToProfile(Vec<String>),
 }

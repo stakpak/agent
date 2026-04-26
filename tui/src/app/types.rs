@@ -5,6 +5,7 @@
 
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::banner::BannerMessage;
 use crate::services::file_search::FileSearch;
 use crate::services::message::Message;
@@ -782,6 +783,92 @@ pub enum ModelSwitcherMode {
     #[default]
     All, // Show all models grouped by provider
     Reasoning, // Show only models with reasoning support
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoApprovePopupRow {
+    pub tool_name: String,
+    pub policy: AutoApprovePolicy,
+    pub original_policy: AutoApprovePolicy,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AutoApprovePopupState {
+    pub is_visible: bool,
+    pub rows: Vec<AutoApprovePopupRow>,
+    pub row_selected: usize,
+    pub scroll: usize,
+    pub filter_text: String,
+    pub filtered_rows: Vec<usize>,
+}
+
+/// What triggered the persistence modal — determines the action after save/discard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApprovalSettingsPersistenceTrigger {
+    #[default]
+    Quit,
+    NewSession,
+}
+
+#[derive(Debug, Default)]
+pub struct ApprovalSettingsPersistenceModal {
+    pub is_visible: bool,
+    /// Currently selected option (0 = Profile, 1 = Project Directory, 2 = Discard).
+    pub selected: usize,
+    /// What action to take after the user makes their choice.
+    pub trigger: ApprovalSettingsPersistenceTrigger,
+}
+
+impl AutoApprovePopupState {
+    pub fn reset(&mut self) {
+        self.is_visible = false;
+        self.rows.clear();
+        self.row_selected = 0;
+        self.scroll = 0;
+        self.filter_text.clear();
+        self.filtered_rows.clear();
+    }
+
+    pub fn apply_filter(&mut self) {
+        self.filtered_rows = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row.tool_name
+                    .to_lowercase()
+                    .contains(&self.filter_text.to_lowercase())
+            })
+            .map(|(i, _)| i)
+            .collect();
+        self.row_selected = 0;
+        self.scroll = 0;
+    }
+
+    pub fn visible_count(&self) -> usize {
+        if self.filter_text.is_empty() {
+            self.rows.len()
+        } else {
+            self.filtered_rows.len()
+        }
+    }
+
+    pub fn get_row_index(&self, visual_index: usize) -> Option<usize> {
+        let visible = self.visible_rows();
+        if visual_index < visible.len() {
+            Some(visible[visual_index])
+        } else {
+            None
+        }
+    }
+
+    fn visible_rows(&self) -> Vec<usize> {
+        if self.filter_text.is_empty() {
+            (0..self.rows.len()).collect()
+        } else {
+            self.filtered_rows.clone()
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -294,6 +294,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
     }
 
+    // Render auto-approve popup
+    if state.tool_approval_popup_state.is_visible {
+        crate::services::auto_approve_popup::render_auto_approve_popup(f, state);
+    }
+
+    // Render policy persistence modal (unsaved changes on quit)
+    if state.approval_settings_persistence_state.is_visible {
+        crate::services::policy_persistence_popup::render_policy_persistence_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switcher_state.switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);

@@ -277,8 +277,7 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/toggle_auto_approve".into(),
-            description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view"
-                .into(),
+            description: "Open Tool Approval settings or enable auto-approval for a specific tool: /toggle_auto_approve <tool name>".into(),
             source: CommandSource::BuiltIn,
         },
         HelperCommand {
@@ -434,11 +433,18 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
             Ok(())
         }
         "/toggle_auto_approve" => {
-            // Special case: keep input for user to specify tool name
-            let input = "/toggle_auto_approve ".to_string();
-            ctx.state.input_state.text_area.set_text(&input);
-            ctx.state.input_state.text_area.set_cursor(input.len());
-            ctx.state.input_state.show_helper_dropdown = false;
+            let raw_input = ctx.state.input().trim().to_string();
+            if raw_input == "/toggle_auto_approve" {
+                let _ = ctx.input_tx.try_send(InputEvent::ShowAutoApprovePopup);
+                ctx.state.input_state.text_area.set_text("");
+                ctx.state.input_state.show_helper_dropdown = false;
+            } else {
+                // Special case: keep input for user to specify tool name
+                let input = "/toggle_auto_approve ".to_string();
+                ctx.state.input_state.text_area.set_text(&input);
+                ctx.state.input_state.text_area.set_cursor(input.len());
+                ctx.state.input_state.show_helper_dropdown = false;
+            }
             Ok(())
         }
         "/profiles" => {
@@ -783,6 +789,19 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Check for unsaved auto-approve changes — show persistence modal if needed
+    if state
+        .configuration_state
+        .auto_approve_manager
+        .has_unsaved_changes()
+    {
+        state.approval_settings_persistence_state.is_visible = true;
+        state.approval_settings_persistence_state.selected = 0;
+        state.approval_settings_persistence_state.trigger =
+            crate::app::ApprovalSettingsPersistenceTrigger::NewSession;
+        return;
+    }
+
     // Terminate any active shell before starting new session
     terminate_active_shell(state);
 

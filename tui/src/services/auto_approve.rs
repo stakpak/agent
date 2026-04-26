@@ -28,7 +28,7 @@ pub enum AutoApprovePolicy {
     Never = 2,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AutoApproveConfig {
     pub enabled: bool,
     pub default_policy: AutoApprovePolicy,
@@ -36,7 +36,7 @@ pub struct AutoApproveConfig {
     pub command_patterns: CommandPatterns,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct CommandPatterns {
     pub safe_readonly: Vec<String>,
     pub sensitive_destructive: Vec<String>,
@@ -87,6 +87,7 @@ impl Default for AutoApproveConfig {
 
 pub struct AutoApproveManager {
     pub config: AutoApproveConfig,
+    original_config: AutoApproveConfig,
     pub config_path: PathBuf,
     input_tx: Option<mpsc::Sender<InputEvent>>,
 }
@@ -117,7 +118,8 @@ impl AutoApproveManager {
                 }
 
                 AutoApproveManager {
-                    config,
+                    original_config: config.clone(),
+                    config: config.clone(),
                     config_path,
                     input_tx: input_tx.clone(),
                 }
@@ -142,7 +144,8 @@ impl AutoApproveManager {
             Self::merge_profile_and_session_config(auto_approve_tools, session_config.as_ref());
 
         Ok(AutoApproveManager {
-            config,
+            original_config: config.clone(),
+            config: config.clone(),
             config_path,
             input_tx,
         })
@@ -258,7 +261,7 @@ impl AutoApproveManager {
         policy: AutoApprovePolicy,
     ) -> Result<(), String> {
         self.config.tools.insert(tool_name.to_string(), policy);
-        self.save_config()
+        Ok(())
     }
 
     pub fn update_command_patterns(
@@ -282,17 +285,17 @@ impl AutoApproveManager {
         self.config
             .tools
             .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
-        self.save_config()
+        Ok(())
     }
 
     pub fn set_default_policy(&mut self, policy: AutoApprovePolicy) -> Result<(), String> {
         self.config.default_policy = policy;
-        self.save_config()
+        Ok(())
     }
 
     pub fn toggle_enabled(&mut self) -> Result<(), String> {
         self.config.enabled = !self.config.enabled;
-        self.save_config()
+        Ok(())
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -301,6 +304,50 @@ impl AutoApproveManager {
 
     pub fn get_config(&self) -> &AutoApproveConfig {
         &self.config
+    }
+
+    /// Returns the config as loaded from disk at session start.
+    pub fn get_original_config(&self) -> &AutoApproveConfig {
+        &self.original_config
+    }
+
+    /// Returns true if the current in-memory config differs from what was loaded at session start.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.config != self.original_config
+    }
+
+    /// Extract the list of tool names that are set to Auto policy.
+    pub fn get_auto_approved_tool_names(&self) -> Vec<String> {
+        self.config
+            .tools
+            .iter()
+            .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    /// Persist the current config to the project-local `.stakpak/session/auto_approve.json`.
+    pub fn save_to_project(&self) -> Result<(), String> {
+        self.config
+            .save(&self.config_path, self.input_tx.clone())
+            .map_err(|e| {
+                let error_msg = format!("Failed to save auto-approve config: {}", e);
+                if let Some(ref sender) = self.input_tx {
+                    let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+                }
+                error_msg
+            })
+    }
+
+    /// Persist auto-approved tools to the profile-level config
+    pub fn save_to_profile(&self, output_tx: &tokio::sync::mpsc::Sender<crate::app::OutputEvent>) {
+        let tools = self.get_auto_approved_tool_names();
+        let _ = output_tx.try_send(crate::app::OutputEvent::SaveAutoApproveToProfile(tools));
+    }
+
+    /// Snapshot the current config as the new baseline (after persisting).
+    pub fn snapshot(&mut self) {
+        self.original_config = self.config.clone();
     }
 
     /// Returns a filtered list of tool calls that require user approval (prompt)
@@ -331,18 +378,6 @@ impl AutoApproveManager {
             .filter(|tool_call| self.should_auto_approve(tool_call))
             .cloned()
             .collect()
-    }
-
-    fn save_config(&self) -> Result<(), String> {
-        self.config
-            .save(&self.config_path, self.input_tx.clone())
-            .map_err(|e| {
-                let error_msg = format!("Failed to save auto-approve config: {}", e);
-                if let Some(ref sender) = self.input_tx {
-                    let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
-                }
-                error_msg
-            })
     }
 
     /// Merge profile auto-approve settings with existing session config.

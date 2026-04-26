@@ -200,6 +200,84 @@ pub fn update(
         }
     }
 
+    // Intercept keys for Auto-Approve Popup
+    if state.tool_approval_popup_state.is_visible && !skip_popup_interception {
+        match event {
+            InputEvent::HandleEsc => {
+                if !state.tool_approval_popup_state.filter_text.is_empty() {
+                    state.tool_approval_popup_state.filter_text.clear();
+                    state.tool_approval_popup_state.apply_filter();
+                } else {
+                    popup::handle_auto_approve_popup_cancel(state);
+                }
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_auto_approve_popup_up(state);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_auto_approve_popup_down(state);
+                return;
+            }
+            InputEvent::CursorLeft => {
+                popup::handle_auto_approve_popup_left(state);
+                return;
+            }
+            InputEvent::CursorRight => {
+                popup::handle_auto_approve_popup_right(state);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_auto_approve_popup_apply(state);
+                return;
+            }
+            InputEvent::InputChanged(c) => {
+                state.tool_approval_popup_state.filter_text.push(c);
+                state.tool_approval_popup_state.apply_filter();
+                return;
+            }
+            InputEvent::InputBackspace => {
+                state.tool_approval_popup_state.filter_text.pop();
+                state.tool_approval_popup_state.apply_filter();
+                return;
+            }
+            _ => {
+                return;
+            }
+        }
+    }
+
+    // Intercept keys for Policy Persistence Modal (unsaved auto-approve changes on quit)
+    if state.approval_settings_persistence_state.is_visible && !skip_popup_interception {
+        match event {
+            InputEvent::Up | InputEvent::ScrollUp => {
+                state.approval_settings_persistence_state.selected = state
+                    .approval_settings_persistence_state
+                    .selected
+                    .saturating_sub(1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                if state.approval_settings_persistence_state.selected < 2 {
+                    state.approval_settings_persistence_state.selected += 1;
+                }
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_policy_persistence_confirm(state, output_tx, input_tx);
+                return;
+            }
+            InputEvent::HandleEsc => {
+                popup::handle_policy_persistence_cancel(state);
+                return;
+            }
+            _ => {
+                return;
+            }
+        }
+    }
+
     // Intercept keys for "existing plan found" modal
     if state.plan_mode_state.existing_prompt.is_some() && !skip_popup_interception {
         match event {
@@ -1243,6 +1321,9 @@ pub fn update(
         InputEvent::ShowFileChangesPopup => {
             popup::handle_show_file_changes_popup(state);
         }
+        InputEvent::ShowAutoApprovePopup => {
+            popup::handle_show_auto_approve_popup(state);
+        }
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
         }
@@ -1517,6 +1598,11 @@ pub fn update(
             // These are handled in the intercept block above when popup is visible
             // If we reach here, the popup is not visible, so ignore
         }
+        // Policy persistence modal events are handled in the intercept block above
+        InputEvent::ShowApprovalSettingsPersistenceModal
+        | InputEvent::ApprovalSettingsPersistenceNavigate(_)
+        | InputEvent::ApprovalSettingsPersistenceConfirm
+        | InputEvent::ApprovalSettingsPersistenceCancel => {}
     }
 
     flush_pending_user_messages_if_idle(state, input_tx, output_tx);

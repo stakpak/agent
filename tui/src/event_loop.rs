@@ -25,7 +25,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::interval;
 
-use crate::app::ToolCallStatus;
+use crate::app::{ApprovalSettingsPersistenceTrigger, ToolCallStatus};
 use crate::terminal::TerminalGuard;
 
 // Rulebook config struct (re-defined here to avoid circular dependency)
@@ -384,10 +384,18 @@ pub async fn run_tui(
                        continue;
                    }
 
-                   if let InputEvent::Quit = event {
-                       should_quit = true;
-                   }
-                   else {
+                    if let InputEvent::Quit = event {
+                        if state.configuration_state.auto_approve_manager.has_unsaved_changes()
+                            && !state.approval_settings_persistence_state.is_visible
+                        {
+                            // Show persistence modal instead of quitting
+                            state.approval_settings_persistence_state.is_visible = true;
+                            state.approval_settings_persistence_state.selected = 0;
+                            state.approval_settings_persistence_state.trigger = ApprovalSettingsPersistenceTrigger::Quit;
+                        } else {
+                            should_quit = true;
+                        }
+                    } else {
                        // Calculate main area width accounting for side panel
                        let main_area_width = if state.side_panel_state.is_shown {
                            term_size.width.saturating_sub(32 + 1) // side panel width + margin
@@ -471,47 +479,54 @@ pub async fn run_tui(
                     continue;
                 }
                 if let InputEvent::Quit = event {
-                    should_quit = true;
-                }
-                   else {
-                       let term_size = terminal.size()?;
-                       // Calculate main area width accounting for side panel
-                       let main_area_width = if state.side_panel_state.is_shown {
-                           term_size.width.saturating_sub(32 + 1) // side panel width + margin
-                       } else {
-                           term_size.width
-                       };
-                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
-                       let input_height = 3;
-                       let margin_height = 2;
-                       let dropdown_showing = state.input_state.show_helper_dropdown
-                           && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.input_state.filtered_files.is_empty());
-                       let dropdown_height = if dropdown_showing {
-                           state.input_state.filtered_helpers.len() as u16
-                       } else {
-                           0
-                       };
-                        let hint_height = if dropdown_showing { 0 } else { margin_height };
-                        let banner_h = crate::services::banner::banner_height(&state);
-                         let outer_chunks = ratatui::layout::Layout::default()
-                             .direction(ratatui::layout::Direction::Vertical)
-                             .constraints([
-                                 ratatui::layout::Constraint::Length(banner_h), // banner (0 if no message)
-                                 ratatui::layout::Constraint::Min(1), // messages
-                                 ratatui::layout::Constraint::Length(1), // loading indicator
-                                 ratatui::layout::Constraint::Length(input_height as u16),
-                                 ratatui::layout::Constraint::Length(dropdown_height),
-                                 ratatui::layout::Constraint::Length(hint_height),
-                             ])
-                             .split(term_rect);
-                         // Subtract 2 for padding (matches view.rs padded_message_area)
-                         let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
-                         let message_area_height = outer_chunks[1].height as usize;
-                      if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
-                    continue;
-                   }
+                    if state.configuration_state.auto_approve_manager.has_unsaved_changes()
+                        && !state.approval_settings_persistence_state.is_visible
+                    {
+                        state.approval_settings_persistence_state.is_visible = true;
+                        state.approval_settings_persistence_state.selected = 0;
+                        state.approval_settings_persistence_state.trigger = ApprovalSettingsPersistenceTrigger::Quit;
+                    } else {
+                        should_quit = true;
+                    }
+                } else {
+                    let term_size = terminal.size()?;
+                    // Calculate main area width accounting for side panel
+                    let main_area_width = if state.side_panel_state.is_shown {
+                        term_size.width.saturating_sub(32 + 1) // side panel width + margin
+                    } else {
+                        term_size.width
+                    };
+                    let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
+                    let input_height = 3;
+                    let margin_height = 2;
+                    let dropdown_showing = state.input_state.show_helper_dropdown
+                        && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                            || !state.input_state.filtered_files.is_empty());
+                    let dropdown_height = if dropdown_showing {
+                        state.input_state.filtered_helpers.len() as u16
+                    } else {
+                        0
+                    };
+                    let hint_height = if dropdown_showing { 0 } else { margin_height };
+                    let banner_h = crate::services::banner::banner_height(&state);
+                    let outer_chunks = ratatui::layout::Layout::default()
+                        .direction(ratatui::layout::Direction::Vertical)
+                        .constraints([
+                            ratatui::layout::Constraint::Length(banner_h), // banner (0 if no message)
+                            ratatui::layout::Constraint::Min(1), // messages
+                            ratatui::layout::Constraint::Length(1), // loading indicator
+                            ratatui::layout::Constraint::Length(input_height as u16),
+                            ratatui::layout::Constraint::Length(dropdown_height),
+                            ratatui::layout::Constraint::Length(hint_height),
+                        ])
+                        .split(term_rect);
+                    // Subtract 2 for padding (matches view.rs padded_message_area)
+                    let message_area_width = outer_chunks[1].width.saturating_sub(2) as usize;
+                    let message_area_height = outer_chunks[1].height as usize;
+                    if let InputEvent::EmergencyClearTerminal = event {
+                        emergency_clear_and_redraw(&mut terminal, &mut state)?;
+                        continue;
+                    }
 
                    // Batch scroll events: if this is a scroll event, drain any pending scroll events
                    // and combine them into a single scroll operation for better performance

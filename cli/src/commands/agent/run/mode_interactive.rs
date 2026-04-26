@@ -1359,6 +1359,15 @@ pub async fn run_interactive(
 
                         // No more queued tools — fall through to send to API
                     }
+                    OutputEvent::SaveAutoApproveToProfile(auto_approved_tools) => {
+                        if let Ok(mut config_file) = AppConfig::load_config_file(&config_path)
+                            && let Some(profile) = config_file.profiles.get_mut(&profile_name)
+                        {
+                            profile.auto_approve = Some(auto_approved_tools);
+                            let _ = config_file.save_to(&config_path);
+                        }
+                        continue;
+                    }
                 }
 
                 // Skip sending to API if there are pending tool calls without tool_results
