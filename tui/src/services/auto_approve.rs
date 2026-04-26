@@ -57,6 +57,34 @@ impl Default for AutoApproveConfig {
         tools.insert("get_all_tasks".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_task_details".to_string(), AutoApprovePolicy::Auto);
         tools.insert("wait_for_tasks".to_string(), AutoApprovePolicy::Auto);
+        tools.insert(
+            "run_command::stakpak::version".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::account".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::completion".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::ak".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::sessions".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::config::show".to_string(),
+            AutoApprovePolicy::Auto,
+        );
+        tools.insert(
+            "run_command::stakpak::config::sample".to_string(),
+            AutoApprovePolicy::Auto,
+        );
 
         // Prompt tools (always require confirmation):
         tools.insert("create".to_string(), AutoApprovePolicy::Prompt);
@@ -449,12 +477,17 @@ fn resolve_shell_scope(
     } else {
         Vec::new()
     };
+    let mut effective_rules = rules.clone();
+
+    if !fallback_scopes.is_empty() && effective_rules.get(tool_name) == Some(default) {
+        effective_rules.remove(tool_name);
+    }
 
     match stakpak_shell_tool_approvals::resolve_hierarchical_policy(
         command_str,
         tool_name,
         &fallback_scopes,
-        rules,
+        &effective_rules,
         default.clone(),
     ) {
         Ok(action) => action,
@@ -640,6 +673,33 @@ mod tests {
     }
 
     #[test]
+    fn default_config_includes_stakpak_allowlist_entries() {
+        let config = AutoApproveConfig::default();
+
+        for key in [
+            "run_command::stakpak::version",
+            "run_command::stakpak::account",
+            "run_command::stakpak::completion",
+            "run_command::stakpak::ak",
+            "run_command::stakpak::sessions",
+            "run_command::stakpak::config::show",
+            "run_command::stakpak::config::sample",
+        ] {
+            assert_eq!(
+                config.tools.get(key),
+                Some(&AutoApprovePolicy::Auto),
+                "missing or incorrect policy for {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_config_does_not_include_stakpak_scope_level_entry() {
+        let config = AutoApproveConfig::default();
+        assert_eq!(config.tools.get("run_command::stakpak"), None);
+    }
+
+    #[test]
     fn resolve_shell_scope_command_level_auto() {
         let mut rules = HashMap::new();
         rules.insert("run_command::git".to_string(), AutoApprovePolicy::Auto);
@@ -729,6 +789,62 @@ mod tests {
     }
 
     #[test]
+    fn resolve_shell_scope_stakpak_version_auto_approved() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak version");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_ak_namespace_matches_trailing_args() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak ak write notes.md");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_config_show_two_segment_match() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak config show");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_config_list_still_prompts() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak config list");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_update_still_prompts() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak update");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_bare_still_prompts() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_stakpak_browser_does_not_bypass_ak_allowlist() {
+        let config = AutoApproveConfig::default();
+        let tc = make_run_command_tool_call("stakpak browser ak visit example.com");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
     fn resolve_shell_scope_run_command_task_rule_overrides_shared_scope() {
         let mut rules = HashMap::new();
         rules.insert("run_command_task".to_string(), AutoApprovePolicy::Never);
@@ -745,6 +861,80 @@ mod tests {
         let tc = make_tool_call("run_command_task", "git status");
         let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);
         assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_run_command_task_inherits_stakpak_ak_allowlist() {
+        let config = AutoApproveConfig::default();
+        let tc = make_tool_call("run_command_task", "stakpak ak tree");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn resolve_shell_scope_user_override_prompt_wins_over_allowlist() {
+        let mut config = AutoApproveConfig::default();
+        config.tools.insert(
+            "run_command::stakpak::ak".to_string(),
+            AutoApprovePolicy::Prompt,
+        );
+
+        let tc = make_run_command_tool_call("stakpak ak tree");
+        let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
+        assert_eq!(result, Some(AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn resolve_shell_scope_user_subrule_tightens_namespace_default() {
+        let mut config = AutoApproveConfig::default();
+        config.tools.insert(
+            "run_command::stakpak::ak::write".to_string(),
+            AutoApprovePolicy::Prompt,
+        );
+
+        let write_tc = make_run_command_tool_call("stakpak ak write notes.md");
+        let write_result = resolve_shell_scope(&write_tc, &config.tools, &config.default_policy);
+        assert_eq!(write_result, Some(AutoApprovePolicy::Prompt));
+
+        let tree_tc = make_run_command_tool_call("stakpak ak tree");
+        let tree_result = resolve_shell_scope(&tree_tc, &config.tools, &config.default_policy);
+        assert_eq!(tree_result, Some(AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn should_auto_approve_stakpak_ak_tree_with_fresh_defaults() {
+        let manager = AutoApproveManager {
+            config: AutoApproveConfig::default(),
+            config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
+            input_tx: None,
+        };
+        let tc = make_run_command_tool_call("stakpak ak tree");
+
+        assert!(manager.should_auto_approve(&tc));
+    }
+
+    #[test]
+    fn should_not_auto_approve_stakpak_update_with_fresh_defaults() {
+        let manager = AutoApproveManager {
+            config: AutoApproveConfig::default(),
+            config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
+            input_tx: None,
+        };
+        let tc = make_run_command_tool_call("stakpak update");
+
+        assert!(!manager.should_auto_approve(&tc));
+    }
+
+    #[test]
+    fn should_not_auto_approve_stakpak_browser_ak_visit_with_fresh_defaults() {
+        let manager = AutoApproveManager {
+            config: AutoApproveConfig::default(),
+            config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
+            input_tx: None,
+        };
+        let tc = make_run_command_tool_call("stakpak browser ak visit example.com");
+
+        assert!(!manager.should_auto_approve(&tc));
     }
 
     #[test]
