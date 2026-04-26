@@ -27,12 +27,18 @@ pub struct Settings {
     pub collect_telemetry: Option<bool>,
     /// Preferred external editor (e.g. vim, nano, code)
     pub editor: Option<String>,
+    /// Base URL for downloading rulebooks/skills/playbooks
+    /// If not set, api_endpoint is used for content downloads
+    pub rulebook_base_url: Option<String>,
 }
 
 /// Legacy configuration format for migration purposes.
 #[derive(Deserialize, Clone)]
 pub(crate) struct OldAppConfig {
     pub api_endpoint: String,
+    /// Base URL for downloading rulebooks/skills/playbooks
+    /// If not set, api_endpoint is used for content downloads
+    pub rulebook_base_url: Option<String>,
     pub api_key: Option<String>,
     pub machine_name: Option<String>,
     pub auto_append_gitignore: Option<bool>,
@@ -46,6 +52,7 @@ impl From<OldAppConfig> for Settings {
             anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
             collect_telemetry: Some(true),
             editor: Some("nano".to_string()),
+            rulebook_base_url: old_config.rulebook_base_url,
         }
     }
 }

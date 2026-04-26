@@ -29,6 +29,8 @@ impl Default for ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                // Default rulebook base URL (optional - will fall back to api_endpoint)
+                rulebook_base_url: None,
             },
         }
     }
@@ -48,6 +50,8 @@ impl ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                // Default rulebook base URL (optional - will fall back to api_endpoint)
+                rulebook_base_url: None,
             },
         }
     }
@@ -93,6 +97,7 @@ impl ConfigFile {
         let existing_anonymous_id = self.settings.anonymous_id.clone();
         let existing_collect_telemetry = self.settings.collect_telemetry;
         let existing_editor = self.settings.editor.clone();
+        let existing_rulebook_base_url = self.settings.rulebook_base_url.clone();
 
         self.settings = Settings {
             machine_name: config.machine_name,
@@ -100,6 +105,8 @@ impl ConfigFile {
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
             editor: config.editor.or(existing_editor),
+            // Only set rulebook_base_url if config explicitly provides it
+            rulebook_base_url: config.rulebook_base_url.or(existing_rulebook_base_url),
         };
     }
 
