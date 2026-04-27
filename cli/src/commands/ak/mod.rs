@@ -1,6 +1,6 @@
 use clap::Subcommand;
 use stakpak_ak::search::SearchEngine;
-use stakpak_ak::skills::{SKILL_MAINTAIN, SKILL_USAGE};
+use stakpak_ak::skills::{SKILL_MAINTAIN, SKILL_RETROSPECT, SKILL_USAGE};
 use stakpak_ak::{LocalFsBackend, StorageBackend, TreeNavEngine};
 use std::io::Read;
 use std::path::PathBuf;
@@ -141,10 +141,10 @@ This reflects the default root (~/.stakpak/knowledge) unless AK_STORE is set."
         about = "Print one of the built-in ak skill prompts",
         long_about = "Print one of the built-in behavior prompts for `ak`.
 
-Use `usage` to teach an agent how to navigate and write to the store. Use `maintain` to teach an agent how to audit, deduplicate, and clean up stored knowledge."
+Use `usage` to teach an agent how to navigate and write to the store. Use `maintain` to teach an agent how to audit, deduplicate, and clean up stored knowledge. Use `retrospect` to teach an agent how to turn past sessions into durable entries in the store (pipe its output into `stakpak autopilot schedule add --prompt ...` to run it on cron)."
     )]
     Skill {
-        /// Built-in skill name: usage or maintain
+        /// Built-in skill name: usage, maintain, or retrospect
         name: String,
     },
 }
@@ -216,9 +216,10 @@ impl AkCommands {
             Self::Skill { name } => match name.as_str() {
                 "usage" => println!("{SKILL_USAGE}"),
                 "maintain" => println!("{SKILL_MAINTAIN}"),
+                "retrospect" => println!("{SKILL_RETROSPECT}"),
                 other => {
                     return Err(format!(
-                        "invalid skill: {other}. valid values: usage, maintain"
+                        "invalid skill: {other}. valid values: usage, maintain, retrospect"
                     ));
                 }
             },
@@ -283,6 +284,8 @@ mod tests {
         .expect_err("unknown skill should fail");
 
         assert!(error.contains("invalid skill"));
-        assert!(error.contains("valid values: usage, maintain"));
+        assert!(error.contains("usage"));
+        assert!(error.contains("maintain"));
+        assert!(error.contains("retrospect"));
     }
 }
