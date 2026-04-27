@@ -1,13 +1,10 @@
 use crate::tool_container::ToolContainer;
-use chrono::{DateTime, Utc};
 use rmcp::{
     ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool,
     tool_router,
 };
 use serde::Deserialize;
-use stakpak_api::models::{
-    SearchDocsRequest as ApiSearchDocsRequest, SearchMemoryRequest as ApiSearchMemoryRequest,
-};
+use stakpak_api::models::SearchDocsRequest as ApiSearchDocsRequest;
 use stakpak_shared::utils::{handle_large_output, sanitize_text_output};
 // use stakpak_api::models::CodeIndex;
 // use stakpak_shared::local_store::LocalStore;
@@ -201,35 +198,35 @@ fn search_docs_validation_error_result(error: SearchDocsValidationError) -> Call
     CallToolResult::error(vec![Content::text(code), Content::text(message)])
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SearchMemoryRequest {
-    #[schemars(
-        description = "Space-separated keywords to search for in your memory (e.g., 'kubernetes deployment config'). Searches against the title, tags, and content of your memory."
-    )]
-    pub keywords: String,
-    #[schemars(
-        description = "Start time for filtering memories by creation time (inclusive range, ISO 8601 format)"
-    )]
-    pub start_time: Option<DateTime<Utc>>,
-    #[schemars(
-        description = "End time for filtering memories by creation time (inclusive range, ISO 8601 format)"
-    )]
-    pub end_time: Option<DateTime<Utc>>,
-}
+// #[derive(Debug, Deserialize, schemars::JsonSchema)]
+// pub struct SearchMemoryRequest {
+//     #[schemars(
+//         description = "Space-separated keywords to search for in your memory (e.g., 'kubernetes deployment config'). Searches against the title, tags, and content of your memory."
+//     )]
+//     pub keywords: String,
+//     #[schemars(
+//         description = "Start time for filtering memories by creation time (inclusive range, ISO 8601 format)"
+//     )]
+//     pub start_time: Option<DateTime<Utc>>,
+//     #[schemars(
+//         description = "End time for filtering memories by creation time (inclusive range, ISO 8601 format)"
+//     )]
+//     pub end_time: Option<DateTime<Utc>>,
+// }
 
-impl From<SearchMemoryRequest> for ApiSearchMemoryRequest {
-    fn from(req: SearchMemoryRequest) -> Self {
-        Self {
-            keywords: req
-                .keywords
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect(),
-            start_time: req.start_time,
-            end_time: req.end_time,
-        }
-    }
-}
+// impl From<SearchMemoryRequest> for ApiSearchMemoryRequest {
+//     fn from(req: SearchMemoryRequest) -> Self {
+//         Self {
+//             keywords: req
+//                 .keywords
+//                 .split_whitespace()
+//                 .map(|s| s.to_string())
+//                 .collect(),
+//             start_time: req.start_time,
+//             end_time: req.end_time,
+//         }
+//     }
+// }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LoadSkillRequest {
     #[schemars(
@@ -342,35 +339,35 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         Ok(CallToolResult::success(processed))
     }
 
-    #[tool(
-        description = "Search your memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment."
-    )]
-    pub async fn search_memory(
-        &self,
-        Parameters(request): Parameters<SearchMemoryRequest>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = match self.get_client() {
-            Some(client) => client,
-            None => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("CLIENT_NOT_FOUND"),
-                    Content::text("Client not found"),
-                ]));
-            }
-        };
+    // #[tool(
+    //     description = "Search your memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment."
+    // )]
+    // pub async fn search_memory(
+    //     &self,
+    //     Parameters(request): Parameters<SearchMemoryRequest>,
+    // ) -> Result<CallToolResult, McpError> {
+    //     let client = match self.get_client() {
+    //         Some(client) => client,
+    //         None => {
+    //             return Ok(CallToolResult::error(vec![
+    //                 Content::text("CLIENT_NOT_FOUND"),
+    //                 Content::text("Client not found"),
+    //             ]));
+    //         }
+    //     };
 
-        let response = match client.search_memory(&request.into()).await {
-            Ok(response) => response,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("SEARCH_MEMORY_ERROR"),
-                    Content::text(format!("Failed to search for memory: {}", e)),
-                ]));
-            }
-        };
+    //     let response = match client.search_memory(&request.into()).await {
+    //         Ok(response) => response,
+    //         Err(e) => {
+    //             return Ok(CallToolResult::error(vec![
+    //                 Content::text("SEARCH_MEMORY_ERROR"),
+    //                 Content::text(format!("Failed to search for memory: {}", e)),
+    //             ]));
+    //         }
+    //     };
 
-        Ok(CallToolResult::success(response))
-    }
+    //     Ok(CallToolResult::success(response))
+    // }
 
     #[tool(
         description = "Load a skill's full instructions by its URI. Use this to retrieve the complete content of any skill listed in the <available_skills> block. For local skills the URI is a file path; for remote skills the URI is the rulebook URI. This tool is auto-approved and does not require user confirmation."

@@ -14,8 +14,8 @@ use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::detect_term::ThemeColors;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_status_message, push_styled_message, push_support_message,
-    push_usage_message, render_system_message, welcome_messages,
+    push_status_message, push_styled_message, push_support_message, push_usage_message,
+    render_system_message, welcome_messages,
 };
 use crate::services::layout::centered_rect;
 use crate::services::message::{Message, MessageContent};
@@ -53,7 +53,6 @@ pub enum CommandAction {
     OpenShellMode,
     ResumeSession,
     ShowStatus,
-    MemorizeConversation,
     SubmitIssue,
     GetSupport,
     NewSession,
@@ -69,7 +68,6 @@ impl CommandAction {
             CommandAction::OpenSessions => Some("/sessions"),
             CommandAction::ResumeSession => Some("/resume"),
             CommandAction::ShowStatus => Some("/status"),
-            CommandAction::MemorizeConversation => Some("/memorize"),
             CommandAction::SubmitIssue => Some("/issue"),
             CommandAction::GetSupport => Some("/support"),
             CommandAction::NewSession => Some("/new"),
@@ -169,12 +167,6 @@ pub fn get_all_commands() -> Vec<Command> {
             CommandAction::ShowStatus,
         ),
         Command::new(
-            "Memorize",
-            "Save conversation to memory",
-            "/memorize",
-            CommandAction::MemorizeConversation,
-        ),
-        Command::new(
             "Submit Issue",
             "Submit issue on GitHub repo",
             "/issue",
@@ -238,11 +230,6 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         HelperCommand {
             command: "/new".into(),
             description: "Start a new session".into(),
-            source: CommandSource::BuiltIn,
-        },
-        HelperCommand {
-            command: "/memorize".into(),
-            description: "Memorize the current conversation history".into(),
             source: CommandSource::BuiltIn,
         },
         HelperCommand {
@@ -374,13 +361,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
         }
         "/new" => {
             new_session(ctx.state, ctx.output_tx);
-            Ok(())
-        }
-        "/memorize" => {
-            push_memorize_message(ctx.state);
-            let _ = ctx.output_tx.try_send(OutputEvent::Memorize);
-            ctx.state.input_state.text_area.set_text("");
-            ctx.state.input_state.show_helper_dropdown = false;
             Ok(())
         }
         "/summarize" => {

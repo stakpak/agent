@@ -203,33 +203,6 @@ pub fn format_number_with_separator(n: u32) -> String {
     result.chars().rev().collect()
 }
 
-pub fn push_memorize_message(state: &mut AppState) {
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            "📝 Memorizing conversation history...",
-            Style::default()
-                .fg(ThemeColors::warning())
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "We're extracting important information from your conversation in the background.",
-            Style::default().fg(Color::Reset),
-        )]),
-        Line::from(vec![Span::styled(
-            "Feel free to continue talking to the agent while this happens!",
-            Style::default().fg(ThemeColors::green()),
-        )]),
-        Line::from(""),
-    ];
-    state.messages_scrolling_state.messages.push(Message {
-        id: uuid::Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-        is_collapsed: None,
-    });
-    invalidate_message_lines_cache(state);
-}
-
 pub fn push_help_message(state: &mut AppState) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};

@@ -294,7 +294,6 @@ pub enum OutputEvent {
     ListSessions,
     SwitchToSession(String),
     NewSession,
-    Memorize,
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
     RequestProfileSwitch(String),
