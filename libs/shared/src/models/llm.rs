@@ -252,7 +252,7 @@ pub enum ProviderConfig {
         /// Legacy API key field (prefer `auth` field)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
-        /// Optional custom API endpoint (defaults to https://openrouter.ai/)
+        /// Optional custom API endpoint (defaults to https://openrouter.ai/api/v1)
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
         /// Authentication credentials (preferred over api_key)
