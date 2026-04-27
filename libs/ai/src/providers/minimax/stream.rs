@@ -3,11 +3,12 @@
 //! Reuses OpenAI-compatible SSE streaming format.
 
 use crate::error::{Error, Result};
-use crate::providers::openai::types::{ChatCompletionChunk, ChatUsage};
+use crate::providers::openai::types::{ChatCompletionChunk};
 use crate::types::{
-    FinishReason, FinishReasonKind, GenerateStream, InputTokenDetails, OutputTokenDetails,
+    FinishReason, FinishReasonKind, GenerateStream,
     StreamEvent, Usage,
 };
+use super::convert::usage_from_chat_usage;
 use futures::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 use std::error::Error as StdError;
@@ -52,7 +53,7 @@ pub async fn create_stream(event_source: EventSource) -> Result<GenerateStream> 
                         .text()
                         .await
                         .unwrap_or_else(|_| "Unable to read error body".to_string());
-                    let friendly_error = super::provider::parse_minimax_error(&error_body, status.as_u16());
+                    let friendly_error = super::convert::parse_minimax_error(&error_body, status.as_u16());
                     yield Err(Error::provider_error(friendly_error));
                     break;
                 }
@@ -209,29 +210,3 @@ fn parse_chunk(
     Ok(events)
 }
 
-/// Convert OpenAI-compatible ChatUsage to SDK Usage
-fn usage_from_chat_usage(usage: &ChatUsage) -> Usage {
-    let cache_read = usage
-        .prompt_tokens_details
-        .as_ref()
-        .and_then(|d| d.cached_tokens)
-        .unwrap_or(0);
-
-    Usage::with_details(
-        InputTokenDetails {
-            total: Some(usage.prompt_tokens),
-            no_cache: Some(usage.prompt_tokens.saturating_sub(cache_read)),
-            cache_read: (cache_read > 0).then_some(cache_read),
-            cache_write: None,
-        },
-        OutputTokenDetails {
-            total: Some(usage.completion_tokens),
-            text: None,
-            reasoning: usage
-                .completion_tokens_details
-                .as_ref()
-                .and_then(|d| d.reasoning_tokens),
-        },
-        Some(serde_json::to_value(usage).unwrap_or_default()),
-    )
-}

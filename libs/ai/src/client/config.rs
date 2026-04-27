@@ -1,8 +1,8 @@
 //! Client configuration
 
 use crate::providers::{
-    anthropic::AnthropicConfig, gemini::GeminiConfig, minimax::MiniMaxConfig,
-    openai::OpenAIConfig, stakpak::StakpakProviderConfig,
+    anthropic::AnthropicConfig, gemini::GeminiConfig, minimax::MiniMaxConfig, openai::OpenAIConfig,
+    stakpak::StakpakProviderConfig,
 };
 
 #[cfg(feature = "bedrock")]
