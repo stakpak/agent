@@ -274,6 +274,7 @@ jobs:
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy
           publish_package stakpak-shell-tool-approvals
+          publish_package stakpak-ak
           publish_package stakpak-agent-core
           publish_package stakpak-gateway
           publish_package stakpak-server
