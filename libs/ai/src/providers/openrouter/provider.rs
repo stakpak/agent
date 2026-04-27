@@ -54,7 +54,7 @@ impl Provider for OpenRouterProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}/chat/completions", self.config.base_url);
-        let headers = self.build_headers(None);
+        let headers = self.build_headers(request.options.headers.as_ref());
 
         let openai_req = to_openai_request(&request, false);
 
@@ -82,7 +82,7 @@ impl Provider for OpenRouterProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}/chat/completions", self.config.base_url);
-        let headers = self.build_headers(None);
+        let headers = self.build_headers(request.options.headers.as_ref());
 
         let openai_req = to_openai_request(&request, true);
 

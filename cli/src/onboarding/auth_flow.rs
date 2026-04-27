@@ -651,6 +651,7 @@ mod tests {
                 "Anthropic (Claude)",
                 "OpenAI",
                 "Google (Gemini)",
+                "OpenRouter",
                 "GitHub Copilot",
                 "Hybrid providers (e.g., Google and Anthropic)",
                 "Bring your own model",
