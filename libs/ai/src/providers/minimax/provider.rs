@@ -1,15 +1,13 @@
 //! MiniMax provider implementation
 
-use super::convert::{to_minimax_request, from_minimax_response, parse_minimax_error};
+use super::convert::{from_minimax_response, parse_minimax_error, to_minimax_request};
 use super::stream::create_stream;
 use super::types::MiniMaxConfig;
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::providers::openai::types::{ChatCompletionResponse};
+use crate::providers::openai::types::ChatCompletionResponse;
 use crate::providers::tls::create_platform_tls_client;
-use crate::types::{
-    GenerateRequest, GenerateResponse, GenerateStream, Headers, Model
-};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;

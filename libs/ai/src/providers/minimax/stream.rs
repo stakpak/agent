@@ -2,13 +2,10 @@
 //!
 //! Reuses OpenAI-compatible SSE streaming format.
 
-use crate::error::{Error, Result};
-use crate::providers::openai::types::{ChatCompletionChunk};
-use crate::types::{
-    FinishReason, FinishReasonKind, GenerateStream,
-    StreamEvent, Usage,
-};
 use super::convert::usage_from_chat_usage;
+use crate::error::{Error, Result};
+use crate::providers::openai::types::ChatCompletionChunk;
+use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 use std::error::Error as StdError;
@@ -209,4 +206,3 @@ fn parse_chunk(
 
     Ok(events)
 }
-

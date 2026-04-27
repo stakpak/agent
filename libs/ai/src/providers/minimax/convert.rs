@@ -3,15 +3,15 @@
 //! MiniMax's API is OpenAI-compatible, so we reuse the OpenAI wire types.
 //! Key difference: temperature must be in the range (0.0, 1.0].
 
+use crate::error::{Error, Result};
 use crate::providers::openai::types::{
     ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatUsage, OpenAIFunctionCall,
-    OpenAIToolCall, StreamOptions
+    OpenAIToolCall, StreamOptions,
 };
-use crate::error::{Error, Result};
 use crate::types::{ContentPart, ImageDetail, Message, Role};
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, InputTokenDetails,
-    OutputTokenDetails, ResponseContent, ToolCall, Usage, 
+    OutputTokenDetails, ResponseContent, ToolCall, Usage,
 };
 use serde_json::json;
 
@@ -27,9 +27,7 @@ fn clamp_temperature(temp: Option<f32>) -> f32 {
 }
 
 /// Parse MiniMax message content
-fn parse_minimax_message(
-    msg: &ChatMessage,
-) -> Result<Vec<ResponseContent>> {
+fn parse_minimax_message(msg: &ChatMessage) -> Result<Vec<ResponseContent>> {
     let mut content = Vec::new();
 
     // Handle text content

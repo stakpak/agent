@@ -199,7 +199,6 @@ pub enum BuiltinProvider {
     OpenAI,
     Gemini,
     Anthropic,
-    MiniMax,
 }
 
 impl BuiltinProvider {
@@ -208,7 +207,6 @@ impl BuiltinProvider {
             BuiltinProvider::OpenAI => "OpenAI",
             BuiltinProvider::Gemini => "Gemini",
             BuiltinProvider::Anthropic => "Anthropic",
-            BuiltinProvider::MiniMax => "MiniMax",
         }
     }
 
@@ -217,7 +215,6 @@ impl BuiltinProvider {
             BuiltinProvider::OpenAI => "gpt-4.1",
             BuiltinProvider::Gemini => "gemini-2.5-pro",
             BuiltinProvider::Anthropic => DEFAULT_MODEL,
-            BuiltinProvider::MiniMax => "minimax/MiniMax-M2.7",
         }
     }
 }
@@ -276,16 +273,6 @@ pub fn generate_multi_provider_profile(
                         api_key: Some(setup.api_key),
                         api_endpoint: None,
                         access_token: None,
-                        auth: None,
-                    },
-                );
-            }
-            BuiltinProvider::MiniMax => {
-                profile.providers.insert(
-                    "minimax".to_string(),
-                    ProviderConfig::MiniMax {
-                        api_key: Some(setup.api_key),
-                        api_endpoint: None,
                         auth: None,
                     },
                 );
