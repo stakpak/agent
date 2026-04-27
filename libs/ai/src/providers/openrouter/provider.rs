@@ -1,17 +1,14 @@
 use super::types::OpenRouterConfig;
+use crate::error::{Error, Result};
+use crate::provider::Provider;
 use crate::providers::openai::convert::{from_openai_response, to_openai_request};
 use crate::providers::openai::stream::create_completions_stream;
 use crate::providers::openai::types::ChatCompletionResponse;
-use crate::types::{
-    GenerateRequest, GenerateResponse, GenerateStream, Headers, Model,
-};
+use crate::providers::tls::create_platform_tls_client;
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
+use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
-use crate::error::{Error, Result};
-use crate::providers::tls::create_platform_tls_client;
-use async_trait::async_trait;
-use crate::provider::Provider;
-
 
 pub struct OpenRouterProvider {
     config: OpenRouterConfig,
@@ -30,13 +27,11 @@ impl OpenRouterProvider {
 
 #[async_trait]
 impl Provider for OpenRouterProvider {
-    
     fn provider_id(&self) -> &str {
         "openrouter"
     }
 
     fn build_headers(&self, custom_headers: Option<&Headers>) -> Headers {
-
         let mut headers = Headers::new();
 
         headers.insert("Authorization", format!("Bearer {}", self.config.api_key));
@@ -58,13 +53,14 @@ impl Provider for OpenRouterProvider {
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
-
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers(None);
 
         let openai_req = to_openai_request(&request, false);
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .headers(headers.to_reqwest_headers())
             .json(&openai_req)
             .send()
@@ -74,7 +70,10 @@ impl Provider for OpenRouterProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!("OpenRouter returned error {}: {}", status, text)));
+            return Err(Error::provider_error(format!(
+                "OpenRouter returned error {}: {}",
+                status, text
+            )));
         }
 
         let openai_resp: ChatCompletionResponse = response.json().await?;
@@ -82,19 +81,19 @@ impl Provider for OpenRouterProvider {
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
-
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers(None);
 
         let openai_req = to_openai_request(&request, true);
 
-        let request_builder = self.client.post(&url)
+        let request_builder = self
+            .client
+            .post(&url)
             .headers(headers.to_reqwest_headers())
             .json(&openai_req);
-    
+
         let event_source = EventSource::new(request_builder)
             .map_err(|e| Error::provider_error(format!("Failed to create event source: {}", e)))?;
-
 
         create_completions_stream(event_source).await
     }
@@ -107,6 +106,4 @@ impl Provider for OpenRouterProvider {
         let models = crate::registry::models_dev::load_models_for_provider("openrouter")?;
         Ok(models.into_iter().find(|m| m.id == id))
     }
-
-
 }

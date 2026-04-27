@@ -17,8 +17,8 @@ use stakai::{
     Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
     StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
     providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
-    providers::openai::OpenAIConfig as StakaiOpenAIConfig,
-    providers::openrouter::OpenRouterConfig, registry::ProviderRegistry,
+    providers::openai::OpenAIConfig as StakaiOpenAIConfig, providers::openrouter::OpenRouterConfig,
+    registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -533,8 +533,8 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     use stakai::providers::copilot::{CopilotConfig, CopilotProvider};
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
-    use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
     use stakai::providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
+    use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
 
     let mut registry = ProviderRegistry::new();
 

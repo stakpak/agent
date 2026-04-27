@@ -1,4 +1,4 @@
-//! OpenRouter provider 
+//! OpenRouter provider
 
 mod provider;
 pub mod types;

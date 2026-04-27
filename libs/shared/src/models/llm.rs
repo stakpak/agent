@@ -258,7 +258,7 @@ pub enum ProviderConfig {
         /// Authentication credentials (preferred over api_key)
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<ProviderAuth>,
-    }
+    },
 }
 
 impl ProviderConfig {
@@ -291,7 +291,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
-            ProviderConfig::OpenRouter { api_key, ..} => api_key.as_deref(),
+            ProviderConfig::OpenRouter { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
             ProviderConfig::GitHubCopilot { .. } => None, // OAuth only, no API key
         }
@@ -353,7 +353,6 @@ impl ProviderConfig {
             // GitHubCopilot has no legacy fields; auth is always in the `auth` field
             ProviderConfig::GitHubCopilot { .. } => None,
         }
-
     }
 
     /// Set authentication credentials on this provider config.
