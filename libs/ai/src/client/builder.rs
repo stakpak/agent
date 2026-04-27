@@ -4,8 +4,8 @@ use super::{ClientConfig, Inference, InferenceConfig};
 use crate::error::Result;
 use crate::provider::Provider;
 use crate::providers::{
-    anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider,
-    stakpak::StakpakProvider,
+    anthropic::AnthropicProvider, gemini::GeminiProvider, minimax::MiniMaxProvider,
+    openai::OpenAIProvider, stakpak::StakpakProvider,
 };
 use crate::registry::ProviderRegistry;
 
@@ -70,6 +70,13 @@ impl ClientBuilder {
             && let Ok(provider) = StakpakProvider::new(config)
         {
             registry = registry.register("stakpak", provider);
+        }
+
+        // Register MiniMax if configured
+        if let Some(config) = inference_config.minimax_config
+            && let Ok(provider) = MiniMaxProvider::new(config)
+        {
+            registry = registry.register("minimax", provider);
         }
 
         // Register Bedrock if configured

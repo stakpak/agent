@@ -451,6 +451,7 @@ impl AppConfig {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openai" => "OPENAI_API_KEY",
             "gemini" => "GEMINI_API_KEY",
+            "minimax" => "MINIMAX_API_KEY",
             _ => return None,
         };
 
@@ -852,7 +853,7 @@ impl AppConfig {
         }
 
         let config_provider = Some("Local".to_string());
-        let builtin_providers = ["anthropic", "openai", "gemini"];
+        let builtin_providers = ["anthropic", "openai", "gemini", "minimax"];
 
         for provider_name in builtin_providers {
             if let Some(auth) = self.resolve_provider_auth(provider_name) {
@@ -860,6 +861,7 @@ impl AppConfig {
                     "anthropic" => "Anthropic",
                     "openai" => "OpenAI",
                     "gemini" => "Gemini",
+                    "minimax" => "MiniMax",
                     _ => provider_name,
                 };
 

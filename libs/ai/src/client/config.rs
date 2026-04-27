@@ -1,7 +1,7 @@
 //! Client configuration
 
 use crate::providers::{
-    anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig,
+    anthropic::AnthropicConfig, gemini::GeminiConfig, minimax::MiniMaxConfig, openai::OpenAIConfig,
     stakpak::StakpakProviderConfig,
 };
 
@@ -67,6 +67,7 @@ pub struct InferenceConfig {
     pub(crate) anthropic_config: Option<AnthropicConfig>,
     pub(crate) gemini_config: Option<GeminiConfig>,
     pub(crate) stakpak_config: Option<StakpakProviderConfig>,
+    pub(crate) minimax_config: Option<MiniMaxConfig>,
     #[cfg(feature = "bedrock")]
     pub(crate) bedrock_config: Option<BedrockConfig>,
     pub(crate) client_config: ClientConfig,
@@ -254,6 +255,48 @@ impl InferenceConfig {
     /// ```
     pub fn stakpak_config(mut self, config: StakpakProviderConfig) -> Self {
         self.stakpak_config = Some(config);
+        self
+    }
+
+    /// Configure MiniMax provider with API key and optional base URL
+    ///
+    /// MiniMax provides OpenAI-compatible API access to MiniMax-M2.7
+    /// and MiniMax-M2.5 series models.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .minimax("your-api-key", None);
+    ///
+    /// // With custom base URL
+    /// let config = InferenceConfig::new()
+    ///     .minimax("your-api-key", Some("https://custom.minimax.io/v1".to_string()));
+    /// ```
+    pub fn minimax(mut self, api_key: impl Into<String>, base_url: Option<String>) -> Self {
+        let mut config = MiniMaxConfig::new(api_key);
+        if let Some(url) = base_url {
+            config = config.with_base_url(url);
+        }
+        self.minimax_config = Some(config);
+        self
+    }
+
+    /// Configure MiniMax provider with full MiniMaxConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::{InferenceConfig, providers::minimax::MiniMaxConfig};
+    /// let minimax_config = MiniMaxConfig::new("your-api-key")
+    ///     .with_base_url("https://custom.minimax.io/v1");
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .minimax_config(minimax_config);
+    /// ```
+    pub fn minimax_config(mut self, config: MiniMaxConfig) -> Self {
+        self.minimax_config = Some(config);
         self
     }
 
