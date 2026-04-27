@@ -904,6 +904,7 @@ mod tests {
     #[test]
     fn should_auto_approve_stakpak_ak_tree_with_fresh_defaults() {
         let manager = AutoApproveManager {
+            original_config: AutoApproveConfig::default(),
             config: AutoApproveConfig::default(),
             config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
             input_tx: None,
@@ -916,6 +917,7 @@ mod tests {
     #[test]
     fn should_not_auto_approve_stakpak_update_with_fresh_defaults() {
         let manager = AutoApproveManager {
+            original_config: AutoApproveConfig::default(),
             config: AutoApproveConfig::default(),
             config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
             input_tx: None,
@@ -928,6 +930,7 @@ mod tests {
     #[test]
     fn should_not_auto_approve_stakpak_browser_ak_visit_with_fresh_defaults() {
         let manager = AutoApproveManager {
+            original_config: AutoApproveConfig::default(),
             config: AutoApproveConfig::default(),
             config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
             input_tx: None,
