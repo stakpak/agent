@@ -1135,18 +1135,6 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
-                    OutputEvent::Memorize => {
-                        let checkpoint_id = extract_checkpoint_id_from_messages(&messages);
-                        if let Some(checkpoint_id) = checkpoint_id {
-                            let client_clone = client.clone();
-                            tokio::spawn(async move {
-                                if let Ok(checkpoint_id) = Uuid::parse_str(&checkpoint_id) {
-                                    let _ = client_clone.memorize_session(checkpoint_id).await;
-                                }
-                            });
-                        }
-                        continue;
-                    }
                     OutputEvent::RequestProfileSwitch(new_profile) => {
                         // Send progress event
                         send_input_event(
