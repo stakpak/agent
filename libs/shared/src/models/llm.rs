@@ -246,6 +246,19 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<ProviderAuth>,
     },
+
+    #[serde(rename = "openrouter")]
+    OpenRouter {
+        /// Legacy API key field (prefer `auth` field)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_key: Option<String>,
+        /// Optional custom API endpoint (defaults to https://openrouter.ai/)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
+    }
 }
 
 impl ProviderConfig {
@@ -259,6 +272,7 @@ impl ProviderConfig {
             ProviderConfig::Stakpak { .. } => "stakpak",
             ProviderConfig::Bedrock { .. } => "amazon-bedrock",
             ProviderConfig::GitHubCopilot { .. } => "github-copilot",
+            ProviderConfig::OpenRouter { .. } => "openrouter",
         }
     }
 
@@ -277,6 +291,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
+            ProviderConfig::OpenRouter { api_key, ..} => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
             ProviderConfig::GitHubCopilot { .. } => None, // OAuth only, no API key
         }
@@ -292,6 +307,7 @@ impl ProviderConfig {
             ProviderConfig::Stakpak { auth, .. } => auth.as_ref(),
             ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::GitHubCopilot { auth, .. } => auth.as_ref(),
+            ProviderConfig::OpenRouter { auth, .. } => auth.as_ref(),
         }
     }
 
@@ -312,7 +328,8 @@ impl ProviderConfig {
             ProviderConfig::OpenAI { api_key, .. }
             | ProviderConfig::Gemini { api_key, .. }
             | ProviderConfig::Custom { api_key, .. }
-            | ProviderConfig::Stakpak { api_key, .. } => {
+            | ProviderConfig::Stakpak { api_key, .. }
+            | ProviderConfig::OpenRouter { api_key, .. } => {
                 api_key.as_ref().map(ProviderAuth::api_key)
             }
             ProviderConfig::Anthropic {
@@ -336,6 +353,7 @@ impl ProviderConfig {
             // GitHubCopilot has no legacy fields; auth is always in the `auth` field
             ProviderConfig::GitHubCopilot { .. } => None,
         }
+
     }
 
     /// Set authentication credentials on this provider config.
@@ -360,6 +378,11 @@ impl ProviderConfig {
                 ..
             }
             | ProviderConfig::Stakpak {
+                auth: auth_field,
+                api_key,
+                ..
+            }
+            | ProviderConfig::OpenRouter {
                 auth: auth_field,
                 api_key,
                 ..
@@ -413,6 +436,11 @@ impl ProviderConfig {
                 auth: auth_field,
                 api_key,
                 ..
+            }
+            | ProviderConfig::OpenRouter {
+                auth: auth_field,
+                api_key,
+                ..
             } => {
                 *auth_field = None;
                 *api_key = None;
@@ -446,6 +474,7 @@ impl ProviderConfig {
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
+            ProviderConfig::OpenRouter { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => api_endpoint.as_deref(),
         }
@@ -461,7 +490,8 @@ impl ProviderConfig {
             | ProviderConfig::Anthropic { api_endpoint, .. }
             | ProviderConfig::Gemini { api_endpoint, .. }
             | ProviderConfig::Stakpak { api_endpoint, .. }
-            | ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
+            | ProviderConfig::GitHubCopilot { api_endpoint, .. }
+            | ProviderConfig::OpenRouter { api_endpoint, .. } => {
                 *api_endpoint = endpoint;
             }
             ProviderConfig::Custom { api_endpoint, .. } => {
@@ -583,6 +613,24 @@ impl ProviderConfig {
         }
     }
 
+    /// Create an OpenRouter provider config (legacy, uses api_key field)
+    pub fn openrouter(api_key: Option<String>, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::OpenRouter {
+            api_key,
+            api_endpoint,
+            auth: None,
+        }
+    }
+
+    /// Create an OpenRouter provider config with auth
+    pub fn openrouter_with_auth(auth: ProviderAuth, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::OpenRouter {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
+        }
+    }
+
     /// Create a GitHub Copilot provider config with auth (OAuth token from device flow)
     pub fn github_copilot_with_auth(auth: ProviderAuth) -> Self {
         ProviderConfig::GitHubCopilot {
@@ -643,6 +691,11 @@ impl ProviderConfig {
                 auth: None,
             }),
             "github-copilot" => Some(ProviderConfig::GitHubCopilot {
+                api_endpoint: None,
+                auth: None,
+            }),
+            "openrouter" => Some(ProviderConfig::OpenRouter {
+                api_key: None,
                 api_endpoint: None,
                 auth: None,
             }),

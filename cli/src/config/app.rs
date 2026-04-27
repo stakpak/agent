@@ -852,7 +852,7 @@ impl AppConfig {
         }
 
         let config_provider = Some("Local".to_string());
-        let builtin_providers = ["anthropic", "openai", "gemini"];
+        let builtin_providers = ["anthropic", "openai", "gemini", "openrouter"];
 
         for provider_name in builtin_providers {
             if let Some(auth) = self.resolve_provider_auth(provider_name) {
@@ -860,6 +860,7 @@ impl AppConfig {
                     "anthropic" => "Anthropic",
                     "openai" => "OpenAI",
                     "gemini" => "Gemini",
+                    "openrouter" => "OpenRouter",
                     _ => provider_name,
                 };
 

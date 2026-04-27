@@ -5,7 +5,7 @@ use crate::error::Result;
 use crate::provider::Provider;
 use crate::providers::{
     anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider,
-    stakpak::StakpakProvider,
+    openrouter::OpenRouterProvider, stakpak::StakpakProvider,
 };
 use crate::registry::ProviderRegistry;
 
@@ -70,6 +70,13 @@ impl ClientBuilder {
             && let Ok(provider) = StakpakProvider::new(config)
         {
             registry = registry.register("stakpak", provider);
+        }
+
+        // Register OpenRouter if configured
+        if let Some(config) = inference_config.openrouter_config
+            && let Ok(provider) = OpenRouterProvider::new(config)
+        {
+            registry = registry.register("openrouter", provider);
         }
 
         // Register Bedrock if configured

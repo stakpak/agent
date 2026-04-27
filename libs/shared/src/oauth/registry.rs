@@ -2,7 +2,8 @@
 
 use super::provider::OAuthProvider;
 use super::providers::{
-    AnthropicProvider, GeminiProvider, GitHubCopilotProvider, OpenAICodexProvider, StakpakProvider,
+    AnthropicProvider, GeminiProvider, GitHubCopilotProvider, OpenAICodexProvider,
+    OpenRouterProvider, StakpakProvider,
 };
 use std::collections::HashMap;
 
@@ -23,6 +24,7 @@ impl ProviderRegistry {
         registry.register(Box::new(AnthropicProvider::new()));
         registry.register(Box::new(OpenAICodexProvider::new()));
         registry.register(Box::new(GeminiProvider::new()));
+        registry.register(Box::new(OpenRouterProvider::new()));
         registry.register(Box::new(GitHubCopilotProvider::new()));
 
         registry

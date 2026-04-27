@@ -2,7 +2,7 @@
 
 use crate::providers::{
     anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig,
-    stakpak::StakpakProviderConfig,
+    openrouter::OpenRouterConfig, stakpak::StakpakProviderConfig,
 };
 
 #[cfg(feature = "bedrock")]
@@ -67,6 +67,7 @@ pub struct InferenceConfig {
     pub(crate) anthropic_config: Option<AnthropicConfig>,
     pub(crate) gemini_config: Option<GeminiConfig>,
     pub(crate) stakpak_config: Option<StakpakProviderConfig>,
+    pub(crate) openrouter_config: Option<OpenRouterConfig>,
     #[cfg(feature = "bedrock")]
     pub(crate) bedrock_config: Option<BedrockConfig>,
     pub(crate) client_config: ClientConfig,
@@ -254,6 +255,47 @@ impl InferenceConfig {
     /// ```
     pub fn stakpak_config(mut self, config: StakpakProviderConfig) -> Self {
         self.stakpak_config = Some(config);
+        self
+    }
+
+    /// Configure OpenRouter provider with API key and optional base URL
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .openrouter("sk-or-v1-...", None);
+    ///
+    /// // With custom base URL
+    /// let config = InferenceConfig::new()
+    ///     .openrouter("sk-or-v1-...", Some("https://custom.openrouter.com/api/v1".to_string()));
+    /// ```
+    pub fn openrouter(mut self, api_key: impl Into<String>, base_url: Option<String>) -> Self {
+        let mut config = OpenRouterConfig::new(api_key);
+        if let Some(url) = base_url {
+            config = config.with_base_url(url);
+        }
+        self.openrouter_config = Some(config);
+        self
+    }
+
+    /// Configure OpenRouter provider with full OpenRouterConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::{InferenceConfig, providers::openrouter::OpenRouterConfig};
+    /// let openrouter_config = OpenRouterConfig::new("sk-or-v1-...")
+    ///     .with_base_url("https://custom.openrouter.com/api/v1")
+    ///     .with_http_referer("https://example.com")
+    ///     .with_site_title("My App");
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .openrouter_config(openrouter_config);
+    /// ```
+    pub fn openrouter_config(mut self, config: OpenRouterConfig) -> Self {
+        self.openrouter_config = Some(config);
         self
     }
 
