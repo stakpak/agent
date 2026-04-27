@@ -164,6 +164,8 @@ stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(
 
 Each retrospect run processes candidate sessions newest-first and cites its sources in frontmatter. Idempotency falls out of those citations: sessions already cited are skipped on subsequent runs, so the schedule is safe to re-trigger and scale-insensitive to how many sessions have accumulated. See `stakpak ak skill retrospect` for the full workflow.
 
+`ak search`, `ak read`, `ak write`, `ak remove`, and `ak skill` are auto-approved by default for agent workflows.
+
 ### Add channels with profile
 
 ```bash

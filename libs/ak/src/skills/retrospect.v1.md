@@ -16,15 +16,15 @@ rule, `write --force` for updates).
 
 ## Step 2 — orient in the store
 
-Run `stakpak ak tree` to see the full structure. Then use
-`stakpak ak peek` on likely containers — any `_schema.md`, project
+Run `stakpak ak search --tree` to see the full structure. Then use
+`stakpak ak search` on likely containers — any `_schema.md`, project
 roots, top-level indexes — to understand what is already known, how it
 is organized, and which sessions are already cited. Collect the set of
 every `session:` UUID that appears in any existing entry's frontmatter
 `sources:` list; that set is your "already processed" reference for
 this run.
 
-Use `stakpak ak cat` when `peek` is not enough to judge whether a
+Use `stakpak ak read` when `search` is not enough to judge whether a
 specific existing entry already covers a topic you are about to touch.
 
 ## Step 3 — list candidate sessions

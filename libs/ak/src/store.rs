@@ -13,7 +13,13 @@ pub trait StorageBackend {
     fn read_prefix(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, Error>;
     fn remove(&self, path: &str) -> Result<(), Error>;
     fn list(&self, path: &str) -> Result<Vec<Entry>, Error>;
-    fn tree(&self) -> Result<TreeNode, Error>;
+    /// Returns a directory tree rooted at `prefix` (empty string for the store root).
+    /// The root node's name is the prefix's last component, or `.` for the store root.
+    /// Missing prefixes return an empty directory node.
+    fn tree(&self, prefix: &str) -> Result<TreeNode, Error>;
+    /// Returns sorted store-relative file paths under `prefix`, excluding dotfiles.
+    /// Missing prefixes return an empty result.
+    fn walk(&self, prefix: &str) -> Result<Vec<String>, Error>;
     fn exists(&self, path: &str) -> Result<bool, Error>;
 }
 
@@ -314,10 +320,7 @@ impl StorageBackend for LocalFsBackend {
             };
         };
         if !metadata.is_dir() {
-            return Err(Error::Parse(format!(
-                "path is not a directory: {}",
-                self.relative_path(&target).display()
-            )));
+            return Err(Error::NotADirectory(self.relative_path(&target)));
         }
 
         read_sorted_children(&target, Some(&self.root)).map(|children| {
@@ -331,9 +334,56 @@ impl StorageBackend for LocalFsBackend {
         })
     }
 
-    fn tree(&self) -> Result<TreeNode, Error> {
-        self.ensure_no_symlinks_below_root(&self.root)?;
-        Self::build_tree_node(&self.root, ".".to_string())
+    fn tree(&self, prefix: &str) -> Result<TreeNode, Error> {
+        let trimmed = prefix.trim_matches('/');
+        let target = self.resolve_path(trimmed)?;
+        self.ensure_no_symlinks_below_root(&target)?;
+        let name = Path::new(trimmed)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        Self::build_tree_node(&target, name)
+    }
+
+    fn walk(&self, prefix: &str) -> Result<Vec<String>, Error> {
+        let target = self.resolve_path(prefix)?;
+        self.ensure_no_symlinks_below_root(&target)?;
+
+        let Some(metadata) = self.metadata_if_exists(&target)? else {
+            return Ok(vec![]);
+        };
+        if is_hidden_path(&target, &self.root) {
+            return Ok(vec![]);
+        }
+
+        let mut walked = Vec::new();
+        for entry in WalkDir::new(&target)
+            .into_iter()
+            .filter_entry(|entry| !is_hidden_path(entry.path(), &self.root))
+        {
+            let entry = entry.map_err(|error| Error::Io(std::io::Error::other(error)))?;
+            if entry.path() != target && entry.file_type().is_symlink() {
+                return Err(Error::UnsafePath(self.relative_path(entry.path())));
+            }
+            if metadata.is_file() || entry.file_type().is_file() {
+                walked.push(
+                    entry
+                        .path()
+                        .strip_prefix(&self.root)
+                        .map_err(|_| {
+                            Error::Parse(format!(
+                                "path is outside the configured store root: {}",
+                                self.relative_path(entry.path()).display()
+                            ))
+                        })?
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
+        }
+
+        walked.sort();
+        Ok(walked)
     }
 
     fn exists(&self, path: &str) -> Result<bool, Error> {
@@ -538,7 +588,7 @@ mod tests {
             .expect("create entity file");
         std::fs::write(backend.root().join(".hidden.md"), "hidden").expect("write hidden file");
 
-        let tree = backend.tree().expect("build tree");
+        let tree = backend.tree("").expect("build tree");
 
         assert_eq!(
             tree,
@@ -565,6 +615,58 @@ mod tests {
                         }],
                     },
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn tree_returns_scoped_subtree() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("services/auth/flows.md", b"Auth flow\n")
+            .expect("create auth file");
+        backend
+            .create("services/rate-limits.md", b"Rate limit\n")
+            .expect("create rate file");
+        backend
+            .create("notes/todo.md", b"Todo\n")
+            .expect("create notes file");
+
+        assert_eq!(
+            backend.tree("services").expect("scoped tree"),
+            TreeNode {
+                name: "services".to_string(),
+                is_dir: true,
+                children: vec![
+                    TreeNode {
+                        name: "auth".to_string(),
+                        is_dir: true,
+                        children: vec![TreeNode {
+                            name: "flows.md".to_string(),
+                            is_dir: false,
+                            children: vec![],
+                        }],
+                    },
+                    TreeNode {
+                        name: "rate-limits.md".to_string(),
+                        is_dir: false,
+                        children: vec![],
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn tree_returns_empty_directory_for_missing_prefix() {
+        let (_temp_dir, backend) = backend();
+
+        assert_eq!(
+            backend.tree("missing").expect("missing tree"),
+            TreeNode {
+                name: "missing".to_string(),
+                is_dir: true,
+                children: vec![],
             }
         );
     }
@@ -746,5 +848,67 @@ mod tests {
             result.is_err(),
             "expected unreadable directory to return an error"
         );
+    }
+
+    #[test]
+    fn walk_returns_sorted_relative_files_from_store_root() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("services/auth/flows.md", b"auth")
+            .expect("create nested file");
+        backend
+            .create("notes/todo.md", b"todo")
+            .expect("create top-level file");
+        std::fs::create_dir_all(backend.root().join("services/.private"))
+            .expect("create hidden dir");
+        std::fs::write(backend.root().join(".hidden.md"), "hidden")
+            .expect("write hidden root file");
+        std::fs::write(backend.root().join("services/.secret.md"), "hidden")
+            .expect("write hidden nested file");
+        std::fs::write(
+            backend.root().join("services/.private/ignored.md"),
+            "hidden",
+        )
+        .expect("write hidden-dir file");
+
+        let walked = backend.walk("").expect("walk store root");
+
+        assert_eq!(
+            walked,
+            vec![
+                "notes/todo.md".to_string(),
+                "services/auth/flows.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_scopes_to_prefix() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("services/auth/flows.md", b"auth")
+            .expect("create auth file");
+        backend
+            .create("services/billing/limits.md", b"limits")
+            .expect("create billing file");
+        backend
+            .create("notes/todo.md", b"todo")
+            .expect("create notes file");
+
+        let walked = backend.walk("services/auth").expect("walk subtree");
+
+        assert_eq!(walked, vec!["services/auth/flows.md".to_string()]);
+    }
+
+    #[test]
+    fn walk_returns_empty_for_missing_prefix() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("notes/todo.md", b"todo")
+            .expect("create notes file");
+
+        let walked = backend.walk("missing").expect("walk missing prefix");
+
+        assert!(walked.is_empty());
     }
 }

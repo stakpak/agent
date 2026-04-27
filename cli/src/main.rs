@@ -1039,12 +1039,21 @@ mod tests {
 
     #[test]
     fn ak_command_does_not_require_auth() {
-        assert!(!Commands::Ak(commands::ak::AkCommands::Tree).requires_auth());
+        assert!(
+            !Commands::Ak(commands::ak::AkCommands::Search {
+                path: None,
+                grep: None,
+                glob: None,
+                tree: false,
+                case_insensitive: false,
+            })
+            .requires_auth()
+        );
     }
 
     #[test]
-    fn ak_cat_requires_at_least_one_path() {
-        let parsed = Cli::try_parse_from(["stakpak", "ak", "cat"]);
+    fn ak_read_requires_at_least_one_path() {
+        let parsed = Cli::try_parse_from(["stakpak", "ak", "read"]);
         assert!(parsed.is_err());
     }
 
@@ -1060,7 +1069,8 @@ mod tests {
         assert!(help.contains("default store root: ~/.stakpak/knowledge"));
         assert!(help.contains("override: AK_STORE"));
         assert!(help.contains("paths are relative to the store root"));
-        assert!(help.contains("use `peek` before `cat` to save tokens"));
+        assert!(help.contains("ak search [path]"));
+        assert!(help.contains("ak read <path>..."));
         assert!(!help.contains("ls --json"));
     }
 
@@ -1081,22 +1091,19 @@ mod tests {
     }
 
     #[test]
-    fn ak_ls_help_explains_directory_listing_behavior() {
-        let result = Cli::try_parse_from(["stakpak", "ak", "ls", "--help"]);
+    fn ak_search_help_explains_recursive_preview_and_filters() {
+        let result = Cli::try_parse_from(["stakpak", "ak", "search", "--help"]);
         let error = match result {
             Ok(_) => panic!("help output should exit via clap error"),
             Err(error) => error,
         };
         let help = error.to_string();
 
-        assert!(help.contains("one directory at a time"));
-        assert!(help.contains("frontmatter"));
+        assert!(help.contains("peek body"));
+        assert!(help.contains("--tree"));
+        assert!(help.contains("--grep"));
+        assert!(help.contains("--glob"));
+        assert!(help.contains("-i"));
         assert!(!help.contains("--json"));
-    }
-
-    #[test]
-    fn ak_ls_rejects_json_flag() {
-        let parsed = Cli::try_parse_from(["stakpak", "ak", "ls", "--json"]);
-        assert!(parsed.is_err());
     }
 }

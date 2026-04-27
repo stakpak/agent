@@ -195,20 +195,24 @@ mod tests {
     }
 
     #[test]
-    fn arg_namespace_and_sub_rule_both_match_most_restrictive_wins() {
+    fn ak_verb_specific_rules_can_all_auto_approve() {
         let mut rules = HashMap::new();
-        rules.insert("run_command::stakpak::ak".to_string(), Action::Approve);
-        rules.insert("run_command::stakpak::ak::write".to_string(), Action::Ask);
+        for verb in ["search", "read", "write", "remove", "skill"] {
+            rules.insert(format!("run_command::stakpak::ak::{verb}"), Action::Approve);
+        }
 
-        let resolved = resolve_hierarchical_policy(
+        for command in [
+            "stakpak ak search services --tree",
+            "stakpak ak read notes.md",
             "stakpak ak write notes.md",
-            "run_command",
-            &[],
-            &rules,
-            Action::Deny,
-        );
+            "stakpak ak remove notes.md",
+            "stakpak ak skill usage",
+        ] {
+            let resolved =
+                resolve_hierarchical_policy(command, "run_command", &[], &rules, Action::Ask);
 
-        assert_eq!(resolved, Ok(Some(Action::Ask)));
+            assert_eq!(resolved, Ok(Some(Action::Approve)), "command: {command}");
+        }
     }
 
     #[test]

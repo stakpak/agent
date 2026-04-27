@@ -13,6 +13,10 @@ serde_json = { workspace = true }
 serde_yaml = "0.9"
 walkdir = { workspace = true }
 dirs = "5.0"
+regex = { workspace = true }
+globset = { workspace = true }
+grep-matcher = { workspace = true }
+grep-regex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

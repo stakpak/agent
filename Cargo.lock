@@ -6193,6 +6193,10 @@ name = "stakpak-ak"
 version = "0.3.76"
 dependencies = [
  "dirs",
+ "globset",
+ "grep-matcher",
+ "grep-regex",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
