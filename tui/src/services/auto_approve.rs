@@ -879,13 +879,13 @@ mod tests {
             AutoApprovePolicy::Prompt,
         );
 
-        let tc = make_run_command_tool_call("stakpak ak tree");
+        let tc = make_run_command_tool_call("stakpak ak search --tree");
         let result = resolve_shell_scope(&tc, &config.tools, &config.default_policy);
         assert_eq!(result, Some(AutoApprovePolicy::Prompt));
     }
 
     #[test]
-    fn resolve_shell_scope_user_subrule_tightens_namespace_default() {
+    fn resolve_shell_scope_user_subrule_tightens_write_default_only() {
         let mut config = AutoApproveConfig::default();
         config.tools.insert(
             "run_command::stakpak::ak::write".to_string(),
@@ -896,20 +896,33 @@ mod tests {
         let write_result = resolve_shell_scope(&write_tc, &config.tools, &config.default_policy);
         assert_eq!(write_result, Some(AutoApprovePolicy::Prompt));
 
-        let tree_tc = make_run_command_tool_call("stakpak ak tree");
-        let tree_result = resolve_shell_scope(&tree_tc, &config.tools, &config.default_policy);
-        assert_eq!(tree_result, Some(AutoApprovePolicy::Auto));
+        let search_tc = make_run_command_tool_call("stakpak ak search --tree");
+        let search_result = resolve_shell_scope(&search_tc, &config.tools, &config.default_policy);
+        assert_eq!(search_result, Some(AutoApprovePolicy::Auto));
     }
 
     #[test]
-    fn should_auto_approve_stakpak_ak_tree_with_fresh_defaults() {
+    fn should_auto_approve_stakpak_ak_search_with_fresh_defaults() {
         let manager = AutoApproveManager {
             original_config: AutoApproveConfig::default(),
             config: AutoApproveConfig::default(),
             config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
             input_tx: None,
         };
-        let tc = make_run_command_tool_call("stakpak ak tree");
+        let tc = make_run_command_tool_call("stakpak ak search --tree");
+
+        assert!(manager.should_auto_approve(&tc));
+    }
+
+    #[test]
+    fn should_auto_approve_stakpak_ak_write_with_fresh_defaults() {
+        let manager = AutoApproveManager {
+            original_config: AutoApproveConfig::default(),
+            config: AutoApproveConfig::default(),
+            config_path: PathBuf::from(AUTO_APPROVE_CONFIG_PATH),
+            input_tx: None,
+        };
+        let tc = make_run_command_tool_call("stakpak ak write notes.md");
 
         assert!(manager.should_auto_approve(&tc));
     }

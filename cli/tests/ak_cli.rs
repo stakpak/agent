@@ -54,32 +54,129 @@ fn readme_autopilot_one_liner_matches_retrospect_prompt() {
 }
 
 #[test]
-fn ak_status_bootstraps_default_config_on_clean_home() {
+fn ak_search_tree_bootstraps_default_config_on_clean_home() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let home = temp_dir.path();
 
     let output = Command::new(env!("CARGO_BIN_EXE_stakpak"))
         .arg("ak")
-        .arg("status")
+        .arg("search")
+        .arg("--tree")
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("STAKPAK_PROFILE")
         .output()
-        .expect("run stakpak ak status");
+        .expect("run stakpak ak search --tree");
 
     assert!(
         output.status.success(),
-        "ak status failed: stdout={} stderr= {}",
+        "ak search --tree failed: stdout={} stderr= {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Store:"), "stdout was: {stdout}");
-    assert!(stdout.contains("Files: 0"), "stdout was: {stdout}");
+    assert!(stdout.contains("."), "stdout was: {stdout}");
 
     assert!(
         home.join(".stakpak/config.toml").is_file(),
-        "expected ak status to bootstrap ~/.stakpak/config.toml"
+        "expected ak search --tree to bootstrap ~/.stakpak/config.toml"
+    );
+}
+
+#[test]
+fn ak_search_rejects_tree_with_grep() {
+    let output = Command::new(env!("CARGO_BIN_EXE_stakpak"))
+        .arg("ak")
+        .arg("search")
+        .arg("--tree")
+        .arg("--grep")
+        .arg("foo")
+        .output()
+        .expect("run stakpak ak search with invalid flags");
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--tree"), "stderr was: {stderr}");
+    assert!(stderr.contains("--grep"), "stderr was: {stderr}");
+}
+
+#[test]
+fn ak_read_multiple_paths_uses_delimiter() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let home = temp_dir.path();
+    let store = temp_dir.path().join("knowledge");
+    std::fs::create_dir_all(&store).expect("create store");
+    std::fs::write(store.join("a.md"), "alpha\n").expect("write first file");
+    std::fs::write(store.join("b.md"), "beta\n").expect("write second file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_stakpak"))
+        .arg("ak")
+        .arg("read")
+        .arg("a.md")
+        .arg("b.md")
+        .env("AK_STORE", &store)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .output()
+        .expect("run stakpak ak read");
+
+    assert!(
+        output.status.success(),
+        "ak read failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "alpha\n---\nbeta\n"
+    );
+}
+
+#[test]
+fn ak_read_on_directory_returns_search_hint() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let store = temp_dir.path().join("knowledge");
+    std::fs::create_dir_all(store.join("services")).expect("create services dir");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_stakpak"))
+        .arg("ak")
+        .arg("read")
+        .arg("services")
+        .env("AK_STORE", &store)
+        .output()
+        .expect("run stakpak ak read on directory");
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("is a directory"), "stderr was: {stderr}");
+    assert!(
+        stderr.contains("ak search services"),
+        "stderr was: {stderr}"
+    );
+}
+
+#[test]
+fn ak_remove_missing_path_returns_clear_error() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let store = temp_dir.path().join("knowledge");
+    std::fs::create_dir_all(&store).expect("create store");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_stakpak"))
+        .arg("ak")
+        .arg("remove")
+        .arg("missing.md")
+        .env("AK_STORE", &store)
+        .output()
+        .expect("run stakpak ak remove on missing path");
+
+    assert!(!output.status.success(), "command unexpectedly succeeded");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("path not found: missing.md"),
+        "stderr was: {stderr}"
     );
 }
