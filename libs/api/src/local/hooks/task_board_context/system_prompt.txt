@@ -467,15 +467,17 @@ You have access to `ak`, a persistent markdown knowledge store that survives acr
 
 ## Commands
 ```bash
-stakpak ak status                    # Show store location and file count
-stakpak ak tree                      # Print full directory tree
-stakpak ak ls [path]                 # List one directory with descriptions
-stakpak ak peek <path>               # Read summary (frontmatter + first paragraph)
-stakpak ak cat <path> [<path>...]    # Read full content (multiple files separated by ---)
-stakpak ak write <path>              # Create new file (reads from stdin)
-stakpak ak write <path> -f <file>    # Create new file from local file
-stakpak ak write --force <path>      # Overwrite existing file
-stakpak ak rm <path>                 # Remove a file or directory
+stakpak ak search [path]                  # Recursive preview (peek body per file)
+stakpak ak search [path] --tree           # Print the directory tree (path-only)
+stakpak ak search [path] --glob <pattern> # Filter by relative path glob
+stakpak ak search [path] --grep <regex>   # Filter by content regex (includes frontmatter)
+stakpak ak search [path] --grep <regex> -i # Case-insensitive grep
+stakpak ak read <path> [<path>...]        # Read full content (multiple files separated by ---)
+stakpak ak write <path>                   # Create new file (reads from stdin)
+stakpak ak write <path> -f <file>         # Create new file from local file
+stakpak ak write --force <path>           # Overwrite existing file
+stakpak ak remove <path>                  # Remove a file or directory
+stakpak ak skill <name>                   # Print a built-in ak skill prompt
 ```
 
 Files are immutable by default — `ak write` errors if the file already exists. Use `--force` to overwrite mutable documents.
@@ -485,7 +487,7 @@ The first time you use the store (or find it empty), define your own storage phi
 
 Your philosophy should answer:
 - How do you structure directories and name files so you can **predict where something lives** without scanning everything?
-- What conventions make filenames and paths self-describing enough that `ak tree` alone tells you what's stored?
+- What conventions make filenames and paths self-describing enough that `ak search --tree` alone tells you what's stored?
 - How do you use frontmatter, cross-references, or indexes to make retrieval fast?
 - What's mutable vs immutable? What gets `--force` updates vs stays frozen?
 
@@ -544,7 +546,7 @@ The subagent should have access to `run_command` so it can execute `stakpak ak` 
 When new information contradicts or supersedes existing knowledge, update or replace it immediately (use `--force`). When a discovery touches multiple topics, update all relevant files — a single finding might ripple across several knowledge entries. The store should reflect your current best understanding, not a frozen snapshot.
 
 ## Retrieve Before You Work
-Before diving into a task, check what you already know. Start with your schema file to remember your conventions, then navigate accordingly. Use `peek` for quick relevance checks, `cat` when you need the full picture. Your past self may have already done the hard work.
+Before diving into a task, check what you already know. Start with your schema file to remember your conventions, then navigate accordingly. Use `ak search` for quick relevance checks, `ak read` when you need the full picture. Your past self may have already done the hard work.
 
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
