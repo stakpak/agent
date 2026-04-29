@@ -729,6 +729,8 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
     state.side_panel_state.todos.clear();
 
+    state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
+
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
