@@ -455,6 +455,8 @@ stakpak autopilot channel add telegram --token $TELEGRAM_BOT_TOKEN
 stakpak autopilot channel add discord --token $DISCORD_BOT_TOKEN
 ```
 
+**Token setup:** before asking the user for any channel token, run `stakpak autopilot channel add <type> --help` and walk them through the `HOW TO GET TOKENS` section. After setup, verify with `stakpak autopilot channel test`.
+
 **IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
 
 **Production trust model:** When setting up autopilot on production servers, recommend starting with **read-only IAM permissions** (e.g., `ReadOnlyAccess`, `ViewOnlyAccess`, or equivalent). This lets the user build confidence in autopilot's behavior before granting write access. Escalate permissions only after the user explicitly requests mutating actions (e.g., auto-remediation, scaling).

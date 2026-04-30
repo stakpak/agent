@@ -1014,17 +1014,21 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         // Clear spinner line before printing error
         print!("\r\x1b[2K");
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        println!(
+        eprintln!(
             "  ✗ Timed out waiting for autopilot to become healthy ({}s)",
             max_wait.as_secs()
         );
-        println!();
-        println!("  Troubleshoot:");
-        println!("    stakpak autopilot logs -c server    View server logs");
-        println!("    stakpak autopilot status            Check component health");
+        eprintln!();
+        eprintln!("  Troubleshoot:");
+        eprintln!("    stakpak autopilot logs -c server    View server logs");
+        eprintln!("    stakpak autopilot status            Check component health");
         if expects_sandbox {
-            println!("    docker ps                           Verify sandbox container");
+            eprintln!("    docker ps                           Verify sandbox container");
         }
+        return Err(format!(
+            "Autopilot did not become healthy within {}s",
+            max_wait.as_secs()
+        ));
     }
 
     // Clean post-start status summary

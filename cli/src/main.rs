@@ -74,6 +74,7 @@ fn config_has_any_auth_flags(has_stakpak_key: bool, has_provider_keys: bool) -> 
 
 #[derive(Parser, PartialEq)]
 #[command(name = "stakpak")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Stakpak CLI tool", long_about = None)]
 struct Cli {
     /// Run the agent for a single step and print the response

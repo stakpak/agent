@@ -129,6 +129,41 @@ pub trait ProbeEnvironment: Send + Sync {
     fn can_read_path(&self, path: &Path) -> Result<(), String>;
     fn current_username(&self) -> Option<String>;
     fn can_bind_addr(&self, addr: &str) -> Result<(), String>;
+    /// Linux distro ID parsed from /etc/os-release (e.g. "amzn", "ubuntu", "debian", "fedora").
+    /// Returns None on non-Linux hosts or when /etc/os-release is unavailable/unparseable.
+    fn os_id(&self) -> Option<String> {
+        let contents = self.read_to_string(Path::new("/etc/os-release")).ok()?;
+        parse_os_release_id(&contents)
+    }
+}
+
+fn parse_os_release_id(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("ID=") {
+            let trimmed = value.trim().trim_matches('"').trim_matches('\'');
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_ascii_lowercase());
+            }
+        }
+    }
+    None
+}
+
+fn docker_install_remediation(os_id: Option<&str>) -> (String, String) {
+    match os_id {
+        Some("amzn" | "rhel" | "fedora" | "rocky" | "almalinux" | "centos") => (
+            "Install Docker, then rerun stakpak up".to_string(),
+            "sudo dnf install -y docker && sudo systemctl enable --now docker && sudo usermod -aG docker $USER".to_string(),
+        ),
+        Some("ubuntu" | "debian") => (
+            "Install Docker, then rerun stakpak up".to_string(),
+            "sudo apt-get install -y docker.io && sudo usermod -aG docker $USER".to_string(),
+        ),
+        _ => (
+            "Install Docker for your distribution, then rerun stakpak up".to_string(),
+            "See https://docs.docker.com/engine/install/ — after install, run: sudo usermod -aG docker $USER".to_string(),
+        ),
+    }
 }
 
 pub struct RealProbeEnvironment;
@@ -197,7 +232,7 @@ pub fn run_autopilot_probes(
     let docker_installed_ok = docker_installed.status == ProbeStatus::Pass;
     results.push(docker_installed);
 
-    results.push(if docker_installed_ok {
+    let docker_accessible = if docker_installed_ok {
         probe_docker_accessible(env)
     } else {
         ProbeResult {
@@ -209,7 +244,13 @@ pub fn run_autopilot_probes(
             details: None,
             remediation: None,
         }
-    });
+    };
+    let docker_accessible_ok = docker_accessible.status == ProbeStatus::Pass;
+    results.push(docker_accessible);
+
+    if matches!(mode, ProbeMode::Startup | ProbeMode::Doctor) && docker_accessible_ok {
+        results.push(probe_docker_user_systemd(env));
+    }
 
     results.push(probe_memory(env));
 
@@ -268,29 +309,33 @@ pub fn probe_credentials(ctx: &AutopilotProbeContext<'_>) -> ProbeResult {
 }
 
 pub fn probe_docker_installed(env: &dyn ProbeEnvironment) -> ProbeResult {
-    match env.command_output("docker", &["--version"]) {
-        Ok(snapshot) if snapshot.success => ProbeResult {
+    let snapshot = env.command_output("docker", &["--version"]);
+    if let Ok(ref snap) = snapshot
+        && snap.success
+    {
+        return ProbeResult {
             id: "docker_installed",
             title: "Docker",
             severity: ProbeSeverity::Blocking,
             status: ProbeStatus::Pass,
             summary: "Docker is installed".to_string(),
-            details: first_non_empty_line(&snapshot.stdout),
+            details: first_non_empty_line(&snap.stdout),
             remediation: None,
-        },
-        Ok(snapshot) => ProbeResult {
+        };
+    }
+
+    let (summary, command) = docker_install_remediation(env.os_id().as_deref());
+    match snapshot {
+        Ok(snap) => ProbeResult {
             id: "docker_installed",
             title: "Docker",
             severity: ProbeSeverity::Blocking,
             status: ProbeStatus::Fail,
             summary: "Docker is installed but failed to report its version".to_string(),
-            details: command_details(&snapshot),
+            details: command_details(&snap),
             remediation: Some(Remediation::Manual {
-                summary: "Reinstall or repair Docker, then rerun autopilot".to_string(),
-                command: Some(
-                    "sudo apt-get install -y docker.io && sudo usermod -aG docker $USER"
-                        .to_string(),
-                ),
+                summary: format!("Reinstall or repair Docker. {summary}"),
+                command: Some(command),
             }),
         },
         Err(error) => ProbeResult {
@@ -301,11 +346,8 @@ pub fn probe_docker_installed(env: &dyn ProbeEnvironment) -> ProbeResult {
             summary: "Docker is not installed".to_string(),
             details: Some(format!("Command error: {error}")),
             remediation: Some(Remediation::Manual {
-                summary: "Install Docker, then rerun stakpak up".to_string(),
-                command: Some(
-                    "sudo apt-get install -y docker.io && sudo usermod -aG docker $USER"
-                        .to_string(),
-                ),
+                summary,
+                command: Some(command),
             }),
         },
     }
@@ -508,6 +550,84 @@ pub fn probe_bind_port(
                 ),
             }),
         },
+    }
+}
+
+/// Detect the silent-failure case where the calling shell can reach the Docker
+/// daemon but the user's systemd manager cannot — typically after `usermod -aG
+/// docker $USER` was run without restarting `user@UID.service`. The systemd
+/// manager retains the old (group-less) credentials, so any service it launches
+/// (including autopilot) hits "permission denied on /var/run/docker.sock" and
+/// crash-loops without surfacing a useful error.
+pub fn probe_docker_user_systemd(env: &dyn ProbeEnvironment) -> ProbeResult {
+    let make = |severity, status, summary: String, details, remediation| ProbeResult {
+        id: "docker_user_systemd",
+        title: "Docker access via systemd user manager",
+        severity,
+        status,
+        summary,
+        details,
+        remediation,
+    };
+
+    if !env.path_exists(Path::new("/etc/os-release")) {
+        return make(
+            ProbeSeverity::Info,
+            ProbeStatus::Skip,
+            "Probe is only available on Linux hosts".to_string(),
+            None,
+            None,
+        );
+    }
+
+    let snapshot = env.command_output(
+        "systemd-run",
+        &[
+            "--user",
+            "--pipe",
+            "--wait",
+            "--quiet",
+            "--collect",
+            "docker",
+            "ps",
+        ],
+    );
+    match snapshot {
+        Ok(snap) if snap.success => make(
+            ProbeSeverity::Blocking,
+            ProbeStatus::Pass,
+            "systemd user manager can reach the Docker daemon".to_string(),
+            None,
+            None,
+        ),
+        Ok(snap) if combined_output(&snap).to_ascii_lowercase().contains("permission denied") => {
+            make(
+                ProbeSeverity::Blocking,
+                ProbeStatus::Fail,
+                "systemd user manager cannot reach Docker (likely stale group membership)".to_string(),
+                command_details(&snap),
+                Some(Remediation::Manual {
+                    summary: "Restart the user systemd manager so it picks up docker group membership".to_string(),
+                    command: Some(
+                        "sudo systemctl restart user@$(id -u).service && systemd-run --user --pipe --wait --quiet docker ps".to_string(),
+                    ),
+                }),
+            )
+        }
+        Ok(snap) => make(
+            ProbeSeverity::Info,
+            ProbeStatus::Skip,
+            "Unable to verify Docker access from systemd user manager".to_string(),
+            command_details(&snap),
+            None,
+        ),
+        Err(error) => make(
+            ProbeSeverity::Info,
+            ProbeStatus::Skip,
+            "systemd-run is unavailable; skipping check".to_string(),
+            Some(error),
+            None,
+        ),
     }
 }
 
@@ -1011,6 +1131,59 @@ mod tests {
             }
             Remediation::Suggested { .. } => panic!("expected manual remediation"),
         }
+    }
+
+    #[test]
+    fn docker_user_systemd_flags_stale_group_membership() {
+        let env = MockProbeEnvironment::default()
+            .with_file("/etc/os-release", "ID=ubuntu\n")
+            .with_command(
+                "systemd-run",
+                &[
+                    "--user",
+                    "--pipe",
+                    "--wait",
+                    "--quiet",
+                    "--collect",
+                    "docker",
+                    "ps",
+                ],
+                Ok(CommandSnapshot {
+                    success: false,
+                    stdout: String::new(),
+                    stderr: "permission denied while trying to connect to the Docker daemon socket"
+                        .to_string(),
+                }),
+            );
+
+        let result = probe_docker_user_systemd(&env);
+        assert!(result.is_blocking_failure());
+        assert!(result.summary.contains("stale group membership"));
+        let remediation = result.remediation.expect("remediation");
+        match remediation {
+            Remediation::Manual { command, .. } => {
+                let command = command.expect("command");
+                assert!(command.contains("systemctl restart user@"));
+            }
+            Remediation::Suggested { .. } => panic!("expected manual remediation"),
+        }
+    }
+
+    #[test]
+    fn docker_user_systemd_skips_when_systemd_run_missing() {
+        let env = MockProbeEnvironment::default().with_file("/etc/os-release", "ID=ubuntu\n");
+
+        let result = probe_docker_user_systemd(&env);
+        assert_eq!(result.status, ProbeStatus::Skip);
+    }
+
+    #[test]
+    fn docker_user_systemd_skips_on_non_linux() {
+        let env = MockProbeEnvironment::default();
+
+        let result = probe_docker_user_systemd(&env);
+        assert_eq!(result.status, ProbeStatus::Skip);
+        assert!(result.summary.contains("only available on Linux"));
     }
 
     #[test]
