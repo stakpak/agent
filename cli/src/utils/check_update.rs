@@ -3,6 +3,7 @@ use semver::Version;
 use serde::Deserialize;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
+use std::future::Future;
 
 use crate::commands::auto_update::run_auto_update;
 use crate::utils::cli_colors::CliColors;
@@ -196,50 +197,30 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
     Ok(release.tag_name)
 }
 
+async fn run_auto_update_if_newer<F, Fut>(
+    current_version: &str,
+    release: &LatestRelease,
+    run_update: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    if is_newer_version(current_version, &release.tag_name) {
+        run_update().await?;
+    }
+
+    Ok(())
+}
+
 pub async fn auto_update() -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-    if is_newer_version(&current_version, &release.tag_name) {
-        let yellow = CliColors::yellow();
-        let green = CliColors::green();
-        let cyan = CliColors::cyan();
-        let text = CliColors::text();
-        let reset = CliColors::reset();
-
-        println!(
-            "\n🚀 Update available!  {}{}{}{} → {}{}{} ✨\n",
-            text, yellow, current_version, reset, green, release.tag_name, reset
-        );
-
-        if let Some(body) = &release.body
-            && !body.trim().is_empty()
-        {
-            println!("{} What's new in this update:{}", text, reset);
-            println!("{}{}{}", cyan, "─".repeat(50), reset);
-            let changelog = format_changelog(body);
-            println!("{}", changelog);
-            println!("{}{}{}", cyan, "─".repeat(50), reset);
-            println!(
-                "{} View full changelog: {}{}{}\n",
-                text, cyan, release.html_url, reset
-            );
-        }
-
-        println!("Would you like to update? (y/n)");
-        let mut input = String::new();
-        if let Err(e) = std::io::stdin().read_line(&mut input) {
-            eprintln!("Failed to read input: {}", e);
-            return Ok(());
-        }
-        if input.trim() == "y" || input.trim().is_empty() {
-            run_auto_update(false).await?;
-        } else if input.trim() == "n" {
-            println!("Update cancelled!");
-            println!("Proceeding to open Stakpak Agent...")
-        } else {
-            println!("Invalid input! Please enter y or n.");
-        }
-    }
+    run_auto_update_if_newer(&current_version, &release, || async {
+        run_auto_update(false).await
+    })
+    .await
+    .map_err(std::io::Error::other)?;
     Ok(())
 }
 
@@ -254,10 +235,77 @@ pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
             current_version, release.tag_name
         );
         run_auto_update(true).await?;
-        // run_auto_update calls std::process::exit(0) on success,
-        // so we only reach here if something went wrong
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    fn release(tag_name: &str) -> LatestRelease {
+        LatestRelease {
+            tag_name: tag_name.to_string(),
+            name: format!("Stakpak {tag_name}"),
+            published_at: "2026-01-01T00:00:00Z".to_string(),
+            html_url: "https://github.com/stakpak/agent/releases/latest".to_string(),
+            prerelease: false,
+            draft: false,
+            body: Some("### Features\n- Faster updates".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_update_runs_updater_when_release_is_newer() {
+        let invoked = Arc::new(AtomicBool::new(false));
+        let invoked_clone = Arc::clone(&invoked);
+
+        run_auto_update_if_newer("v0.3.78", &release("v9.9.9"), || {
+            invoked_clone.store(true, Ordering::SeqCst);
+            async { Ok::<(), String>(()) }
+        })
+        .await
+        .expect("auto update succeeds");
+
+        assert!(invoked.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn auto_update_skips_updater_when_release_is_not_newer() {
+        let invoked = Arc::new(AtomicBool::new(false));
+        let invoked_clone = Arc::clone(&invoked);
+
+        run_auto_update_if_newer("v9.9.9", &release("v9.9.9"), || {
+            invoked_clone.store(true, Ordering::SeqCst);
+            async { Ok::<(), String>(()) }
+        })
+        .await
+        .expect("auto update succeeds");
+
+        assert!(!invoked.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn auto_update_logic_is_non_interactive() {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            run_auto_update_if_newer("v0.3.78", &release("v9.9.9"), || async {
+                Ok::<(), String>(())
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "auto-update logic should not wait for stdin"
+        );
+        let update_result = result.expect("timeout result");
+        assert!(update_result.is_ok(), "auto-update logic should succeed");
     }
 }

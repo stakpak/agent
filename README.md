@@ -274,6 +274,8 @@ api_endpoint = "http://localhost:11434/v1"
 [settings]
 ```
 
+Stakpak applies available updates in the background during interactive startup. When an update is applied, restart any long-running Stakpak processes to pick up the new binary.
+
 Then run with your profile:
 ```bash
 stakpak --profile byok

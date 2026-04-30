@@ -70,6 +70,10 @@ fn config_has_any_auth(config: &AppConfig) -> bool {
 fn config_has_any_auth_flags(has_stakpak_key: bool, has_provider_keys: bool) -> bool {
     has_stakpak_key || has_provider_keys
 }
+
+fn should_spawn_auto_update(cli: &Cli, skip_warden: bool) -> bool {
+    cli.command.is_none() && !cli.r#async && !cli.print && !skip_warden
+}
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
@@ -237,17 +241,8 @@ async fn main() {
         Cli::parse()
     };
 
-    // Only run auto-update in interactive mode (when no command is specified)
-    if cli.command.is_none()
-        && !cli.r#async
-        && !cli.print
-        && let Err(e) = auto_update().await
-    {
-        eprintln!("Auto-update failed: {}", e);
-    }
-
-    if let Some(workdir) = cli.workdir {
-        let workdir = Path::new(&workdir);
+    if let Some(workdir) = &cli.workdir {
+        let workdir = Path::new(workdir);
         if let Err(e) = env::set_current_dir(workdir) {
             eprintln!("Failed to set current directory: {}", e);
             std::process::exit(1);
@@ -267,10 +262,21 @@ async fn main() {
     // Determine which profile to use: CLI arg > STAKPAK_PROFILE env var > "default"
     let profile_name = cli
         .profile
+        .clone()
         .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
         .unwrap_or_else(|| "default".to_string());
 
-    match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
+    let config_result = AppConfig::load(&profile_name, cli.config_path.as_deref());
+
+    if config_result.is_ok()
+        && should_spawn_auto_update(&cli, std::env::var("STAKPAK_SKIP_WARDEN").is_ok())
+    {
+        tokio::spawn(async move {
+            let _ = auto_update().await;
+        });
+    }
+
+    match config_result {
         Ok(mut config) => {
             // Check if warden is enabled in profile and we're not already inside warden
             let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
@@ -712,6 +718,18 @@ mod tests {
     #[test]
     fn config_has_any_auth_flags_true_when_provider_is_configured() {
         assert!(config_has_any_auth_flags(false, true));
+    }
+
+    #[test]
+    fn auto_update_gate_is_false_inside_warden() {
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        assert!(!should_spawn_auto_update(&cli, true));
+    }
+
+    #[test]
+    fn auto_update_gate_is_true_for_default_interactive_startup() {
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        assert!(should_spawn_auto_update(&cli, false));
     }
 
     #[cfg(unix)]
