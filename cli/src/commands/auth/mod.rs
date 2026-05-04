@@ -12,6 +12,7 @@
 mod list;
 pub(crate) mod login;
 mod logout;
+mod status;
 
 use crate::config::AppConfig;
 use clap::Subcommand;
@@ -79,6 +80,13 @@ pub enum AuthCommands {
         #[arg(long, short)]
         profile: Option<String>,
     },
+
+    /// Show active profile, configured credentials, and API reachability
+    Status {
+        /// Filter by profile
+        #[arg(long, short)]
+        profile: Option<String>,
+    },
 }
 
 impl AuthCommands {
@@ -121,6 +129,9 @@ impl AuthCommands {
                 logout::handle_logout(&config_dir, provider.as_deref(), profile.as_deref())
             }
             AuthCommands::List { profile } => list::handle_list(&config_dir, profile.as_deref()),
+            AuthCommands::Status { profile } => {
+                status::handle_status(&config_dir, &config, profile.as_deref()).await
+            }
         }
     }
 }
