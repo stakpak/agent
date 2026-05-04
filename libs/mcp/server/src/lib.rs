@@ -306,7 +306,7 @@ async fn start_server_internal(
         tokio::spawn(async move {
             task_manager.run().await;
         });
-        handle.clone()
+        handle
     };
 
     let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
