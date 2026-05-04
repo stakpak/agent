@@ -54,7 +54,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agent_context::AgentContext;
 use utils::agents_md::discover_agents_md;
 use utils::apps_md::discover_apps_md;
-use utils::check_update::{auto_update, check_update};
+#[cfg(feature = "auto-update")]
+use utils::check_update::auto_update;
+use utils::check_update::check_update;
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
@@ -239,6 +241,7 @@ async fn main() {
     };
 
     // Only run auto-update in interactive mode (when no command is specified)
+    #[cfg(feature = "auto-update")]
     if cli.command.is_none()
         && !cli.r#async
         && !cli.print
