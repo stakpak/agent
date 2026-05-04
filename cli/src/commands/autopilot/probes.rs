@@ -137,7 +137,7 @@ pub trait ProbeEnvironment: Send + Sync {
     }
 }
 
-fn parse_os_release_id(contents: &str) -> Option<String> {
+pub(crate) fn parse_os_release_id(contents: &str) -> Option<String> {
     for line in contents.lines() {
         if let Some(value) = line.strip_prefix("ID=") {
             let trimmed = value.trim().trim_matches('"').trim_matches('\'');
@@ -157,7 +157,7 @@ fn docker_install_remediation(os_id: Option<&str>) -> (String, String) {
         ),
         Some("ubuntu" | "debian") => (
             "Install Docker, then rerun stakpak up".to_string(),
-            "sudo apt-get install -y docker.io && sudo usermod -aG docker $USER".to_string(),
+            "sudo apt-get update && sudo apt-get install -y docker.io && sudo usermod -aG docker $USER".to_string(),
         ),
         _ => (
             "Install Docker for your distribution, then rerun stakpak up".to_string(),
@@ -248,7 +248,9 @@ pub fn run_autopilot_probes(
     let docker_accessible_ok = docker_accessible.status == ProbeStatus::Pass;
     results.push(docker_accessible);
 
-    if matches!(mode, ProbeMode::Startup | ProbeMode::Doctor) && docker_accessible_ok {
+    // ProbeMode currently only has Startup/Doctor — both want this check, so no
+    // mode gating needed today. Revisit if a lighter mode (e.g. Healthcheck) is added.
+    if docker_accessible_ok {
         results.push(probe_docker_user_systemd(env));
     }
 
@@ -1184,6 +1186,64 @@ mod tests {
         let result = probe_docker_user_systemd(&env);
         assert_eq!(result.status, ProbeStatus::Skip);
         assert!(result.summary.contains("only available on Linux"));
+    }
+
+    #[test]
+    fn parse_os_release_id_handles_quoting_and_case() {
+        assert_eq!(
+            parse_os_release_id("NAME=Ubuntu\nID=ubuntu\nVERSION=\"22.04\"\n").as_deref(),
+            Some("ubuntu")
+        );
+        assert_eq!(
+            parse_os_release_id("ID=\"amzn\"\n").as_deref(),
+            Some("amzn")
+        );
+        assert_eq!(
+            parse_os_release_id("ID='fedora'\n").as_deref(),
+            Some("fedora")
+        );
+        assert_eq!(
+            parse_os_release_id("ID=Debian\n").as_deref(),
+            Some("debian"),
+            "ID values should be lowercased for matching"
+        );
+    }
+
+    #[test]
+    fn parse_os_release_id_returns_none_when_missing() {
+        assert_eq!(parse_os_release_id(""), None);
+        assert_eq!(parse_os_release_id("NAME=Foo\n"), None);
+        assert_eq!(parse_os_release_id("ID=\n"), None);
+    }
+
+    #[test]
+    fn docker_install_remediation_picks_dnf_for_rhel_family() {
+        for id in ["amzn", "rhel", "fedora", "rocky", "almalinux", "centos"] {
+            let (_, command) = docker_install_remediation(Some(id));
+            assert!(command.contains("dnf install"), "{id} should use dnf");
+        }
+    }
+
+    #[test]
+    fn docker_install_remediation_picks_apt_for_debian_family() {
+        for id in ["ubuntu", "debian"] {
+            let (_, command) = docker_install_remediation(Some(id));
+            assert!(
+                command.contains("apt-get install"),
+                "{id} should use apt-get"
+            );
+            assert!(
+                command.contains("apt-get update"),
+                "{id} should refresh apt cache before install"
+            );
+        }
+    }
+
+    #[test]
+    fn docker_install_remediation_falls_back_to_docs_link() {
+        let (summary, command) = docker_install_remediation(None);
+        assert!(summary.contains("for your distribution"));
+        assert!(command.contains("docs.docker.com/engine/install"));
     }
 
     #[test]
