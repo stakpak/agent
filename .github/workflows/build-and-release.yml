@@ -269,10 +269,12 @@ jobs:
           publish_package stakai
           publish_package stakpak-shared
           publish_package stakpak-api
+          publish_package stakpak-mcp-config
           publish_package stakpak-mcp-client
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy
           publish_package stakpak-shell-tool-approvals
+          publish_package stakpak-ak
           publish_package stakpak-agent-core
           publish_package stakpak-gateway
           publish_package stakpak-server

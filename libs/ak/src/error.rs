@@ -6,6 +6,7 @@ pub enum Error {
     Io(std::io::Error),
     AlreadyExists(PathBuf),
     NotFound(PathBuf),
+    NotADirectory(PathBuf),
     UnsafePath(PathBuf),
     Parse(String),
 }
@@ -27,6 +28,9 @@ impl Display for Error {
                 "path not found: {}. check that the path is relative to the store root",
                 path.display()
             ),
+            Self::NotADirectory(path) => {
+                write!(f, "path is not a directory: {}", path.display())
+            }
             Self::UnsafePath(path) => write!(
                 f,
                 "unsafe path blocked: {}. ak paths must stay inside the store and cannot pass through symlinks",

@@ -111,7 +111,6 @@ const DEFAULT_ASK_TOOLS: &[&str] = &[
     "run_command_task",
     "run_remote_command",
     "run_remote_command_task",
-    "subagent_task",
     "dynamic_subagent_task",
     "cancel_task",
     "remove",

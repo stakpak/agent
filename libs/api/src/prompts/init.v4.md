@@ -197,6 +197,33 @@ After writing APPS.md, present a table mapping **specific discovered risks to mo
 
 Every row must trace to a discovery finding. Prioritize: customer-facing services → data loss risks → drift → housekeeping. Keep to 4-8 schedules. Always include `apps-refresh` (weekly re-discovery). Use `--check` scripts with `--trigger-on failure` so the agent only wakes when something is wrong.
 
+After presenting schedule recommendations, ask where Autopilot should run using `ask_user`:
+
+| Option | Value | Behavior |
+|---|---|---|
+| Remote Linux host | `remote` | Invoke `/remote-autopilot-install` directly with the discovered host/cloud context and schedule recommendations |
+| Existing Autopilot installation | `existing` | Continue by creating schedules on the existing installation |
+| Local machine | `local` | Continue with local `stakpak up`, verify health, then create schedules |
+| Later | `later` | Save the recommendations in APPS.md and finish |
+
+When the user chooses `remote`, immediately invoke the `/remote-autopilot-install` command. Include a compact handoff payload with:
+
+```text
+source=init
+target_preference=<selected host/cloud resource if known>
+cloud_context=<provider/account/project/subscription/region/zone/resource-id summary>
+ssh_context=<known user/IP/key-name/private-only notes>
+channel_preference=<selected or inferred Slack/Telegram/Discord/skip>
+schedules=<recommended schedule table from init>
+apps_md_path=<path to APPS.md>
+```
+
+Use this handoff phrasing before invoking the command:
+
+```text
+Starting /remote-autopilot-install with the host/cloud context discovered during init and these schedule recommendations.
+```
+
 ---
 
 ## Constraints

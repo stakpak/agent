@@ -53,8 +53,15 @@ fn resolve_command_in_scope<T: Clone + Ord>(
 
     let arg_prefix = format!("{scope}::{name}::");
     let arg_match = rules.iter().filter_map(|(key, action)| {
-        let pattern = key.strip_prefix(&arg_prefix)?;
-        let matched = cmd.args.iter().any(|arg| matches_pattern(pattern, arg));
+        let remainder = key.strip_prefix(&arg_prefix)?;
+        let segments: Vec<&str> = remainder.split("::").collect();
+        if segments.len() > cmd.args.len() {
+            return None;
+        }
+        let matched = segments
+            .iter()
+            .zip(cmd.args.iter())
+            .all(|(segment, arg)| matches_pattern(segment, arg));
         matched.then_some(action.clone())
     });
 
@@ -88,6 +95,132 @@ mod tests {
 
         let resolved =
             resolve_hierarchical_policy("git status", "run_command", &[], &rules, Action::Ask);
+
+        assert_eq!(resolved, Ok(Some(Action::Approve)));
+    }
+
+    #[test]
+    fn arg_single_segment_matches_args_first() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::git::status".to_string(), Action::Approve);
+
+        let resolved =
+            resolve_hierarchical_policy("git status", "run_command", &[], &rules, Action::Ask);
+
+        assert_eq!(resolved, Ok(Some(Action::Approve)));
+    }
+
+    #[test]
+    fn arg_single_segment_does_not_match_later_positions() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::stakpak::ak".to_string(), Action::Approve);
+
+        let resolved = resolve_hierarchical_policy(
+            "stakpak browser ak visit example.com",
+            "run_command",
+            &[],
+            &rules,
+            Action::Ask,
+        );
+
+        assert_eq!(resolved, Ok(Some(Action::Ask)));
+    }
+
+    #[test]
+    fn arg_multi_segment_matches_exact_path() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::stakpak::config::show".to_string(),
+            Action::Approve,
+        );
+
+        let resolved = resolve_hierarchical_policy(
+            "stakpak config show",
+            "run_command",
+            &[],
+            &rules,
+            Action::Ask,
+        );
+
+        assert_eq!(resolved, Ok(Some(Action::Approve)));
+    }
+
+    #[test]
+    fn arg_multi_segment_does_not_match_short_command() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::stakpak::config::show".to_string(),
+            Action::Approve,
+        );
+
+        let resolved =
+            resolve_hierarchical_policy("stakpak config", "run_command", &[], &rules, Action::Ask);
+
+        assert_eq!(resolved, Ok(Some(Action::Ask)));
+    }
+
+    #[test]
+    fn arg_multi_segment_does_not_match_different_middle() {
+        let mut rules = HashMap::new();
+        rules.insert(
+            "run_command::stakpak::config::show".to_string(),
+            Action::Approve,
+        );
+
+        let resolved = resolve_hierarchical_policy(
+            "stakpak config list",
+            "run_command",
+            &[],
+            &rules,
+            Action::Ask,
+        );
+
+        assert_eq!(resolved, Ok(Some(Action::Ask)));
+    }
+
+    #[test]
+    fn arg_namespace_rule_matches_trailing_args() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::stakpak::ak".to_string(), Action::Approve);
+
+        let resolved = resolve_hierarchical_policy(
+            "stakpak ak write notes.md",
+            "run_command",
+            &[],
+            &rules,
+            Action::Ask,
+        );
+
+        assert_eq!(resolved, Ok(Some(Action::Approve)));
+    }
+
+    #[test]
+    fn ak_verb_specific_rules_can_all_auto_approve() {
+        let mut rules = HashMap::new();
+        for verb in ["search", "read", "write", "remove", "skill"] {
+            rules.insert(format!("run_command::stakpak::ak::{verb}"), Action::Approve);
+        }
+
+        for command in [
+            "stakpak ak search services --tree",
+            "stakpak ak read notes.md",
+            "stakpak ak write notes.md",
+            "stakpak ak remove notes.md",
+            "stakpak ak skill usage",
+        ] {
+            let resolved =
+                resolve_hierarchical_policy(command, "run_command", &[], &rules, Action::Ask);
+
+            assert_eq!(resolved, Ok(Some(Action::Approve)), "command: {command}");
+        }
+    }
+
+    #[test]
+    fn arg_empty_args_command_falls_through_to_command_level() {
+        let mut rules = HashMap::new();
+        rules.insert("run_command::ls".to_string(), Action::Approve);
+
+        let resolved = resolve_hierarchical_policy("ls", "run_command", &[], &rules, Action::Ask);
 
         assert_eq!(resolved, Ok(Some(Action::Approve)));
     }

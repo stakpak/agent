@@ -65,8 +65,9 @@ pub fn get_navigation_order(state: &AppState, filtered_indices: &[usize]) -> Vec
     let mut nav_order: Vec<usize> = Vec::new();
 
     // First: Recent models that exist in available_models and match filter
-    for recent_id in &state.recent_models {
+    for recent_id in &state.model_switcher_state.recent_models {
         if let Some(idx) = state
+            .model_switcher_state
             .available_models
             .iter()
             .position(|m| matches_recent_id(m, recent_id))
@@ -81,7 +82,7 @@ pub fn get_navigation_order(state: &AppState, filtered_indices: &[usize]) -> Vec
     let mut models_by_provider: std::collections::HashMap<&str, Vec<usize>> =
         std::collections::HashMap::new();
     for &idx in filtered_indices {
-        let model = &state.available_models[idx];
+        let model = &state.model_switcher_state.available_models[idx];
         models_by_provider
             .entry(model.provider.as_str())
             .or_default()
@@ -122,7 +123,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
         .border_style(Style::default().fg(ThemeColors::cyan()));
 
     // Show loading message if no models are available yet
-    if state.available_models.is_empty() {
+    if state.model_switcher_state.available_models.is_empty() {
         let loading = Paragraph::new(vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -179,7 +180,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
     let cursor = "|";
     let placeholder = "Type to filter";
 
-    let search_spans = if state.model_switcher_search.is_empty() {
+    let search_spans = if state.model_switcher_state.search.is_empty() {
         vec![
             Span::raw(" "),
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
@@ -194,7 +195,7 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
             Span::styled(search_prompt, Style::default().fg(ThemeColors::magenta())),
             Span::raw(" "),
             Span::styled(
-                &state.model_switcher_search,
+                &state.model_switcher_state.search,
                 Style::default()
                     .fg(ThemeColors::text())
                     .add_modifier(Modifier::BOLD),
@@ -209,9 +210,9 @@ pub fn render_model_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Get filtered model indices
     let filtered_indices = filter_models(
-        &state.available_models,
-        state.model_switcher_mode,
-        &state.model_switcher_search,
+        &state.model_switcher_state.available_models,
+        state.model_switcher_state.mode,
+        &state.model_switcher_state.search,
     );
 
     // Render model list
@@ -341,8 +342,8 @@ fn render_model_line(
 fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize], list_area: Rect) {
     // Show empty state if no models match
     if filtered_indices.is_empty() {
-        let empty_message = if state.model_switcher_search.is_empty() {
-            match state.model_switcher_mode {
+        let empty_message = if state.model_switcher_state.search.is_empty() {
+            match state.model_switcher_state.mode {
                 ModelSwitcherMode::All => " No models available",
                 ModelSwitcherMode::Reasoning => " No reasoning models available",
             }
@@ -365,10 +366,12 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
     // Recent models are now always in available_models (custom models are synthesized
     // with provider inferred from model ID prefix or the user's default provider)
     let recent_model_indices: Vec<usize> = state
+        .model_switcher_state
         .recent_models
         .iter()
         .filter_map(|recent_id| {
             state
+                .model_switcher_state
                 .available_models
                 .iter()
                 .position(|m| matches_recent_id(m, recent_id))
@@ -388,9 +391,10 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
         // Recent model items
         for &model_idx in &recent_model_indices {
-            let model = &state.available_models[model_idx];
-            let is_selected = model_idx == state.model_switcher_selected;
+            let model = &state.model_switcher_state.available_models[model_idx];
+            let is_selected = model_idx == state.model_switcher_state.is_selected;
             let is_current = state
+                .model_switcher_state
                 .current_model
                 .as_ref()
                 .is_some_and(|m| m.id == model.id);
@@ -415,7 +419,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
         if recent_set.contains(&idx) {
             continue; // Skip models already shown in Recent section
         }
-        let model = &state.available_models[idx];
+        let model = &state.model_switcher_state.available_models[idx];
         models_by_provider
             .entry(model.provider.as_str())
             .or_default()
@@ -445,9 +449,10 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
 
         // Model items
         for &model_idx in model_indices {
-            let model = &state.available_models[model_idx];
-            let is_selected = model_idx == state.model_switcher_selected;
+            let model = &state.model_switcher_state.available_models[model_idx];
+            let is_selected = model_idx == state.model_switcher_state.is_selected;
             let is_current = state
+                .model_switcher_state
                 .current_model
                 .as_ref()
                 .is_some_and(|m| m.id == model.id);
@@ -466,7 +471,7 @@ fn render_model_list(f: &mut Frame, state: &AppState, filtered_indices: &[usize]
     let height = list_area.height as usize;
     let selected_line = line_to_model_idx
         .iter()
-        .position(|idx| *idx == Some(state.model_switcher_selected))
+        .position(|idx| *idx == Some(state.model_switcher_state.is_selected))
         .unwrap_or(0);
 
     let scroll = if selected_line >= height {

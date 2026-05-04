@@ -238,20 +238,21 @@ fn extract_selected_text_from_lines(selection: &SelectionState, cached_lines: &[
 
 /// Extract selected text from the assembled lines cache (main message area)
 pub fn extract_selected_text(state: &AppState) -> String {
-    let Some((_, cached_lines, _)) = &state.assembled_lines_cache else {
+    let Some((_, cached_lines, _)) = &state.messages_scrolling_state.assembled_lines_cache else {
         return String::new();
     };
 
-    extract_selected_text_from_lines(&state.selection, cached_lines)
+    extract_selected_text_from_lines(&state.message_interaction_state.selection, cached_lines)
 }
 
 /// Extract selected text from the collapsed message lines cache (fullscreen popup)
 pub fn extract_selected_text_from_collapsed(state: &AppState) -> String {
-    let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache else {
+    let Some((_, _, cached_lines)) = &state.messages_scrolling_state.collapsed_message_lines_cache
+    else {
         return String::new();
     };
 
-    extract_selected_text_from_lines(&state.selection, cached_lines)
+    extract_selected_text_from_lines(&state.message_interaction_state.selection, cached_lines)
 }
 
 /// Calculate display width of a line

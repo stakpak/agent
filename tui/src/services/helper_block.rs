@@ -12,12 +12,12 @@ pub fn get_stakpak_version() -> String {
 
 /// Generate a mouse capture hint message based on the terminal type
 pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
-    let status = if state.mouse_capture_enabled {
+    let status = if state.terminal_ui_state.mouse_capture_enabled {
         "enabled"
     } else {
         "disabled"
     };
-    let status_color = if state.mouse_capture_enabled {
+    let status_color = if state.terminal_ui_state.mouse_capture_enabled {
         ThemeColors::success()
     } else {
         ThemeColors::danger()
@@ -42,7 +42,7 @@ pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
 }
 
 pub fn push_status_message(state: &mut AppState) {
-    let status_text = state.account_info.clone();
+    let status_text = state.sessions_state.account_info.clone();
     let version = get_stakpak_version();
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
@@ -90,7 +90,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(format!("  L Name: {}", name)),
         Line::from(""),
     ];
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -102,7 +102,7 @@ pub fn push_usage_message(state: &mut AppState) {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
 
-    let usage = &state.total_session_usage;
+    let usage = &state.usage_tracking_state.total_session_usage;
     let mut lines = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
@@ -183,7 +183,7 @@ pub fn push_usage_message(state: &mut AppState) {
         ]));
     }
 
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -201,33 +201,6 @@ pub fn format_number_with_separator(n: u32) -> String {
         result.push(c);
     }
     result.chars().rev().collect()
-}
-
-pub fn push_memorize_message(state: &mut AppState) {
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            "📝 Memorizing conversation history...",
-            Style::default()
-                .fg(ThemeColors::warning())
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "We're extracting important information from your conversation in the background.",
-            Style::default().fg(Color::Reset),
-        )]),
-        Line::from(vec![Span::styled(
-            "Feel free to continue talking to the agent while this happens!",
-            Style::default().fg(ThemeColors::green()),
-        )]),
-        Line::from(""),
-    ];
-    state.messages.push(Message {
-        id: uuid::Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-        is_collapsed: None,
-    });
-    invalidate_message_lines_cache(state);
 }
 
 pub fn push_help_message(state: &mut AppState) {
@@ -340,7 +313,7 @@ pub fn push_help_message(state: &mut AppState) {
         ]));
     }
     lines.push(Line::from(""));
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -366,7 +339,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
     lines.push(message);
     lines.push(Line::from(vec![Span::raw(" ")]));
 
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -418,7 +391,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
+    state.messages_scrolling_state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
@@ -437,7 +410,10 @@ pub fn push_styled_message(
         Span::styled(icon.to_string(), Style::default().fg(icon_color)),
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
-    state.messages.push(Message::styled(line));
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::styled(line));
     invalidate_message_lines_cache(state);
 }
 
@@ -490,7 +466,7 @@ pub fn welcome_messages(
     ];
 
     // Show allowed tools for debugging
-    // if let Some(tools) = &state.allowed_tools {
+    // if let Some(tools) = &state.configuration_state.allowed_tools {
     //     if tools.is_empty() {
     //         messages.push(Message::info(
     //             "allowed_tools: [] (empty - all tools allowed)",
@@ -510,7 +486,7 @@ pub fn welcome_messages(
     // }
 
     // // Show rulebook configuration
-    // if let Some(rb_config) = &state.rulebook_config {
+    // if let Some(rb_config) = &state.rulebook_switcher_state.rulebook_config {
     //     if let Some(include) = &rb_config.include
     //         && !include.is_empty()
     //     {
@@ -547,7 +523,7 @@ pub fn welcome_messages(
 
     messages.push(Message::info("SPACING_MARKER", None));
     #[cfg(unix)]
-    if state.mouse_capture_enabled {
+    if state.terminal_ui_state.mouse_capture_enabled {
         messages.push(mouse_capture_hint_message(state));
         messages.push(Message::info("SPACING_MARKER", None));
     }
@@ -555,11 +531,11 @@ pub fn welcome_messages(
 }
 
 pub fn push_clear_message(state: &mut AppState) {
-    state.messages.clear();
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
-    let welcome_msg = welcome_messages(state.latest_version.clone(), state);
-    state.messages.extend(welcome_msg);
+    state.messages_scrolling_state.messages.clear();
+    state.input_state.text_area.set_text("");
+    state.input_state.show_helper_dropdown = false;
+    let welcome_msg = welcome_messages(state.configuration_state.latest_version.clone(), state);
+    state.messages_scrolling_state.messages.extend(welcome_msg);
     invalidate_message_lines_cache(state);
 }
 
@@ -592,7 +568,7 @@ pub fn push_issue_message(state: &mut AppState) {
                 ),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
         Err(e) => {
             let message = Message::styled(Line::from(vec![
@@ -604,7 +580,7 @@ pub fn push_issue_message(state: &mut AppState) {
                 Span::raw(" - "),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
     }
     invalidate_message_lines_cache(state);
@@ -623,7 +599,7 @@ pub fn push_support_message(state: &mut AppState) {
                 ),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
         Err(e) => {
             let message = Message::styled(Line::from(vec![
@@ -635,7 +611,7 @@ pub fn push_support_message(state: &mut AppState) {
                 Span::raw(" - "),
                 Span::raw(url),
             ]));
-            state.messages.push(message);
+            state.messages_scrolling_state.messages.push(message);
         }
     }
     invalidate_message_lines_cache(state);

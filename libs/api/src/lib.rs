@@ -23,11 +23,12 @@ pub use stakai::{Model, ModelCost, ModelLimit};
 
 // Re-export storage types
 pub use storage::{
-    BoxedSessionStorage, Checkpoint, CheckpointState, CheckpointSummary, CreateCheckpointRequest,
-    CreateSessionRequest as StorageCreateSessionRequest, CreateSessionResult, ListCheckpointsQuery,
-    ListCheckpointsResult, ListSessionsQuery, ListSessionsResult, LocalStorage, Session,
-    SessionStats, SessionStatus, SessionStorage, SessionSummary, SessionVisibility, StakpakStorage,
-    StorageError, UpdateSessionRequest as StorageUpdateSessionRequest,
+    BackendInfo, BackendKind, BoxedSessionStorage, Checkpoint, CheckpointState, CheckpointSummary,
+    CreateCheckpointRequest, CreateSessionRequest as StorageCreateSessionRequest,
+    CreateSessionResult, ListCheckpointsQuery, ListCheckpointsResult, ListSessionsQuery,
+    ListSessionsResult, LocalStorage, Session, SessionStats, SessionStatus, SessionStorage,
+    SessionSummary, SessionVisibility, StakpakStorage, StorageError,
+    UpdateSessionRequest as StorageUpdateSessionRequest,
 };
 
 /// Find a model by ID string

@@ -519,23 +519,46 @@ NOTES:
         // cache, etc.) are handled by the `warden wrap` CLI handler which calls
         // `prepare_volumes()` → `stakpak_agent_default_mounts()` automatically.
         if enable_sandbox {
-            use stakpak_shared::container::{ensure_named_volumes_exist, stakpak_agent_image};
+            use stakpak_shared::container::{
+                ensure_named_volumes_exist, resolve_ak_store_for_sandbox, stakpak_agent_image,
+                warden_ak_store_args,
+            };
 
-            // Pre-create named volumes to prevent race conditions with parallel subagents
             ensure_named_volumes_exist();
+
+            let host_knowledge_root = resolve_ak_store_for_sandbox().map_err(|e| {
+                McpError::internal_error(
+                    "AK_STORE could not be resolved for sandboxed subagent",
+                    Some(json!({ "error": e })),
+                )
+            })?;
+
+            // Pre-create ~/.stakpak/knowledge on the host so docker doesn't
+            // materialize the bind-mount source as root-owned at first launch.
+            // The AK_STORE-override branch is already create_dir_all'd inside
+            // resolve_ak_store_for_sandbox().
+            if host_knowledge_root.is_none()
+                && let Ok(home) = env::var("HOME")
+            {
+                let default_root = Path::new(&home).join(".stakpak/knowledge");
+                if let Err(e) = std::fs::create_dir_all(&default_root) {
+                    error!(
+                        "failed to pre-create host knowledge dir {}: {}",
+                        default_root.display(),
+                        e
+                    );
+                }
+            }
 
             let stakpak_image = stakpak_agent_image();
 
             let mut warden_command = format!("{} warden wrap {}", current_exe, stakpak_image);
 
-            // Mount the prompt file into the container
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
             warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
 
-            // When a config path was passed, overlay it at the default location
-            // (~/.stakpak/config.toml → /agent/.stakpak/config.toml).
-            // User-specified `-v` volumes are appended after `prepare_volumes()`
-            // defaults, so this overlay takes precedence.
+            // Profile-overlay precedence: user `-v` flags are appended after
+            // prepare_volumes() defaults, so this overlay wins.
             let container_config_path = config_path.and_then(|p| {
                 let path = Path::new(p);
                 if path.exists() && path.is_file() {
@@ -550,7 +573,11 @@ NOTES:
                 }
             });
 
-            // Replace host paths in the inner command with container paths
+            for arg in warden_ak_store_args(host_knowledge_root.as_deref()) {
+                warden_command.push(' ');
+                warden_command.push_str(&arg);
+            }
+
             let inner_command = command.replace(&prompt_file_path, &warden_prompt_path);
             let inner_command = if let (Some(host_cfg), Some(ref container_cfg)) =
                 (config_path, container_config_path)
@@ -560,7 +587,6 @@ NOTES:
                 inner_command
             };
 
-            // wrap uses -- separator before the command
             command = format!("{} -- {}", warden_command, inner_command);
         }
 

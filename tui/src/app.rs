@@ -3,14 +3,9 @@ mod types;
 
 pub use events::{InputEvent, OutputEvent};
 use stakai::Model;
-use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
-use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
-use crate::services::banner::BannerMessage;
-use crate::services::board_tasks::TaskProgress;
-use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::ThemeColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 #[cfg(unix)]
@@ -21,373 +16,51 @@ use crate::services::message::Message;
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
-use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
-use crate::services::text_selection::SelectionState;
+use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
-use ratatui::layout::{Rect, Size};
-use ratatui::text::Line;
-use stakpak_api::models::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 pub struct AppState {
-    // ========== Input & TextArea State ==========
-    pub text_area: TextArea,
-    pub text_area_state: TextAreaState,
-    pub cursor_visible: bool,
-    pub helpers: Vec<HelperCommand>,
-    pub show_helper_dropdown: bool,
-    pub helper_selected: usize,
-    pub helper_scroll: usize,
-    pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>,
-    pub file_search: FileSearch,
-    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
-    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
-    pub is_pasting: bool,
-    pub pasted_long_text: Option<String>,
-    pub pasted_placeholder: Option<String>,
-    pub pending_pastes: Vec<(String, String)>,
-    /// Images attached via pasted file paths (and future clipboard image support).
-    pub attached_images: Vec<AttachedImage>,
-    pub pending_path_start: Option<usize>,
-    pub interactive_commands: Vec<String>,
-
-    // ========== Messages & Scrolling State ==========
-    pub messages: Vec<Message>,
-    pub scroll: usize,
-    pub scroll_to_bottom: bool,
-    pub scroll_to_last_message_start: bool,
-    pub stay_at_bottom: bool,
-    /// Counter to block stay_at_bottom for N frames (used when scroll_to_last_message_start needs to persist)
-    pub block_stay_at_bottom_frames: u8,
-    /// When scroll is locked, this stores how many lines from the end we want to show at top of viewport
-    /// This allows us to maintain relative position even as total_lines changes
-    pub scroll_lines_from_end: Option<usize>,
-    pub content_changed_while_scrolled_up: bool,
-    pub message_lines_cache: Option<MessageLinesCache>,
-    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
-    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
-    pub show_collapsed_messages: bool,
-    pub collapsed_messages_scroll: usize,
-    pub collapsed_messages_selected: usize,
-    pub has_user_messages: bool,
-    /// Per-message rendered line cache for efficient incremental rendering
-    pub per_message_cache: PerMessageCache,
-    /// Assembled lines cache (the final combined output of all message lines)
-    /// Format: (cache_key_hash, lines, generation_counter)
-    pub assembled_lines_cache: Option<(u64, Vec<Line<'static>>, u64)>,
-    /// Cache for visible lines on screen (avoids cloning on every frame)
-    pub visible_lines_cache: Option<VisibleLinesCache>,
-    /// Generation counter for assembled cache (increments on each rebuild)
-    pub cache_generation: u64,
-    /// Performance metrics for render operations
-    pub render_metrics: RenderMetrics,
-    /// Last width used for rendering (to detect width changes)
-    pub last_render_width: usize,
-    /// Maps line ranges to message info for click detection
-    /// Format: Vec<(start_line, end_line, message_id, is_user_message, message_text, user_message_index)>
-    pub line_to_message_map: Vec<(usize, usize, Uuid, bool, String, usize)>,
-
-    // ========== Loading State ==========
-    pub loading: bool,
-    pub loading_type: LoadingType,
-    pub spinner_frame: usize,
-    pub loading_manager: LoadingStateManager,
-
-    // ========== Shell Popup State ==========
-    pub shell_popup_visible: bool,
-    pub shell_popup_expanded: bool,
-    pub shell_popup_scroll: usize,
-    /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
-    pub needs_terminal_clear: bool,
-    pub shell_cursor_visible: bool,
-    pub shell_cursor_blink_timer: u8,
-    pub active_shell_command: Option<ShellCommand>,
-    pub active_shell_command_output: Option<String>,
-    pub waiting_for_shell_input: bool,
-    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
-    pub shell_loading: bool,
-    pub shell_pending_command_value: Option<String>,
-    pub shell_pending_command_executed: bool,
-    pub shell_pending_command_output: Option<String>,
-    // Backward compatibility aliases (to be removed after full migration)
-    pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
-    pub shell_mode_input: String, // unused, kept for compatibility
-    pub is_tool_call_shell_command: bool,
-    pub ondemand_shell_mode: bool,
-    pub shell_pending_command: Option<String>,
-    pub shell_pending_command_output_count: usize,
-    /// Tracks if the initial shell prompt has been shown (before command is typed)
-    pub shell_initial_prompt_shown: bool,
-    /// Tracks if the command has been typed into the shell (after initial prompt)
-    pub shell_command_typed: bool,
-
-    // ========== Tool Call State ==========
-    pub pending_bash_message_id: Option<Uuid>,
-    pub streaming_tool_results: HashMap<Uuid, String>,
-    pub streaming_tool_result_id: Option<Uuid>,
-    pub completed_tool_calls: std::collections::HashSet<Uuid>,
-    pub is_streaming: bool,
-    /// When true, cancellation has been requested (ESC pressed) but the final ToolResult
-    /// hasn't arrived yet. Late StreamToolResult/StreamAssistantMessage events should be ignored.
-    pub cancel_requested: bool,
-    pub latest_tool_call: Option<ToolCall>,
-    /// Stable message ID for the tool call streaming preview block
-    pub tool_call_stream_preview_id: Option<Uuid>,
-    pub retry_attempts: usize,
-    pub max_retry_attempts: usize,
-    pub last_user_message_for_retry: Option<String>,
-    pub is_retrying: bool,
-
-    // ========== Dialog & Approval State ==========
-    pub is_dialog_open: bool,
-    pub dialog_command: Option<ToolCall>,
-    pub dialog_selected: usize,
-    pub dialog_message_id: Option<Uuid>,
-    pub dialog_focused: bool,
-    pub approval_bar: ApprovalBar,
-    pub message_tool_calls: Option<Vec<ToolCall>>,
-    pub message_approved_tools: Vec<ToolCall>,
-    pub message_rejected_tools: Vec<ToolCall>,
-    pub toggle_approved_message: bool,
-    pub show_shortcuts: bool,
-
-    // ========== Sessions State ==========
-    pub sessions: Vec<SessionInfo>,
-    pub session_selected: usize,
-    pub account_info: String,
-
-    // ========== Session Tool Calls Queue ==========
-    pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
-    pub tool_call_execution_order: Vec<String>,
-    pub last_message_tool_calls: Vec<ToolCall>,
-
-    // ========== Profile Switcher State ==========
-    pub show_profile_switcher: bool,
-    pub available_profiles: Vec<String>,
-    pub profile_switcher_selected: usize,
-    pub current_profile_name: String,
-    pub profile_switching_in_progress: bool,
-    pub profile_switch_status_message: Option<String>,
-
-    // ========== Rulebook Switcher State ==========
-    pub show_rulebook_switcher: bool,
-    pub available_rulebooks: Vec<ListRuleBook>,
-    pub selected_rulebooks: std::collections::HashSet<String>,
-    pub rulebook_switcher_selected: usize,
-    pub rulebook_search_input: String,
-    pub filtered_rulebooks: Vec<ListRuleBook>,
-    pub rulebook_config: Option<crate::RulebookConfig>,
-
-    // ========== Model Switcher State ==========
-    pub show_model_switcher: bool,
-    pub available_models: Vec<Model>,
-    pub model_switcher_selected: usize,
-    pub current_model: Option<Model>,
-    pub model_switcher_mode: ModelSwitcherMode,
-    pub model_switcher_search: String,
-    /// Recently used model IDs (most recent first, for display in model switcher)
-    pub recent_models: Vec<String>,
-
-    // ========== Command Palette State ==========
-    pub show_command_palette: bool,
-    pub command_palette_selected: usize,
-    pub command_palette_scroll: usize,
-    pub command_palette_search: String,
-
-    // ========== Shortcuts Popup State ==========
-    pub show_shortcuts_popup: bool,
-    pub shortcuts_scroll: usize,
-    pub shortcuts_popup_mode: ShortcutsPopupMode,
-
-    // ========== File Changes Popup State ==========
-    pub show_file_changes_popup: bool,
-    pub file_changes_selected: usize,
-    pub file_changes_scroll: usize,
-    pub file_changes_search: String,
-
-    // ========== Usage Tracking State ==========
-    pub current_message_usage: LLMTokenUsage,
-    pub total_session_usage: LLMTokenUsage,
-    pub context_usage_percent: u64,
-
-    // ========== Configuration State ==========
-    pub secret_manager: SecretManager,
-    pub latest_version: Option<String>,
-    pub is_git_repo: bool,
-    pub auto_approve_manager: AutoApproveManager,
-    pub allowed_tools: Option<Vec<String>>,
-    pub model: Model,
-    /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
-    pub auth_display_info: (Option<String>, Option<String>, Option<String>),
-    /// Content of init prompt for /init
-    pub init_prompt_content: Option<String>,
-
-    // ========== Misc State ==========
-    pub ctrl_c_pressed_once: bool,
-    pub ctrl_c_timer: Option<std::time::Instant>,
-    pub mouse_capture_enabled: bool,
-    pub terminal_size: Size,
-    pub shell_screen: vt100::Parser,
-    pub shell_scroll: u16,
-    pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
-    pub interactive_shell_message_id: Option<Uuid>,
-    pub shell_interaction_occurred: bool,
-
-    // ========== Text Selection State ==========
-    pub selection: SelectionState,
+    pub input_state: InputState,
+    pub messages_scrolling_state: MessagesScrollingState,
+    pub loading_state: LoadingState,
+    pub shell_popup_state: ShellPopupState,
+    pub tool_call_state: ToolCallState,
+    pub dialog_approval_state: DialogApprovalState,
+    pub sessions_state: SessionsState,
+    pub session_tool_calls_state: SessionToolCallsState,
+    pub profile_switcher_state: ProfileSwitcherState,
+    pub rulebook_switcher_state: RulebookSwitcherState,
+    pub model_switcher_state: ModelSwitcherState,
+    pub command_palette_state: CommandPaletteState,
+    pub shortcuts_panel_state: ShortcutsPanelState,
+    pub file_changes_popup_state: FileChangesPopupState,
+    pub usage_tracking_state: UsageTrackingState,
+    pub configuration_state: ConfigurationState,
+    pub quit_intent_state: QuitIntentState,
+    pub terminal_ui_state: TerminalUiState,
+    pub shell_runtime_state: ShellRuntimeState,
+    pub shell_session_state: ShellSessionState,
+    pub banner_state: BannerState,
     pub toast: Option<Toast>,
-    pub banner_message: Option<BannerMessage>,
-    /// Stores the banner area rect for mouse click detection
-    pub banner_area: Option<Rect>,
-    /// Clickable command regions within the banner: (command_text, bounding_rect)
-    pub banner_click_regions: Vec<(String, Rect)>,
-    /// Clickable dismiss button region within the banner
-    pub banner_dismiss_region: Option<Rect>,
-    /// Auto-scroll direction during drag selection: -1 (up), 0 (none), 1 (down)
-    pub selection_auto_scroll: i32,
-
-    // ========== Message Action Popup State ==========
-    pub show_message_action_popup: bool,
-    pub message_action_popup_selected: usize,
-    pub message_action_popup_position: Option<(u16, u16)>, // (x, y) position for popup
-    pub message_action_target_message_id: Option<Uuid>,    // The user message being acted on
-    pub message_action_target_text: Option<String>,        // The text of the target message
-    pub message_area_y: u16, // Y offset of message area for click detection
-    pub message_area_x: u16, // X offset of padded message area for column mapping
-    pub message_area_height: u16, // Height of message area (set during render for accurate event handling)
-    pub hover_row: Option<u16>,   // Current mouse hover row for debugging
-
-    // ========== Collapsed Popup Geometry (for text selection in fullscreen popup) ==========
-    pub collapsed_popup_area_y: u16, // Y offset of popup content area
-    pub collapsed_popup_area_x: u16, // X offset of popup content area
-    pub collapsed_popup_area_height: u16, // Height of popup content area
-
-    // ========== Input Area State ==========
-    /// Stores the input area content rect for mouse click positioning
-    pub input_content_area: Option<ratatui::layout::Rect>,
-
-    // ========== Side Panel State ==========
-    pub show_side_panel: bool,
-    pub side_panel_focus: SidePanelSection,
-    pub side_panel_section_collapsed: std::collections::HashMap<SidePanelSection, bool>,
-    /// Stores the screen area for each side panel section to handle mouse clicks
-    pub side_panel_areas: HashMap<SidePanelSection, ratatui::layout::Rect>,
-    /// Current session ID for backup paths
-    pub session_id: String,
-    /// Timestamp when session ID was last copied (for "Copied!" feedback)
-    pub session_id_copied_at: Option<std::time::Instant>,
-    pub changeset: Changeset,
-
-    pub todos: Vec<TodoItem>,
-    /// Task progress (completed/total checklist items)
-    pub task_progress: Option<TaskProgress>,
-    pub session_start_time: std::time::Instant,
-
-    // Auto-show side panel tracking
-    pub side_panel_auto_shown: bool,
-
-    /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID or created)
-    pub board_agent_id: Option<String>,
-
-    /// External editor command (vim, nvim, or nano)
-    pub editor_command: String,
-
-    /// Pending file to open in editor (set by handler, consumed by event loop)
-    pub pending_editor_open: Option<String>,
-
-    /// Billing info for the side panel
-    pub billing_info: Option<stakpak_shared::models::billing::BillingResponse>,
-
-    /// Cached pause info for subagent tasks (task_id -> pause_info)
-    /// Used to display what subagents want to do in the approval bar
-    pub subagent_pause_info:
-        HashMap<String, stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    pub message_interaction_state: MessageInteractionState,
+    pub side_panel_state: SidePanelState,
+    pub user_message_queue_state: UserMessageQueueState,
+    pub message_revert_state: MessageRevertState,
+    pub plan_mode_state: PlanModeState,
+    pub plan_review_state: PlanReviewState,
+    pub ask_user_state: AskUserState,
+    pub tool_approval_popup_state: AutoApprovePopupState,
+    pub approval_settings_persistence_state: ApprovalSettingsPersistenceModal,
     /// Handle to the TaskManager for querying background task status (e.g., running subagents)
     pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
     /// Cached count of running/pending background tasks (refreshed on Ctrl+C press)
     pub running_background_tasks: usize,
-    /// Buffered user messages waiting to be sent after streaming completes
-    pub pending_user_messages: VecDeque<PendingUserMessage>,
-
-    // ========== Message Revert State ==========
-    /// Counter for user messages (1-indexed, incremented when user sends a message)
-    /// Used to track which user message triggered file edits for selective revert
-    pub user_message_count: usize,
-    /// Pending revert: truncate backend messages to this user message index when next message is sent
-    /// Set when user selects "Revert" action, consumed when sending the next user message
-    pub pending_revert_index: Option<usize>,
-
-    // ========== Plan Mode State ==========
-    /// Whether plan mode is active (set by /plan command, cleared by /new session)
-    pub plan_mode_active: bool,
-    /// Cached plan metadata from `.stakpak/session/plan.md` front matter
-    pub plan_metadata: Option<crate::services::plan::PlanMetadata>,
-    /// SHA-256 hash of the last-read plan content (for change detection)
-    pub plan_content_hash: Option<String>,
-    /// Previous plan status (for detecting transitions)
-    pub plan_previous_status: Option<crate::services::plan::PlanStatus>,
-    /// Whether plan review was auto-opened for current reviewing transition
-    pub plan_review_auto_opened: bool,
-    /// When set, the "existing plan found" modal is visible.
-    /// Contains the stashed prompt and plan metadata for the modal to display.
-    pub existing_plan_prompt: Option<ExistingPlanPrompt>,
-
-    // ========== Plan Review State ==========
-    /// Whether the plan review overlay is visible
-    pub show_plan_review: bool,
-    /// Scroll offset (line index of the top visible line)
-    pub plan_review_scroll: usize,
-    /// Currently selected line (0-indexed)
-    pub plan_review_cursor_line: usize,
-    /// Cached plan content (loaded when review opens)
-    pub plan_review_content: String,
-    /// Cached split lines of plan content
-    pub plan_review_lines: Vec<String>,
-    /// Cached plan comments (loaded when review opens)
-    pub plan_review_comments: Option<crate::services::plan_comments::PlanComments>,
-    /// Resolved anchors mapping comment IDs to line numbers
-    pub plan_review_resolved_anchors: Vec<(String, crate::services::plan_comments::ResolvedAnchor)>,
-    /// Whether the comment input modal is open
-    pub plan_review_show_comment_modal: bool,
-    /// Text buffer for composing a new comment
-    pub plan_review_comment_input: String,
-    /// Selected comment ID (for reply targeting)
-    pub plan_review_selected_comment: Option<String>,
-    /// Kind of comment modal currently open
-    pub plan_review_modal_kind: Option<crate::services::plan_review::CommentModalKind>,
-    /// Confirmation dialog currently shown (approve, feedback, delete)
-    pub plan_review_confirm: Option<crate::services::plan_review::ConfirmAction>,
-
-    // ========== Ask User Inline Block State ==========
-    /// Whether the ask user interaction is active
-    pub show_ask_user_popup: bool,
-    /// Questions to display in the inline block
-    pub ask_user_questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
-    /// User's answers (question label -> answer)
-    pub ask_user_answers:
-        HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
-    /// Currently selected tab index (question index, or questions.len() for Submit)
-    pub ask_user_current_tab: usize,
-    /// Currently selected option index within the current question
-    pub ask_user_selected_option: usize,
-    /// Custom input text when "Type something..." is selected
-    pub ask_user_custom_input: String,
-    /// The tool call that triggered this (for sending result back)
-    pub ask_user_tool_call: Option<ToolCall>,
-    /// Message ID for the inline ask_user block in the messages list
-    pub ask_user_message_id: Option<Uuid>,
-    /// Whether the ask_user block has keyboard focus (Tab toggles)
-    pub ask_user_focused: bool,
-    /// Multi-select toggle state: question label -> list of currently selected option values
-    pub ask_user_multi_selections: HashMap<String, Vec<String>>,
 }
 
 pub struct AppStateOptions<'a> {
@@ -492,281 +165,124 @@ impl AppState {
         let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
 
         AppState {
-            text_area: TextArea::new(),
-            text_area_state: TextAreaState::default(),
-            cursor_visible: true,
-            messages: Vec::new(), // Will be populated after state is created
-            scroll: 0,
-            scroll_to_bottom: false,
-            scroll_to_last_message_start: false,
-            stay_at_bottom: true,
-            block_stay_at_bottom_frames: 0,
-            scroll_lines_from_end: None,
-            content_changed_while_scrolled_up: false,
-            helpers: helpers.clone(),
-            show_helper_dropdown: false,
-            helper_selected: 0,
-            helper_scroll: 0,
-            filtered_helpers: Vec::new(),
-            filtered_files: Vec::new(),
-            show_shortcuts: false,
-            is_dialog_open: false,
-            dialog_command: None,
-            dialog_selected: 0,
-            loading: false,
-            loading_type: LoadingType::Llm,
-            spinner_frame: 0,
-            sessions: Vec::new(),
-            session_selected: 0,
-            account_info: String::new(),
-            pending_bash_message_id: None,
-            streaming_tool_results: HashMap::new(),
-            streaming_tool_result_id: None,
-            completed_tool_calls: std::collections::HashSet::new(),
-            shell_popup_visible: false,
-            shell_popup_expanded: false,
-            shell_popup_scroll: 0,
-            needs_terminal_clear: false,
-            shell_cursor_visible: true,
-            shell_cursor_blink_timer: 0,
-            active_shell_command: None,
-            active_shell_command_output: None,
-            waiting_for_shell_input: false,
-            is_pasting: false,
-            shell_tool_calls: None,
-            shell_loading: false,
-            shell_pending_command_value: None,
-            shell_pending_command_executed: false,
-            shell_pending_command_output: None,
-            // Backward compatibility aliases
-            show_shell_mode: false,
-            shell_mode_input: String::new(),
-            is_tool_call_shell_command: false,
-            ondemand_shell_mode: false,
-            shell_pending_command: None,
-            shell_pending_command_output_count: 0,
-            shell_initial_prompt_shown: false,
-            shell_command_typed: false,
-            attached_images: Vec::new(),
-            pending_path_start: None,
-            dialog_message_id: None,
-            file_search: FileSearch::default(),
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
-            latest_version: latest_version.clone(),
-            ctrl_c_pressed_once: false,
-            ctrl_c_timer: None,
-            pasted_long_text: None,
-            pasted_placeholder: None,
-            file_search_tx: Some(file_search_tx),
-            file_search_rx: Some(result_rx),
-            is_streaming: false,
-            cancel_requested: false,
-            interactive_commands: crate::constants::INTERACTIVE_COMMANDS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
-            allowed_tools: allowed_tools.cloned(),
-            dialog_focused: false, // Default to messages view focused
-            latest_tool_call: None,
-            tool_call_stream_preview_id: None,
-            retry_attempts: 0,
-            max_retry_attempts: 3,
-            last_user_message_for_retry: None,
-            is_retrying: false,
-            show_collapsed_messages: false,
-            collapsed_messages_scroll: 0,
-            collapsed_messages_selected: 0,
-            is_git_repo,
-            message_lines_cache: None,
-            collapsed_message_lines_cache: None,
-            processed_lines_cache: None,
-            per_message_cache: HashMap::new(),
-            assembled_lines_cache: None,
-            visible_lines_cache: None,
-            cache_generation: 0,
-            render_metrics: RenderMetrics::new(),
-            last_render_width: 0,
-            line_to_message_map: Vec::new(),
-            pending_pastes: Vec::new(),
-            mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
-            loading_manager: LoadingStateManager::new(),
-            has_user_messages: false,
-            message_tool_calls: None,
-            approval_bar: ApprovalBar::new(),
-            message_approved_tools: Vec::new(),
-            message_rejected_tools: Vec::new(),
-            toggle_approved_message: true,
-            terminal_size: Size {
-                width: 0,
-                height: 0,
+            input_state: InputState {
+                text_area: TextArea::new(),
+                text_area_state: TextAreaState::default(),
+                cursor_visible: true,
+                helpers,
+                show_helper_dropdown: false,
+                helper_selected: 0,
+                helper_scroll: 0,
+                filtered_helpers: Vec::new(),
+                filtered_files: Vec::new(),
+                file_search: FileSearch::default(),
+                file_search_tx: Some(file_search_tx),
+                file_search_rx: Some(result_rx),
+                is_pasting: false,
+                pasted_long_text: None,
+                pasted_placeholder: None,
+                pending_pastes: Vec::new(),
+                attached_images: Vec::new(),
+                pending_path_start: None,
+                interactive_commands: crate::constants::INTERACTIVE_COMMANDS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
-            session_tool_calls_queue: std::collections::HashMap::new(),
-            tool_call_execution_order: Vec::new(),
-            last_message_tool_calls: Vec::new(),
-            shell_screen: vt100::Parser::new(24, 80, 1000),
-            shell_scroll: 0,
-            shell_history_lines: Vec::new(),
-            interactive_shell_message_id: None,
-            shell_interaction_occurred: false,
+            loading_state: LoadingState::default(),
+            messages_scrolling_state: MessagesScrollingState::default(),
+            dialog_approval_state: DialogApprovalState::default(),
+            sessions_state: SessionsState::default(),
+            tool_call_state: ToolCallState {
+                max_retry_attempts: 3,
+                ..Default::default()
+            },
+            session_tool_calls_state: SessionToolCallsState::default(),
+            shell_popup_state: ShellPopupState {
+                cursor_visible: true,
+                ..Default::default()
+            },
+            quit_intent_state: QuitIntentState::default(),
+            terminal_ui_state: TerminalUiState::default(),
+            shell_runtime_state: ShellRuntimeState::default(),
+            shell_session_state: ShellSessionState::default(),
 
-            // Text selection initialization
-            selection: SelectionState::default(),
             toast: None,
-            banner_message: None,
-            banner_area: None,
-            banner_click_regions: Vec::new(),
-            banner_dismiss_region: None,
-            selection_auto_scroll: 0,
-            input_content_area: None,
+            banner_state: BannerState::default(),
 
-            // Message action popup initialization
-            show_message_action_popup: false,
-            message_action_popup_selected: 0,
-            message_action_popup_position: None,
-            message_action_target_message_id: None,
-            message_action_target_text: None,
-            message_area_y: 0,
-            message_area_x: 0,
-            message_area_height: 0,
-            hover_row: None,
-
-            collapsed_popup_area_y: 0,
-            collapsed_popup_area_x: 0,
-            collapsed_popup_area_height: 0,
+            // Message interaction initialization
+            message_interaction_state: MessageInteractionState::default(),
 
             // Profile switcher initialization
-            show_profile_switcher: false,
-            available_profiles: Vec::new(),
-            profile_switcher_selected: 0,
-            current_profile_name: "default".to_string(),
-            profile_switching_in_progress: false,
-            profile_switch_status_message: None,
-            rulebook_config: None,
+            profile_switcher_state: ProfileSwitcherState {
+                current_profile_name: "default".to_string(),
+                ..Default::default()
+            },
 
             // Shortcuts popup initialization
-            show_shortcuts_popup: false,
-            shortcuts_scroll: 0,
-            shortcuts_popup_mode: ShortcutsPopupMode::default(),
+            shortcuts_panel_state: ShortcutsPanelState::default(),
             // Rulebook switcher initialization
-            show_rulebook_switcher: false,
-            available_rulebooks: Vec::new(),
-            selected_rulebooks: std::collections::HashSet::new(),
-            rulebook_switcher_selected: 0,
-            rulebook_search_input: String::new(),
-            filtered_rulebooks: Vec::new(),
+            rulebook_switcher_state: RulebookSwitcherState::default(),
 
             // Model switcher initialization
-            show_model_switcher: false,
-            available_models: Vec::new(),
-            model_switcher_selected: 0,
-            current_model: None,
-            model_switcher_mode: ModelSwitcherMode::default(),
-            model_switcher_search: String::new(),
-            recent_models,
+            model_switcher_state: ModelSwitcherState {
+                recent_models,
+                ..Default::default()
+            },
             // Command palette initialization
-            show_command_palette: false,
-            command_palette_selected: 0,
-            command_palette_scroll: 0,
-            command_palette_search: String::new(),
+            command_palette_state: CommandPaletteState::default(),
 
             // File changes popup initialization
-            show_file_changes_popup: false,
-            file_changes_selected: 0,
-            file_changes_scroll: 0,
-            file_changes_search: String::new(),
+            file_changes_popup_state: FileChangesPopupState::default(),
+
+            // tool approval popup initialization
+            tool_approval_popup_state: AutoApprovePopupState::default(),
+
+            // Policy persistence modal initialization
+            approval_settings_persistence_state: ApprovalSettingsPersistenceModal::default(),
 
             // Usage tracking
-            current_message_usage: LLMTokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
+            usage_tracking_state: UsageTrackingState::default(),
+
+            // Configuration state
+            configuration_state: ConfigurationState {
+                secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+                latest_version: latest_version.clone(),
+                is_git_repo,
+                auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
+                allowed_tools: allowed_tools.cloned(),
+                model,
+                auth_display_info,
+                init_prompt_content,
             },
-            total_session_usage: LLMTokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
-            },
-            context_usage_percent: 0,
-            model,
 
             // Side panel initialization
-            show_side_panel: false,
-            side_panel_focus: SidePanelSection::Context,
-            side_panel_section_collapsed: {
-                let mut collapsed = std::collections::HashMap::new();
-                collapsed.insert(SidePanelSection::Context, false); // Always expanded
-                collapsed.insert(SidePanelSection::Billing, false); // Expanded by default
-                collapsed.insert(SidePanelSection::Tasks, false); // Expanded by default
-                collapsed.insert(SidePanelSection::Changeset, false); // Expanded by default
-                collapsed
+            side_panel_state: SidePanelState {
+                board_agent_id,
+                editor_command: crate::services::editor::detect_editor(editor_command)
+                    .unwrap_or_else(|| "nano".to_string()),
+                ..Default::default()
             },
-            side_panel_areas: HashMap::new(),
-            changeset: Changeset::new(),
-            todos: Vec::new(),
-            task_progress: None,
-            session_start_time: std::time::Instant::now(),
-            side_panel_auto_shown: false,
-            session_id: String::new(), // Will be set when session starts
-            session_id_copied_at: None,
-            board_agent_id,
-            editor_command: crate::services::editor::detect_editor(editor_command)
-                .unwrap_or_else(|| "nano".to_string()),
-            pending_editor_open: None,
-            pending_user_messages: VecDeque::new(),
-            billing_info: None,
-            auth_display_info,
-
-            // Plan mode initialization
-            plan_mode_active: false,
-            plan_metadata: None,
-            plan_content_hash: None,
-            plan_previous_status: None,
-            plan_review_auto_opened: false,
-            existing_plan_prompt: None,
-
-            // Plan review initialization
-            show_plan_review: false,
-            plan_review_scroll: 0,
-            plan_review_cursor_line: 0,
-            plan_review_content: String::new(),
-            plan_review_lines: Vec::new(),
-            plan_review_comments: None,
-            plan_review_resolved_anchors: Vec::new(),
-            plan_review_show_comment_modal: false,
-            plan_review_comment_input: String::new(),
-            plan_review_selected_comment: None,
-            plan_review_modal_kind: None,
-            plan_review_confirm: None,
-            subagent_pause_info: HashMap::new(),
+            user_message_queue_state: UserMessageQueueState::default(),
+            message_revert_state: MessageRevertState::default(),
             task_manager_handle,
             running_background_tasks: 0,
-            init_prompt_content,
 
-            // Message revert state initialization
-            user_message_count: 0,
-            pending_revert_index: None,
-
+            // Plan mode/review initialization
+            plan_mode_state: PlanModeState::default(),
+            plan_review_state: PlanReviewState::default(),
             // Ask User inline block initialization
-            show_ask_user_popup: false,
-            ask_user_questions: Vec::new(),
-            ask_user_answers: HashMap::new(),
-            ask_user_current_tab: 0,
-            ask_user_selected_option: 0,
-            ask_user_custom_input: String::new(),
-            ask_user_tool_call: None,
-            ask_user_message_id: None,
-            ask_user_focused: true,
-            ask_user_multi_selections: HashMap::new(),
+            ask_user_state: AskUserState {
+                is_focused: true,
+                ..Default::default()
+            },
         }
     }
 
     pub fn update_session_empty_status(&mut self) {
-        // Check if there are any user messages (not just any messages)
-        let session_empty = !self.has_user_messages && self.text_area.text().is_empty();
-        self.text_area.set_session_empty(session_empty);
+        let session_empty = !self.messages_scrolling_state.has_user_messages
+            && self.input_state.text_area.text().is_empty();
+        self.input_state.text_area.set_session_empty(session_empty);
     }
 
     /// Poll `.stakpak/session/plan.md` for changes and update cached metadata.
@@ -783,7 +299,7 @@ impl AppState {
         use crate::services::plan;
 
         // Only poll when plan mode is active
-        if !self.plan_mode_active {
+        if !self.plan_mode_state.is_active {
             return None;
         }
 
@@ -792,9 +308,9 @@ impl AppState {
 
         let Ok(content) = std::fs::read_to_string(&path) else {
             // File doesn't exist (yet) — clear stale cache
-            if self.plan_metadata.is_some() {
-                self.plan_metadata = None;
-                self.plan_content_hash = None;
+            if self.plan_mode_state.metadata.is_some() {
+                self.plan_mode_state.metadata = None;
+                self.plan_mode_state.content_hash = None;
             }
             return None;
         };
@@ -802,21 +318,21 @@ impl AppState {
         let new_hash = plan::compute_plan_hash(&content);
 
         // Skip re-parse if content unchanged
-        if self.plan_content_hash.as_deref() == Some(&new_hash) {
+        if self.plan_mode_state.content_hash.as_deref() == Some(&new_hash) {
             return None;
         }
 
-        self.plan_content_hash = Some(new_hash);
+        self.plan_mode_state.content_hash = Some(new_hash);
         let new_meta = plan::parse_plan_front_matter(&content);
-        self.plan_metadata = new_meta.clone();
+        self.plan_mode_state.metadata = new_meta.clone();
 
         // Detect status transitions
         if let Some(ref meta) = new_meta {
             let new_status = meta.status;
-            let old_status = self.plan_previous_status;
+            let old_status = self.plan_mode_state.previous_status;
 
             if old_status != Some(new_status) {
-                self.plan_previous_status = Some(new_status);
+                self.plan_mode_state.previous_status = Some(new_status);
                 return Some((old_status, new_status));
             }
         }
@@ -824,43 +340,45 @@ impl AppState {
         None
     }
 
-    // Convenience methods for accessing input and cursor
+    // Convenience methods for accessing input and cursor (using input_state)
     pub fn input(&self) -> &str {
-        self.text_area.text()
+        self.input_state.text_area.text()
     }
 
     pub fn cursor_position(&self) -> usize {
-        self.text_area.cursor()
+        self.input_state.text_area.cursor()
     }
 
     pub fn set_input(&mut self, input: &str) {
-        self.text_area.set_text(input);
+        self.input_state.text_area.set_text(input);
     }
 
     pub fn set_cursor_position(&mut self, pos: usize) {
-        self.text_area.set_cursor(pos);
+        self.input_state.text_area.set_cursor(pos);
     }
 
     pub fn insert_char(&mut self, c: char) {
-        self.text_area.insert_str(&c.to_string());
+        self.input_state.text_area.insert_str(&c.to_string());
     }
 
     pub fn insert_str(&mut self, s: &str) {
-        self.text_area.insert_str(s);
+        self.input_state.text_area.insert_str(s);
     }
 
     pub fn clear_input(&mut self) {
-        self.text_area.set_text("");
+        self.input_state.text_area.set_text("");
     }
 
     /// Check if user input should be blocked (during profile switch)
     pub fn is_input_blocked(&self) -> bool {
-        self.profile_switching_in_progress
+        self.profile_switcher_state.switching_in_progress
     }
 
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
-        self.messages.push(Message::plain_text("SPACING_MARKER"));
+        self.messages_scrolling_state
+            .messages
+            .push(Message::plain_text("SPACING_MARKER"));
         push_styled_message(
             self,
             &command,
@@ -868,14 +386,16 @@ impl AppState {
             SHELL_PROMPT_PREFIX,
             ThemeColors::magenta(),
         );
-        self.messages.push(Message::plain_text("SPACING_MARKER"));
-        let rows = if self.terminal_size.height > 0 {
-            self.terminal_size.height
+        self.messages_scrolling_state
+            .messages
+            .push(Message::plain_text("SPACING_MARKER"));
+        let rows = if self.terminal_ui_state.terminal_size.height > 0 {
+            self.terminal_ui_state.terminal_size.height
         } else {
             24
         };
-        let cols = if self.terminal_size.width > 0 {
-            self.terminal_size.width
+        let cols = if self.terminal_ui_state.terminal_size.width > 0 {
+            self.terminal_ui_state.terminal_size.width
         } else {
             80
         };
@@ -892,9 +412,9 @@ impl AppState {
         #[cfg(not(unix))]
         let shell_cmd = run_background_shell_command(command.clone(), shell_tx);
 
-        self.active_shell_command = Some(shell_cmd.clone());
-        self.active_shell_command_output = Some(String::new());
-        self.shell_screen = vt100::Parser::new(rows, cols, 0);
+        self.shell_popup_state.active_shell_command = Some(shell_cmd.clone());
+        self.shell_popup_state.active_shell_command_output = Some(String::new());
+        self.shell_runtime_state.screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {
@@ -920,20 +440,23 @@ impl AppState {
 
     // --- Poll file_search results and update state (for @ file completion only) ---
     pub fn poll_file_search_results(&mut self) {
-        if let Some(rx) = &mut self.file_search_rx {
+        if let Some(rx) = &mut self.input_state.file_search_rx {
             while let Ok(result) = rx.try_recv() {
                 // Get input text before any mutable operations
-                let input_text = self.text_area.text().to_string();
+                let input_text = self.input_state.text_area.text().to_string();
 
                 let filtered_files = result.filtered_files.clone();
-                self.filtered_files = filtered_files;
-                self.file_search.filtered_files = self.filtered_files.clone();
-                self.file_search.is_file_mode = !self.filtered_files.is_empty();
-                self.file_search.trigger_char = if !self.filtered_files.is_empty() {
-                    Some('@')
-                } else {
-                    None
-                };
+                self.input_state.filtered_files = filtered_files;
+                self.input_state.file_search.filtered_files =
+                    self.input_state.filtered_files.clone();
+                self.input_state.file_search.is_file_mode =
+                    !self.input_state.filtered_files.is_empty();
+                self.input_state.file_search.trigger_char =
+                    if !self.input_state.filtered_files.is_empty() {
+                        Some('@')
+                    } else {
+                        None
+                    };
 
                 // NOTE: Slash command filtering (filtered_helpers) is now done synchronously
                 // in handle_input_changed / handle_input_backspace to avoid race conditions
@@ -943,29 +466,29 @@ impl AppState {
                 // Show dropdown for @ file triggers (slash command dropdown is managed synchronously)
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                if has_at_trigger && !self.waiting_for_shell_input {
-                    self.show_helper_dropdown = true;
+                if has_at_trigger && !self.shell_popup_state.waiting_for_shell_input {
+                    self.input_state.show_helper_dropdown = true;
                 }
                 // If we have file results, reset selection if out of bounds
-                if !self.filtered_files.is_empty()
-                    && self.helper_selected >= self.filtered_files.len()
+                if !self.input_state.filtered_files.is_empty()
+                    && self.input_state.helper_selected >= self.input_state.filtered_files.len()
                 {
-                    self.helper_selected = 0;
+                    self.input_state.helper_selected = 0;
                 }
 
                 // Don't overwrite show_helper_dropdown for slash commands —
                 // that state is already set synchronously by the input handlers.
                 // Only hide if input is completely empty (safety net).
                 if input_text.is_empty() {
-                    self.show_helper_dropdown = false;
+                    self.input_state.show_helper_dropdown = false;
                 }
             }
         }
     }
     pub fn auto_show_side_panel(&mut self) {
-        if !self.side_panel_auto_shown && !self.show_side_panel {
-            self.show_side_panel = true;
-            self.side_panel_auto_shown = true;
+        if !self.side_panel_state.auto_shown && !self.side_panel_state.is_shown {
+            self.side_panel_state.is_shown = true;
+            self.side_panel_state.auto_shown = true;
         }
     }
 }

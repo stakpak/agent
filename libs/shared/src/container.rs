@@ -11,6 +11,24 @@ pub fn stakpak_agent_image() -> String {
         .unwrap_or_else(|_| format!("ghcr.io/stakpak/agent:v{}", env!("CARGO_PKG_VERSION")))
 }
 
+/// Canonical path of the AK knowledge store inside the agent container.
+/// Both the default mount and the `AK_STORE`-override mount land here so the
+/// in-container `ak` resolves to the same path regardless of host layout.
+pub fn agent_knowledge_store_path() -> &'static str {
+    "/home/agent/.stakpak/knowledge"
+}
+
+/// Host-side part of a volume mount (everything before the first `:`).
+pub fn volume_host_part(vol: &str) -> &str {
+    vol.split(':').next().unwrap_or(vol)
+}
+
+/// Container-side path of a volume mount (segment after the first `:`).
+/// Falls back to the whole string when the format is unexpected.
+pub fn volume_container_part(vol: &str) -> &str {
+    vol.split(':').nth(1).unwrap_or(vol)
+}
+
 /// Default volume mounts for the stakpak agent container.
 ///
 /// Single source of truth for every path the container needs.
@@ -22,6 +40,8 @@ pub fn stakpak_agent_default_mounts() -> Vec<String> {
         "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
         "~/.stakpak/auth.toml:/home/agent/.stakpak/auth.toml:ro".to_string(),
         "~/.stakpak/data/local.db:/home/agent/.stakpak/data/local.db".to_string(),
+        // AK knowledge store — RW so sandboxed subagents can persist entries to the host.
+        format!("~/.stakpak/knowledge:{}", agent_knowledge_store_path()),
         "~/.agent-board/data.db:/home/agent/.agent-board/data.db".to_string(),
         // Working directory
         "./:/agent:ro".to_string(),
@@ -56,6 +76,61 @@ pub fn stakpak_agent_default_mounts() -> Vec<String> {
     ]
 }
 
+/// Resolve the host-side AK knowledge store directory for a sandboxed subagent.
+///
+/// Returns:
+/// - `Ok(None)` when `AK_STORE` is unset — the caller falls back to the default
+///   mount entry from [`stakpak_agent_default_mounts`].
+/// - `Ok(Some(path))` with an absolute, canonicalized host path when `AK_STORE`
+///   is set and resolves cleanly.
+/// - `Err(_)` with a message naming the offending path when `AK_STORE` is set but
+///   cannot be canonicalized (e.g. broken symlink, missing parent).
+///
+/// Tilde-prefixed paths are expanded against `$HOME` before canonicalization so
+/// values like `AK_STORE=~/my-store` work as users expect.
+pub fn resolve_ak_store_for_sandbox() -> Result<Option<std::path::PathBuf>, String> {
+    let raw = match std::env::var_os("AK_STORE") {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let raw_str = raw.to_string_lossy().to_string();
+    if raw_str.is_empty() {
+        return Ok(None);
+    }
+
+    let expanded = if let Some(rest) = raw_str.strip_prefix("~/") {
+        let home = std::env::var("HOME")
+            .map_err(|_| format!("AK_STORE='{raw_str}' uses '~' but $HOME is not set"))?;
+        std::path::PathBuf::from(home).join(rest)
+    } else if raw_str == "~" {
+        std::path::PathBuf::from(
+            std::env::var("HOME")
+                .map_err(|_| format!("AK_STORE='{raw_str}' uses '~' but $HOME is not set"))?,
+        )
+    } else {
+        std::path::PathBuf::from(&raw_str)
+    };
+
+    // create_dir_all so a fresh AK_STORE path can be canonicalized without a
+    // confusing NotFound, matching the host store's "create on first write".
+    std::fs::create_dir_all(&expanded).map_err(|e| {
+        format!(
+            "AK_STORE='{raw_str}' could not be created at {}: {e}",
+            expanded.display()
+        )
+    })?;
+
+    let canonical = std::fs::canonicalize(&expanded).map_err(|e| {
+        format!(
+            "AK_STORE='{raw_str}' could not be resolved to an absolute path ({}): {e}",
+            expanded.display()
+        )
+    })?;
+
+    Ok(Some(canonical))
+}
+
 /// Expand `~` to `$HOME` in a volume mount string.
 pub fn expand_volume_path(volume: &str) -> String {
     if (volume.starts_with("~/") || volume.starts_with("~:"))
@@ -77,13 +152,31 @@ pub fn is_named_volume(host_part: &str) -> bool {
         && !host_part.contains('/')
 }
 
+/// Warden CLI flags that pin the AK knowledge store inside the sandboxed
+/// container. Returns an empty Vec when no host override is supplied — the
+/// caller then relies on the default mount in [`stakpak_agent_default_mounts`].
+pub fn warden_ak_store_args(host_knowledge_root: Option<&std::path::Path>) -> Vec<String> {
+    match host_knowledge_root {
+        Some(host_path) => {
+            let target = agent_knowledge_store_path();
+            vec![
+                "--volume".to_string(),
+                format!("{}:{target}", host_path.display()),
+                "--env".to_string(),
+                format!("AK_STORE={target}"),
+            ]
+        }
+        None => Vec::new(),
+    }
+}
+
 /// Pre-create any Docker named volumes found in [`stakpak_agent_default_mounts`].
 ///
 /// Running `docker volume create` is idempotent and prevents a race condition
 /// when multiple sandbox containers first-use the same named volume in parallel.
 pub fn ensure_named_volumes_exist() {
     for vol in stakpak_agent_default_mounts() {
-        let host_part = vol.split(':').next().unwrap_or(&vol);
+        let host_part = volume_host_part(&vol);
         if is_named_volume(host_part) {
             let _ = Command::new("docker")
                 .args(["volume", "create", host_part])
@@ -287,5 +380,155 @@ pub fn get_container_host_port(container_id: &str, container_port: u16) -> Resul
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Err(format!("Failed to get container port: {}", stderr))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // ENV_LOCK serializes tests that mutate process-wide env vars (AK_STORE,
+    // HOME). All `unsafe { std::env::set_var / remove_var }` calls below are
+    // sound because the lock guarantees no concurrent reader exists in this
+    // suite.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn warden_ak_store_args_empty_when_no_override() {
+        assert!(warden_ak_store_args(None).is_empty());
+    }
+
+    #[test]
+    fn warden_ak_store_args_emits_volume_and_env_when_override_set() {
+        let host = std::path::PathBuf::from("/tmp/custom-ak");
+        let args = warden_ak_store_args(Some(&host));
+        let target = agent_knowledge_store_path();
+        assert_eq!(
+            args,
+            vec![
+                "--volume".to_string(),
+                format!("/tmp/custom-ak:{target}"),
+                "--env".to_string(),
+                format!("AK_STORE={target}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn volume_part_helpers_split_at_first_colon() {
+        assert_eq!(volume_host_part("./:/agent:ro"), "./");
+        assert_eq!(volume_container_part("./:/agent:ro"), "/agent");
+        assert_eq!(volume_host_part("named-vol"), "named-vol");
+        assert_eq!(volume_container_part("named-vol"), "named-vol");
+    }
+
+    #[test]
+    fn knowledge_store_mount_present_and_rw() {
+        let mounts = stakpak_agent_default_mounts();
+        let suffix = format!(":{}", agent_knowledge_store_path());
+        let entry = mounts
+            .iter()
+            .find(|v| v.ends_with(&suffix))
+            .unwrap_or_else(|| panic!("knowledge store mount missing: {mounts:?}"));
+        assert!(
+            entry.starts_with("~/.stakpak/knowledge:"),
+            "host side should be ~/.stakpak/knowledge: {entry}"
+        );
+        assert!(
+            !entry.ends_with(":ro"),
+            "knowledge store mount must be RW (no :ro suffix): {entry}"
+        );
+    }
+
+    #[test]
+    fn resolve_ak_store_returns_none_when_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("AK_STORE");
+        }
+        assert_eq!(resolve_ak_store_for_sandbox().unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_ak_store_expands_tilde() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store_subdir = "ak-store-tilde-test";
+        let expected = tmp.path().join(store_subdir);
+        unsafe {
+            std::env::set_var("HOME", tmp.path());
+            std::env::set_var("AK_STORE", format!("~/{store_subdir}"));
+        }
+        let resolved = resolve_ak_store_for_sandbox().unwrap().unwrap();
+        // canonicalize: macOS /var → /private/var.
+        let expected_canonical = std::fs::canonicalize(&expected).unwrap();
+        assert_eq!(resolved, expected_canonical);
+        unsafe {
+            std::env::remove_var("AK_STORE");
+        }
+    }
+
+    #[test]
+    fn resolve_ak_store_canonicalizes_relative_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store_dir = tmp.path().join("relstore");
+        std::fs::create_dir_all(&store_dir).unwrap();
+        unsafe {
+            std::env::set_var("AK_STORE", store_dir.to_str().unwrap());
+        }
+        let resolved = resolve_ak_store_for_sandbox().unwrap().unwrap();
+        assert!(
+            resolved.is_absolute(),
+            "resolved path must be absolute: {resolved:?}"
+        );
+        let expected_canonical = std::fs::canonicalize(&store_dir).unwrap();
+        assert_eq!(resolved, expected_canonical);
+        unsafe {
+            std::env::remove_var("AK_STORE");
+        }
+    }
+
+    #[test]
+    fn resolve_ak_store_creates_missing_directory() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store_dir = tmp.path().join("does-not-exist-yet");
+        assert!(!store_dir.exists());
+        unsafe {
+            std::env::set_var("AK_STORE", store_dir.to_str().unwrap());
+        }
+        let resolved = resolve_ak_store_for_sandbox().unwrap().unwrap();
+        assert!(
+            store_dir.exists(),
+            "AK_STORE target should be created on resolve"
+        );
+        assert_eq!(resolved, std::fs::canonicalize(&store_dir).unwrap());
+        unsafe {
+            std::env::remove_var("AK_STORE");
+        }
+    }
+
+    #[test]
+    fn resolve_ak_store_fails_when_parent_unreachable() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // A non-directory file as parent → both mkdir and canonicalize fail,
+        // so the resolver hits its error path.
+        let tmp = tempfile::tempdir().unwrap();
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let bad = blocker.join("nested-store");
+        unsafe {
+            std::env::set_var("AK_STORE", bad.to_str().unwrap());
+        }
+        let err = resolve_ak_store_for_sandbox().unwrap_err();
+        assert!(
+            err.contains("AK_STORE="),
+            "error should name the offending env value: {err}"
+        );
+        unsafe {
+            std::env::remove_var("AK_STORE");
+        }
     }
 }

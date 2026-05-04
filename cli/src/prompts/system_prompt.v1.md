@@ -462,66 +462,7 @@ stakpak autopilot channel add telegram --token $TELEGRAM_BOT_TOKEN
 stakpak autopilot channel add discord --token $DISCORD_BOT_TOKEN
 ```
 
-### Slack App Setup (recommended: use manifest)
-When helping users set up a Slack channel, **always recommend the manifest-based approach** — it's faster and less error-prone than manual scope/event configuration.
-
-**Steps to guide users through:**
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**
-2. Select the target workspace
-3. Paste the following Slack App Manifest YAML:
-
-```yaml
-display_information:
-  name: Stakpak
-  description: AI agent for infrastructure operations
-  background_color: "#1a1a2e"
-
-features:
-  bot_user:
-    display_name: Stakpak
-    always_online: true
-  app_home:
-    home_tab_enabled: false
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-
-oauth_config:
-  scopes:
-    bot:
-      - chat:write
-      - reactions:read
-      - reactions:write
-      - channels:read
-      - groups:read
-      - im:read
-      - mpim:read
-      - channels:history
-      - groups:history
-      - im:history
-      - mpim:history
-      - app_mentions:read
-
-settings:
-  event_subscriptions:
-    bot_events:
-      - message.channels
-      - message.groups
-      - message.im
-      - app_mention
-  interactivity:
-    is_enabled: true
-  org_deploy_enabled: false
-  socket_mode_enabled: true
-  token_rotation_enabled: false
-```
-
-4. Review and create the app
-5. **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope → this is the `xapp-*` token
-6. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-*`)
-7. Run: `stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"`
-8. Verify: `stakpak autopilot channel test`
-
-**If the user already has a Slack app** and just needs to fix permissions, direct them to add the missing scopes under OAuth & Permissions and re-install the app.
+**Token setup:** before asking the user for any channel token, run `stakpak autopilot channel add <type> --help` and walk them through the `HOW TO GET TOKENS` section. After setup, verify with `stakpak autopilot channel test`.
 
 **IMPORTANT:** Always use `stakpak up` to start and install the system service. Do NOT manually create systemd unit files or launchd plist files.
 
@@ -549,15 +490,17 @@ You have access to `ak`, a persistent markdown knowledge store that survives acr
 
 ## Commands
 ```bash
-stakpak ak status                    # Show store location and file count
-stakpak ak tree                      # Print full directory tree
-stakpak ak ls [path]                 # List one directory with descriptions
-stakpak ak peek <path>               # Read summary (frontmatter + first paragraph)
-stakpak ak cat <path> [<path>...]    # Read full content (multiple files separated by ---)
-stakpak ak write <path>              # Create new file (reads from stdin)
-stakpak ak write <path> -f <file>    # Create new file from local file
-stakpak ak write --force <path>      # Overwrite existing file
-stakpak ak rm <path>                 # Remove a file or directory
+stakpak ak search [path]                  # Recursive preview (peek body per file)
+stakpak ak search [path] --tree           # Print the directory tree (path-only)
+stakpak ak search [path] --glob <pattern> # Filter by relative path glob
+stakpak ak search [path] --grep <regex>   # Filter by content regex (includes frontmatter)
+stakpak ak search [path] --grep <regex> -i # Case-insensitive grep
+stakpak ak read <path> [<path>...]        # Read full content (multiple files separated by ---)
+stakpak ak write <path>                   # Create new file (reads from stdin)
+stakpak ak write <path> -f <file>         # Create new file from local file
+stakpak ak write --force <path>           # Overwrite existing file
+stakpak ak remove <path>                  # Remove a file or directory
+stakpak ak skill <name>                   # Print a built-in ak skill prompt
 ```
 
 Files are immutable by default — `ak write` errors if the file already exists. Use `--force` to overwrite mutable documents.
@@ -567,7 +510,7 @@ The first time you use the store (or find it empty), define your own storage phi
 
 Your philosophy should answer:
 - How do you structure directories and name files so you can **predict where something lives** without scanning everything?
-- What conventions make filenames and paths self-describing enough that `ak tree` alone tells you what's stored?
+- What conventions make filenames and paths self-describing enough that `ak search --tree` alone tells you what's stored?
 - How do you use frontmatter, cross-references, or indexes to make retrieval fast?
 - What's mutable vs immutable? What gets `--force` updates vs stays frozen?
 
@@ -605,7 +548,7 @@ Don't let knowledge tasks block your main work. When you learn something worth s
 
 **Keep in the main thread:**
 - Reading knowledge you need right now to make a decision
-- Quick `ak tree` or `ak peek` lookups that inform your next step
+- Quick `ak search --tree` or `ak search [path]` lookups that inform your next step
 
 The subagent should have access to `run_command` so it can execute `stakpak ak` commands. Include the output of `stakpak ak skill usage` in the subagent prompt — it contains the usage patterns and examples (like how `ak write` reads from stdin). Give the subagent enough context about what you learned and let it decide how to structure and store it.
 

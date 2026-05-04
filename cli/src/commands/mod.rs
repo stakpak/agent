@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::config::AppConfig;
-use clap::Subcommand;
+use clap::{CommandFactory, Subcommand};
 use serde::{Deserialize, Serialize};
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 
@@ -16,6 +16,7 @@ pub mod autopilot;
 pub mod board;
 pub mod browser;
 pub mod mcp;
+pub mod sessions;
 pub mod warden;
 pub mod watch;
 
@@ -24,6 +25,7 @@ use autopilot::{StartArgs, StopArgs};
 pub use auth::AuthCommands;
 pub use autopilot::AutopilotCommands;
 pub use mcp::McpCommands;
+pub use sessions::SessionsCommands;
 
 /// Frontmatter structure for rulebook metadata
 #[derive(Deserialize, Serialize)]
@@ -198,6 +200,10 @@ pub enum Commands {
     #[command(subcommand)]
     Autopilot(AutopilotCommands),
 
+    /// List and inspect past sessions
+    #[command(subcommand, alias = "session")]
+    Sessions(SessionsCommands),
+
     /// Start autopilot — auto-configures on first run (alias: stakpak autopilot up)
     Up {
         #[command(flatten)]
@@ -208,6 +214,16 @@ pub enum Commands {
     Down {
         #[command(flatten)]
         args: StopArgs,
+    },
+
+    /// Generate shell completion scripts
+    ///
+    /// Prints a completion script for the given shell to stdout. Source or
+    /// install it according to your shell's documentation.
+    Completion {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
 }
 
@@ -253,6 +269,7 @@ impl Commands {
                 | Commands::Set { .. }
                 | Commands::Config(_)
                 | Commands::Version
+                | Commands::Completion { .. }
                 | Commands::Update
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
@@ -511,6 +528,9 @@ impl Commands {
             Commands::Autopilot(autopilot_command) => {
                 autopilot_command.run(config).await?;
             }
+            Commands::Sessions(sessions_command) => {
+                sessions_command.run(config).await?;
+            }
             Commands::Up { args } => {
                 AutopilotCommands::Up {
                     args,
@@ -570,6 +590,14 @@ impl Commands {
                     eprintln!("ACP agent failed: {}", e);
                     std::process::exit(1);
                 }
+            }
+            Commands::Completion { shell } => {
+                clap_complete::generate(
+                    shell,
+                    &mut crate::Cli::command(),
+                    "stakpak",
+                    &mut std::io::stdout(),
+                );
             }
         }
         Ok(())

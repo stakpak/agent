@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if state.is_pasting {
+    if state.input_state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
             Style::default().fg(ThemeColors::dark_gray()),
@@ -18,7 +18,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
         return;
     }
-    if state.ctrl_c_pressed_once && state.ctrl_c_timer.is_some() {
+    if state.quit_intent_state.ctrl_c_pressed_once && state.quit_intent_state.ctrl_c_timer.is_some() {
         let hint_text = if state.running_background_tasks > 0 {
             let task_label = if state.running_background_tasks == 1 {
                 "task"
@@ -40,7 +40,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode && !state.is_dialog_open {
+    if state.shell_popup_state.is_expanded && !state.dialog_approval_state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
             Style::default().fg(ThemeColors::magenta()),
@@ -49,7 +49,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shortcuts && state.input().is_empty() {
+    if state.dialog_approval_state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
             Line::from("$ shell . / commands . ctrl+s shortcuts"),
             Line::from(format!(
@@ -60,19 +60,26 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget =
             Paragraph::new(shortcuts).style(Style::default().fg(ThemeColors::dark_gray()));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.is_dialog_open && state.input().is_empty() {
+    } else if !state.dialog_approval_state.is_dialog_open && state.input().is_empty() {
         // Use current_model if set (from streaming), otherwise use default model
-        let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+        let active_model = state
+            .model_switcher_state
+            .current_model
+            .as_ref()
+            .unwrap_or(&state.configuration_state.model);
         let max_tokens = active_model.limit.context as u32;
         // Use current message's prompt_tokens for context window warnings
         // (prompt_tokens represents the actual context size, not accumulated across messages)
-        let current_context = state.current_message_usage.prompt_tokens;
+        let current_context = state
+            .usage_tracking_state
+            .current_message_usage
+            .prompt_tokens;
         let high_cost_warning = current_context >= (max_tokens as f64 * 0.9) as u32;
         let approaching_max = (current_context as f64 / max_tokens as f64) >= 0.8; // Default threshold
 
         {
             #[cfg(unix)]
-            let select_hint = if state.mouse_capture_enabled {
+            let select_hint = if state.terminal_ui_state.mouse_capture_enabled {
                 "Fn/Option/Shift + drag to select"
             } else {
                 ""
@@ -83,14 +90,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
             // Left side: loader if loading, otherwise empty
             let mut left_spans = Vec::new();
-            if state.loading {
+            if state.loading_state.is_loading {
                 let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-                let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-                let spinner_text = if state.loading_type == crate::app::LoadingType::Sessions {
-                    "Loading sessions..."
-                } else {
-                    "Stakpaking..."
-                };
+                let spinner =
+                    spinner_chars[state.loading_state.spinner_frame % spinner_chars.len()];
+                let spinner_text =
+                    if state.loading_state.loading_type == crate::app::LoadingType::Sessions {
+                        "Loading sessions..."
+                    } else {
+                        "Stakpaking..."
+                    };
 
                 left_spans.push(Span::styled(
                     format!("{} {}", spinner, spinner_text),
@@ -99,7 +108,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 ));
 
-                if state.loading_type == crate::app::LoadingType::Llm {
+                if state.loading_state.loading_type == crate::app::LoadingType::Llm {
                     left_spans.push(Span::styled(
                         " - esc cancel",
                         Style::default().fg(ThemeColors::dark_gray()),
@@ -114,13 +123,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             )];
 
             // Add profile info only if side panel is hidden and not loading heavily
-            if !state.show_side_panel && !high_cost_warning && !approaching_max {
+            if !state.side_panel_state.is_shown && !high_cost_warning && !approaching_max {
                 right_spans.push(Span::styled(
                     " | profile ",
                     Style::default().fg(ThemeColors::dark_gray()),
                 ));
                 right_spans.push(Span::styled(
-                    state.current_profile_name.clone(),
+                    state.profile_switcher_state.current_profile_name.clone(),
                     Style::default().fg(Color::Reset),
                 ));
                 right_spans.push(Span::styled(
@@ -164,9 +173,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-    } else if state.approval_bar.is_visible() {
+    } else if state.dialog_approval_state.approval_bar.is_visible() {
         // Show approval bar hints
-        let spans_vec = if state.approval_bar.is_esc_pending() {
+        let spans_vec = if state.dialog_approval_state.approval_bar.is_esc_pending() {
             // After first ESC: show confirmation hint
             vec![
                 Span::styled("Enter", Style::default().fg(ThemeColors::green())),
@@ -199,7 +208,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let hint =
             Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
         f.render_widget(hint, area);
-    } else if !state.is_dialog_open {
+    } else if !state.dialog_approval_state.is_dialog_open {
         let status_color = ThemeColors::dark_gray();
 
         // detect if terminal is vscode
@@ -212,9 +221,11 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);
-    } else if state.is_dialog_open {
+    } else if state.dialog_approval_state.is_dialog_open {
         let mut spans_vec = vec![];
-        if !state.approval_bar.is_visible() && state.message_tool_calls.is_some() {
+        if !state.dialog_approval_state.approval_bar.is_visible()
+            && state.dialog_approval_state.message_tool_calls.is_some()
+        {
             spans_vec.push(Span::styled(
                 "Enter",
                 Style::default().fg(ThemeColors::cyan()),

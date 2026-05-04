@@ -2,11 +2,7 @@
 //!
 //! This module provides functionality for running the Stakpak agent as an autopilot service
 //! with scheduled tasks, check scripts, and automatic agent invocation.
-
-// Allow dead code in this module as it's still under development
-// and some APIs are kept for future use or completeness
 #![allow(dead_code)]
-
 mod agent;
 pub mod commands;
 pub mod config;

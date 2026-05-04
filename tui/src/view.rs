@@ -33,16 +33,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     banner::render_banner(f, banner_area, state);
 
     // Store banner area for click detection (None when banner is hidden)
-    state.banner_area = if banner_h > 0 {
+    state.banner_state.area = if banner_h > 0 {
         Some(banner_area)
     } else {
-        state.banner_click_regions.clear();
-        state.banner_dismiss_region = None;
+        state.banner_state.click_regions.clear();
+        state.banner_state.dismiss_region = None;
         None
     };
 
     // Horizontal split for the side panel
-    let (main_area, side_panel_area) = if state.show_side_panel {
+    let (main_area, side_panel_area) = if state.side_panel_state.is_shown {
         // Fixed width of 32 characters for side panel
         let panel_width = 32u16;
         let horizontal_chunks = Layout::default()
@@ -72,19 +72,23 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let input_lines = calculate_input_lines(state, input_area_width);
     let input_height = (input_lines + 2) as u16;
     let margin_height = 1;
-    let dropdown_showing = state.show_helper_dropdown
-        && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-            || !state.filtered_files.is_empty());
+    let dropdown_showing = state.input_state.show_helper_dropdown
+        && ((!state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+            || !state.input_state.filtered_files.is_empty());
     let dropdown_height = if dropdown_showing {
-        if !state.filtered_files.is_empty() {
+        if !state.input_state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
             // Use compact height calculation matching helper_dropdown.rs
             const MAX_VISIBLE_ITEMS: usize = 5;
-            let visible_height = MAX_VISIBLE_ITEMS.min(state.filtered_helpers.len());
-            let has_content_above = state.helper_scroll > 0;
-            let has_content_below =
-                state.helper_scroll < state.filtered_helpers.len().saturating_sub(visible_height);
+            let visible_height = MAX_VISIBLE_ITEMS.min(state.input_state.filtered_helpers.len());
+            let has_content_above = state.input_state.helper_scroll > 0;
+            let has_content_below = state.input_state.helper_scroll
+                < state
+                    .input_state
+                    .filtered_helpers
+                    .len()
+                    .saturating_sub(visible_height);
             let arrow_lines =
                 if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
             let counter_line = if has_content_above || has_content_below {
@@ -97,7 +101,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else {
         0
     };
-    let hint_height = if state.show_helper_dropdown {
+    let hint_height = if state.input_state.show_helper_dropdown {
         0
     } else {
         margin_height
@@ -107,15 +111,19 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
     // Calculate approval bar height (needs terminal width for wrapping calculation)
-    let approval_bar_height = state.approval_bar.calculate_height(main_area.width);
-    let approval_bar_visible = state.approval_bar.is_visible();
+    let approval_bar_height = state
+        .dialog_approval_state
+        .approval_bar
+        .calculate_height(main_area.width);
+    let approval_bar_visible = state.dialog_approval_state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let ask_user_visible = state.show_ask_user_popup && !state.ask_user_questions.is_empty();
-    let input_visible =
-        !(approval_bar_visible || state.shell_popup_visible && state.shell_popup_expanded);
+    let ask_user_visible =
+        state.ask_user_state.is_visible && !state.ask_user_state.questions.is_empty();
+    let input_visible = !(approval_bar_visible
+        || state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded);
     let effective_input_height = if input_visible { input_height } else { 0 };
-    let queue_count = state.pending_user_messages.len();
+    let queue_count = state.user_message_queue_state.pending_user_messages.len();
     let queue_preview_height = if input_visible && queue_count > 0 {
         // Cap at 1/4 of the screen to avoid starving the message area
         (queue_count as u16).min(main_area.height / 4).max(1)
@@ -174,9 +182,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     // Store message area geometry for click/selection coordinate mapping
     // These values are used by event handlers to convert mouse coordinates to line indices
-    state.message_area_y = message_area.y;
-    state.message_area_x = padded_message_area.x;
-    state.message_area_height = message_area.height;
+    state.message_interaction_state.message_area_y = message_area.y;
+    state.message_interaction_state.message_area_x = padded_message_area.x;
+    state.message_interaction_state.message_area_height = message_area.height;
 
     render_messages(
         f,
@@ -194,11 +202,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
             width: approval_bar_area.width.saturating_sub(2),
             height: approval_bar_area.height,
         };
-        state.approval_bar.render(f, padded_approval_bar_area);
+        state
+            .dialog_approval_state
+            .approval_bar
+            .render(f, padded_approval_bar_area);
     }
 
     // Render shell popup above input area (if visible)
-    if state.shell_popup_visible {
+    if state.shell_popup_state.is_visible {
         let padded_shell_popup_area = Rect {
             x: shell_popup_area.x + 1,
             y: shell_popup_area.y,
@@ -226,10 +237,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_queue_preview_line(f, state, padded_queue_area);
     }
 
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
-    } else if state.is_dialog_open {
-    } else if state.shell_popup_visible && state.shell_popup_expanded {
+    } else if state.dialog_approval_state.is_dialog_open {
+    } else if state.shell_popup_state.is_visible && state.shell_popup_state.is_expanded {
         // Don't render input when popup is expanded - popup takes over input
     } else if !approval_bar_visible {
         // Only render input/dropdown when approval bar is NOT visible
@@ -238,8 +249,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_file_search_dropdown(f, state, dropdown_area);
     }
     // Render hint/shortcuts if not hiding for dropdown, not showing collapsed messages, and not showing approval bar
-    if !state.show_helper_dropdown
-        && !state.show_collapsed_messages
+    if !state.input_state.show_helper_dropdown
+        && !state.messages_scrolling_state.show_collapsed_messages
         && !approval_bar_visible
         && !ask_user_visible
     {
@@ -255,36 +266,46 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // === POPUPS - rendered last to appear on top of side panel ===
 
     // Render profile switcher
-    if state.show_profile_switcher {
+    if state.profile_switcher_state.show_profile_switcher {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
     }
 
     // Render file changes popup
-    if state.show_file_changes_popup {
+    if state.file_changes_popup_state.is_visible {
         crate::services::file_changes_popup::render_file_changes_popup(f, state);
     }
 
     // Render shortcuts popup (now includes commands)
-    if state.show_shortcuts_popup {
+    if state.shortcuts_panel_state.is_visible {
         crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
     }
     // Render rulebook switcher
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
     // Render message action popup
-    if state.show_message_action_popup {
+    if state.message_interaction_state.show_message_action_popup {
         crate::services::message_action_popup::render_message_action_popup(f, state);
     }
 
     // Render model switcher
-    if state.show_model_switcher {
+    if state.model_switcher_state.is_visible {
         crate::services::model_switcher::render_model_switcher_popup(f, state);
     }
 
+    // Render auto-approve popup
+    if state.tool_approval_popup_state.is_visible {
+        crate::services::auto_approve_popup::render_auto_approve_popup(f, state);
+    }
+
+    // Render policy persistence modal (unsaved changes on quit)
+    if state.approval_settings_persistence_state.is_visible {
+        crate::services::policy_persistence_popup::render_policy_persistence_popup(f, state);
+    }
+
     // Render profile switch overlay
-    if state.profile_switching_in_progress {
+    if state.profile_switcher_state.switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
 
@@ -292,12 +313,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     render_toast(f, state);
 
     // Render "existing plan found" modal
-    if state.existing_plan_prompt.is_some() {
+    if state.plan_mode_state.existing_prompt.is_some() {
         render_existing_plan_modal(f, state);
     }
 
     // Render plan review overlay (full-screen, on top of everything)
-    if state.show_plan_review {
+    if state.plan_review_state.is_visible {
         crate::services::plan_review::render_plan_review(f, state, f.area());
     }
 }
@@ -361,7 +382,8 @@ fn render_existing_plan_modal(f: &mut Frame, state: &AppState) {
     let area = f.area();
 
     let (title_text, status_text) = state
-        .existing_plan_prompt
+        .plan_mode_state
+        .existing_prompt
         .as_ref()
         .and_then(|p| p.metadata.as_ref())
         .map(|m| {
@@ -447,7 +469,10 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
     }
 
     // Use TextArea's desired_height method for accurate line calculation
-    state.text_area.desired_height(available_width as u16) as usize
+    state
+        .input_state
+        .text_area
+        .desired_height(available_width as u16) as usize
 }
 
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
@@ -471,13 +496,13 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     // IMPORTANT: Write the computed scroll back to state so that event handlers
     // (hover highlighting, text selection, click detection) use the same scroll
     // value that was used for rendering. Without this, stay_at_bottom causes
-    // state.scroll to diverge from the actual rendered scroll.
-    let scroll = if state.stay_at_bottom {
+    // state.messages_scrolling_state.scroll to diverge from the actual rendered scroll.
+    let scroll = if state.messages_scrolling_state.stay_at_bottom {
         max_scroll
     } else {
-        state.scroll.min(max_scroll)
+        state.messages_scrolling_state.scroll.min(max_scroll)
     };
-    state.scroll = scroll;
+    state.messages_scrolling_state.scroll = scroll;
 
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
@@ -492,66 +517,67 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     }
 
     // Apply hover highlighting for user messages
-    let visible_lines =
-        if let Some(hover_row) = state.hover_row {
-            let row_in_message_area =
-                (hover_row as usize).saturating_sub(state.message_area_y as usize);
+    let visible_lines = if let Some(hover_row) = state.message_interaction_state.hover_row {
+        let row_in_message_area = (hover_row as usize)
+            .saturating_sub(state.message_interaction_state.message_area_y as usize);
 
-            // Check if hover is within message area
-            if row_in_message_area < height {
-                let absolute_line = scroll + row_in_message_area;
+        // Check if hover is within message area
+        if row_in_message_area < height {
+            let absolute_line = scroll + row_in_message_area;
 
-                // Find the user message range that contains the hovered line
-                let hovered_message_range = state.line_to_message_map.iter().find(
-                    |(start, end, _, is_user, _, _user_idx)| {
-                        *is_user && absolute_line >= *start && absolute_line < *end
-                    },
-                );
+            // Find the user message range that contains the hovered line
+            let hovered_message_range = state
+                .messages_scrolling_state
+                .line_to_message_map
+                .iter()
+                .find(|(start, end, _, is_user, _, _user_idx)| {
+                    *is_user && absolute_line >= *start && absolute_line < *end
+                });
 
-                if let Some((msg_start, msg_end, _, _, _, _)) = hovered_message_range {
-                    let msg_start = *msg_start;
-                    let msg_end = *msg_end;
+            if let Some((msg_start, msg_end, _, _, _, _)) = hovered_message_range {
+                let msg_start = *msg_start;
+                let msg_end = *msg_end;
 
-                    // Highlight all lines of the hovered user message
-                    visible_lines
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, line)| {
-                            let abs_line = scroll + i;
-                            if abs_line >= msg_start && abs_line < msg_end {
-                                Line::from(
-                                    line.spans
-                                        .into_iter()
-                                        .map(|span| {
-                                            ratatui::text::Span::styled(
-                                                span.content,
-                                                span.style
-                                                    .bg(ThemeColors::unselected_bg())
-                                                    .fg(ThemeColors::title_primary()),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                            } else {
-                                line
-                            }
-                        })
-                        .collect()
-                } else {
-                    visible_lines
-                }
+                // Highlight all lines of the hovered user message
+                visible_lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        let abs_line = scroll + i;
+                        if abs_line >= msg_start && abs_line < msg_end {
+                            Line::from(
+                                line.spans
+                                    .into_iter()
+                                    .map(|span| {
+                                        ratatui::text::Span::styled(
+                                            span.content,
+                                            span.style
+                                                .bg(ThemeColors::unselected_bg())
+                                                .fg(ThemeColors::title_primary()),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        } else {
+                            line
+                        }
+                    })
+                    .collect()
             } else {
                 visible_lines
             }
         } else {
             visible_lines
-        };
+        }
+    } else {
+        visible_lines
+    };
 
     // Apply selection highlighting if active
-    let visible_lines = if state.selection.active {
+    let visible_lines = if state.message_interaction_state.selection.active {
         crate::services::text_selection::apply_selection_highlight(
             visible_lines,
-            &state.selection,
+            &state.message_interaction_state.selection,
             scroll,
         )
     } else {
@@ -611,9 +637,9 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let height = area.height as usize;
 
     // Store popup content area geometry for text selection coordinate mapping
-    state.collapsed_popup_area_y = area.y;
-    state.collapsed_popup_area_x = area.x;
-    state.collapsed_popup_area_height = area.height;
+    state.message_interaction_state.collapsed_popup_area_y = area.y;
+    state.message_interaction_state.collapsed_popup_area_x = area.x;
+    state.message_interaction_state.collapsed_popup_area_height = area.height;
 
     // Messages are already owned, no need to clone
     let all_lines: Vec<Line> = get_wrapped_collapsed_message_lines_cached(state, width);
@@ -644,16 +670,16 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Use collapsed_messages_scroll for this popup
-    let scroll = if state.collapsed_messages_scroll > max_scroll {
+    let scroll = if state.messages_scrolling_state.collapsed_messages_scroll > max_scroll {
         max_scroll
     } else {
-        state.collapsed_messages_scroll
+        state.messages_scrolling_state.collapsed_messages_scroll
     };
 
     // Write the clamped scroll back to state so that event handlers (text selection,
     // click detection) use the same scroll value that was used for rendering.
-    // This mirrors the pattern in render_messages() for state.scroll.
-    state.collapsed_messages_scroll = scroll;
+    // This mirrors the pattern in render_messages() for state.messages_scrolling_state.scroll.
+    state.messages_scrolling_state.collapsed_messages_scroll = scroll;
 
     // Create visible lines
     let mut visible_lines = Vec::new();
@@ -667,10 +693,10 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     }
 
     // Apply selection highlighting if active (same as render_messages)
-    let visible_lines = if state.selection.active {
+    let visible_lines = if state.message_interaction_state.selection.active {
         crate::services::text_selection::apply_selection_highlight(
             visible_lines,
-            &state.selection,
+            &state.message_interaction_state.selection,
             scroll,
         )
     } else {
@@ -684,13 +710,13 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
 
 fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(if state.show_shell_mode {
+    let block = Block::default().borders(Borders::ALL).border_style(
+        if state.shell_popup_state.is_expanded {
             Style::default().fg(ThemeColors::magenta())
         } else {
             Style::default().fg(ThemeColors::dark_gray())
-        });
+        },
+    );
 
     // Create content area inside the block (border takes 1 char on each side)
     // The TextArea internally accounts for prefix width when wrapping,
@@ -703,21 +729,25 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Store the content area for mouse click handling
-    state.input_content_area = Some(content_area);
+    state.message_interaction_state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);
 
     // Render the TextArea with state, handling password masking if needed
-    if state.show_shell_mode && state.waiting_for_shell_input {
-        state.text_area.render_with_state(
+    if state.shell_popup_state.is_expanded && state.shell_popup_state.waiting_for_shell_input {
+        state.input_state.text_area.render_with_state(
             content_area,
             f.buffer_mut(),
-            &mut state.text_area_state,
-            state.waiting_for_shell_input,
+            &mut state.input_state.text_area_state,
+            state.shell_popup_state.waiting_for_shell_input,
         );
     } else {
-        f.render_stateful_widget_ref(&state.text_area, content_area, &mut state.text_area_state);
+        f.render_stateful_widget_ref(
+            &state.input_state.text_area,
+            content_area,
+            &mut state.input_state.text_area_state,
+        );
     }
 }
 
@@ -742,14 +772,21 @@ fn truncate_to(s: &str, max: usize) -> String {
 }
 
 fn render_queue_preview_line(f: &mut Frame, state: &AppState, area: Rect) {
-    if area.width == 0 || area.height == 0 || state.pending_user_messages.is_empty() {
+    if area.width == 0
+        || area.height == 0
+        || state
+            .user_message_queue_state
+            .pending_user_messages
+            .is_empty()
+    {
         return;
     }
 
     let max_chars = (area.width as usize).saturating_sub(4); // room for "  > "
-    let mut lines: Vec<Line> = Vec::with_capacity(state.pending_user_messages.len());
+    let mut lines: Vec<Line> =
+        Vec::with_capacity(state.user_message_queue_state.pending_user_messages.len());
 
-    for msg in state.pending_user_messages.iter() {
+    for msg in state.user_message_queue_state.pending_user_messages.iter() {
         let text = if !msg.user_message_text.trim().is_empty() {
             &msg.user_message_text
         } else if !msg.final_input.trim().is_empty() {

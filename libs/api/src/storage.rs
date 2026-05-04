@@ -23,6 +23,9 @@ pub use crate::stakpak::storage::StakpakStorage;
 /// Stakpak API and local SQLite storage backends.
 #[async_trait]
 pub trait SessionStorage: Send + Sync {
+    /// Describe the concrete backend serving this storage implementation.
+    fn backend_info(&self) -> BackendInfo;
+
     // =========================================================================
     // Session Operations
     // =========================================================================
@@ -93,6 +96,48 @@ pub trait SessionStorage: Send + Sync {
 
 /// Box wrapper for dynamic dispatch
 pub type BoxedSessionStorage = Box<dyn SessionStorage>;
+
+// =============================================================================
+// Backend Descriptor
+// =============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackendKind {
+    StakpakApi,
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendInfo {
+    pub kind: BackendKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store_path: Option<String>,
+}
+
+impl BackendInfo {
+    pub fn stakpak_api(profile: Option<String>, endpoint: impl Into<String>) -> Self {
+        Self {
+            kind: BackendKind::StakpakApi,
+            profile,
+            endpoint: Some(endpoint.into()),
+            store_path: None,
+        }
+    }
+
+    pub fn local(store_path: impl Into<String>) -> Self {
+        Self {
+            kind: BackendKind::Local,
+            profile: None,
+            endpoint: None,
+            store_path: Some(store_path.into()),
+        }
+    }
+}
 
 // =============================================================================
 // Error Types

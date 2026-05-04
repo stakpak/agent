@@ -30,12 +30,12 @@ pub fn handle_error(state: &mut AppState, err: String) {
     }
     if err == "STREAM_CANCELLED" {
         // Clear cancellation flag since we're now handling it
-        state.cancel_requested = false;
-        state.is_streaming = false;
+        state.tool_call_state.cancel_requested = false;
+        state.tool_call_state.is_streaming = false;
 
         let rendered_lines =
             render_bash_block_rejected("Interrupted by user", "System", None, None);
-        state.messages.push(Message {
+        state.messages_scrolling_state.messages.push(Message {
             id: Uuid::new_v4(),
             content: crate::services::message::MessageContent::StyledBlock(rendered_lines),
             is_collapsed: None,
@@ -43,7 +43,7 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
         // Invalidate cache and scroll to bottom so the cancelled message is visible
         crate::services::message::invalidate_message_lines_cache(state);
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
         return;
     }
     let mut error_message = handle_errors(err);
@@ -66,36 +66,43 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
 /// Handle resized event
 pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
-    state.terminal_size = Size { width, height };
+    state.terminal_ui_state.terminal_size = Size { width, height };
 
     // Resize shell parser
     // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
     let shell_rows = height.saturating_sub(2).max(1);
     let shell_cols = width.saturating_sub(4).max(1);
-    state.shell_screen.set_size(shell_rows, shell_cols);
+    state
+        .shell_runtime_state
+        .screen
+        .set_size(shell_rows, shell_cols);
 }
 
 /// Handle toggle cursor visible event
 pub fn handle_toggle_cursor_visible(state: &mut AppState) {
-    state.cursor_visible = !state.cursor_visible;
+    state.input_state.cursor_visible = !state.input_state.cursor_visible;
 }
 
 /// Handle toggle auto approve event
 pub fn handle_toggle_auto_approve(state: &mut AppState) {
-    if let Err(e) = state.auto_approve_manager.toggle_enabled() {
+    if let Err(e) = state
+        .configuration_state
+        .auto_approve_manager
+        .toggle_enabled()
+    {
         push_error_message(
             state,
             &format!("Failed to toggle auto-approve: {}", e),
             None,
         );
     } else {
-        let status = if state.auto_approve_manager.is_enabled() {
+        let status = if state.configuration_state.auto_approve_manager.is_enabled() {
             "enabled"
         } else {
             "disabled"
         };
 
-        let status_color = if state.auto_approve_manager.is_enabled() {
+        let status_color = if state.configuration_state.auto_approve_manager.is_enabled() {
             ThemeColors::green()
         } else {
             ThemeColors::red()
@@ -119,8 +126,8 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
-    if state.show_shortcuts_popup {
-        state.shortcuts_popup_mode = match state.shortcuts_popup_mode {
+    if state.shortcuts_panel_state.is_visible {
+        state.shortcuts_panel_state.mode = match state.shortcuts_panel_state.mode {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
             crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
             crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
@@ -128,7 +135,7 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
         return;
     }
 
-    if state.show_collapsed_messages {
+    if state.messages_scrolling_state.show_collapsed_messages {
         handle_collapsed_messages_tab(state, message_area_height, message_area_width);
     } else {
         handle_tab_normal(state);
@@ -138,18 +145,19 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
     // If side panel is visible and input is empty, cycle sections
-    if state.show_side_panel && state.text_area.text().is_empty() {
-        state.side_panel_focus = state.side_panel_focus.next();
+    if state.side_panel_state.is_shown && state.input_state.text_area.text().is_empty() {
+        state.side_panel_state.focused_section = state.side_panel_state.focused_section.next();
         return;
     }
 
     // Check if we're already in helper dropdown mode
-    if state.show_helper_dropdown {
+    if state.input_state.show_helper_dropdown {
         // If in file file_search mode, handle file selection
-        if state.file_search.is_active() {
+        if state.input_state.file_search.is_active() {
             let selected_file = state
+                .input_state
                 .file_search
-                .get_file_at_index(state.helper_selected)
+                .get_file_at_index(state.input_state.helper_selected)
                 .map(|s| s.to_string());
             if let Some(selected_file) = selected_file {
                 handle_file_selection(state, &selected_file);
@@ -157,8 +165,9 @@ fn handle_tab_normal(state: &mut AppState) {
             return;
         }
         // Handle helper selection - auto-complete the selected helper
-        if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
-            let selected_helper = &state.filtered_helpers[state.helper_selected];
+        if !state.input_state.filtered_helpers.is_empty() && state.input().starts_with('/') {
+            let selected_helper =
+                &state.input_state.filtered_helpers[state.input_state.helper_selected];
             // Commands that take arguments should have a trailing space
             let needs_space = matches!(
                 selected_helper.command.as_str(),
@@ -176,13 +185,13 @@ fn handle_tab_normal(state: &mut AppState) {
             } else {
                 selected_helper.command.to_string()
             };
-            state.text_area.set_text(&new_text);
+            state.input_state.text_area.set_text(&new_text);
             // Position cursor at the end of the text
-            state.text_area.set_cursor(new_text.len());
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
-            state.helper_selected = 0;
-            state.helper_scroll = 0;
+            state.input_state.text_area.set_cursor(new_text.len());
+            state.input_state.show_helper_dropdown = false;
+            state.input_state.filtered_helpers.clear();
+            state.input_state.helper_selected = 0;
+            state.input_state.helper_scroll = 0;
             return;
         }
         return;
@@ -198,6 +207,7 @@ fn handle_collapsed_messages_tab(
     message_area_width: usize,
 ) {
     let collapsed_messages: Vec<Message> = state
+        .messages_scrolling_state
         .messages
         .iter()
         .filter(|m| m.is_collapsed == Some(true))
@@ -209,16 +219,16 @@ fn handle_collapsed_messages_tab(
     }
 
     // Move to next message
-    state.collapsed_messages_selected =
-        (state.collapsed_messages_selected + 1) % collapsed_messages.len();
+    state.messages_scrolling_state.collapsed_messages_selected =
+        (state.messages_scrolling_state.collapsed_messages_selected + 1) % collapsed_messages.len();
 
     // Calculate scroll position to show the top of the selected message
     let mut line_count = 0;
 
     for (i, _message) in collapsed_messages.iter().enumerate() {
-        if i == state.collapsed_messages_selected {
+        if i == state.messages_scrolling_state.collapsed_messages_selected {
             // This is our target message, set scroll to show its top
-            state.collapsed_messages_scroll = line_count;
+            state.messages_scrolling_state.collapsed_messages_scroll = line_count;
             break;
         }
 
@@ -231,12 +241,15 @@ fn handle_collapsed_messages_tab(
     let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    state.collapsed_messages_scroll = state.collapsed_messages_scroll.min(max_scroll);
+    state.messages_scrolling_state.collapsed_messages_scroll = state
+        .messages_scrolling_state
+        .collapsed_messages_scroll
+        .min(max_scroll);
 }
 
 /// Handle Ctrl+S event
 pub fn handle_ctrl_s(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<InputEvent>) {
-    if state.show_rulebook_switcher {
+    if state.rulebook_switcher_state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherSelectAll);
         return;
     }
@@ -247,9 +260,13 @@ pub fn handle_ctrl_s(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<
 pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<InputEvent>) {
     use std::time::Instant;
     let now = Instant::now();
-    if !state.ctrl_c_pressed_once
-        || state.ctrl_c_timer.is_none()
-        || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
+    if !state.quit_intent_state.ctrl_c_pressed_once
+        || state.quit_intent_state.ctrl_c_timer.is_none()
+        || state
+            .quit_intent_state
+            .ctrl_c_timer
+            .map(|t| now > t)
+            .unwrap_or(true)
     {
         // First press or timer expired: clear input, move cursor, set timer
         state.text_area.set_text("");
@@ -279,8 +296,8 @@ pub fn handle_attempt_quit(state: &mut AppState, input_tx: &tokio::sync::mpsc::S
         }
     } else {
         // Second press within 2s: trigger quit
-        state.ctrl_c_pressed_once = false;
-        state.ctrl_c_timer = None;
+        state.quit_intent_state.ctrl_c_pressed_once = false;
+        state.quit_intent_state.ctrl_c_timer = None;
         let _ = input_tx.try_send(InputEvent::Quit);
     }
 }
@@ -294,26 +311,28 @@ pub fn handle_toggle_mouse_capture(_state: &mut AppState) {
 /// Handle set sessions event
 pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::SessionInfo>) {
     // Terminate any active shell before showing sessions popup
-    if let Some(cmd) = &state.active_shell_command {
+    if let Some(cmd) = &state.shell_popup_state.active_shell_command {
         let _ = cmd.kill();
     }
-    if let Some(shell_msg_id) = state.interactive_shell_message_id {
-        state.messages.retain(|m| m.id != shell_msg_id);
+    if let Some(shell_msg_id) = state.shell_session_state.interactive_shell_message_id {
+        state
+            .messages_scrolling_state
+            .messages
+            .retain(|m| m.id != shell_msg_id);
     }
-    state.active_shell_command = None;
-    state.active_shell_command_output = None;
-    state.interactive_shell_message_id = None;
-    state.show_shell_mode = false;
-    state.shell_popup_visible = false;
-    state.shell_popup_expanded = false;
-    state.waiting_for_shell_input = false;
-    state.text_area.set_shell_mode(false);
+    state.shell_popup_state.active_shell_command = None;
+    state.shell_popup_state.active_shell_command_output = None;
+    state.shell_session_state.interactive_shell_message_id = None;
+    state.shell_popup_state.is_visible = false;
+    state.shell_popup_state.is_expanded = false;
+    state.shell_popup_state.waiting_for_shell_input = false;
+    state.input_state.text_area.set_shell_mode(false);
 
-    state.sessions = sessions;
-    state.session_selected = 0; // Reset selection to first item
+    state.sessions_state.sessions = sessions;
+    state.sessions_state.session_selected = 0; // Reset selection to first item
     // Open unified popup at Sessions tab instead of separate sessions dialog
-    state.show_shortcuts_popup = true;
-    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
+    state.shortcuts_panel_state.is_visible = true;
+    state.shortcuts_panel_state.mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
 /// Handle set banner message event
@@ -322,7 +341,7 @@ pub fn handle_set_banner_message(
     text: String,
     style: crate::services::banner::BannerStyle,
 ) {
-    state.banner_message = Some(crate::services::banner::BannerMessage::new(text, style));
+    state.banner_state.message = Some(crate::services::banner::BannerMessage::new(text, style));
 }
 
 /// Handle start loading operation event
@@ -330,9 +349,12 @@ pub fn handle_start_loading_operation(
     state: &mut AppState,
     operation: crate::app::LoadingOperation,
 ) {
-    state.loading_manager.start_operation(operation.clone());
-    state.loading = state.loading_manager.is_loading();
-    state.loading_type = state.loading_manager.get_loading_type();
+    state
+        .loading_state
+        .loading_manager
+        .start_operation(operation.clone());
+    state.loading_state.is_loading = state.loading_state.loading_manager.is_loading();
+    state.loading_state.loading_type = state.loading_state.loading_manager.get_loading_type();
 }
 
 /// Handle end loading operation event
@@ -340,14 +362,14 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
     // Check if this is a checkpoint resume before consuming operation
     let is_checkpoint_resume = matches!(operation, crate::app::LoadingOperation::CheckpointResume);
 
-    state.loading_manager.end_operation(operation);
-    state.loading = state.loading_manager.is_loading();
-    state.loading_type = state.loading_manager.get_loading_type();
+    state.loading_state.loading_manager.end_operation(operation);
+    state.loading_state.is_loading = state.loading_state.loading_manager.is_loading();
+    state.loading_state.loading_type = state.loading_state.loading_manager.get_loading_type();
 
     // After checkpoint resume completes, ensure we scroll to show the latest messages
     if is_checkpoint_resume {
-        state.scroll_to_bottom = true;
-        state.stay_at_bottom = true;
+        state.messages_scrolling_state.scroll_to_bottom = true;
+        state.messages_scrolling_state.stay_at_bottom = true;
         // Invalidate cache to ensure fresh render with correct scroll
         crate::services::message::invalidate_message_lines_cache(state);
     }
@@ -356,15 +378,18 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     // Clear any pending cancellation since a new assistant message arrived
-    state.cancel_requested = false;
-    state.messages.push(Message::assistant(None, msg, None));
+    state.tool_call_state.cancel_requested = false;
+    state
+        .messages_scrolling_state
+        .messages
+        .push(Message::assistant(None, msg, None));
 
     // Invalidate cache since messages changed
     crate::services::message::invalidate_message_lines_cache(state);
 
     // Scroll to bottom to show the new message
-    state.scroll_to_bottom = true;
-    state.stay_at_bottom = true;
+    state.messages_scrolling_state.scroll_to_bottom = true;
+    state.messages_scrolling_state.stay_at_bottom = true;
 
     // Auto-show side panel on first message (assistant)
     state.auto_show_side_panel();
@@ -372,12 +397,12 @@ pub fn handle_assistant_message(state: &mut AppState, msg: String) {
 
 /// Handle get status event
 pub fn handle_get_status(state: &mut AppState, account_info: String) {
-    state.account_info = account_info;
+    state.sessions_state.account_info = account_info;
 }
 
 /// Handle stream model event - updates current_model for side panel display
 pub fn handle_stream_model(state: &mut AppState, model: Model) {
-    state.current_model = Some(model);
+    state.model_switcher_state.current_model = Some(model);
 }
 
 /// Handle billing info loaded event
@@ -385,7 +410,7 @@ pub fn handle_billing_info_loaded(
     state: &mut AppState,
     billing_info: stakpak_shared::models::billing::BillingResponse,
 ) {
-    state.billing_info = Some(billing_info);
+    state.side_panel_state.billing_info = Some(billing_info);
 }
 
 /// Handle refresh board tasks event - spawns blocking task to fetch from agent-board
@@ -394,18 +419,18 @@ pub fn handle_refresh_board_tasks(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
     // Try to get agent_id from state, or extract from message history
-    let agent_id = state
-        .board_agent_id
-        .clone()
-        .or_else(|| extract_board_agent_id_from_messages(&state.messages));
+    let agent_id =
+        state.side_panel_state.board_agent_id.clone().or_else(|| {
+            extract_board_agent_id_from_messages(&state.messages_scrolling_state.messages)
+        });
 
     let Some(agent_id) = agent_id else {
         return;
     };
 
     // Update state if we found it from messages
-    if state.board_agent_id.is_none() {
-        state.board_agent_id = Some(agent_id.clone());
+    if state.side_panel_state.board_agent_id.is_none() {
+        state.side_panel_state.board_agent_id = Some(agent_id.clone());
     }
 
     let tx = input_tx.clone();
@@ -423,8 +448,8 @@ pub fn handle_refresh_board_tasks(
 
 /// Handle board tasks loaded event
 pub fn handle_board_tasks_loaded(state: &mut AppState, result: FetchTasksResult) {
-    state.todos = result.items;
-    state.task_progress = Some(result.progress);
+    state.side_panel_state.todos = result.items;
+    state.side_panel_state.task_progress = Some(result.progress);
 }
 
 /// Handle board tasks error event

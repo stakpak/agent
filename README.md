@@ -484,6 +484,29 @@ tags:
 Your deployment procedures and guidelines here...
 ```
 
+### Shell Completion
+
+Enable tab-completion for every `stakpak` subcommand, flag, and argument.
+
+```bash
+# Bash
+echo 'source <(stakpak completion bash)' >> ~/.bashrc
+
+# Elvish
+echo 'eval (stakpak completion elvish | slurp)' >> ~/.elvish/rc.elv
+
+# Fish
+echo 'stakpak completion fish | source' > ~/.config/fish/completions/stakpak.fish
+
+# Zsh
+echo 'source <(stakpak completion zsh)' >> ~/.zshrc
+
+# PowerShell
+Add-Content -Path $PROFILE -Value 'stakpak completion powershell | Out-String | Invoke-Expression'
+```
+
+Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
+
 ### Shell Mode
 
 Execute system commands explicitly from the input bar.

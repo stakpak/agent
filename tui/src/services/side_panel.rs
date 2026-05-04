@@ -47,9 +47,10 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let footer_height = 7; // Separator, session ID line, empty, version, empty, shortcuts (2 lines)
 
     // Plan section is only visible when plan mode is active
-    let plan_active = state.plan_mode_active;
+    let plan_active = state.plan_mode_state.is_active;
     let plan_collapsed = state
-        .side_panel_section_collapsed
+        .side_panel_state
+        .collapsed_sections
         .get(&SidePanelSection::Plan)
         .copied()
         .unwrap_or(false);
@@ -64,22 +65,26 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
-        .side_panel_section_collapsed
+        .side_panel_state
+        .collapsed_sections
         .get(&SidePanelSection::Context)
         .copied()
         .unwrap_or(false);
     let billing_collapsed = state
-        .side_panel_section_collapsed
+        .side_panel_state
+        .collapsed_sections
         .get(&SidePanelSection::Billing)
         .copied()
         .unwrap_or(false);
     let tasks_collapsed = state
-        .side_panel_section_collapsed
+        .side_panel_state
+        .collapsed_sections
         .get(&SidePanelSection::Tasks)
         .copied()
         .unwrap_or(false);
     let changeset_collapsed = state
-        .side_panel_section_collapsed
+        .side_panel_state
+        .collapsed_sections
         .get(&SidePanelSection::Changeset)
         .copied()
         .unwrap_or(false);
@@ -91,7 +96,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Billing section is hidden when billing_info is None (local mode)
-    let billing_height = if state.billing_info.is_none() {
+    let billing_height = if state.side_panel_state.billing_info.is_none() {
         0
     } else if billing_collapsed {
         collapsed_height
@@ -104,12 +109,12 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let tasks_height = if tasks_collapsed {
         collapsed_height
-    } else if state.todos.is_empty() {
+    } else if state.side_panel_state.todos.is_empty() {
         3 // Header + "No tasks" + blank line
     } else {
         // Calculate total lines needed including wrapped lines
         let mut total_lines = 1; // Header
-        for todo in &state.todos {
+        for todo in &state.side_panel_state.todos {
             let wrapped_lines = wrap_text(&todo.text, task_content_width);
             total_lines += wrapped_lines.len().max(1);
         }
@@ -120,7 +125,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let changeset_height = if changeset_collapsed {
         collapsed_height
     } else {
-        (state.changeset.file_count().max(1) + 2).min(10) as u16 // +2 for header, max 10
+        (state.side_panel_state.changeset.file_count().max(1) + 2).min(10) as u16 // +2 for header, max 10
     };
 
     // Layout the sections vertically
@@ -138,23 +143,28 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .split(padded_area);
 
     // Store areas for mouse handling
-    state.side_panel_areas.clear();
+    state.side_panel_state.areas.clear();
     if plan_active {
         state
-            .side_panel_areas
+            .side_panel_state
+            .areas
             .insert(SidePanelSection::Plan, chunks[0]);
     }
     state
-        .side_panel_areas
+        .side_panel_state
+        .areas
         .insert(SidePanelSection::Context, chunks[1]);
     state
-        .side_panel_areas
+        .side_panel_state
+        .areas
         .insert(SidePanelSection::Billing, chunks[2]);
     state
-        .side_panel_areas
+        .side_panel_state
+        .areas
         .insert(SidePanelSection::Tasks, chunks[3]);
     state
-        .side_panel_areas
+        .side_panel_state
+        .areas
         .insert(SidePanelSection::Changeset, chunks[4]);
 
     if plan_active {
@@ -171,13 +181,13 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
     use crate::services::plan::PlanStatus;
 
-    let focused = state.side_panel_focus == SidePanelSection::Plan;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Plan;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
 
     // Derive phase badge from plan_metadata status
-    let phase_badge = match state.plan_metadata.as_ref().map(|m| m.status) {
+    let phase_badge = match state.plan_mode_state.metadata.as_ref().map(|m| m.status) {
         Some(PlanStatus::Drafting) => "",
         Some(PlanStatus::PendingReview) => "",
         Some(PlanStatus::Approved) => "",
@@ -217,7 +227,8 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     };
 
     // Phase row — derived from plan_metadata status
-    let (phase_label, phase_color) = match state.plan_metadata.as_ref().map(|m| m.status) {
+    let (phase_label, phase_color) = match state.plan_mode_state.metadata.as_ref().map(|m| m.status)
+    {
         Some(PlanStatus::Drafting) => ("Drafting", ThemeColors::yellow()),
         Some(PlanStatus::PendingReview) => ("Pending Review", ThemeColors::cyan()),
         Some(PlanStatus::Approved) => ("Approved", ThemeColors::green()),
@@ -226,7 +237,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
     lines.push(make_row("Phase", phase_label.to_string(), phase_color));
 
     // Plan metadata (from polled file)
-    if let Some(ref meta) = state.plan_metadata {
+    if let Some(ref meta) = state.plan_mode_state.metadata {
         // Title — truncate to fit
         let avail_for_title = (area.width as usize).saturating_sub(12);
         let title = truncate_string(&meta.title, avail_for_title);
@@ -257,7 +268,7 @@ fn render_plan_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: b
 
 /// Render the Context section
 fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_focus == SidePanelSection::Context;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Context;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -299,11 +310,18 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     };
 
     // Get the active model (current_model if set, otherwise default model)
-    let active_model = state.current_model.as_ref().unwrap_or(&state.model);
+    let active_model = state
+        .model_switcher_state
+        .current_model
+        .as_ref()
+        .unwrap_or(&state.configuration_state.model);
 
     // Token usage - use current message's prompt_tokens for context window utilization
     // (prompt_tokens represents the actual context size, not accumulated across messages)
-    let tokens = state.current_message_usage.prompt_tokens;
+    let tokens = state
+        .usage_tracking_state
+        .current_message_usage
+        .prompt_tokens;
     let max_tokens = active_model.limit.context as u32;
 
     // Show tokens info
@@ -348,7 +366,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
     // Profile
     lines.push(make_row(
         "Profile",
-        state.current_profile_name.clone(),
+        state.profile_switcher_state.current_profile_name.clone(),
         ThemeColors::dark_gray(),
     ));
 
@@ -358,7 +376,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
 /// Render the Billing section
 fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_focus == SidePanelSection::Billing;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Billing;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
@@ -397,7 +415,7 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         ])
     };
 
-    if let Some(info) = &state.billing_info {
+    if let Some(info) = &state.side_panel_state.billing_info {
         // Get plan name from first active product
         let plan_name = info
             .products
@@ -437,16 +455,16 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
 /// Render the Tasks section
 fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_focus == SidePanelSection::Tasks;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Tasks;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
-    let progress = if let Some(ref p) = state.task_progress {
+    let progress = if let Some(ref p) = state.side_panel_state.task_progress {
         format!(" ({}/{})", p.completed, p.total)
-    } else if state.todos.is_empty() {
+    } else if state.side_panel_state.todos.is_empty() {
         String::new()
     } else {
-        format!(" ({})", state.todos.len())
+        format!(" ({})", state.side_panel_state.todos.len())
     };
 
     let header = Line::from(Span::styled(
@@ -462,7 +480,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
 
     let mut lines = vec![header];
 
-    if state.todos.is_empty() {
+    if state.side_panel_state.todos.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("{}  No tasks", LEFT_PADDING),
             Style::default()
@@ -479,7 +497,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
         let checklist_content_width =
             (area.width as usize).saturating_sub(checklist_prefix_width + 2);
 
-        for todo in &state.todos {
+        for todo in &state.side_panel_state.todos {
             let (symbol, symbol_color, text_color) = match todo.status {
                 TodoStatus::Done => ("✓", ThemeColors::green(), ThemeColors::dark_gray()),
                 TodoStatus::InProgress => ("◐", ThemeColors::yellow(), Color::Reset),
@@ -569,11 +587,11 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
 
 /// Render the Changeset section
 fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
-    let focused = state.side_panel_focus == SidePanelSection::Changeset;
+    let focused = state.side_panel_state.focused_section == SidePanelSection::Changeset;
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
-    let count = state.changeset.file_count();
+    let count = state.side_panel_state.changeset.file_count();
 
     // Show "n files changed" on the right if there are files
     // User requested "numbers of edits/deletion move them to the far right"
@@ -605,7 +623,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     // Import FileState
     use crate::services::changeset::FileState;
 
-    if state.changeset.file_count() == 0 {
+    if state.side_panel_state.changeset.file_count() == 0 {
         lines.push(Line::from(Span::styled(
             format!("{}  No changes", LEFT_PADDING),
             Style::default()
@@ -617,12 +635,12 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
         // The file_count() filter might need adjustment if we want to hide them totally
         // But for "Removed" files we definitely want to show them
 
-        let files = state.changeset.files_in_order();
+        let files = state.side_panel_state.changeset.files_in_order();
         let total_files = files.len();
         let max_display = 5;
 
         for (i, file) in files.iter().take(max_display).enumerate() {
-            let is_selected = i == state.changeset.selected_index && focused;
+            let is_selected = i == state.side_panel_state.changeset.selected_index && focused;
             // Prefix: "  ▸ " (4 chars)
             let prefix = if file.is_expanded { "▾" } else { "▸" };
 
@@ -782,6 +800,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     // Session ID line with copy shortcut
     // Check if we recently copied (within 2 seconds)
     let recently_copied = state
+        .side_panel_state
         .session_id_copied_at
         .map(|t| t.elapsed().as_secs() < 2)
         .unwrap_or(false);
@@ -794,10 +813,10 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     let fixed_width = LEFT_PADDING.len() + 8 + suffix_width + 2;
     let available_width = (area.width as usize).saturating_sub(fixed_width);
 
-    let session_display = if state.session_id.is_empty() {
+    let session_display = if state.side_panel_state.session_id.is_empty() {
         "N/A".to_string()
     } else {
-        truncate_session_id(&state.session_id, available_width)
+        truncate_session_id(&state.side_panel_state.session_id, available_width)
     };
 
     let session_line = if recently_copied {

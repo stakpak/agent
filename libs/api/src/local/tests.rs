@@ -276,6 +276,60 @@ mod local_storage_tests {
         assert!(summary.message_count > 0);
     }
 
+    #[tokio::test]
+    async fn test_list_then_get_session_roundtrip_returns_same_session() {
+        let storage = create_test_storage().await;
+        let created = storage
+            .create_session(&session_request("Round Trip", vec![user_msg("hi")]))
+            .await
+            .unwrap();
+
+        let listed = storage
+            .list_sessions(&ListSessionsQuery::new().with_limit(10))
+            .await
+            .unwrap();
+        let first_id = listed.sessions.first().expect("first session from list").id;
+
+        let fetched = storage
+            .get_session(first_id)
+            .await
+            .expect("get session by listed id");
+        assert_eq!(fetched.id, created.session_id);
+        assert_eq!(fetched.title, "Round Trip");
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_message_count_reflects_messages_not_checkpoints() {
+        let storage = create_test_storage().await;
+        let created = storage
+            .create_session(&session_request("multi", vec![user_msg("one")]))
+            .await
+            .unwrap();
+
+        let cp2 = storage
+            .create_checkpoint(
+                created.session_id,
+                &CreateCheckpointRequest::new(vec![
+                    user_msg("one"),
+                    assistant_msg("hi"),
+                    user_msg("two"),
+                ])
+                .with_parent(created.checkpoint.id),
+            )
+            .await
+            .unwrap();
+
+        let result = storage
+            .list_sessions(&ListSessionsQuery::new())
+            .await
+            .unwrap();
+        let summary = &result.sessions[0];
+        assert_eq!(summary.active_checkpoint_id.unwrap(), cp2.id);
+        // Checkpoint count is 2, but active checkpoint has 3 messages.
+        // `message_count` must be 3 — not 2.
+        assert_eq!(summary.message_count, 3);
+    }
+
     // =========================================================================
     // Checkpoint CRUD
     // =========================================================================
