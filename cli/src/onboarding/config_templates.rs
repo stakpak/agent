@@ -132,6 +132,24 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
     profile
 }
 
+/// Generate OpenRouter profile configuration (credentials stored separately in config.toml auth field)
+pub fn generate_openrouter_profile() -> ProfileConfig {
+    let mut profile = ProfileConfig {
+        provider: Some(ProviderType::Local),
+        model: Some("openrouter/anthropic/claude-sonnet-4".to_string()),
+        ..ProfileConfig::default()
+    };
+    profile.providers.insert(
+        "openrouter".to_string(),
+        ProviderConfig::OpenRouter {
+            api_key: None,
+            api_endpoint: None,
+            auth: None,
+        },
+    );
+    profile
+}
+
 /// Generate custom provider profile configuration
 ///
 /// This creates a profile with a custom OpenAI-compatible provider (e.g., LiteLLM, Ollama).
@@ -393,6 +411,22 @@ pub fn config_to_toml_preview(profile: &ProfileConfig, profile_name: &str) -> St
                 }
                 if let Some(a) = auth {
                     toml.push_str(&format!("# auth: {} (set)\n", a.auth_type_display()));
+                }
+            }
+            ProviderConfig::OpenRouter {
+                api_key,
+                api_endpoint,
+                ..
+            } => {
+                toml.push_str("type = \"openrouter\"\n");
+                if let Some(endpoint) = api_endpoint {
+                    toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
+                }
+                if let Some(key) = api_key {
+                    toml.push_str(&format!(
+                        "api_key = \"{}\"\n",
+                        if key.is_empty() { "" } else { "***" }
+                    ));
                 }
             }
         }

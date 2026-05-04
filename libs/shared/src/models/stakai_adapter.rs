@@ -17,7 +17,8 @@ use stakai::{
     Model, OpenAIApiConfig, OpenAIOptions, ProviderOptions, ReasoningEffort, ResponsesConfig, Role,
     StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
     providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
-    providers::openai::OpenAIConfig as StakaiOpenAIConfig, registry::ProviderRegistry,
+    providers::openai::OpenAIConfig as StakaiOpenAIConfig, providers::openrouter::OpenRouterConfig,
+    registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -474,6 +475,17 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                         inference_config.stakpak(api_key.to_string(), api_endpoint.clone());
                 }
             }
+            ProviderConfig::OpenRouter { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut openrouter_config = OpenRouterConfig::new(api_key.to_string());
+                    openrouter_config = openrouter_config.with_http_referer("https://stakpak.dev/");
+                    openrouter_config = openrouter_config.with_site_title("Stakpak");
+                    if let Some(endpoint) = api_endpoint {
+                        openrouter_config = openrouter_config.with_base_url(endpoint.clone());
+                    }
+                    inference_config = inference_config.openrouter_config(openrouter_config);
+                }
+            }
             ProviderConfig::GitHubCopilot { .. } => {
                 tracing::debug!(
                     provider = %name,
@@ -521,6 +533,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     use stakai::providers::copilot::{CopilotConfig, CopilotProvider};
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
+    use stakai::providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
     use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
 
     let mut registry = ProviderRegistry::new();
@@ -581,6 +594,18 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 let provider = StakpakProvider::new(stakpak_config)
                     .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
                 registry = registry.register("stakpak", provider);
+            }
+            ProviderConfig::OpenRouter { api_endpoint, .. } => {
+                let Some(api_key) = provider_config.api_key() else {
+                    continue;
+                };
+                let mut openrouter_config = OpenRouterConfig::new(api_key.to_string());
+                if let Some(endpoint) = api_endpoint {
+                    openrouter_config = openrouter_config.with_base_url(endpoint.clone());
+                }
+                let provider = OpenRouterProvider::new(openrouter_config)
+                    .map_err(|e| format!("Failed to create OpenRouter provider: {}", e))?;
+                registry = registry.register("openrouter", provider);
             }
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
                 if let Some(access_token) = provider_config.access_token() {

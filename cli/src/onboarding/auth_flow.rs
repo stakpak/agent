@@ -3,7 +3,7 @@ use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
     BuiltinProvider, DEFAULT_MODEL, ProviderSetup, config_to_toml_preview,
     generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
-    generate_multi_provider_profile, generate_openai_profile,
+    generate_multi_provider_profile, generate_openai_profile, generate_openrouter_profile,
 };
 use crate::onboarding::menu::{
     prompt_password, prompt_yes_no, select_option, select_option_no_header,
@@ -516,6 +516,7 @@ fn render_default_model_for_provider(provider_id: &str) {
         "anthropic" => DEFAULT_MODEL,
         "openai" => "gpt-4.1",
         "gemini" => "gemini-2.5-pro",
+        "openrouter" => "openrouter/anthropic/claude-sonnet-4",
         "github-copilot" => "github-copilot/gpt-4o",
         _ => return,
     };
@@ -581,7 +582,8 @@ fn provider_order_key(provider_id: &str, label: &str) -> (u8, String) {
         "anthropic" => 0,
         "openai" => 1,
         "gemini" => 2,
-        "github-copilot" => 3,
+        "openrouter" => 3,
+        "github-copilot" => 4,
         _ => 100,
     };
     (priority, label.to_string())
@@ -592,6 +594,7 @@ fn build_provider_profile(provider_id: &str) -> Result<ProfileConfig, String> {
         "anthropic" => Ok(generate_anthropic_profile()),
         "openai" => Ok(generate_openai_profile()),
         "gemini" => Ok(generate_gemini_profile()),
+        "openrouter" => Ok(generate_openrouter_profile()),
         "github-copilot" => Ok(generate_github_copilot_profile()),
         other => Err(format!("Unsupported provider for auth flow: {}", other)),
     }
@@ -648,6 +651,7 @@ mod tests {
                 "Anthropic (Claude)",
                 "OpenAI",
                 "Google (Gemini)",
+                "OpenRouter",
                 "GitHub Copilot",
                 "Hybrid providers (e.g., Google and Anthropic)",
                 "Bring your own model",
