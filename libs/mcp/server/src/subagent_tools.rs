@@ -9,7 +9,7 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 
 /// Default config path inside container (matches ~/.stakpak/config.toml convention).
@@ -46,11 +46,11 @@ pub struct DynamicSubagentRequest {
     )]
     pub tools: Vec<String>,
 
-    // /// Model to use (the "M" in the 4-tuple).
-    // #[schemars(
-    //     description = "Model selection: small cheap models for fast/exploratory/research tasks or large more expensive models for complex reasoning"
-    // )]
-    // pub model_id: Option<String>,
+    /// Model to use (the "M" in the 4-tuple).
+    #[schemars(
+        description = "Subagent model override in provider/short_name format. Used verbatim when set; otherwise resolution falls back through profile config, built-in default for the parent provider, then the parent model."
+    )]
+    pub model: Option<String>,
     /// Maximum steps the subagent can take (default: 30)
     #[schemars(description = "Maximum steps the subagent can take (default: 30)")]
     pub max_steps: Option<usize>,
@@ -116,8 +116,15 @@ PARAMETERS:
 - instruction: What the subagent should do - be specific and include success criteria
 - context: (Optional) Curated context from previous work - include relevant findings, key references, failed approaches
 - tools: Array of tool names to grant (follow least-privilege - minimum tools required)
+- model: (Optional) Subagent model override in provider/short_name format; used verbatim when set, otherwise the resolution chain below applies
 - max_steps: (Optional) Maximum steps, default 30
 - enable_sandbox: (Optional) Run in isolated warden container with security policies
+
+MODEL RESOLUTION:
+1. Caller-supplied model override
+2. Profile [subagent].model setting
+3. Built-in default for the parent provider
+4. Parent model verbatim (silent inherit)
 
 WHEN TO USE:
 - When you need fine-grained control over subagent capabilities
@@ -166,6 +173,7 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             instructions,
             context,
             tools,
+            model,
             max_steps,
             enable_sandbox,
         }): Parameters<DynamicSubagentRequest>,
@@ -181,34 +189,34 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         // Use the main agent's profile and config path, passed explicitly through config structs.
         let profile_name = self.subagent_config.profile_name.clone();
         let config_path = self.subagent_config.config_path.clone();
+        let configured_model = self.subagent_config.model.clone();
         let max_steps = max_steps.unwrap_or(30);
 
-        let model_id = ctx
+        let parent_model_id = ctx
             .meta
             .get("model_id")
             .and_then(|v| v.as_str())
             .map(ToString::to_string);
 
-        let model_provider = ctx
+        let parent_provider = ctx
             .meta
             .get("model_provider")
             .and_then(|v| v.as_str())
             .map(ToString::to_string);
 
-        let model = match (model_provider.clone(), model_id.clone()) {
-            (Some(provider), Some(id)) => {
-                let downgraded_id = downgrade_model_choice(&id);
-                Some(format!("{}/{}", provider, downgraded_id))
-            }
-            _ => None,
-        };
+        let resolved_model = resolve_subagent_model(
+            model.as_deref(),
+            configured_model.as_deref(),
+            parent_provider.as_deref(),
+            parent_model_id.as_deref(),
+        );
 
         // Build the dynamic subagent command
         let subagent_command = match self.build_dynamic_subagent_command(
             &instructions,
             context.as_deref(),
             &tools,
-            model.as_deref(),
+            resolved_model.model.as_deref(),
             max_steps,
             enable_sandbox,
             session_id.as_deref(),
@@ -244,6 +252,15 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
             }
         };
 
+        info!(
+            parent = parent_model_id.as_deref().unwrap_or_default(),
+            provider = parent_provider.as_deref().unwrap_or_default(),
+            step = resolved_model.step,
+            resolved = resolved_model.model.as_deref().unwrap_or_default(),
+            task_id = %task_info.id,
+            "resolved subagent model"
+        );
+
         // Format tools list for display
         let tools_display = tools.join(", ");
         let context_display = context
@@ -255,9 +272,9 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         } else {
             ""
         };
-        let model_display = model
-            .clone()
-            .unwrap_or_else(|| "(inherited from profile config)".to_string());
+        let model_display = resolved_model
+            .model
+            .unwrap_or_else(|| "(inherited from parent context)".to_string());
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "🤖 Dynamic Subagent Created\n\n\
@@ -594,71 +611,192 @@ NOTES:
     }
 }
 
-fn downgrade_model_choice(model_id: &str) -> String {
-    if !model_id.contains("claude") {
-        return model_id.to_string();
+struct ResolvedModel {
+    model: Option<String>,
+    step: &'static str,
+}
+
+fn trimmed_non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn default_subagent_model(provider: &str) -> Option<&'static str> {
+    match provider {
+        "anthropic" => Some("anthropic/claude-haiku-4-5"),
+        "openai" => Some("openai/gpt-5-mini"),
+        "google" | "gemini" => Some("gemini/gemini-2.0-flash"),
+        "amazon-bedrock" => Some("amazon-bedrock/claude-haiku-4-5"),
+        "stakpak" => Some("stakpak/anthropic/claude-haiku-4-5"),
+        "github-copilot" => None,
+        _ => None,
+    }
+}
+
+fn resolve_subagent_model(
+    request_model: Option<&str>,
+    configured_model: Option<&str>,
+    parent_provider: Option<&str>,
+    parent_model_id: Option<&str>,
+) -> ResolvedModel {
+    if let Some(model) = trimmed_non_empty(request_model) {
+        return ResolvedModel {
+            model: Some(model.to_string()),
+            step: "caller_override",
+        };
     }
 
-    let downgraded = if model_id.contains("opus") {
-        model_id.replacen("opus", "haiku", 1)
-    } else if model_id.contains("sonnet") {
-        model_id.replacen("sonnet", "haiku", 1)
-    } else {
-        model_id.to_string()
+    if let Some(model) = trimmed_non_empty(configured_model) {
+        return ResolvedModel {
+            model: Some(model.to_string()),
+            step: "profile_config",
+        };
+    }
+
+    if let Some(provider) = trimmed_non_empty(parent_provider)
+        && let Some(model) = default_subagent_model(provider)
+    {
+        return ResolvedModel {
+            model: Some(model.to_string()),
+            step: "builtin_default",
+        };
+    }
+
+    let inherited = match (
+        trimmed_non_empty(parent_provider),
+        trimmed_non_empty(parent_model_id),
+    ) {
+        (Some(provider), Some(model_id)) => Some(format!("{provider}/{model_id}")),
+        (None, Some(model_id)) => Some(model_id.to_string()),
+        _ => None,
     };
 
-    if downgraded.contains("claude") {
-        downgraded.replace("4-6", "4-5").replace("4.6", "4.5")
-    } else {
-        downgraded
+    ResolvedModel {
+        model: inherited,
+        step: "parent_inherit",
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::downgrade_model_choice;
+    use super::{default_subagent_model, resolve_subagent_model};
 
     #[test]
-    fn non_claude_model_is_unchanged() {
-        let model = "gpt-5";
-        assert_eq!(downgrade_model_choice(model), model);
+    fn caller_override_wins_verbatim() {
+        let resolved = resolve_subagent_model(
+            Some("anthropic/claude-haiku-4-5"),
+            Some("openai/gpt-5-mini"),
+            Some("anthropic"),
+            Some("claude-opus-4-7"),
+        );
+
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(resolved.step, "caller_override");
     }
 
     #[test]
-    fn claude_opus_is_downgraded_to_haiku() {
+    fn profile_model_wins_when_caller_is_silent() {
+        let resolved = resolve_subagent_model(
+            None,
+            Some("anthropic/claude-haiku-4-5"),
+            Some("openai"),
+            Some("gpt-4o"),
+        );
+
         assert_eq!(
-            downgrade_model_choice("claude-opus-4-6"),
-            "claude-haiku-4-5"
+            resolved.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(resolved.step, "profile_config");
+    }
+
+    #[test]
+    fn anthropic_parent_uses_builtin_default() {
+        let resolved =
+            resolve_subagent_model(None, None, Some("anthropic"), Some("claude-opus-4-7"));
+
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(resolved.step, "builtin_default");
+    }
+
+    #[test]
+    fn openai_gemini_bedrock_and_stakpak_parents_use_builtin_defaults() {
+        assert_eq!(default_subagent_model("openai"), Some("openai/gpt-5-mini"));
+        assert_eq!(
+            default_subagent_model("google"),
+            Some("gemini/gemini-2.0-flash")
+        );
+        assert_eq!(
+            default_subagent_model("gemini"),
+            Some("gemini/gemini-2.0-flash")
+        );
+        assert_eq!(
+            default_subagent_model("amazon-bedrock"),
+            Some("amazon-bedrock/claude-haiku-4-5")
+        );
+        assert_eq!(
+            default_subagent_model("stakpak"),
+            Some("stakpak/anthropic/claude-haiku-4-5")
         );
     }
 
     #[test]
-    fn claude_sonnet_is_downgraded_to_haiku() {
-        assert_eq!(
-            downgrade_model_choice("claude-sonnet-4-6"),
-            "claude-haiku-4-5"
+    fn unknown_provider_inherits_parent_model() {
+        let resolved = resolve_subagent_model(
+            None,
+            None,
+            Some("litellm-custom"),
+            Some("my-org/my-model-v3"),
         );
+
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("litellm-custom/my-org/my-model-v3")
+        );
+        assert_eq!(resolved.step, "parent_inherit");
     }
 
     #[test]
-    fn claude_version_with_dot_is_normalized() {
+    fn future_claude_versions_only_depend_on_table_value() {
+        let resolved =
+            resolve_subagent_model(None, None, Some("anthropic"), Some("claude-opus-4-9"));
+
         assert_eq!(
-            downgrade_model_choice("claude-opus-4.6"),
-            "claude-haiku-4.5"
+            resolved.model.as_deref(),
+            default_subagent_model("anthropic")
         );
+        assert_eq!(resolved.step, "builtin_default");
     }
 
     #[test]
-    fn claude_haiku_still_gets_version_normalization() {
-        assert_eq!(
-            downgrade_model_choice("claude-haiku-4-6"),
-            "claude-haiku-4-5"
+    fn empty_strings_fall_through_the_chain() {
+        let resolved = resolve_subagent_model(
+            Some(""),
+            Some("anthropic/claude-haiku-4-5"),
+            Some("anthropic"),
+            Some("claude-opus-4-7"),
         );
-    }
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(resolved.step, "profile_config");
 
-    #[test]
-    fn claude_without_target_tokens_is_left_as_is() {
-        let model = "claude-custom";
-        assert_eq!(downgrade_model_choice(model), model);
+        let resolved = resolve_subagent_model(
+            Some(""),
+            Some(""),
+            Some("anthropic"),
+            Some("claude-opus-4-7"),
+        );
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(resolved.step, "builtin_default");
     }
 }

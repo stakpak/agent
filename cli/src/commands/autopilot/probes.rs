@@ -1065,6 +1065,7 @@ mod tests {
             config_path: "config.toml".to_string(),
             allowed_tools: None,
             auto_approve: None,
+            subagent: None,
             rulebooks: None,
             warden: None,
             providers: HashMap::<String, ProviderConfig>::new(),

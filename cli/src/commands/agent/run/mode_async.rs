@@ -212,6 +212,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         subagent_config: stakpak_mcp_server::SubagentConfig {
             profile_name: Some(ctx.profile_name.clone()),
             config_path: Some(ctx.config_path.clone()),
+            model: ctx.subagent_model(),
         },
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
