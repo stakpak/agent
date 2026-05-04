@@ -137,6 +137,7 @@ fn ak_read_multiple_paths_uses_delimiter() {
 #[test]
 fn ak_read_on_directory_returns_search_hint() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let home = temp_dir.path();
     let store = temp_dir.path().join("knowledge");
     std::fs::create_dir_all(store.join("services")).expect("create services dir");
 
@@ -145,10 +146,18 @@ fn ak_read_on_directory_returns_search_hint() {
         .arg("read")
         .arg("services")
         .env("AK_STORE", &store)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("STAKPAK_PROFILE")
         .output()
         .expect("run stakpak ak read on directory");
 
-    assert!(!output.status.success(), "command unexpectedly succeeded");
+    assert!(
+        !output.status.success(),
+        "command unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("is a directory"), "stderr was: {stderr}");
@@ -161,6 +170,7 @@ fn ak_read_on_directory_returns_search_hint() {
 #[test]
 fn ak_remove_missing_path_returns_clear_error() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let home = temp_dir.path();
     let store = temp_dir.path().join("knowledge");
     std::fs::create_dir_all(&store).expect("create store");
 
@@ -169,10 +179,18 @@ fn ak_remove_missing_path_returns_clear_error() {
         .arg("remove")
         .arg("missing.md")
         .env("AK_STORE", &store)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("STAKPAK_PROFILE")
         .output()
         .expect("run stakpak ak remove on missing path");
 
-    assert!(!output.status.success(), "command unexpectedly succeeded");
+    assert!(
+        !output.status.success(),
+        "command unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
