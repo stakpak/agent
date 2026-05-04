@@ -18,16 +18,17 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
         return;
     }
-    if state.quit_intent_state.ctrl_c_pressed_once && state.quit_intent_state.ctrl_c_timer.is_some() {
-        let hint_text = if state.running_background_tasks > 0 {
-            let task_label = if state.running_background_tasks == 1 {
+    if state.quit_intent_state.ctrl_c_pressed_once && state.quit_intent_state.ctrl_c_timer.is_some()
+    {
+        let hint_text = if state.background_tasks_state.running_background_tasks > 0 {
+            let task_label = if state.background_tasks_state.running_background_tasks == 1 {
                 "task"
             } else {
                 "tasks"
             };
             format!(
                 "Press Ctrl+C again to quit ({} background {} will be stopped)",
-                state.running_background_tasks, task_label
+                state.background_tasks_state.running_background_tasks, task_label
             )
         } else {
             "Press Ctrl+C again to exit".to_string()

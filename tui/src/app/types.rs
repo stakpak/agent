@@ -20,6 +20,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::task_manager::TaskManagerHandle;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -524,6 +525,12 @@ pub struct ToolCallState {
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
     pub subagent_pause_info: HashMap<String, TaskPauseInfo>,
+}
+
+pub struct BackgroundTasksState {
+    pub running_background_tasks: usize,
+    pub subagent_pause_info: HashMap<String, TaskPauseInfo>,
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
 /// Dialog visibility, approval-bar interaction, and tool-approval selection state.

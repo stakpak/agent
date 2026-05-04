@@ -21,7 +21,7 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -57,10 +57,7 @@ pub struct AppState {
     pub ask_user_state: AskUserState,
     pub tool_approval_popup_state: AutoApprovePopupState,
     pub approval_settings_persistence_state: ApprovalSettingsPersistenceModal,
-    /// Handle to the TaskManager for querying background task status (e.g., running subagents)
-    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
-    /// Cached count of running/pending background tasks (refreshed on Ctrl+C press)
-    pub running_background_tasks: usize,
+    pub background_tasks_state: BackgroundTasksState,
 }
 
 pub struct AppStateOptions<'a> {
@@ -265,8 +262,12 @@ impl AppState {
             },
             user_message_queue_state: UserMessageQueueState::default(),
             message_revert_state: MessageRevertState::default(),
-            task_manager_handle,
-            running_background_tasks: 0,
+
+            background_tasks_state: BackgroundTasksState {
+                running_background_tasks: 0,
+                subagent_pause_info: HashMap::new(),
+                task_manager_handle,
+            },
 
             // Plan mode/review initialization
             plan_mode_state: PlanModeState::default(),

@@ -1599,7 +1599,7 @@ pub fn update(
             // If we reach here, the popup is not visible, so ignore
         }
         InputEvent::RunningBackgroundTasksCount(count) => {
-            state.running_background_tasks = count;
+            state.background_tasks_state.running_background_tasks = count;
         }
         // Policy persistence modal events are handled in the intercept block above
         InputEvent::ShowApprovalSettingsPersistenceModal
