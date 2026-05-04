@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::file::ConfigFile;
-use super::profile::ProfileConfig;
+use super::profile::{ProfileConfig, SubagentConfig};
 use super::rulebook::RulebookConfig;
 use super::types::{OldAppConfig, ProviderType, Settings};
 use super::warden::WardenConfig;
@@ -49,6 +49,8 @@ pub struct AppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     /// User's preferred model (unified field, replaces smart/eco/recovery)
     pub model: Option<String>,
+    /// Optional subagent-specific profile settings.
+    pub subagent: Option<SubagentConfig>,
     /// Optional system prompt override for sessions using this profile.
     pub system_prompt: Option<String>,
     /// Optional max turn override for sessions using this profile.
@@ -165,6 +167,7 @@ impl AppConfig {
             provider: profile_config.provider.unwrap_or(ProviderType::Remote),
             providers: profile_config.providers,
             model: profile_config.model,
+            subagent: profile_config.subagent,
             system_prompt: profile_config.system_prompt,
             max_turns: profile_config.max_turns,
             anonymous_id: settings.anonymous_id,
@@ -892,6 +895,10 @@ impl AppConfig {
         (config_provider, None, None)
     }
 
+    pub fn subagent_model(&self) -> Option<String> {
+        self.subagent.as_ref().and_then(|s| s.model.clone())
+    }
+
     /// Get the default Model from config
     ///
     /// Uses the `model` field if set, otherwise falls back to a default Claude Opus model.
@@ -997,6 +1004,7 @@ impl From<AppConfig> for ProfileConfig {
             provider: Some(config.provider),
             providers: config.providers,
             model: config.model,
+            subagent: config.subagent,
             recent_models: config.recent_models,
             system_prompt: config.system_prompt,
             max_turns: config.max_turns,

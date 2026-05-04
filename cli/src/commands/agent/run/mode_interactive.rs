@@ -390,6 +390,7 @@ pub async fn run_interactive(
                 subagent_config: stakpak_mcp_server::SubagentConfig {
                     profile_name: Some(ctx_clone.profile_name.clone()),
                     config_path: Some(ctx_clone.config_path.clone()),
+                    model: ctx_clone.subagent_model(),
                 },
             };
             // Tools are already filtered by initialize_mcp_server_and_tools (same as async mode)

@@ -423,6 +423,7 @@ mod tests {
             config_path: "/tmp/test".into(),
             allowed_tools: None,
             auto_approve: None,
+            subagent: None,
             rulebooks: None,
             warden,
             provider: ProviderType::Remote,

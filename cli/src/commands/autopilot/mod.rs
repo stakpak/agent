@@ -1237,6 +1237,7 @@ async fn start_foreground_runtime(
         subagent_config: stakpak_mcp_server::SubagentConfig {
             profile_name: Some(config.profile_name.clone()),
             config_path: Some(config.config_path.clone()),
+            model: config.subagent_model(),
         },
     };
 
@@ -3872,6 +3873,7 @@ mod tests {
             config_path: config_path.to_string_lossy().to_string(),
             allowed_tools: None,
             auto_approve: None,
+            subagent: None,
             rulebooks: None,
             warden: None,
             providers: std::collections::HashMap::new(),

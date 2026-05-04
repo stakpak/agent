@@ -113,6 +113,7 @@ pub async fn run_server(
             subagent_config: SubagentConfig {
                 profile_name: Some(config.profile_name.clone()),
                 config_path: Some(config.config_path.clone()),
+                model: config.subagent_model(),
             },
             server_tls_config,
         },

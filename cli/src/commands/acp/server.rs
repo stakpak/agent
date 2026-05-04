@@ -1128,6 +1128,7 @@ impl StakpakAcpAgent {
             subagent_config: stakpak_mcp_server::SubagentConfig {
                 profile_name: Some(config.profile_name.clone()),
                 config_path: Some(config.config_path.clone()),
+                model: config.subagent_model(),
             },
             ..McpInitConfig::default()
         };

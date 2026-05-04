@@ -47,6 +47,7 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         config_path: "/tmp/stakpak/config.toml".into(),
         allowed_tools: Some(vec!["git".into(), "curl".into()]),
         auto_approve: Some(vec!["git status".into()]),
+        subagent: None,
         rulebooks: Some(RulebookConfig {
             include: Some(vec!["https://rules.stakpak.dev/security/*".into()]),
             exclude: Some(vec!["https://rules.stakpak.dev/internal/*".into()]),
@@ -283,6 +284,48 @@ fn profile_merge_falls_back_to_base_for_system_prompt_and_max_turns() {
 }
 
 #[test]
+fn profile_merge_inherits_subagent_model_from_base() {
+    let base = ProfileConfig {
+        subagent: Some(profile::SubagentConfig {
+            model: Some("anthropic/claude-haiku-4-5".to_string()),
+        }),
+        ..ProfileConfig::default()
+    };
+
+    let merged = ProfileConfig::default().merge(Some(&base));
+    assert_eq!(
+        merged
+            .subagent
+            .as_ref()
+            .and_then(|config| config.model.as_deref()),
+        Some("anthropic/claude-haiku-4-5")
+    );
+}
+
+#[test]
+fn config_file_parses_profile_subagent_model() {
+    let parsed: ConfigFile = toml::from_str(
+        r#"
+[profiles.default.subagent]
+model = "anthropic/claude-haiku-4-5"
+
+[settings]
+editor = "nano"
+"#,
+    )
+    .expect("parse config with subagent model");
+
+    assert_eq!(
+        parsed
+            .profiles
+            .get("default")
+            .and_then(|profile| profile.subagent.as_ref())
+            .and_then(|config| config.model.as_deref()),
+        Some("anthropic/claude-haiku-4-5")
+    );
+}
+
+#[test]
 fn profile_validate_rejects_invalid_max_turns_and_prompt_size() {
     let min_turns = ProfileConfig {
         max_turns: Some(1),
@@ -496,6 +539,7 @@ fn save_writes_profile_and_settings() {
         config_path: path.to_string_lossy().into_owned(),
         allowed_tools: Some(vec!["git".into(), "curl".into()]),
         auto_approve: Some(vec!["git status".into()]),
+        subagent: None,
         rulebooks: Some(RulebookConfig {
             include: Some(vec!["https://rules.stakpak.dev/security/*".into()]),
             exclude: Some(vec!["https://rules.stakpak.dev/internal/*".into()]),
