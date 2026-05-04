@@ -2,6 +2,10 @@ use crate::config::AppConfig;
 use crate::utils::plugins::{PluginConfig, get_plugin_path};
 use clap::Subcommand;
 // Re-export container constants so existing callers (autopilot.rs) don't need to change imports.
+use stakpak_shared::container::{
+    agent_knowledge_store_path, resolve_ak_store_for_sandbox, volume_container_part,
+    warden_ak_store_args,
+};
 pub use stakpak_shared::container::{
     expand_volume_path, stakpak_agent_default_mounts, stakpak_agent_image,
 };
@@ -79,15 +83,30 @@ impl WardenCommands {
                     cmd.args(["--env", &env_var]);
                 }
 
-                // Pre-create named volumes to prevent race conditions
                 stakpak_shared::container::ensure_named_volumes_exist();
 
-                // Prepare volumes from config first, then add user-specified volumes
-                // User volumes come last to allow overrides
+                let ak_store_override = match resolve_ak_store_for_sandbox() {
+                    Ok(opt) => opt,
+                    Err(e) => {
+                        eprintln!("Warning: AK_STORE override skipped — could not resolve: {e}");
+                        None
+                    }
+                };
+                let knowledge_target = agent_knowledge_store_path();
+
+                // Drop the default knowledge mount when AK_STORE is set; the
+                // override below replaces it at the same container target.
                 for vol in prepare_volumes(&config, false) {
+                    if ak_store_override.is_some()
+                        && volume_container_part(&vol) == knowledge_target
+                    {
+                        continue;
+                    }
                     let expanded_vol = expand_volume_path(&vol);
                     cmd.args(["--volume", &expanded_vol]);
                 }
+
+                cmd.args(warden_ak_store_args(ak_store_override.as_deref()));
 
                 for vol in volume {
                     cmd.args(["--volume", &vol]);
@@ -566,6 +585,64 @@ mod tests {
         assert_eq!(
             agent_count, 1,
             "working directory mount should appear exactly once: {vols:?}"
+        );
+    }
+
+    // ── AK knowledge store mount ───────────────────────────────────────
+    // The default mount must reach every warden-wrapped agent run so
+    // sandboxed subagents can `ak read/search/write` against the host store.
+
+    fn knowledge_mount_count(volumes: &[String]) -> usize {
+        volumes
+            .iter()
+            .filter(|v| v.contains(":/home/agent/.stakpak/knowledge"))
+            .count()
+    }
+
+    #[test]
+    fn knowledge_mount_present_when_no_warden_config() {
+        let config = test_config(None);
+        let vols = prepare_volumes(&config, false);
+        assert!(
+            vols.iter()
+                .any(|v| v == "~/.stakpak/knowledge:/home/agent/.stakpak/knowledge"),
+            "knowledge store mount missing: {vols:?}"
+        );
+    }
+
+    #[test]
+    fn knowledge_mount_present_for_agent_server_sandbox() {
+        let config = test_config(Some(WardenConfig {
+            enabled: true,
+            volumes: WardenConfig::readonly_profile().volumes,
+        }));
+        let vols = prepare_volumes(&config, false);
+        assert_eq!(
+            knowledge_mount_count(&vols),
+            1,
+            "knowledge mount should appear exactly once: {vols:?}"
+        );
+    }
+
+    #[test]
+    fn knowledge_mount_deduped_when_profile_provides_override() {
+        // If a profile already mounts a custom host dir at the canonical
+        // container path, the default RW mount must not be appended on top
+        // (otherwise docker would complain about duplicate target paths).
+        let custom = "/my/custom-ak:/home/agent/.stakpak/knowledge".to_string();
+        let config = test_config(Some(WardenConfig {
+            enabled: true,
+            volumes: vec![custom.clone()],
+        }));
+        let vols = prepare_volumes(&config, false);
+        assert_eq!(
+            knowledge_mount_count(&vols),
+            1,
+            "knowledge mount should appear exactly once when profile overrides it: {vols:?}"
+        );
+        assert!(
+            vols.contains(&custom),
+            "profile override should be preserved: {vols:?}"
         );
     }
 
