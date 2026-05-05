@@ -799,7 +799,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     // Reset tool call state
     state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
-    
+
     // Reset scroll state
     state.messages_scrolling_state.scroll = 0;
     state.messages_scrolling_state.scroll_to_bottom = true;
