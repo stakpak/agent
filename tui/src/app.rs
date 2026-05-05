@@ -20,6 +20,9 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::task_manager::TaskManagerHandle;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub struct AppState {
@@ -54,6 +57,7 @@ pub struct AppState {
     pub ask_user_state: AskUserState,
     pub tool_approval_popup_state: AutoApprovePopupState,
     pub approval_settings_persistence_state: ApprovalSettingsPersistenceModal,
+    pub background_tasks_state: BackgroundTasksState,
 }
 
 pub struct AppStateOptions<'a> {
@@ -74,6 +78,8 @@ pub struct AppStateOptions<'a> {
     pub init_prompt_content: Option<String>,
     /// Recently used model IDs (most recent first)
     pub recent_models: Vec<String>,
+    /// Handle to the TaskManager for querying background task status
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
 impl AppState {
@@ -149,6 +155,7 @@ impl AppState {
             board_agent_id,
             init_prompt_content,
             recent_models,
+            task_manager_handle,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -255,6 +262,12 @@ impl AppState {
             },
             user_message_queue_state: UserMessageQueueState::default(),
             message_revert_state: MessageRevertState::default(),
+
+            background_tasks_state: BackgroundTasksState {
+                running_background_tasks: 0,
+                subagent_pause_info: HashMap::new(),
+                task_manager_handle,
+            },
 
             // Plan mode/review initialization
             plan_mode_state: PlanModeState::default(),

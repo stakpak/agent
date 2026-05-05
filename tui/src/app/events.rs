@@ -224,6 +224,8 @@ pub enum InputEvent {
     // Session events
     SetSessionId(String),
 
+    // Background task status
+    RunningBackgroundTasksCount(usize),
     // Approval settings persistence modal events
     ShowApprovalSettingsPersistenceModal,
     ApprovalSettingsPersistenceNavigate(i32),
@@ -275,6 +277,7 @@ impl InputEvent {
                 | InputEvent::RecentModelsUpdated(_)
                 | InputEvent::RulebooksLoaded(_)
                 | InputEvent::CurrentRulebooksLoaded(_)
+                | InputEvent::RunningBackgroundTasksCount(_)
         )
     }
 }
