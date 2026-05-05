@@ -729,8 +729,6 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
     state.side_panel_state.todos.clear();
 
-    state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
-
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
@@ -799,6 +797,9 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         ));
     render_system_message(state, "New session started.");
 
+    // Reset tool call state
+    state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
+    
     // Reset scroll state
     state.messages_scrolling_state.scroll = 0;
     state.messages_scrolling_state.scroll_to_bottom = true;
