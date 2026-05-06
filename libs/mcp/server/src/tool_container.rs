@@ -10,6 +10,27 @@ use stakpak_shared::task_manager::TaskManagerHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Clone, Debug, Default)]
+pub struct LocalToolRuntimeDefaults {
+    active_profile_name: Option<String>,
+}
+
+impl LocalToolRuntimeDefaults {
+    pub fn new(active_profile_name: Option<String>) -> Self {
+        let active_profile_name = active_profile_name
+            .map(|profile| profile.trim().to_string())
+            .filter(|profile| !profile.is_empty());
+
+        Self {
+            active_profile_name,
+        }
+    }
+
+    pub fn active_profile_name(&self) -> Option<&str> {
+        self.active_profile_name.as_deref()
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolContainer {
     pub client: Option<Arc<dyn AgentProvider>>,
@@ -19,6 +40,7 @@ pub struct ToolContainer {
     pub tool_router: ToolRouter<Self>,
     pub skill_directories: Vec<PathBuf>,
     pub subagent_config: SubagentConfig,
+    pub local_runtime_defaults: LocalToolRuntimeDefaults,
 }
 
 #[tool_router]
@@ -31,6 +53,9 @@ impl ToolContainer {
         skill_directories: Vec<PathBuf>,
         subagent_config: SubagentConfig,
     ) -> Result<Self, String> {
+        let local_runtime_defaults =
+            LocalToolRuntimeDefaults::new(subagent_config.profile_name.clone());
+
         Ok(Self {
             client,
             task_manager,
@@ -39,6 +64,7 @@ impl ToolContainer {
             tool_router,
             skill_directories,
             subagent_config,
+            local_runtime_defaults,
         })
     }
 
