@@ -28,7 +28,9 @@ use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
 use std::{
     env,
+    ffi::OsString,
     path::{Path, PathBuf},
+    process::{Command as ProcessCommand, Stdio},
     sync::Arc,
 };
 
@@ -54,7 +56,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agent_context::AgentContext;
 use utils::agents_md::discover_agents_md;
 use utils::apps_md::discover_apps_md;
-use utils::check_update::{auto_update, check_update};
+use utils::check_update::check_update;
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
@@ -73,6 +75,36 @@ fn config_has_any_auth_flags(has_stakpak_key: bool, has_provider_keys: bool) -> 
 
 fn should_spawn_auto_update(cli: &Cli, skip_warden: bool) -> bool {
     cli.command.is_none() && !cli.r#async && !cli.print && !skip_warden
+}
+
+fn background_auto_update_args(cli: &Cli) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if let Some(profile) = &cli.profile {
+        args.push(OsString::from("--profile"));
+        args.push(OsString::from(profile));
+    }
+    if let Some(config_path) = &cli.config_path {
+        args.push(OsString::from("--config"));
+        args.push(config_path.as_os_str().to_os_string());
+    }
+    args.push(OsString::from("update"));
+    args.push(OsString::from("--background"));
+    args
+}
+
+fn spawn_background_auto_update(cli: &Cli) -> std::io::Result<()> {
+    let current_exe = env::current_exe()?;
+    spawn_background_auto_update_with_exe(&current_exe, cli)
+}
+
+fn spawn_background_auto_update_with_exe(executable: &Path, cli: &Cli) -> std::io::Result<()> {
+    ProcessCommand::new(executable)
+        .args(background_auto_update_args(cli))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
@@ -271,9 +303,7 @@ async fn main() {
     if config_result.is_ok()
         && should_spawn_auto_update(&cli, std::env::var("STAKPAK_SKIP_WARDEN").is_ok())
     {
-        tokio::spawn(async move {
-            let _ = auto_update().await;
-        });
+        let _ = spawn_background_auto_update(&cli);
     }
 
     match config_result {
@@ -730,6 +760,69 @@ mod tests {
     fn auto_update_gate_is_true_for_default_interactive_startup() {
         let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
         assert!(should_spawn_auto_update(&cli, false));
+    }
+
+    #[test]
+    fn background_auto_update_preserves_root_profile_and_config_args() {
+        let cli = Cli::try_parse_from([
+            "stakpak",
+            "--profile",
+            "byok",
+            "--config",
+            "/tmp/stakpak-config.toml",
+        ])
+        .expect("parse cli");
+
+        let args = background_auto_update_args(&cli);
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("--profile"),
+                OsString::from("byok"),
+                OsString::from("--config"),
+                OsString::from("/tmp/stakpak-config.toml"),
+                OsString::from("update"),
+                OsString::from("--background"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_auto_update_spawn_runs_update_subcommand_with_background_flag() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_stakpak = temp_dir.path().join("stakpak");
+        let log_path = temp_dir.path().join("update.log");
+
+        std::fs::write(
+            &fake_stakpak,
+            format!(
+                "#!/bin/sh\nprintf 'args=%s\\n' \"$*\" > '{}'\n",
+                log_path.display()
+            ),
+        )
+        .expect("write fake stakpak");
+        let mut permissions = std::fs::metadata(&fake_stakpak)
+            .expect("fake stakpak metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_stakpak, permissions).expect("chmod fake stakpak");
+
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        spawn_background_auto_update_with_exe(&fake_stakpak, &cli)
+            .expect("spawn background auto update");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !log_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let log = std::fs::read_to_string(&log_path).expect("read background update log");
+        assert!(log.contains("args=update --background"), "got: {log}");
     }
 
     #[cfg(unix)]

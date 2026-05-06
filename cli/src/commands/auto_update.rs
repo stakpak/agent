@@ -130,6 +130,29 @@ fn update_success_message(version: &str) -> String {
     )
 }
 
+pub fn restart_current_process() -> Result<(), String> {
+    let executable = env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
+    let args: Vec<String> = env::args().skip(1).collect();
+    restart_process(&executable, &args)
+}
+
+#[cfg(unix)]
+fn restart_process(executable: &Path, args: &[String]) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+
+    let err = Command::new(executable).args(args).exec();
+    Err(format!("Failed to exec updated binary: {}", err))
+}
+
+#[cfg(windows)]
+fn restart_process(executable: &Path, args: &[String]) -> Result<(), String> {
+    Command::new(executable)
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn updated binary: {}", e))?;
+    std::process::exit(0);
+}
+
 fn update_via_brew(
     latest_version: &str,
     silent: bool,
@@ -350,6 +373,11 @@ fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
+fn cleanup_downloaded_binary_update(temp_exe: &Path, extracted_binary_path: &Path) {
+    fs::remove_file(temp_exe).ok();
+    fs::remove_file(extracted_binary_path).ok();
+}
+
 fn apply_downloaded_binary_update(
     current_exe: &Path,
     extracted_binary_path: &Path,
@@ -361,18 +389,32 @@ fn apply_downloaded_binary_update(
     let backup_exe = current_exe.with_extension("backup");
 
     update_info!(silent, "Preparing new binary...");
-    fs::copy(extracted_binary_path, &temp_exe)
-        .map_err(|e| format!("Failed to copy extracted binary to temp location: {}", e))?;
+    if let Err(e) = fs::copy(extracted_binary_path, &temp_exe) {
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+        return Err(format!(
+            "Failed to copy extracted binary to temp location: {}",
+            e
+        ));
+    }
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&temp_exe)
-            .map_err(|e| format!("Failed to get temp file metadata: {}", e))?
-            .permissions();
+        let mut perms = match fs::metadata(&temp_exe) {
+            Ok(metadata) => metadata.permissions(),
+            Err(e) => {
+                cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+                return Err(format!("Failed to get temp file metadata: {}", e));
+            }
+        };
         perms.set_mode(0o755);
-        fs::set_permissions(&temp_exe, perms)
-            .map_err(|e| format!("Failed to set executable permissions on temp file: {}", e))?;
+        if let Err(e) = fs::set_permissions(&temp_exe, perms) {
+            cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+            return Err(format!(
+                "Failed to set executable permissions on temp file: {}",
+                e
+            ));
+        }
     }
 
     update_info!(silent, "Verifying new binary...");
@@ -409,7 +451,7 @@ fn apply_downloaded_binary_update(
                     true
                 }
                 Err(e) => {
-                    fs::remove_file(&temp_exe).ok();
+                    cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
                     return Err(format!(
                         "Failed to run verification test on new binary: {}",
                         e
@@ -420,12 +462,15 @@ fn apply_downloaded_binary_update(
     };
 
     if !verification_success {
-        fs::remove_file(&temp_exe).ok();
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
         return Err("New binary failed all verification tests".to_string());
     }
 
     update_info!(silent, "Creating backup of current executable...");
-    fs::copy(current_exe, &backup_exe).map_err(|e| format!("Failed to create backup: {}", e))?;
+    if let Err(e) = fs::copy(current_exe, &backup_exe) {
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+        return Err(format!("Failed to create backup: {}", e));
+    }
 
     update_info!(silent, "Performing atomic replacement...");
     match fs::rename(&temp_exe, current_exe) {
@@ -558,6 +603,30 @@ mod tests {
             .permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(path, permissions).expect("chmod script");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_binary_update_removes_downloaded_binary() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let missing_current_exe = temp_dir.path().join("missing-stakpak");
+        let extracted_binary = temp_dir.path().join("stakpak_downloaded");
+
+        write_executable_script(&extracted_binary, "#!/bin/sh\necho new-binary\n");
+
+        let result = apply_downloaded_binary_update(
+            &missing_current_exe,
+            &extracted_binary,
+            "v9.9.9",
+            true,
+            false,
+        );
+
+        assert!(result.is_err());
+        assert!(
+            !extracted_binary.exists(),
+            "downloaded binary should be removed on update failure"
+        );
     }
 
     #[cfg(unix)]

@@ -201,27 +201,17 @@ async fn run_auto_update_if_newer<F, Fut>(
     current_version: &str,
     release: &LatestRelease,
     run_update: F,
-) -> Result<(), String>
+) -> Result<bool, String>
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<(), String>>,
 {
     if is_newer_version(current_version, &release.tag_name) {
         run_update().await?;
+        return Ok(true);
     }
 
-    Ok(())
-}
-
-pub async fn auto_update() -> Result<(), Box<dyn Error>> {
-    let release = get_latest_release().await?;
-    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-    run_auto_update_if_newer(&current_version, &release, || async {
-        run_auto_update(false).await
-    })
-    .await
-    .map_err(std::io::Error::other)?;
-    Ok(())
+    Ok(false)
 }
 
 /// Force auto-update without prompting (for ACP mode).
@@ -234,11 +224,14 @@ pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
             "🔄 Updating Stakpak: {} → {} ...",
             current_version, release.tag_name
         );
-        run_auto_update(true).await?;
-        Ok(true)
-    } else {
-        Ok(false)
     }
+
+    run_auto_update_if_newer(&current_version, &release, || async {
+        run_auto_update(true).await
+    })
+    .await
+    .map_err(std::io::Error::other)
+    .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -266,13 +259,14 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_clone = Arc::clone(&invoked);
 
-        run_auto_update_if_newer("v0.3.78", &release("v9.9.9"), || {
+        let updated = run_auto_update_if_newer("v0.3.78", &release("v9.9.9"), || {
             invoked_clone.store(true, Ordering::SeqCst);
             async { Ok::<(), String>(()) }
         })
         .await
         .expect("auto update succeeds");
 
+        assert!(updated);
         assert!(invoked.load(Ordering::SeqCst));
     }
 
@@ -281,13 +275,14 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_clone = Arc::clone(&invoked);
 
-        run_auto_update_if_newer("v9.9.9", &release("v9.9.9"), || {
+        let updated = run_auto_update_if_newer("v9.9.9", &release("v9.9.9"), || {
             invoked_clone.store(true, Ordering::SeqCst);
             async { Ok::<(), String>(()) }
         })
         .await
         .expect("auto update succeeds");
 
+        assert!(!updated);
         assert!(!invoked.load(Ordering::SeqCst));
     }
 
