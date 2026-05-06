@@ -7,7 +7,7 @@ use crate::utils::plugins::{PluginConfig, extract_tar_gz, extract_zip, get_downl
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Print an informational message to stdout, or stderr when `silent` is true.
@@ -72,7 +72,7 @@ pub async fn run_auto_update(silent: bool) -> Result<(), String> {
             silent,
             "Detected current binary is managed by Homebrew. Updating via Homebrew..."
         );
-        update_via_brew(silent, autopilot_was_running)
+        update_via_brew(&latest_version, silent, autopilot_was_running)
     } else {
         update_info!(
             silent,
@@ -123,9 +123,61 @@ fn is_stakpak_homebrew_install() -> bool {
     }
 }
 
-fn update_via_brew(silent: bool, autopilot_was_running: bool) -> Result<(), String> {
-    // update brew
-    let update_status = Command::new("brew")
+fn update_success_message(version: &str) -> String {
+    format!(
+        "✓ Updated to {}. Restart any long-running stakpak processes to pick up the new binary.",
+        version
+    )
+}
+
+pub fn restart_current_process() -> Result<(), String> {
+    let executable = env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
+    let args: Vec<String> = env::args().skip(1).collect();
+    restart_process(&executable, &args)
+}
+
+#[cfg(unix)]
+fn restart_process(executable: &Path, args: &[String]) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+
+    let err = Command::new(executable).args(args).exec();
+    Err(format!("Failed to exec updated binary: {}", err))
+}
+
+#[cfg(windows)]
+fn restart_process(executable: &Path, args: &[String]) -> Result<(), String> {
+    Command::new(executable)
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn updated binary: {}", e))?;
+    std::process::exit(0);
+}
+
+fn update_via_brew(
+    latest_version: &str,
+    silent: bool,
+    autopilot_was_running: bool,
+) -> Result<(), String> {
+    update_via_brew_with_command("brew", latest_version, silent, autopilot_was_running)
+}
+
+#[cfg(test)]
+fn update_via_brew_with_path(
+    brew_path: &str,
+    latest_version: &str,
+    silent: bool,
+    autopilot_was_running: bool,
+) -> Result<(), String> {
+    update_via_brew_with_command(brew_path, latest_version, silent, autopilot_was_running)
+}
+
+fn update_via_brew_with_command(
+    brew_command: &str,
+    latest_version: &str,
+    silent: bool,
+    autopilot_was_running: bool,
+) -> Result<(), String> {
+    let update_status = Command::new(brew_command)
         .arg("update")
         .status()
         .map_err(|e| format!("Failed to run brew update: {}", e))?;
@@ -133,29 +185,26 @@ fn update_via_brew(silent: bool, autopilot_was_running: bool) -> Result<(), Stri
         update_info!(silent, "brew update failed!");
     }
 
-    let upgrade_status = Command::new("brew")
+    let upgrade_status = Command::new(brew_command)
         .arg("upgrade")
         .arg("stakpak")
         .status()
         .map_err(|e| format!("Failed to run brew upgrade: {}", e))?;
-    if upgrade_status.success() {
-        // Restart autopilot with the new binary before exiting
-        if autopilot_was_running {
-            update_info!(silent, "Restarting autopilot service with new binary...");
-            if let Err(e) = start_autopilot_service() {
-                update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
-            } else {
-                update_info!(silent, "✓ Autopilot service restarted");
-            }
-        }
-        update_info!(
-            silent,
-            "Update complete! Please restart the CLI to use the new version."
-        );
-        std::process::exit(0);
-    } else {
-        Err("brew upgrade stakpak failed".to_string())
+    if !upgrade_status.success() {
+        return Err("brew upgrade stakpak failed".to_string());
     }
+
+    if autopilot_was_running {
+        update_info!(silent, "Restarting autopilot service with new binary...");
+        if let Err(e) = start_autopilot_service() {
+            update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
+        } else {
+            update_info!(silent, "✓ Autopilot service restarted");
+        }
+    }
+
+    update_info!(silent, "{}", update_success_message(latest_version));
+    Ok(())
 }
 
 fn is_current_binary_homebrew_managed() -> Result<bool, String> {
@@ -324,6 +373,154 @@ fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
+fn cleanup_downloaded_binary_update(temp_exe: &Path, extracted_binary_path: &Path) {
+    fs::remove_file(temp_exe).ok();
+    fs::remove_file(extracted_binary_path).ok();
+}
+
+fn apply_downloaded_binary_update(
+    current_exe: &Path,
+    extracted_binary_path: &Path,
+    version: &str,
+    silent: bool,
+    autopilot_was_running: bool,
+) -> Result<(), String> {
+    let temp_exe = current_exe.with_extension("new");
+    let backup_exe = current_exe.with_extension("backup");
+
+    update_info!(silent, "Preparing new binary...");
+    if let Err(e) = fs::copy(extracted_binary_path, &temp_exe) {
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+        return Err(format!(
+            "Failed to copy extracted binary to temp location: {}",
+            e
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = match fs::metadata(&temp_exe) {
+            Ok(metadata) => metadata.permissions(),
+            Err(e) => {
+                cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+                return Err(format!("Failed to get temp file metadata: {}", e));
+            }
+        };
+        perms.set_mode(0o755);
+        if let Err(e) = fs::set_permissions(&temp_exe, perms) {
+            cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+            return Err(format!(
+                "Failed to set executable permissions on temp file: {}",
+                e
+            ));
+        }
+    }
+
+    update_info!(silent, "Verifying new binary...");
+    let verification_result = Command::new(&temp_exe).arg("--help").output();
+
+    let verification_success = match verification_result {
+        Ok(output) if output.status.success() => {
+            let help_output = String::from_utf8_lossy(&output.stdout);
+            update_info!(silent, "✅ New binary verified successfully with --help!");
+            update_info!(
+                silent,
+                "   Help output preview: {}",
+                help_output.lines().take(2).collect::<Vec<_>>().join(" ")
+            );
+            true
+        }
+        Ok(_) | Err(_) => {
+            update_info!(silent, "--help failed, trying without arguments...");
+            match Command::new(&temp_exe).output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    update_info!(silent, "✅ New binary verified successfully (no args)!");
+                    update_info!(
+                        silent,
+                        "   Output preview: {}",
+                        stdout
+                            .lines()
+                            .chain(stderr.lines())
+                            .take(2)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                    true
+                }
+                Err(e) => {
+                    cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+                    return Err(format!(
+                        "Failed to run verification test on new binary: {}",
+                        e
+                    ));
+                }
+            }
+        }
+    };
+
+    if !verification_success {
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+        return Err("New binary failed all verification tests".to_string());
+    }
+
+    update_info!(silent, "Creating backup of current executable...");
+    if let Err(e) = fs::copy(current_exe, &backup_exe) {
+        cleanup_downloaded_binary_update(&temp_exe, extracted_binary_path);
+        return Err(format!("Failed to create backup: {}", e));
+    }
+
+    update_info!(silent, "Performing atomic replacement...");
+    match fs::rename(&temp_exe, current_exe) {
+        Ok(()) => {
+            update_info!(silent, "✅ Binary replacement successful!");
+            fs::remove_file(&backup_exe).ok();
+            fs::remove_file(extracted_binary_path).ok();
+            update_info!(silent, "{}", update_success_message(version));
+
+            if autopilot_was_running {
+                update_info!(silent, "Restarting autopilot service with new binary...");
+                if let Err(e) = start_autopilot_service() {
+                    update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
+                } else {
+                    update_info!(silent, "✓ Autopilot service restarted");
+                }
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            update_info!(silent, "❌ Atomic replacement failed: {}", e);
+
+            if backup_exe.exists() {
+                update_info!(silent, "Attempting to restore backup...");
+                match fs::copy(&backup_exe, current_exe) {
+                    Ok(_) => {
+                        update_info!(silent, "✅ Backup restored successfully");
+                        fs::remove_file(&backup_exe).ok();
+                    }
+                    Err(restore_err) => {
+                        update_info!(silent, "❌ Failed to restore backup: {}", restore_err);
+                        fs::remove_file(&temp_exe).ok();
+                        fs::remove_file(extracted_binary_path).ok();
+                        return Err(format!(
+                            "Critical error: Failed to replace executable AND failed to restore backup. Original error: {}, Restore error: {}",
+                            e, restore_err
+                        ));
+                    }
+                }
+            }
+
+            fs::remove_file(&temp_exe).ok();
+            fs::remove_file(extracted_binary_path).ok();
+
+            Err(format!("Failed to replace executable: {}", e))
+        }
+    }
+}
+
 async fn update_binary_atomic(
     os: &str,
     arch: &str,
@@ -382,178 +579,104 @@ async fn update_binary_atomic(
     update_info!(silent, "Downloading new version {}...", version);
     let extracted_binary_path = download_and_extract_binary(&config, silent).await?;
 
-    // 6. Copy extracted binary to temp location
-    update_info!(silent, "Preparing new binary...");
-    fs::copy(&extracted_binary_path, &temp_exe)
-        .map_err(|e| format!("Failed to copy extracted binary to temp location: {}", e))?;
+    apply_downloaded_binary_update(
+        &current_exe,
+        Path::new(&extracted_binary_path),
+        &version,
+        silent,
+        autopilot_was_running,
+    )
+}
 
-    // 7. Set executable permissions on temp file (Unix systems)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
     #[cfg(unix)]
-    {
+    fn write_executable_script(path: &std::path::Path, content: &str) {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&temp_exe)
-            .map_err(|e| format!("Failed to get temp file metadata: {}", e))?
+
+        std::fs::write(path, content).expect("write script");
+        let mut permissions = std::fs::metadata(path)
+            .expect("script metadata")
             .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&temp_exe, perms)
-            .map_err(|e| format!("Failed to set executable permissions on temp file: {}", e))?;
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod script");
     }
 
-    // 8. Verify the new binary works - try multiple verification methods
-    update_info!(silent, "Verifying new binary...");
+    #[cfg(unix)]
+    #[test]
+    fn failed_binary_update_removes_downloaded_binary() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let missing_current_exe = temp_dir.path().join("missing-stakpak");
+        let extracted_binary = temp_dir.path().join("stakpak_downloaded");
 
-    // First try --help (most binaries support this)
-    let verification_result = Command::new(&temp_exe).arg("--help").output();
+        write_executable_script(&extracted_binary, "#!/bin/sh\necho new-binary\n");
 
-    let verification_success = match verification_result {
-        Ok(output) if output.status.success() => {
-            let help_output = String::from_utf8_lossy(&output.stdout);
-            update_info!(silent, "✅ New binary verified successfully with --help!");
-            update_info!(
-                silent,
-                "   Help output preview: {}",
-                help_output.lines().take(2).collect::<Vec<_>>().join(" ")
-            );
-            true
-        }
-        Ok(_) | Err(_) => {
-            // If --help fails, try running without arguments
-            update_info!(silent, "--help failed, trying without arguments...");
-            match Command::new(&temp_exe).output() {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    update_info!(silent, "✅ New binary verified successfully (no args)!");
-                    update_info!(
-                        silent,
-                        "   Output preview: {}",
-                        stdout
-                            .lines()
-                            .chain(stderr.lines())
-                            .take(2)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    );
-                    true
-                }
-                Err(e) => {
-                    // Clean up and fail
-                    fs::remove_file(&temp_exe).ok();
-                    fs::remove_file(&extracted_binary_path).ok();
-                    return Err(format!(
-                        "Failed to run verification test on new binary: {}",
-                        e
-                    ));
-                }
-            }
-        }
-    };
+        let result = apply_downloaded_binary_update(
+            &missing_current_exe,
+            &extracted_binary,
+            "v9.9.9",
+            true,
+            false,
+        );
 
-    if !verification_success {
-        // Clean up and fail
-        fs::remove_file(&temp_exe).ok();
-        fs::remove_file(&extracted_binary_path).ok();
-        return Err("New binary failed all verification tests".to_string());
+        assert!(result.is_err());
+        assert!(
+            !extracted_binary.exists(),
+            "downloaded binary should be removed on update failure"
+        );
     }
 
-    // 9. Create backup of current executable
-    update_info!(silent, "Creating backup of current executable...");
-    fs::copy(&current_exe, &backup_exe).map_err(|e| format!("Failed to create backup: {}", e))?;
+    #[cfg(unix)]
+    #[test]
+    fn atomic_binary_update_returns_ok_without_exiting() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let current_exe = temp_dir.path().join("stakpak");
+        let extracted_binary = temp_dir.path().join("stakpak_downloaded");
+        let sentinel = temp_dir.path().join("still-alive");
 
-    // 10. Atomic replacement using rename
-    update_info!(silent, "Performing atomic replacement...");
-    match fs::rename(&temp_exe, &current_exe) {
-        Ok(()) => {
-            update_info!(silent, "✅ Binary replacement successful!");
+        write_executable_script(&current_exe, "#!/bin/sh\necho old-binary\n");
+        write_executable_script(&extracted_binary, "#!/bin/sh\necho new-binary\n");
 
-            // Clean up backup file
-            fs::remove_file(&backup_exe).ok();
+        apply_downloaded_binary_update(&current_exe, &extracted_binary, "v9.9.9", true, false)
+            .expect("update succeeds");
 
-            // Clean up downloaded binary
-            fs::remove_file(&extracted_binary_path).ok();
+        std::fs::write(&sentinel, "alive").expect("write sentinel");
+        assert!(sentinel.exists(), "test process should still be alive");
 
-            update_info!(
-                silent,
-                "🎉 Update complete! Restarting with version {}...",
-                version
-            );
+        let output = Command::new(&current_exe)
+            .arg("--help")
+            .output()
+            .expect("run swapped binary");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("new-binary"));
+    }
 
-            // Restart autopilot service with the new binary
-            if autopilot_was_running {
-                update_info!(silent, "Restarting autopilot service with new binary...");
-                if let Err(e) = start_autopilot_service() {
-                    update_info!(silent, "⚠ Failed to restart autopilot service: {}", e);
-                } else {
-                    update_info!(silent, "✓ Autopilot service restarted");
-                }
-            }
+    #[cfg(unix)]
+    #[test]
+    fn brew_update_returns_ok_without_exiting() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let brew_log = temp_dir.path().join("brew.log");
+        std::fs::create_dir_all(&fake_bin).expect("create fake bin");
 
-            // Re-exec the new binary with the same arguments — but only when
-            // the update was triggered implicitly (e.g. interactive auto-update
-            // prompt at startup).  When the user ran `stakpak update` explicitly
-            // there is nothing left to do, so we just exit cleanly.
-            let args: Vec<String> = std::env::args().collect();
-            let is_explicit_update = args.iter().any(|a| a == "update");
+        write_executable_script(
+            &fake_bin.join("brew"),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"{}\"\nexit 0\n",
+                brew_log.display()
+            ),
+        );
 
-            if is_explicit_update {
-                // Nothing more to do — the binary has been replaced.
-                std::process::exit(0);
-            }
+        let fake_brew = fake_bin.join("brew");
 
-            // This replaces the current process with the updated binary
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::CommandExt;
-                // exec() replaces the current process - never returns on success
-                let err = Command::new(&current_exe)
-                    .args(&args[1..]) // Skip the program name, pass remaining args
-                    .exec();
-                // If we get here, exec failed
-                eprintln!("Failed to exec new binary: {}", err);
-                std::process::exit(1);
-            }
+        let result = update_via_brew_with_path(&fake_brew.to_string_lossy(), "v9.9.9", true, false);
 
-            #[cfg(windows)]
-            {
-                // Windows doesn't have exec(), so spawn and exit
-                match Command::new(&current_exe).args(&args[1..]).spawn() {
-                    Ok(_) => std::process::exit(0),
-                    Err(e) => {
-                        eprintln!("Failed to spawn new binary: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            // Atomic rename failed, try to restore backup
-            update_info!(silent, "❌ Atomic replacement failed: {}", e);
-
-            if backup_exe.exists() {
-                update_info!(silent, "Attempting to restore backup...");
-                match fs::copy(&backup_exe, &current_exe) {
-                    Ok(_) => {
-                        update_info!(silent, "✅ Backup restored successfully");
-                        fs::remove_file(&backup_exe).ok();
-                    }
-                    Err(restore_err) => {
-                        update_info!(silent, "❌ Failed to restore backup: {}", restore_err);
-                        // Clean up temp files
-                        fs::remove_file(&temp_exe).ok();
-                        fs::remove_file(&extracted_binary_path).ok();
-                        return Err(format!(
-                            "Critical error: Failed to replace executable AND failed to restore backup. Original error: {}, Restore error: {}",
-                            e, restore_err
-                        ));
-                    }
-                }
-            }
-
-            // Clean up temp file
-            fs::remove_file(&temp_exe).ok();
-            fs::remove_file(&extracted_binary_path).ok();
-
-            Err(format!("Failed to replace executable: {}", e))
-        }
+        assert!(result.is_ok());
+        let log = std::fs::read_to_string(&brew_log).expect("read brew log");
+        assert!(log.contains("update"));
+        assert!(log.contains("upgrade stakpak"));
     }
 }

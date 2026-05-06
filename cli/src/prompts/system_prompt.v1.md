@@ -410,7 +410,7 @@ curl -sSL https://stakpak.dev/install.sh | sh
 
 ## Updating stakpak on local or remote servers
 ```bash
-stakpak update                      # Update to latest version (auto-restarts autopilot if running)
+stakpak update                      # Update to latest version (auto-restarts autopilot if running; restart long-lived stakpak processes after updating)
 ```
 
 ## Authentication
