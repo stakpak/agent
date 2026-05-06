@@ -3,8 +3,31 @@ use crate::helper::generate_simple_id;
 /// Re-export the gitleaks initialization function for external access
 pub use gitleaks::initialize_gitleaks_config;
 use gitleaks::{DetectedSecret, detect_secrets};
+use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
+
+static REDACTED_SECRET_MARKER_RE: LazyLock<Regex> =
+    LazyLock::new(
+        || match Regex::new(r"\[REDACTED_SECRET:[^:\]]+:[^:\]]+\]") {
+            Ok(regex) => regex,
+            Err(error) => panic!("invalid redacted-secret marker regex: {error}"),
+        },
+    );
+
+fn find_protected_spans(content: &str) -> Vec<(usize, usize)> {
+    REDACTED_SECRET_MARKER_RE
+        .find_iter(content)
+        .map(|marker_match| (marker_match.start(), marker_match.end()))
+        .collect()
+}
+
+fn overlaps_protected_span(start: usize, end: usize, protected_spans: &[(usize, usize)]) -> bool {
+    protected_spans
+        .iter()
+        .any(|(protected_start, protected_end)| start < *protected_end && end > *protected_start)
+}
 
 /// A result containing both the redacted string and the mapping of redaction keys to original secrets
 #[derive(Debug, Clone)]
@@ -39,34 +62,44 @@ pub fn redact_secrets(
     old_redaction_map: &HashMap<String, String>,
     privacy_mode: bool,
 ) -> RedactionResult {
-    // Skip redaction if content already contains redacted secrets (avoid double redaction)
-    if content.contains("[REDACTED_SECRET:") {
-        return RedactionResult::new(content.to_string(), HashMap::new());
-    }
-
-    let mut secrets = detect_secrets(content, path, privacy_mode);
+    let protected_spans = find_protected_spans(content);
+    let mut secrets = detect_secrets(content, path, privacy_mode)
+        .into_iter()
+        .filter(|secret| {
+            !overlaps_protected_span(secret.start_pos, secret.end_pos, &protected_spans)
+        })
+        .collect::<Vec<_>>();
 
     let mut redaction_map = old_redaction_map.clone();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
         .clone()
         .into_iter()
-        .map(|(k, v)| (v, k))
+        .map(|(key, value)| (value, key))
         .collect();
 
     for (original_secret, redaction_key) in &reverse_redaction_map {
-        // Extract rule_id from redaction_key format: [REDACTED_SECRET:rule_id:id]
+        if original_secret.is_empty() {
+            continue;
+        }
+
         let key_parts = redaction_key.split(':').collect::<Vec<&str>>();
-        if key_parts.len() == 3 {
-            let rule_id = key_parts[1].to_string();
-            if let Some(start) = content.find(original_secret) {
-                let end = start + original_secret.len();
-                secrets.push(DetectedSecret {
-                    rule_id,
-                    value: original_secret.clone(),
-                    start_pos: start,
-                    end_pos: end,
-                });
+        if key_parts.len() != 3 {
+            continue;
+        }
+
+        let rule_id = key_parts[1].to_string();
+        for (start_pos, _) in content.match_indices(original_secret) {
+            let end_pos = start_pos + original_secret.len();
+            if overlaps_protected_span(start_pos, end_pos, &protected_spans) {
+                continue;
             }
+
+            secrets.push(DetectedSecret {
+                rule_id: rule_id.clone(),
+                value: original_secret.clone(),
+                start_pos,
+                end_pos,
+            });
         }
     }
 
@@ -79,21 +112,19 @@ pub fn redact_secrets(
     // Deduplicate overlapping secrets - keep the longest one
     let mut deduplicated_secrets: Vec<DetectedSecret> = Vec::new();
     let mut sorted_by_start = secrets;
-    sorted_by_start.sort_by(|a, b| a.start_pos.cmp(&b.start_pos));
+    sorted_by_start.sort_by(|left, right| left.start_pos.cmp(&right.start_pos));
 
     for secret in sorted_by_start {
         let mut should_add = true;
         let mut to_remove = Vec::new();
 
-        for (i, existing) in deduplicated_secrets.iter().enumerate() {
-            // Check if secrets overlap
+        for (index, existing) in deduplicated_secrets.iter().enumerate() {
             let overlaps =
                 secret.start_pos < existing.end_pos && secret.end_pos > existing.start_pos;
 
             if overlaps {
-                // Keep the longer secret (more specific)
                 if secret.value.len() > existing.value.len() {
-                    to_remove.push(i);
+                    to_remove.push(index);
                 } else {
                     should_add = false;
                     break;
@@ -101,9 +132,8 @@ pub fn redact_secrets(
             }
         }
 
-        // Remove secrets that should be replaced by this longer one
-        for &i in to_remove.iter().rev() {
-            deduplicated_secrets.remove(i);
+        for &index in to_remove.iter().rev() {
+            deduplicated_secrets.remove(index);
         }
 
         if should_add {
@@ -111,34 +141,27 @@ pub fn redact_secrets(
         }
     }
 
-    // Sort by position in reverse order to avoid index shifting issues
-    deduplicated_secrets.sort_by(|a, b| b.start_pos.cmp(&a.start_pos));
+    deduplicated_secrets.sort_by(|left, right| right.start_pos.cmp(&left.start_pos));
 
     for secret in deduplicated_secrets {
-        // Validate character boundaries before replacement
         if !content.is_char_boundary(secret.start_pos) || !content.is_char_boundary(secret.end_pos)
         {
             continue;
         }
 
-        // Validate positions are within bounds
         if secret.start_pos >= redacted_string.len() || secret.end_pos > redacted_string.len() {
             continue;
         }
 
-        // make sure same secrets have the same redaction key within the same file
-        // without making the hash content dependent (content addressable)
         let redaction_key = if let Some(existing_key) = reverse_redaction_map.get(&secret.value) {
             existing_key.clone()
         } else {
             let key = generate_redaction_key(&secret.rule_id);
-            // Store the mapping (only once per unique secret value)
             redaction_map.insert(key.clone(), secret.value.clone());
             reverse_redaction_map.insert(secret.value, key.clone());
             key
         };
 
-        // Replace the secret in the string
         redacted_string.replace_range(secret.start_pos..secret.end_pos, &redaction_key);
     }
 
@@ -147,12 +170,29 @@ pub fn redact_secrets(
 
 /// Restores secrets in a redacted string using the provided redaction map
 pub fn restore_secrets(redacted_string: &str, redaction_map: &HashMap<String, String>) -> String {
-    let mut restored = redacted_string.to_string();
+    let mut restored = String::with_capacity(redacted_string.len());
+    let mut cursor = 0;
 
-    for (redaction_key, original_value) in redaction_map {
-        restored = restored.replace(redaction_key, original_value);
+    for marker_match in REDACTED_SECRET_MARKER_RE.find_iter(redacted_string) {
+        let Some(prefix) = redacted_string.get(cursor..marker_match.start()) else {
+            return redacted_string.to_string();
+        };
+        restored.push_str(prefix);
+
+        let marker = marker_match.as_str();
+        if let Some(original_value) = redaction_map.get(marker) {
+            restored.push_str(original_value);
+        } else {
+            restored.push_str(marker);
+        }
+
+        cursor = marker_match.end();
     }
 
+    let Some(suffix) = redacted_string.get(cursor..) else {
+        return redacted_string.to_string();
+    };
+    restored.push_str(suffix);
     restored
 }
 
@@ -166,8 +206,16 @@ pub fn redact_password(
         return RedactionResult::new(content.to_string(), HashMap::new());
     }
 
-    // Skip redaction if content already contains redacted secrets (avoid double redaction)
-    if content.contains("[REDACTED_SECRET:") {
+    let protected_spans = find_protected_spans(content);
+    let occurrences = content
+        .match_indices(password)
+        .map(|(start_pos, _)| (start_pos, start_pos + password.len()))
+        .filter(|(start_pos, end_pos)| {
+            !overlaps_protected_span(*start_pos, *end_pos, &protected_spans)
+        })
+        .collect::<Vec<_>>();
+
+    if occurrences.is_empty() && !protected_spans.is_empty() {
         return RedactionResult::new(content.to_string(), HashMap::new());
     }
 
@@ -176,22 +224,21 @@ pub fn redact_password(
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
         .clone()
         .into_iter()
-        .map(|(k, v)| (v, k))
+        .map(|(key, value)| (value, key))
         .collect();
 
-    // Check if we already have a redaction key for this password
     let redaction_key = if let Some(existing_key) = reverse_redaction_map.get(password) {
         existing_key.clone()
     } else {
         let key = generate_redaction_key("password");
-        // Store the mapping
         redaction_map.insert(key.clone(), password.to_string());
         reverse_redaction_map.insert(password.to_string(), key.clone());
         key
     };
 
-    // Replace all occurrences of the password
-    redacted_string = redacted_string.replace(password, &redaction_key);
+    for (start_pos, end_pos) in occurrences.iter().rev().copied() {
+        redacted_string.replace_range(start_pos..end_pos, &redaction_key);
+    }
 
     RedactionResult::new(redacted_string, redaction_map)
 }
@@ -278,10 +325,17 @@ mod tests {
     #[test]
     fn test_restore_secrets() {
         let mut redaction_map = HashMap::new();
-        redaction_map.insert("[REDACTED_abc123]".to_string(), "secret123".to_string());
-        redaction_map.insert("[REDACTED_def456]".to_string(), "api_key_xyz".to_string());
+        redaction_map.insert(
+            "[REDACTED_SECRET:test:abc123]".to_string(),
+            "secret123".to_string(),
+        );
+        redaction_map.insert(
+            "[REDACTED_SECRET:test:def456]".to_string(),
+            "api_key_xyz".to_string(),
+        );
 
-        let redacted = "Password is [REDACTED_abc123] and key is [REDACTED_def456]";
+        let redacted =
+            "Password is [REDACTED_SECRET:test:abc123] and key is [REDACTED_SECRET:test:def456]";
         let restored = restore_secrets(redacted, &redaction_map);
 
         assert_eq!(restored, "Password is secret123 and key is api_key_xyz");

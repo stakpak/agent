@@ -17,6 +17,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -185,6 +186,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut total_usage = LLMTokenUsage::default();
     let renderer = OutputRenderer::new(config.output_format.clone(), config.verbose);
+    let secret_manager = SecretManager::new(config.redact_secrets, config.privacy_mode);
 
     // Build auto-approve config if pause_on_approval is enabled
     let auto_approve = if config.pause_on_approval {
@@ -419,7 +421,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             config.prompt.clone()
         };
 
-        chat_messages.push(user_message(user_input));
+        let redacted_user_input = secret_manager.redact_and_store_secrets(&user_input, None);
+        chat_messages.push(user_message(redacted_user_input));
     }
 
     let mut step = 0;
@@ -470,7 +473,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         } else {
             feedback_text
         };
-        chat_messages.push(user_message(feedback_msg));
+        let redacted_feedback = secret_manager.redact_and_store_secrets(&feedback_msg, None);
+        chat_messages.push(user_message(redacted_feedback));
         print!("{}", renderer.render_info("Plan feedback loaded from file"));
     }
 
