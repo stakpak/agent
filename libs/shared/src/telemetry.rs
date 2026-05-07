@@ -8,11 +8,11 @@ use std::fmt;
 
 const TELEMETRY_ENDPOINT: &str = "https://apiv2.stakpak.dev/v1/telemetry";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TelemetryEvent {
     FirstOpen,
     UserPrompted,
-    InitCommandCalled,
+    CommandCalled(String),
 }
 
 impl fmt::Display for TelemetryEvent {
@@ -20,14 +20,14 @@ impl fmt::Display for TelemetryEvent {
         match self {
             TelemetryEvent::FirstOpen => write!(f, "FirstOpen"),
             TelemetryEvent::UserPrompted => write!(f, "UserPrompted"),
-            TelemetryEvent::InitCommandCalled => write!(f, "InitCommandCalled"),
+            TelemetryEvent::CommandCalled(command_name) => write!(f, "CommandCalled: {}", command_name),
         }
     }
 }
 
 #[derive(Serialize)]
 struct TelemetryPayload {
-    event: String,
+    event: TelemetryEvent,
     machine_name: String,
     provider: String,
     user_id: String,
@@ -44,7 +44,7 @@ pub fn capture_event(
     }
 
     let payload = TelemetryPayload {
-        event: event.to_string(),
+        event,
         machine_name: machine_name.unwrap_or("").to_string(),
         provider: "Local".to_string(),
         user_id: anonymous_id.to_string(),

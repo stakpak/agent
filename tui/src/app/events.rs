@@ -310,8 +310,8 @@ pub enum OutputEvent {
     PlanFeedback(String),
     /// Plan approved — transition to Executing phase.
     PlanApproved,
-    /// /init command was invoked.
-    InitCommandCalled,
+    /// A slash command was invoked.
+    CommandCalled(String),
     /// Response from ask_user popup with the tool call and result
     AskUserResponse(ToolCallResult),
     /// Save auto-approve settings to the profile config (tool names set to Auto)
