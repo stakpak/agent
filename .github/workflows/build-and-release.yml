@@ -286,7 +286,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
 
-  docker:
+  docker-amd64:
     needs: [setup, build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
@@ -303,15 +303,83 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push amd64 image
         uses: docker/build-push-action@v5
         with:
           context: .
+          # Build native per-arch images, then fuse them in docker-manifest.
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}
-            ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}:latest', github.repository) || '' }}
+          tags: ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-amd64
+
+  docker-arm64:
+    needs: [setup, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push arm64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # Native arm64 runner avoids slow full Rust builds under QEMU.
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-arm64
+
+  docker-manifest:
+    needs: [setup, docker-amd64, docker-arm64]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Set up QEMU for cross-platform smoke tests
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create versioned multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }} \
+            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-amd64 \
+            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-arm64
+
+      - name: Create latest multi-arch manifest
+        if: needs.setup.outputs.is_beta != 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-amd64 \
+            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}-arm64
+
+      - name: Smoke test multi-arch image
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}"
+          for platform in linux/amd64 linux/arm64; do
+            output=$(docker run --rm --platform="$platform" "$IMAGE" --version)
+            echo "$platform: $output"
+            echo "$output" | grep -F "${{ needs.setup.outputs.version }}"
+          done
 
   update-release-notes:
     needs: release
