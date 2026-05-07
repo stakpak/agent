@@ -320,7 +320,9 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
 
 /// Execute a command by its ID
 pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result<(), String> {
-    let _ = ctx.output_tx.try_send(OutputEvent::CommandCalled(command_id.to_string()));
+    let _ = ctx
+        .output_tx
+        .try_send(OutputEvent::CommandCalled(command_id.to_string()));
     match command_id {
         "/help" => {
             push_help_message(ctx.state);

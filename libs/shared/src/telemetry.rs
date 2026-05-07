@@ -20,7 +20,9 @@ impl fmt::Display for TelemetryEvent {
         match self {
             TelemetryEvent::FirstOpen => write!(f, "FirstOpen"),
             TelemetryEvent::UserPrompted => write!(f, "UserPrompted"),
-            TelemetryEvent::CommandCalled(command_name) => write!(f, "CommandCalled: {}", command_name),
+            TelemetryEvent::CommandCalled(command_name) => {
+                write!(f, "CommandCalled: {}", command_name)
+            }
         }
     }
 }
