@@ -44,6 +44,8 @@ struct SandboxStatusResponse {
     consecutive_failures: u64,
     last_ok: Option<String>,
     last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -303,18 +305,45 @@ pub fn protected_router(auth: AuthConfig) -> Router<AppState> {
         .route_layer(middleware::from_fn_with_state(auth, require_bearer))
 }
 
+fn short_sandbox_startup_reason(error: &str) -> String {
+    let first_line = error
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("unknown error");
+
+    first_line.chars().take(160).collect()
+}
+
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
-    let sandbox = state.persistent_sandbox.as_ref().map(|ps| {
+    let sandbox = if let Some(ps) = state.persistent_sandbox.as_ref() {
         let h = ps.health();
-        SandboxStatusResponse {
+        Some(SandboxStatusResponse {
             mode: ps.mode().to_string(),
             healthy: h.healthy,
             consecutive_ok: h.consecutive_ok,
             consecutive_failures: h.consecutive_failures,
             last_ok: h.last_ok,
             last_error: h.last_error,
-        }
-    });
+            startup_error: None,
+        })
+    } else {
+        state
+            .persistent_sandbox_startup_error
+            .as_ref()
+            .map(|error| {
+                let reason = short_sandbox_startup_reason(error);
+                SandboxStatusResponse {
+                    mode: state.sandbox_mode().to_string(),
+                    healthy: false,
+                    consecutive_ok: 0,
+                    consecutive_failures: 1,
+                    last_ok: None,
+                    last_error: Some(reason.clone()),
+                    startup_error: Some(reason),
+                }
+            })
+    };
 
     Json(HealthResponse {
         status: "ok",
@@ -1424,6 +1453,79 @@ mod tests {
                 .and_then(|value| value.get("oneOf").or_else(|| value.get("anyOf")))
                 .is_some(),
             "expected MessageContentDoc to model text-or-parts variants"
+        );
+    }
+
+    #[test]
+    fn short_sandbox_startup_reason_sanitizes_verbose_errors() {
+        let raw = "Timed out waiting for container\n\nContainer stderr:\nFailed to read /Users/alice/.stakpak/auth.toml: Permission denied";
+
+        assert_eq!(
+            short_sandbox_startup_reason(raw),
+            "Timed out waiting for container"
+        );
+    }
+
+    async fn fetch_health_with_startup_error(error: String) -> serde_json::Value {
+        let state = match test_state().await {
+            Ok(state) => state
+                .with_sandbox(crate::SandboxConfig {
+                    warden_path: "warden".to_string(),
+                    image: "ghcr.io/stakpak/agent:does-not-exist-xyz".to_string(),
+                    volumes: Vec::new(),
+                    mode: crate::SandboxMode::Persistent,
+                    user_mapping: crate::SandboxUserMapping::ImageDefault,
+                })
+                .with_persistent_sandbox_startup_error(error),
+            Err(error) => panic!("failed to create app state: {error}"),
+        };
+        let app = router(state, AuthConfig::token("secret"));
+
+        let request = match Request::builder().uri("/v1/health").body(Body::empty()) {
+            Ok(request) => request,
+            Err(error) => panic!("failed to build request: {error}"),
+        };
+
+        let response = match app.oneshot(request).await {
+            Ok(response) => response,
+            Err(error) => panic!("request should succeed: {error}"),
+        };
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = match to_bytes(response.into_body(), 1024 * 1024).await {
+            Ok(body) => body,
+            Err(error) => panic!("failed to read body: {error}"),
+        };
+        match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(error) => panic!("invalid json: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn health_endpoint_reports_persistent_sandbox_startup_error() {
+        let body = fetch_health_with_startup_error("image not found".to_string()).await;
+
+        assert_eq!(
+            body.get("sandbox")
+                .and_then(|sandbox| sandbox.get("startup_error"))
+                .and_then(|value| value.as_str()),
+            Some("image not found")
+        );
+    }
+
+    #[tokio::test]
+    async fn health_endpoint_sanitizes_persistent_sandbox_startup_error() {
+        let body = fetch_health_with_startup_error(
+            "Timed out waiting for container\n\nContainer stderr:\nsecret path".to_string(),
+        )
+        .await;
+
+        assert_eq!(
+            body.get("sandbox")
+                .and_then(|sandbox| sandbox.get("startup_error"))
+                .and_then(|value| value.as_str()),
+            Some("Timed out waiting for container")
         );
     }
 

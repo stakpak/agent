@@ -431,7 +431,9 @@ impl SandboxedMcpServer {
         // 6. Wait for the MCP server inside the container to be ready
         let server_url = format!("https://127.0.0.1:{container_host_port}/mcp");
         tracing::info!(url = %server_url, "Waiting for sandbox MCP server to be ready");
-        wait_for_server_ready(&server_url, &container_client_config).await?;
+        if let Err(error) = wait_for_server_ready(&server_url, &container_client_config).await {
+            return Err(sandbox_runtime_error(&mut container_process, error).await);
+        }
         tracing::info!("Sandbox MCP server is ready");
 
         // 7. Start a per-session proxy connecting to the sandboxed server
@@ -719,6 +721,11 @@ async fn sandbox_bootstrap_error(process: &mut Child, base_message: &str) -> Str
     let exit_status = ensure_process_exited(process).await;
     let stderr_excerpt = read_stderr_excerpt(process, 4096).await;
     format_bootstrap_error(base_message, exit_status, stderr_excerpt.as_deref())
+}
+
+async fn sandbox_runtime_error(process: &mut Child, error: String) -> String {
+    let _ = ensure_process_exited(process).await;
+    error
 }
 
 async fn ensure_process_exited(process: &mut Child) -> Option<ExitStatus> {
@@ -1176,6 +1183,55 @@ MIIB0zCCAXmgAwIBAgIUFAKE=
         // No target UID/GID env vars either
         assert!(!argv.iter().any(|a| a.starts_with("STAKPAK_TARGET_UID")));
         assert!(!argv.iter().any(|a| a.starts_with("STAKPAK_TARGET_GID")));
+    }
+
+    #[tokio::test]
+    async fn sandbox_runtime_error_terminates_spawned_process() {
+        let mut process = match tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(process) => process,
+            Err(error) => panic!("failed to spawn sleep process: {error}"),
+        };
+
+        let message =
+            super::sandbox_runtime_error(&mut process, "readiness failed".to_string()).await;
+
+        assert_eq!(message, "readiness failed");
+        match process.try_wait() {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("process should be terminated"),
+            Err(error) => panic!("failed to inspect process: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_sandbox_spawn_returns_error_when_warden_is_missing() {
+        let config = super::SandboxConfig {
+            warden_path: "/definitely/missing/stakpak-warden".to_string(),
+            image: "ghcr.io/stakpak/agent:does-not-exist-xyz".to_string(),
+            volumes: vec![],
+            mode: super::SandboxMode::Persistent,
+            user_mapping: super::SandboxUserMapping::ImageDefault,
+        };
+
+        let result = super::PersistentSandbox::spawn(&config).await;
+
+        let error = match result {
+            Ok(_) => panic!("missing warden should fail spawn"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("Failed to start sandbox MCP server")
+                || error.contains("No such file")
+                || error.contains("os error"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

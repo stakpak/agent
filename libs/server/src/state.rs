@@ -42,6 +42,9 @@ pub struct AppState {
     /// Pre-spawned persistent sandbox (when `SandboxMode::Persistent` is configured).
     /// Shared across all sessions — avoids per-session container startup overhead.
     pub persistent_sandbox: Option<Arc<PersistentSandbox>>,
+    /// Startup failure recorded when persistent sandbox mode is configured but spawn failed.
+    /// Mutually exclusive with `persistent_sandbox` — at most one is `Some`.
+    pub persistent_sandbox_startup_error: Option<String>,
     pub base_system_prompt: Option<String>,
     pub context_budget: ContextBudget,
     /// Base directory for project context discovery (AGENTS.md, APPS.md).
@@ -82,6 +85,7 @@ impl AppState {
             mcp_proxy_shutdown_tx: None,
             sandbox_config: None,
             persistent_sandbox: None,
+            persistent_sandbox_startup_error: None,
             base_system_prompt: None,
             context_budget: ContextBudget::default(),
             project_dir: None,
@@ -113,6 +117,13 @@ impl AppState {
     /// Sessions will reuse this sandbox instead of spawning ephemeral ones.
     pub fn with_persistent_sandbox(mut self, sandbox: PersistentSandbox) -> Self {
         self.persistent_sandbox = Some(Arc::new(sandbox));
+        self.persistent_sandbox_startup_error = None;
+        self
+    }
+
+    pub fn with_persistent_sandbox_startup_error(mut self, error: String) -> Self {
+        self.persistent_sandbox = None;
+        self.persistent_sandbox_startup_error = Some(error);
         self
     }
 
