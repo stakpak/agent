@@ -947,6 +947,24 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
 
         if let Some(session_id) = current_session_id {
             println!("Session ID: {}", session_id);
+
+            // Fetch and display session stats (matching interactive mode behavior)
+            match client.get_session_stats(session_id).await {
+                Ok(stats) => {
+                    print!("{}", renderer.render_session_stats(&stats));
+                }
+                Err(_) => {
+                    // Don't fail the whole operation if stats fetch fails
+                }
+            }
+
+            // Display session URL (matching interactive mode behavior)
+            if let Ok(account) = client.get_my_account().await {
+                println!(
+                    "To view full session in browser:\nhttps://stakpak.dev/{}/agent-sessions/{}",
+                    account.username, session_id
+                );
+            }
         }
     }
 
