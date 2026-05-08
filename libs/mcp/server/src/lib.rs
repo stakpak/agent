@@ -291,15 +291,11 @@ fn build_tool_container(
     Ok(tool_container)
 }
 
-/// Internal helper function that contains the common server initialization logic
-async fn start_server_internal(
-    config: MCPServerConfig,
-    tcp_listener: TcpListener,
-    shutdown_rx: Option<Receiver<()>>,
-) -> Result<()> {
-    // Use provided TaskManagerHandle or create a new one
-    let task_manager_handle = if let Some(handle) = config.task_manager_handle.clone() {
-        handle
+/// Create or reuse a TaskManagerHandle from config.
+/// If `config.task_manager_handle` is provided, clones the Arc; otherwise creates a new TaskManager.
+fn get_or_create_task_manager(config: &MCPServerConfig) -> Arc<TaskManagerHandle> {
+    if let Some(handle) = &config.task_manager_handle {
+        handle.clone()
     } else {
         let task_manager = TaskManager::new();
         let handle = task_manager.handle();
@@ -307,7 +303,16 @@ async fn start_server_internal(
             task_manager.run().await;
         });
         handle
-    };
+    }
+}
+
+/// Internal helper function that contains the common server initialization logic
+async fn start_server_internal(
+    config: MCPServerConfig,
+    tcp_listener: TcpListener,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    let task_manager_handle = get_or_create_task_manager(&config);
 
     let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
 
@@ -372,13 +377,7 @@ pub async fn start_server_stdio(
     config: MCPServerConfig,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    // Create and start TaskManager
-    let task_manager = TaskManager::new();
-    let task_manager_handle = task_manager.handle();
-
-    tokio::spawn(async move {
-        task_manager.run().await;
-    });
+    let task_manager_handle = get_or_create_task_manager(&config);
 
     let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
 
