@@ -9,6 +9,7 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::task_manager::StartTaskOptions;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -47,10 +48,12 @@ pub struct DynamicSubagentRequest {
     pub tools: Vec<String>,
 
     /// Model to use (the "M" in the 4-tuple).
-    #[schemars(
-        description = "Subagent model override in provider/short_name format. Used verbatim when set; otherwise resolution falls back through profile config, built-in default for the parent provider, then the parent model."
-    )]
+    /// Not exposed to the LLM — resolved automatically from profile config,
+    /// built-in defaults for the parent provider, or inherited from the parent model.
+    #[serde(default, skip_deserializing)]
+    #[schemars(skip)]
     pub model: Option<String>,
+
     /// Maximum steps the subagent can take (default: 30)
     #[schemars(description = "Maximum steps the subagent can take (default: 30)")]
     pub max_steps: Option<usize>,
@@ -116,15 +119,13 @@ PARAMETERS:
 - instruction: What the subagent should do - be specific and include success criteria
 - context: (Optional) Curated context from previous work - include relevant findings, key references, failed approaches
 - tools: Array of tool names to grant (follow least-privilege - minimum tools required)
-- model: (Optional) Subagent model override in provider/short_name format; used verbatim when set, otherwise the resolution chain below applies
 - max_steps: (Optional) Maximum steps, default 30
 - enable_sandbox: (Optional) Run in isolated warden container with security policies
 
 MODEL RESOLUTION:
-1. Caller-supplied model override
-2. Profile [subagent].model setting
-3. Built-in default for the parent provider
-4. Parent model verbatim (silent inherit)
+1. Profile [subagent].model setting
+2. Built-in default for the parent provider
+3. Parent model verbatim (silent inherit)
 
 WHEN TO USE:
 - When you need fine-grained control over subagent capabilities
@@ -240,7 +241,13 @@ The subagent runs asynchronously. Use get_task_details to monitor progress."
         };
         let task_info = match self
             .get_task_manager()
-            .start_task(subagent_command, Some(task_description), None, None)
+            .start_task(
+                subagent_command,
+                StartTaskOptions {
+                    description: Some(task_description),
+                    ..StartTaskOptions::default()
+                },
+            )
             .await
         {
             Ok(task_info) => task_info,
@@ -527,7 +534,11 @@ NOTES:
             args.push(tool.clone());
         }
 
-        let mut command = args.join(" ");
+        let mut command = args
+            .iter()
+            .map(|arg| shell_quote_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
 
         // If sandbox mode is enabled, wrap the command in warden.
         //
@@ -569,10 +580,17 @@ NOTES:
 
             let stakpak_image = stakpak_agent_image();
 
-            let mut warden_command = format!("{} warden wrap {}", current_exe, stakpak_image);
+            let mut warden_command = format!(
+                "{} warden wrap {}",
+                shell_quote_arg(&current_exe),
+                shell_quote_arg(&stakpak_image)
+            );
 
             let warden_prompt_path = format!("/tmp/{}", prompt_filename);
-            warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
+            warden_command.push_str(&format!(
+                " -v {}",
+                shell_quote_arg(&format!("{}:{}", prompt_file_path, warden_prompt_path))
+            ));
 
             // Profile-overlay precedence: user `-v` flags are appended after
             // prepare_volumes() defaults, so this overlay wins.
@@ -580,9 +598,12 @@ NOTES:
                 let path = Path::new(p);
                 if path.exists() && path.is_file() {
                     warden_command.push_str(&format!(
-                        " -v {}:{}:ro",
-                        path.display(),
-                        CONTAINER_CONFIG_PATH
+                        " -v {}",
+                        shell_quote_arg(&format!(
+                            "{}:{}:ro",
+                            path.display(),
+                            CONTAINER_CONFIG_PATH
+                        ))
                     ));
                     Some(CONTAINER_CONFIG_PATH.to_string())
                 } else {
@@ -592,7 +613,7 @@ NOTES:
 
             for arg in warden_ak_store_args(host_knowledge_root.as_deref()) {
                 warden_command.push(' ');
-                warden_command.push_str(&arg);
+                warden_command.push_str(&shell_quote_arg(&arg));
             }
 
             let inner_command = command.replace(&prompt_file_path, &warden_prompt_path);
@@ -618,6 +639,20 @@ struct ResolvedModel {
 
 fn trimmed_non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn shell_quote_arg(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':' | b'=')
+    }) {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn default_subagent_model(provider: &str) -> Option<&'static str> {
@@ -678,7 +713,63 @@ fn resolve_subagent_model(
 
 #[cfg(test)]
 mod tests {
-    use super::{default_subagent_model, resolve_subagent_model};
+    use super::{DynamicSubagentRequest, default_subagent_model, resolve_subagent_model};
+    use crate::{EnabledToolsConfig, SubagentConfig, ToolContainer};
+    use stakpak_shared::task_manager::TaskManager;
+
+    #[test]
+    fn deserialized_dynamic_subagent_request_ignores_caller_model() {
+        let request: DynamicSubagentRequest = serde_json::from_value(serde_json::json!({
+            "description": "probe",
+            "instructions": "do the thing",
+            "tools": ["stakpak__view"],
+            "model": "evil/model; touch /tmp/pwned",
+            "max_steps": 1,
+            "enable_sandbox": false
+        }))
+        .expect("request should deserialize even when model is supplied");
+
+        assert_eq!(request.model, None);
+    }
+
+    #[test]
+    fn dynamic_subagent_tool_description_does_not_expose_model_parameter() {
+        let source = include_str!("subagent_tools.rs");
+
+        assert!(!source.contains(&["- ", "model:"].concat()));
+        assert!(!source.contains(&["Caller-supplied", " model override"].concat()));
+    }
+
+    #[test]
+    fn dynamic_subagent_command_shell_quotes_model_and_tools() {
+        let task_manager = TaskManager::new();
+        let container = ToolContainer::new(
+            None,
+            EnabledToolsConfig::default(),
+            task_manager.handle(),
+            ToolContainer::tool_router_subagent(),
+            Vec::new(),
+            SubagentConfig::default(),
+        )
+        .expect("tool container should be constructed");
+
+        let command = container
+            .build_dynamic_subagent_command(
+                "do the thing",
+                None,
+                &["stakpak__view; touch /tmp/tool_pwn".to_string()],
+                Some("provider/model; touch /tmp/model_pwn"),
+                1,
+                false,
+                None,
+                None,
+                None,
+            )
+            .expect("subagent command should be built");
+
+        assert!(command.contains("--model 'provider/model; touch /tmp/model_pwn'"));
+        assert!(command.contains("-t 'stakpak__view; touch /tmp/tool_pwn'"));
+    }
 
     #[test]
     fn caller_override_wins_verbatim() {

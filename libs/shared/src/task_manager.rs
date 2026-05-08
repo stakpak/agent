@@ -102,6 +102,7 @@ pub struct Task {
     pub duration: Option<Duration>,
     pub timeout: Option<Duration>,
     pub pause_info: Option<PauseInfo>,
+    pub child_env: HashMap<String, String>,
 }
 
 pub struct TaskEntry {
@@ -157,6 +158,22 @@ pub struct TaskCompletion {
     pub final_status: TaskStatus,
 }
 
+struct TaskExecution {
+    id: TaskId,
+    command: String,
+    remote_connection: Option<RemoteConnectionInfo>,
+    task_timeout: Option<Duration>,
+    child_env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StartTaskOptions {
+    pub description: Option<String>,
+    pub timeout: Option<Duration>,
+    pub remote_connection: Option<RemoteConnectionInfo>,
+    pub child_env: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PauseInfo {
     pub checkpoint_id: Option<String>,
@@ -187,9 +204,7 @@ pub enum TaskMessage {
     Start {
         id: Option<TaskId>,
         command: String,
-        description: Option<String>,
-        remote_connection: Option<RemoteConnectionInfo>,
-        timeout: Option<Duration>,
+        options: StartTaskOptions,
         response_tx: oneshot::Sender<Result<TaskId, TaskError>>,
     },
     Cancel {
@@ -291,21 +306,11 @@ impl TaskManager {
             TaskMessage::Start {
                 id,
                 command,
-                description,
-                remote_connection,
-                timeout,
+                options,
                 response_tx,
             } => {
                 let task_id = id.unwrap_or_else(|| generate_simple_id(6));
-                let result = self
-                    .start_task(
-                        task_id.clone(),
-                        command,
-                        description,
-                        timeout,
-                        remote_connection,
-                    )
-                    .await;
+                let result = self.start_task(task_id.clone(), command, options).await;
                 let _ = response_tx.send(result.map(|_| task_id.clone()));
                 false
             }
@@ -407,13 +412,18 @@ impl TaskManager {
         &mut self,
         id: TaskId,
         command: String,
-        description: Option<String>,
-        timeout: Option<Duration>,
-        remote_connection: Option<RemoteConnectionInfo>,
+        options: StartTaskOptions,
     ) -> Result<(), TaskError> {
         if self.tasks.contains_key(&id) {
             return Err(TaskError::TaskAlreadyRunning(id));
         }
+
+        let StartTaskOptions {
+            description,
+            timeout,
+            remote_connection,
+            child_env,
+        } = options;
 
         let task = Task {
             id: id.clone(),
@@ -427,6 +437,7 @@ impl TaskManager {
             duration: None,
             timeout,
             pause_info: None,
+            child_env: child_env.clone(),
         };
 
         let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -436,14 +447,16 @@ impl TaskManager {
         let is_remote_task = remote_connection.is_some();
 
         // Spawn task immediately - SSH connection happens inside the task
-        let handle = tokio::spawn(Self::execute_task(
-            id.clone(),
+        let execution = TaskExecution {
+            id: id.clone(),
             command,
             remote_connection,
-            timeout,
-            cancel_rx,
-            process_tx,
-            task_tx,
+            task_timeout: timeout,
+            child_env,
+        };
+
+        let handle = tokio::spawn(Self::execute_task(
+            execution, cancel_rx, process_tx, task_tx,
         ));
 
         let entry = TaskEntry {
@@ -496,15 +509,18 @@ impl TaskManager {
 
         let remote_connection = entry.task.remote_connection.clone();
         let timeout = entry.task.timeout;
+        let child_env = entry.task.child_env.clone();
+
+        let execution = TaskExecution {
+            id: id.clone(),
+            command,
+            remote_connection: remote_connection.clone(),
+            task_timeout: timeout,
+            child_env,
+        };
 
         let handle = tokio::spawn(Self::execute_task(
-            id.clone(),
-            command,
-            remote_connection.clone(),
-            timeout,
-            cancel_rx,
-            process_tx,
-            task_tx,
+            execution, cancel_rx, process_tx, task_tx,
         ));
 
         entry.handle = handle;
@@ -542,14 +558,18 @@ impl TaskManager {
     }
 
     async fn execute_task(
-        id: TaskId,
-        command: String,
-        remote_connection: Option<RemoteConnectionInfo>,
-        task_timeout: Option<Duration>,
+        execution: TaskExecution,
         mut cancel_rx: oneshot::Receiver<()>,
         process_tx: oneshot::Sender<u32>,
         task_tx: mpsc::UnboundedSender<TaskMessage>,
     ) {
+        let TaskExecution {
+            id,
+            command,
+            remote_connection,
+            task_timeout,
+            child_env,
+        } = execution;
         let completion = if let Some(remote_info) = remote_connection {
             // Remote execution
             Self::execute_remote_task(
@@ -570,6 +590,7 @@ impl TaskManager {
                 &mut cancel_rx,
                 process_tx,
                 &task_tx,
+                child_env,
             )
             .await
         };
@@ -588,6 +609,7 @@ impl TaskManager {
         cancel_rx: &mut oneshot::Receiver<()>,
         process_tx: oneshot::Sender<u32>,
         task_tx: &mpsc::UnboundedSender<TaskMessage>,
+        child_env: HashMap<String, String>,
     ) -> TaskCompletion {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
@@ -595,6 +617,9 @@ impl TaskManager {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        for (key, value) in child_env {
+            cmd.env(key, value);
+        }
         #[cfg(unix)]
         {
             cmd.env("DEBIAN_FRONTEND", "noninteractive")
@@ -861,9 +886,7 @@ impl TaskManagerHandle {
     pub async fn start_task(
         &self,
         command: String,
-        description: Option<String>,
-        timeout: Option<Duration>,
-        remote_connection: Option<RemoteConnectionInfo>,
+        options: StartTaskOptions,
     ) -> Result<TaskInfo, TaskError> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -871,9 +894,7 @@ impl TaskManagerHandle {
             .send(TaskMessage::Start {
                 id: None,
                 command: command.clone(),
-                description,
-                remote_connection: remote_connection.clone(),
-                timeout,
+                options,
                 response_tx,
             })
             .map_err(|_| TaskError::ManagerShutdown)?;
@@ -1021,7 +1042,7 @@ mod tests {
 
         // Start a background task
         let task_info = handle
-            .start_task("sleep 5".to_string(), None, None, None)
+            .start_task("sleep 5".to_string(), StartTaskOptions::default())
             .await
             .expect("Failed to start task");
 
@@ -1057,7 +1078,7 @@ mod tests {
 
         // Start a long-running background task
         let task_info = handle
-            .start_task("sleep 10".to_string(), None, None, None)
+            .start_task("sleep 10".to_string(), StartTaskOptions::default())
             .await
             .expect("Failed to start task");
 
@@ -1093,7 +1114,10 @@ mod tests {
 
         // Start a simple task
         let task_info = handle
-            .start_task("echo 'Hello, World!'".to_string(), None, None, None)
+            .start_task(
+                "echo 'Hello, World!'".to_string(),
+                StartTaskOptions::default(),
+            )
             .await
             .expect("Failed to start task");
 
@@ -1123,6 +1147,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_manager_local_task_receives_child_env_defaults() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        let _manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        let mut child_env = HashMap::new();
+        child_env.insert("STAKPAK_PROFILE".to_string(), "ops".to_string());
+
+        let task_info = handle
+            .start_task(
+                "printf '%s\\n' \"$STAKPAK_PROFILE\"".to_string(),
+                StartTaskOptions {
+                    child_env,
+                    ..StartTaskOptions::default()
+                },
+            )
+            .await
+            .expect("task should start with child env defaults");
+
+        sleep(Duration::from_millis(500)).await;
+
+        let details = handle
+            .get_task_details(task_info.id.clone())
+            .await
+            .expect("task details request should succeed")
+            .expect("task details should exist");
+
+        assert_eq!(details.status, TaskStatus::Completed);
+        assert_eq!(details.output.as_deref(), Some("ops\n"));
+
+        handle
+            .shutdown()
+            .await
+            .expect("Failed to shutdown task manager");
+    }
+
+    #[tokio::test]
+    async fn resumed_local_task_reuses_child_env_defaults() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        let _manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        let mut child_env = HashMap::new();
+        child_env.insert("STAKPAK_PROFILE".to_string(), "ops".to_string());
+
+        let task_info = handle
+            .start_task(
+                "exit 10".to_string(),
+                StartTaskOptions {
+                    child_env,
+                    ..StartTaskOptions::default()
+                },
+            )
+            .await
+            .expect("pausing task should start");
+
+        sleep(Duration::from_millis(500)).await;
+
+        let paused = handle
+            .get_task_details(task_info.id.clone())
+            .await
+            .expect("task details request should succeed")
+            .expect("task details should exist");
+        assert_eq!(paused.status, TaskStatus::Paused);
+
+        handle
+            .resume_task(
+                task_info.id.clone(),
+                "printf '%s\\n' \"$STAKPAK_PROFILE\"".to_string(),
+            )
+            .await
+            .expect("paused task should resume");
+
+        sleep(Duration::from_millis(500)).await;
+
+        let details = handle
+            .get_task_details(task_info.id)
+            .await
+            .expect("task details request should succeed")
+            .expect("task details should exist");
+
+        assert_eq!(details.status, TaskStatus::Completed);
+        assert_eq!(details.output.as_deref(), Some("ops\n"));
+
+        handle
+            .shutdown()
+            .await
+            .expect("Failed to shutdown task manager");
+    }
+
+    #[tokio::test]
     async fn test_task_manager_detects_immediate_failure() {
         let task_manager = TaskManager::new();
         let handle = task_manager.handle();
@@ -1134,7 +1255,10 @@ mod tests {
 
         // Start a task that will fail immediately
         let result = handle
-            .start_task("nonexistent_command_12345".to_string(), None, None, None)
+            .start_task(
+                "nonexistent_command_12345".to_string(),
+                StartTaskOptions::default(),
+            )
             .await;
 
         // Should get a TaskFailedOnStart error
@@ -1158,7 +1282,7 @@ mod tests {
 
         // Start a long-running task
         let _task_info = handle
-            .start_task("sleep 30".to_string(), None, None, None)
+            .start_task("sleep 30".to_string(), StartTaskOptions::default())
             .await
             .expect("Failed to start task");
 
@@ -1188,7 +1312,10 @@ mod tests {
         // Start a task that writes a marker file while running
         let marker = format!("/tmp/stakpak_test_drop_{}", std::process::id());
         let task_info = handle
-            .start_task(format!("touch {} && sleep 30", marker), None, None, None)
+            .start_task(
+                format!("touch {} && sleep 30", marker),
+                StartTaskOptions::default(),
+            )
             .await
             .expect("Failed to start task");
 
@@ -1219,7 +1346,7 @@ mod tests {
 
         // Start a task that will exit with non-zero code immediately
         let result = handle
-            .start_task("exit 1".to_string(), None, None, None)
+            .start_task("exit 1".to_string(), StartTaskOptions::default())
             .await;
 
         // Should get a TaskFailedOnStart error
