@@ -32,7 +32,7 @@ tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 clap = { version = "4.5.23", features = ["derive", "env"] }
 clap_complete = "4.6.0"
-config = "0.14.1"
+config = { version = "0.14.1", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
@@ -45,7 +45,7 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 walkdir = { workspace = true }
 rpassword = "7.3"
-names = "0.14.0"
+names = { version = "0.14.0", default-features = false }
 tar = "0.4"
 flate2 = "1.1"
 zip = "4.2"
@@ -84,7 +84,9 @@ grep-searcher = { workspace = true }
 # (including SQLite's embedded C code compiled via libsql-ffi). Without this,
 # only Rust allocations go through jemalloc while SQLite's sqlite3Malloc still
 # calls musl's aggressive allocator.
-tikv-jemallocator = { version = "0.6", features = ["unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemallocator = { version = "0.6", features = [
+  "unprefixed_malloc_on_supported_platforms",
+], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -112,3 +112,7 @@ terminal-light = "1.8"
 unwrap_used = "deny"
 expect_used = "deny"
 string_slice = "deny"
+
+[profile.release]
+panic = "abort"
+strip = "symbols"

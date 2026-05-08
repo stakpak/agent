@@ -122,9 +122,9 @@ jobs:
             -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
             ${{ matrix.docker }} sh -c '
               set -euo pipefail
-              apk add --no-cache gcc musl-dev make binutils pkgconfig openssl-dev openssl-libs-static ca-certificates vim
+              apk add --no-cache gcc musl-dev make binutils pkgconfig openssl-dev openssl-libs-static ca-certificates
               cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
-              cargo test --target ${{ matrix.target }} ${{ matrix.features }}
+              cargo test --release --target ${{ matrix.target }} ${{ matrix.features }}
 
               # Verify jemalloc overrides musl malloc
               BINARY="target/${{ matrix.target }}/release/stakpak"
@@ -145,7 +145,7 @@ jobs:
 
       - name: Run tests
         if: ${{ !matrix.docker }}
-        run: cargo test --target ${{ matrix.target }} ${{ matrix.features }}
+        run: cargo test --release --target ${{ matrix.target }} ${{ matrix.features }}
 
       - name: Verify jemalloc overrides musl malloc
         if: endsWith(matrix.target, 'linux-musl') && !matrix.docker
