@@ -21,7 +21,6 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use crate::services::toast::Toast;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -265,7 +264,6 @@ impl AppState {
 
             background_tasks_state: BackgroundTasksState {
                 running_background_tasks: 0,
-                subagent_pause_info: HashMap::new(),
                 task_manager_handle,
             },
 
