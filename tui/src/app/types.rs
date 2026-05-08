@@ -529,7 +529,6 @@ pub struct ToolCallState {
 
 pub struct BackgroundTasksState {
     pub running_background_tasks: usize,
-    pub subagent_pause_info: HashMap<String, TaskPauseInfo>,
     pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
