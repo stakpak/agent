@@ -345,11 +345,11 @@ pub async fn run_default_warden(
     execute_warden_command(cmd, true)
 }
 
-/// Re-execute the stakpak command inside warden container
-pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result<(), String> {
-    // Get warden path (will download if not available)
-    let warden_path = get_warden_plugin_path().await;
-
+async fn run_stakpak_in_warden_with_path(
+    warden_path: &str,
+    config: AppConfig,
+    args: &[String],
+) -> Result<(), String> {
     // Build warden wrap command
     let mut cmd = Command::new(warden_path);
     cmd.arg("wrap");
@@ -405,11 +405,31 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
     // Execute the warden command with appropriate TTY handling
     execute_warden_command(cmd, needs_tty)
 }
+
+/// Re-execute the stakpak command inside warden container
+pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result<(), String> {
+    // Get warden path (will download if not available)
+    let warden_path = get_warden_plugin_path().await;
+    run_stakpak_in_warden_with_path(&warden_path, config, args).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{ProviderType, WardenConfig};
     use std::collections::HashMap;
+
+    #[cfg(unix)]
+    fn write_executable_script(path: &std::path::Path, content: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, content).expect("write script");
+        let mut permissions = std::fs::metadata(path)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod script");
+    }
 
     /// Minimal AppConfig for testing prepare_volumes.
     fn test_config(warden: Option<WardenConfig>) -> AppConfig {
@@ -668,5 +688,36 @@ mod tests {
                 "tilde still present: {expanded}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_stakpak_in_warden_sets_skip_warden_env_for_inner_process() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let log_path = temp_dir.path().join("warden-args.log");
+        let fake_warden = temp_dir.path().join("warden");
+        let config = test_config(None);
+
+        write_executable_script(
+            &fake_warden,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"{}\"\nexit 0\n",
+                log_path.display()
+            ),
+        );
+
+        run_stakpak_in_warden_with_path(
+            &fake_warden.to_string_lossy(),
+            config,
+            &["stakpak".to_string()],
+        )
+        .await
+        .expect("warden command succeeds");
+
+        let log = std::fs::read_to_string(&log_path).expect("read log");
+        assert!(
+            log.contains("--env STAKPAK_SKIP_WARDEN=1"),
+            "expected inner process to inherit skip-warden env, got: {log}"
+        );
     }
 }
