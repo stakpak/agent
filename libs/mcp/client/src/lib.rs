@@ -7,7 +7,7 @@ use rmcp::{
     transport::streamable_http_client::StreamableHttpClientTransportConfig,
 };
 use stakpak_shared::cert_utils::CertificateChain;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::models::agent_runtime::ToolCallResultProgress;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 

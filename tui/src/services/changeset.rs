@@ -6,7 +6,7 @@
 //! - Backup paths for revert functionality
 
 use chrono::{DateTime, Utc};
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakai::ToolCall;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -191,7 +191,7 @@ impl Changeset {
     pub fn track_file(&mut self, path: &str, edit: FileEdit) {
         // Check if this is a file creation based on tool call
         let is_creation = edit.tool_call.as_ref().is_some_and(|tc| {
-            let name = tc.function.name.as_str();
+            let name = tc.name.as_str();
             name == "stakpak__create"
                 || name == "stakpak__write"
                 || name == "stakpak__create_file"
@@ -332,13 +332,12 @@ impl Changeset {
     /// Apply a single edit in reverse (replace new_str with old_str)
     fn apply_reverse_edit(content: &str, tool_call: &ToolCall) -> Result<String, String> {
         // Only handle str_replace tool calls
-        if tool_call.function.name != "stakpak__str_replace" {
+        if tool_call.name != "stakpak__str_replace" {
             return Ok(content.to_string());
         }
 
         // Parse the tool call arguments
-        let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-            .map_err(|e| format!("Failed to parse tool call arguments: {}", e))?;
+        let args = &tool_call.arguments;
 
         let old_str = args["old_str"]
             .as_str()
@@ -752,11 +751,8 @@ mod tests {
                 .with_stats(10, 0)
                 .with_tool_call(ToolCall {
                     id: "call_1".to_string(),
-                    r#type: "function".to_string(),
-                    function: stakpak_shared::models::integrations::openai::FunctionCall {
-                        name: "stakpak__create".to_string(),
-                        arguments: "{}".to_string(),
-                    },
+                    name: "stakpak__create".to_string(),
+                    arguments: serde_json::json!({}),
                     metadata: None,
                 }),
         );

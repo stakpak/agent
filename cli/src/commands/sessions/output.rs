@@ -4,7 +4,6 @@ use serde::Serialize;
 use stakpak_api::{
     BackendInfo, BackendKind, Session, SessionStatus, SessionSummary, SessionVisibility,
 };
-use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::utils::sanitize_text_output;
 
 /// Output format for session commands.
@@ -131,13 +130,13 @@ pub struct ShowOutput<'a> {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub active_checkpoint_id: Option<uuid::Uuid>,
     pub message_count: u32,
-    pub messages: &'a [ChatMessage],
+    pub messages: &'a [stakai::Message],
     pub backend: &'a BackendInfo,
 }
 
 pub fn render_show(
     session: &Session,
-    messages: &[ChatMessage],
+    messages: &[stakai::Message],
     backend: &BackendInfo,
     options: ShowRenderOptions<'_>,
     mode: OutputMode,
@@ -158,7 +157,7 @@ pub fn render_show(
 
 fn render_show_json(
     session: &Session,
-    messages: &[ChatMessage],
+    messages: &[stakai::Message],
     message_count: u32,
     backend: &BackendInfo,
 ) -> String {
@@ -180,7 +179,7 @@ fn render_show_json(
 
 fn render_show_human(
     session: &Session,
-    messages: &[ChatMessage],
+    messages: &[stakai::Message],
     message_count: u32,
     limit: Option<u32>,
     offset: u32,
@@ -228,35 +227,52 @@ fn render_show_human(
     }
 
     for (i, m) in messages.iter().enumerate() {
-        out.push_str(&format!("\n[{}] {}\n", i + 1, m.role));
-        if let Some(content) = &m.content {
-            let text = sanitize_text_output(&content.to_string());
+        out.push_str(&format!("\n[{}] {}\n", i + 1, format_role(&m.role)));
+        if let Some(content) = m.content.text() {
+            let text = sanitize_text_output(&content);
             for line in text.lines() {
                 out.push_str("    ");
                 out.push_str(line);
                 out.push('\n');
             }
         }
-        if let Some(tool_calls) = &m.tool_calls {
-            for tc in tool_calls {
-                out.push_str(&format!(
-                    "    [tool_call] {} ({})\n",
-                    sanitize_text_output(&tc.function.name),
-                    sanitize_text_output(&tc.id),
-                ));
-                out.push_str("      arguments:\n");
-                for line in format_tool_call_arguments(&tc.function.arguments).lines() {
-                    out.push_str("        ");
-                    out.push_str(line);
-                    out.push('\n');
+        for part in m.parts() {
+            match part {
+                stakai::ContentPart::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => {
+                    out.push_str(&format!(
+                        "    [tool_call] {} ({})\n",
+                        sanitize_text_output(&name),
+                        sanitize_text_output(&id),
+                    ));
+                    out.push_str("      arguments:\n");
+                    for line in format_tool_call_arguments(&arguments.to_string()).lines() {
+                        out.push_str("        ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
                 }
+                stakai::ContentPart::ToolResult {
+                    tool_call_id,
+                    content,
+                    ..
+                } => {
+                    out.push_str(&format!(
+                        "    [tool_call_id] {}\n",
+                        sanitize_text_output(&tool_call_id)
+                    ));
+                    for line in format_tool_result_content(&content).lines() {
+                        out.push_str("    ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+                _ => {}
             }
-        }
-        if let Some(tc_id) = &m.tool_call_id {
-            out.push_str(&format!(
-                "    [tool_call_id] {}\n",
-                sanitize_text_output(tc_id)
-            ));
         }
     }
 
@@ -329,6 +345,23 @@ fn format_tool_call_arguments(arguments: &str) -> String {
         Err(_) => arguments.to_string(),
     };
     sanitize_text_output(&rendered)
+}
+
+fn format_tool_result_content(content: &serde_json::Value) -> String {
+    let rendered = match content {
+        serde_json::Value::String(text) => text.clone(),
+        value => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
+    };
+    sanitize_text_output(&rendered)
+}
+
+fn format_role(role: &stakai::Role) -> &'static str {
+    match role {
+        stakai::Role::System => "system",
+        stakai::Role::User => "user",
+        stakai::Role::Assistant => "assistant",
+        stakai::Role::Tool => "tool",
+    }
 }
 
 fn collapse_whitespace(s: &str) -> String {

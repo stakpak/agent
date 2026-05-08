@@ -3,9 +3,6 @@ use futures_util::Stream;
 use models::*;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
-use stakpak_shared::models::integrations::openai::{
-    ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
-};
 use uuid::Uuid;
 
 pub mod client;
@@ -147,24 +144,22 @@ pub trait AgentProvider: SessionStorage + Send + Sync {
     async fn chat_completion(
         &self,
         model: Model,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
+        messages: Vec<stakai::Message>,
+        tools: Option<Vec<stakai::Tool>>,
         session_id: Option<Uuid>,
         metadata: Option<serde_json::Value>,
-    ) -> Result<ChatCompletionResponse, String>;
+    ) -> Result<CompletionResponse, String>;
     async fn chat_completion_stream(
         &self,
         model: Model,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
+        messages: Vec<stakai::Message>,
+        tools: Option<Vec<stakai::Tool>>,
         headers: Option<HeaderMap>,
         session_id: Option<Uuid>,
         metadata: Option<serde_json::Value>,
     ) -> Result<
         (
-            std::pin::Pin<
-                Box<dyn Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>> + Send>,
-            >,
+            std::pin::Pin<Box<dyn Stream<Item = Result<AgentStreamEvent, ApiStreamError>> + Send>>,
             Option<String>,
         ),
         String,

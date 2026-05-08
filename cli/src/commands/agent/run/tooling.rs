@@ -6,7 +6,6 @@ use stakpak_api::AgentProvider;
 use stakpak_api::storage::ListSessionsQuery;
 use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_tui::SessionInfo;
 use uuid::Uuid;
 
@@ -36,28 +35,18 @@ pub async fn list_sessions(client: &dyn AgentProvider) -> Result<Vec<SessionInfo
 pub async fn run_tool_call(
     mcp_client: &McpClient,
     tools: &[rmcp::model::Tool],
-    tool_call: &ToolCall,
+    tool_call: &stakai::ToolCall,
     cancel_rx: Option<tokio::sync::broadcast::Receiver<()>>,
     session_id: Option<Uuid>,
     model_id: Option<String>,
     model_provider: Option<String>,
 ) -> Result<Option<CallToolResult>, String> {
-    let tool_name = &tool_call.function.name;
+    let tool_name = &tool_call.name;
     let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
 
     if tool_exists {
         // Parse arguments safely
-        let arguments = match serde_json::from_str(&tool_call.function.arguments) {
-            Ok(args) => Some(args),
-            Err(e) => {
-                let error_msg = format!("Failed to parse tool arguments as JSON: {}", e);
-                log::error!("{}", error_msg);
-                return Ok(Some(CallToolResult::error(vec![
-                    rmcp::model::Content::text("INVALID_ARGUMENTS"),
-                    rmcp::model::Content::text(error_msg),
-                ])));
-            }
-        };
+        let arguments = tool_call.arguments.as_object().cloned();
 
         // Call tool and handle errors gracefully
         let metadata = Some({

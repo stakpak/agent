@@ -4,7 +4,6 @@ pub mod context;
 pub mod error;
 pub mod event_log;
 pub mod idempotency;
-pub mod message_bridge;
 pub mod openapi;
 pub mod routes;
 pub mod sandbox;

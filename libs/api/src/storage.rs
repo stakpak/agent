@@ -6,7 +6,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stakpak_shared::models::integrations::openai::ChatMessage;
 use uuid::Uuid;
 
 // Re-export implementations
@@ -285,7 +284,7 @@ pub struct CheckpointSummary {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CheckpointState {
     #[serde(default)]
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<stakai::Message>,
     /// Optional metadata for context trimming state, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -305,7 +304,7 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
-    pub fn new(title: impl Into<String>, messages: Vec<ChatMessage>) -> Self {
+    pub fn new(title: impl Into<String>, messages: Vec<stakai::Message>) -> Self {
         Self {
             title: title.into(),
             visibility: SessionVisibility::Private,
@@ -359,7 +358,7 @@ pub struct CreateCheckpointRequest {
 }
 
 impl CreateCheckpointRequest {
-    pub fn new(messages: Vec<ChatMessage>) -> Self {
+    pub fn new(messages: Vec<stakai::Message>) -> Self {
         Self {
             state: CheckpointState {
                 messages,

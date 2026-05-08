@@ -12,10 +12,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use serde_json::Value;
-#[cfg(test)]
-use stakpak_shared::models::integrations::openai::FunctionCall;
-use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
+use stakai::ToolCall;
+use stakpak_shared::models::agent_runtime::{
+    ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
 };
 use stakpak_shared::utils::strip_tool_name;
 use std::collections::hash_map::DefaultHasher;
@@ -74,7 +73,7 @@ pub enum MessageContent {
     /// Task wait block - shows progress of background tasks being waited on
     /// (task_updates: Vec<TaskUpdate>, overall_progress: f64, target_task_ids: Vec<String>)
     RenderTaskWaitBlock(
-        Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        Vec<stakpak_shared::models::agent_runtime::TaskUpdate>,
         f64,
         Vec<String>,
     ),
@@ -83,18 +82,16 @@ pub enum MessageContent {
     RenderSubagentResumePendingBlock(
         ToolCall,
         bool,
-        Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+        Option<stakpak_shared::models::agent_runtime::TaskPauseInfo>,
     ),
     /// Tool call streaming preview - shows tools being generated with token counters
     /// (tool_infos: Vec<ToolCallStreamInfo>)
     RenderToolCallStreamBlock(Vec<ToolCallStreamInfo>),
     /// Ask user inline block - renders questions and options inline in the message area
     RenderAskUserBlock {
-        questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
-        answers: std::collections::HashMap<
-            String,
-            stakpak_shared::models::integrations::openai::AskUserAnswer,
-        >,
+        questions: Vec<stakpak_shared::models::agent_runtime::AskUserQuestion>,
+        answers:
+            std::collections::HashMap<String, stakpak_shared::models::agent_runtime::AskUserAnswer>,
         current_tab: usize,
         selected_option: usize,
         custom_input: String,
@@ -149,7 +146,7 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
         MessageContent::RenderPendingBorderBlock(tool_call, is_auto) => {
             6u8.hash(&mut hasher);
             tool_call.id.hash(&mut hasher);
-            tool_call.function.arguments.hash(&mut hasher);
+            tool_call.arguments.hash(&mut hasher);
             is_auto.hash(&mut hasher);
         }
         MessageContent::RenderPendingBorderBlockWithStallWarning(tool_call, is_auto, msg) => {
@@ -594,10 +591,10 @@ impl Message {
     }
 
     pub fn render_ask_user_block(
-        questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+        questions: Vec<stakpak_shared::models::agent_runtime::AskUserQuestion>,
         answers: std::collections::HashMap<
             String,
-            stakpak_shared::models::integrations::openai::AskUserAnswer,
+            stakpak_shared::models::agent_runtime::AskUserAnswer,
         >,
         current_tab: usize,
         selected_option: usize,
@@ -653,7 +650,7 @@ impl Message {
     /// Create a task wait block message
     /// Shows progress of background tasks being waited on with status indicators
     pub fn render_task_wait_block(
-        task_updates: Vec<stakpak_shared::models::integrations::openai::TaskUpdate>,
+        task_updates: Vec<stakpak_shared::models::agent_runtime::TaskUpdate>,
         progress: f64,
         target_task_ids: Vec<String>,
         message_id: Option<Uuid>,
@@ -670,7 +667,7 @@ impl Message {
     pub fn render_subagent_resume_pending_block(
         tool_call: ToolCall,
         is_auto_approved: bool,
-        pause_info: Option<stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+        pause_info: Option<stakpak_shared::models::agent_runtime::TaskPauseInfo>,
         message_id: Option<Uuid>,
     ) -> Self {
         Message {
@@ -1432,7 +1429,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
         }
         MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
             let full_command = extract_full_command_arguments(tool_call);
-            let tool_name = strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.name);
             let rendered = if (tool_name == "str_replace" || tool_name == "create")
                 && !render_file_diff(tool_call, width).is_empty()
             {
@@ -1480,7 +1477,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             lines.extend(convert_to_owned_lines(borrowed));
         }
         MessageContent::RenderCollapsedMessage(tool_call) => {
-            let tool_name = strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.name);
             if (tool_name == "str_replace" || tool_name == "create")
                 && let Some(rendered) = render_file_diff_full(tool_call, width, Some(true), None)
                 && !rendered.is_empty()
@@ -1513,8 +1510,7 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             lines.extend(convert_to_owned_lines(borrowed));
         }
         MessageContent::RenderFullContentMessage(tool_call_result) => {
-            let tool_name =
-                stakpak_shared::utils::strip_tool_name(&tool_call_result.call.function.name);
+            let tool_name = stakpak_shared::utils::strip_tool_name(&tool_call_result.call.name);
 
             // For str_replace/create, use the diff view with proper line numbers
             if (tool_name == "str_replace" || tool_name == "create")
@@ -2138,7 +2134,7 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
-                let tool_name = strip_tool_name(&tool_call.function.name);
+                let tool_name = strip_tool_name(&tool_call.name);
                 let rendered_lines = if (tool_name == "str_replace" || tool_name == "create")
                     && !render_file_diff(tool_call, width).is_empty()
                 {
@@ -2192,7 +2188,7 @@ fn get_wrapped_message_lines_internal(
             }
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
-                let tool_name = strip_tool_name(&tool_call.function.name);
+                let tool_name = strip_tool_name(&tool_call.name);
                 if (tool_name == "str_replace" || tool_name == "create")
                     && let Some(rendered_lines) =
                         render_file_diff_full(tool_call, width, Some(true), None)
@@ -2234,8 +2230,7 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::RenderFullContentMessage(tool_call_result) => {
-                let tool_name =
-                    stakpak_shared::utils::strip_tool_name(&tool_call_result.call.function.name);
+                let tool_name = stakpak_shared::utils::strip_tool_name(&tool_call_result.call.name);
 
                 // For str_replace/create, use the diff view with proper line numbers
                 if (tool_name == "str_replace" || tool_name == "create")
@@ -2445,23 +2440,21 @@ fn get_wrapped_message_lines_internal(
 }
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<String>) -> String {
-    let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
+    let arguments = &tool_call.arguments;
 
     // For subagent tasks, show description + tools summary instead of raw args
-    let tool_name = strip_tool_name(&tool_call.function.name);
-    if tool_name == "dynamic_subagent_task"
-        && let Ok(ref args) = arguments
-    {
-        let desc = args
+    let tool_name = strip_tool_name(&tool_call.name);
+    if tool_name == "dynamic_subagent_task" {
+        let desc = arguments
             .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("subagent");
-        let tools_count = args
+        let tools_count = arguments
             .get("tools")
             .and_then(|v| v.as_array())
             .map(|a| a.len())
             .unwrap_or(0);
-        let is_sandbox = args
+        let is_sandbox = arguments
             .get("enable_sandbox")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
@@ -2471,9 +2464,9 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 
     // For ask_user, show question labels
     if tool_name == "ask_user"
-        && let Ok(request) = serde_json::from_str::<
-            stakpak_shared::models::integrations::openai::AskUserRequest,
-        >(&tool_call.function.arguments)
+        && let Ok(request) = serde_json::from_value::<
+            stakpak_shared::models::agent_runtime::AskUserRequest,
+        >(tool_call.arguments.clone())
     {
         let labels: Vec<&str> = request.questions.iter().map(|q| q.label.as_str()).collect();
         if !labels.is_empty() {
@@ -2484,7 +2477,7 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 
     const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
 
-    if let Ok(arguments) = arguments {
+    {
         // Check each keyword in order of priority
         for &keyword in &KEYWORDS {
             if let Some(value) = arguments.get(keyword) {
@@ -2498,9 +2491,9 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 
         // If no keywords found, return the first parameter
         if let Value::Object(obj) = arguments
-            && let Some((key, val)) = obj.into_iter().next()
+            && let Some((key, val)) = obj.iter().next()
         {
-            let formatted_val = format_simple_value(&val);
+            let formatted_val = format_simple_value(val);
             return format!("{} = {}", key, formatted_val);
         }
     }
@@ -2509,18 +2502,19 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
 }
 
 pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
 
     if tool_name == "ask_user" {
         return "Ask user questions...".to_string();
     }
 
-    // First try to parse as valid JSON
-    if let Ok(v) = serde_json::from_str::<Value>(&tool_call.function.arguments) {
-        return format_json_value(&v);
+    if !tool_call.arguments.is_null() {
+        return format_json_value(&tool_call.arguments);
     }
 
-    // If JSON parsing fails, try regex patterns for malformed JSON
+    let raw_arguments = tool_call.arguments.as_str().unwrap_or("");
+
+    // If arguments are a malformed JSON string, try regex patterns
     let patterns = vec![
         // Pattern for key-value pairs with quotes
         r#"["']?(\w+)["']?\s*:\s*["']([^"']+)["']"#,
@@ -2531,7 +2525,7 @@ pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
     for pattern in patterns {
         if let Ok(re) = Regex::new(pattern) {
             let mut results = Vec::new();
-            for caps in re.captures_iter(&tool_call.function.arguments) {
+            for caps in re.captures_iter(raw_arguments) {
                 if caps.len() >= 3 {
                     let key = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                     let value = caps.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -2545,19 +2539,19 @@ pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
     }
 
     // Try to wrap in braces and parse as JSON
-    let wrapped = format!("{{{}}}", tool_call.function.arguments);
+    let wrapped = format!("{{{}}}", raw_arguments);
     if let Ok(v) = serde_json::from_str::<Value>(&wrapped) {
         return format_json_value(&v);
     }
 
     // If all else fails, return the raw arguments if they're not empty
-    let trimmed = tool_call.function.arguments.trim();
+    let trimmed = raw_arguments.trim();
     if !trimmed.is_empty() {
         return trimmed.to_string();
     }
 
     // Last resort
-    format!("function_name={}", tool_call.function.name)
+    format!("function_name={}", tool_call.name)
 }
 
 fn format_json_value(value: &Value) -> String {
@@ -2750,7 +2744,7 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
 
 // Helper function to get command name for the outside title
 pub fn get_command_type_name(tool_call: &ToolCall) -> String {
-    match strip_tool_name(&tool_call.function.name) {
+    match strip_tool_name(&tool_call.name) {
         "create_file" => "Create file".to_string(),
         "create" => "Create".to_string(),
         "edit_file" => "Edit file".to_string(),
@@ -2761,8 +2755,7 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
         "list_directory" => "List directory".to_string(),
         "search_files" => "Search files".to_string(),
         "dynamic_subagent_task" => {
-            let args =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let args = Some(&tool_call.arguments);
             let desc = args
                 .as_ref()
                 .and_then(|a| a.get("description").and_then(|v| v.as_str()))
@@ -2780,7 +2773,7 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
         "ask_user" => "Ask User".to_string(),
         _ => {
             // Convert function name to title case
-            strip_tool_name(&tool_call.function.name)
+            strip_tool_name(&tool_call.name)
                 .replace("_", " ")
                 .split_whitespace()
                 .map(|word| {
@@ -2818,11 +2811,9 @@ mod tests {
         for (input, expected) in test_cases {
             let tool_call = ToolCall {
                 id: "test".to_string(),
-                r#type: "function".to_string(),
-                function: FunctionCall {
-                    name: "test".to_string(),
-                    arguments: input.to_string(),
-                },
+                name: "test".to_string(),
+                arguments: serde_json::from_str(input)
+                    .unwrap_or_else(|_| serde_json::Value::String(input.to_string())),
                 metadata: None,
             };
 

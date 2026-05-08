@@ -16,7 +16,7 @@ use crossterm::event::{
 use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakai::Model;
-use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
+use stakpak_shared::models::agent_runtime::ToolCallResultStatus;
 use stakpak_shared::utils::strip_tool_name;
 use std::io;
 use std::sync::Arc;
@@ -270,7 +270,7 @@ pub async fn run_tui(
 
                        state.session_tool_calls_state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
-                       let tool_name = strip_tool_name(&tool_call_result.call.function.name);
+                       let tool_name = strip_tool_name(&tool_call_result.call.name);
 
                        let is_fg_cmd = matches!(tool_name, "run_command" | "run_remote_command");
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && is_fg_cmd {

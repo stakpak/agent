@@ -15,10 +15,9 @@ use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use stakai::ToolCall;
 use stakpak_shared::helper::truncate_output;
-use stakpak_shared::models::integrations::openai::{
-    FunctionCall, ToolCall, ToolCallResult, ToolCallResultStatus,
-};
+use stakpak_shared::models::agent_runtime::{ToolCallResult, ToolCallResultStatus};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -163,10 +162,7 @@ pub fn send_shell_input(state: &mut AppState, data: &str) {
 /// Extract command from tool call
 pub fn extract_command_from_tool_call(tool_call: &ToolCall) -> Result<String, String> {
     // Parse as JSON and extract the command field
-    let json = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-
-    if let Some(command_value) = json.get("command") {
+    if let Some(command_value) = tool_call.arguments.get("command") {
         if let Some(command_str) = command_value.as_str() {
             return Ok(command_str.to_string());
         } else {
@@ -1010,7 +1006,7 @@ pub fn shell_command_to_tool_call_result(
     shell_output: Option<String>,
 ) -> ToolCallResult {
     let (id, name) = if let Some(cmd) = &state.dialog_approval_state.dialog_command {
-        (cmd.id.clone(), cmd.function.name.clone())
+        (cmd.id.clone(), cmd.name.clone())
     } else {
         (
             format!("tool_{}", Uuid::new_v4()),
@@ -1050,11 +1046,8 @@ pub fn shell_command_to_tool_call_result(
 
     let call = ToolCall {
         id,
-        r#type: "function".to_string(),
-        function: FunctionCall {
-            name,
-            arguments: args,
-        },
+        name,
+        arguments: serde_json::from_str(&args).unwrap_or(serde_json::Value::String(args)),
         metadata: None,
     };
     ToolCallResult {

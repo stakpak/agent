@@ -4,8 +4,9 @@
 //! option selection, custom input, and submission.
 
 use crate::app::{AppState, OutputEvent};
-use stakpak_shared::models::integrations::openai::{
-    AskUserAnswer, AskUserQuestion, AskUserResult, ToolCall, ToolCallResult, ToolCallResultStatus,
+use stakai::ToolCall;
+use stakpak_shared::models::agent_runtime::{
+    AskUserAnswer, AskUserQuestion, AskUserResult, ToolCallResult, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -590,7 +591,7 @@ mod tests {
     use super::*;
     use crate::app::AppStateOptions;
     use stakai::Model;
-    use stakpak_shared::models::integrations::openai::{AskUserOption, FunctionCall};
+    use stakpak_shared::models::agent_runtime::AskUserOption;
     use tokio::sync::mpsc;
 
     /// Helper to create a minimal AppState for testing
@@ -662,11 +663,8 @@ mod tests {
     fn create_test_tool_call() -> ToolCall {
         ToolCall {
             id: "call_test123".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "ask_user".to_string(),
-                arguments: "{}".to_string(),
-            },
+            name: "ask_user".to_string(),
+            arguments: serde_json::json!({}),
             metadata: None,
         }
     }

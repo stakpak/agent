@@ -3,10 +3,7 @@ use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stakai::Model;
-use stakpak_shared::models::{
-    integrations::openai::{ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall},
-    llm::{LLMInput, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
-};
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -498,29 +495,6 @@ impl ListRuleBook {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct SimpleLLMMessage {
-    #[serde(rename = "role")]
-    pub role: SimpleLLMRole,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SimpleLLMRole {
-    User,
-    Assistant,
-}
-
-impl std::fmt::Display for SimpleLLMRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SimpleLLMRole::User => write!(f, "user"),
-            SimpleLLMRole::Assistant => write!(f, "assistant"),
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SearchDocsRequest {
     pub keywords: String,
@@ -558,10 +532,10 @@ pub struct SlackSendMessageRequest {
 pub struct AgentState {
     /// The active model to use for inference
     pub active_model: Model,
-    pub messages: Vec<ChatMessage>,
-    pub tools: Option<Vec<Tool>>,
+    pub messages: Vec<stakai::Message>,
+    pub tools: Option<Vec<stakai::Tool>>,
 
-    pub llm_input: Option<LLMInput>,
+    pub llm_input: Option<stakai::GenerateRequest>,
     pub llm_output: Option<LLMOutput>,
 
     /// Metadata for checkpoint persistence (context trimming state, etc.)
@@ -569,74 +543,52 @@ pub struct AgentState {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LLMOutput {
-    pub new_message: LLMMessage,
-    pub usage: LLMTokenUsage,
+    pub new_message: stakai::Message,
+    pub usage: stakai::Usage,
 }
 
-impl From<&LLMOutput> for ChatMessage {
-    fn from(value: &LLMOutput) -> Self {
-        let message_content = match &value.new_message.content {
-            LLMMessageContent::String(s) => s.clone(),
-            LLMMessageContent::List(l) => l
-                .iter()
-                .map(|c| match c {
-                    LLMMessageTypedContent::Text { text } => text.clone(),
-                    LLMMessageTypedContent::ToolCall { .. } => String::new(),
-                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
-                    LLMMessageTypedContent::Image { .. } => String::new(),
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
-        let tool_calls = if let LLMMessageContent::List(items) = &value.new_message.content {
-            let calls: Vec<ToolCall> = items
-                .iter()
-                .filter_map(|item| {
-                    if let LLMMessageTypedContent::ToolCall {
-                        id,
-                        name,
-                        args,
-                        metadata,
-                    } = item
-                    {
-                        Some(ToolCall {
-                            id: id.clone(),
-                            r#type: "function".to_string(),
-                            function: FunctionCall {
-                                name: name.clone(),
-                                arguments: args.to_string(),
-                            },
-                            metadata: metadata.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+#[derive(Debug, Clone, Serialize)]
+pub struct CompletionResponse {
+    pub id: String,
+    pub created: u64,
+    pub model: String,
+    pub message: stakai::Message,
+    pub usage: stakai::Usage,
+    pub metadata: Option<Value>,
+}
 
-            if calls.is_empty() { None } else { Some(calls) }
-        } else {
-            None
-        };
-        ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(message_content)),
-            name: None,
-            tool_calls,
-            tool_call_id: None,
-            usage: Some(value.usage.clone()),
-            ..Default::default()
-        }
+#[derive(Debug, Clone, Serialize)]
+pub enum AgentStreamEvent {
+    Model(Model),
+    Event(stakai::StreamEvent),
+    Metadata(Value),
+}
+
+pub fn stakai_usage_to_llm_usage(usage: &stakai::Usage) -> LLMTokenUsage {
+    use stakpak_shared::models::llm::PromptTokensDetails;
+
+    LLMTokenUsage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        prompt_tokens_details: usage.input_token_details.as_ref().map(|details| {
+            PromptTokensDetails {
+                input_tokens: details.no_cache,
+                output_tokens: None,
+                cache_read_input_tokens: details.cache_read,
+                cache_write_input_tokens: details.cache_write,
+            }
+        }),
     }
 }
 
 impl AgentState {
     pub fn new(
         active_model: Model,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
+        messages: Vec<stakai::Message>,
+        tools: Option<Vec<stakai::Tool>>,
         metadata: Option<Value>,
     ) -> Self {
         Self {
@@ -649,11 +601,11 @@ impl AgentState {
         }
     }
 
-    pub fn set_messages(&mut self, messages: Vec<ChatMessage>) {
+    pub fn set_messages(&mut self, messages: Vec<stakai::Message>) {
         self.messages = messages;
     }
 
-    pub fn set_tools(&mut self, tools: Option<Vec<Tool>>) {
+    pub fn set_tools(&mut self, tools: Option<Vec<stakai::Tool>>) {
         self.tools = tools;
     }
 
@@ -661,18 +613,18 @@ impl AgentState {
         self.active_model = model;
     }
 
-    pub fn set_llm_input(&mut self, llm_input: Option<LLMInput>) {
+    pub fn set_llm_input(&mut self, llm_input: Option<stakai::GenerateRequest>) {
         self.llm_input = llm_input;
     }
 
-    pub fn set_llm_output(&mut self, new_message: LLMMessage, new_usage: Option<LLMTokenUsage>) {
+    pub fn set_llm_output(&mut self, new_message: stakai::Message, new_usage: stakai::Usage) {
         self.llm_output = Some(LLMOutput {
             new_message,
-            usage: new_usage.unwrap_or_default(),
+            usage: new_usage,
         });
     }
 
-    pub fn append_new_message(&mut self, new_message: ChatMessage) {
+    pub fn append_new_message(&mut self, new_message: stakai::Message) {
         self.messages.push(new_message);
     }
 }

@@ -3,6 +3,9 @@ use crate::utils::apps_md::{AppsMdInfo, format_apps_md_for_context};
 use crate::utils::local_context::LocalContext;
 use stakpak_api::models::Skill;
 
+const INJECTED_CONTEXT_TAGS: &[&str] =
+    &["local_context", "available_skills", "agents_md", "apps_md"];
+
 #[derive(Debug, Clone)]
 pub struct AgentContext {
     /// Pre-formatted local context string. Snapshotted once at construction;
@@ -93,6 +96,36 @@ fn format_skills(skills: &[Skill]) -> String {
             .collect::<Vec<String>>()
             .join("\n")
     )
+}
+
+pub fn strip_injected_context_blocks(input: &str) -> String {
+    let mut stripped = input.to_string();
+    for tag in INJECTED_CONTEXT_TAGS {
+        stripped = strip_xml_like_blocks(&stripped, tag);
+    }
+
+    stripped.trim_end().to_string()
+}
+
+fn strip_xml_like_blocks(input: &str, tag: &str) -> String {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut remaining = input;
+    let mut output = String::with_capacity(input.len());
+
+    while let Some(start) = remaining.find(&open) {
+        output.push_str(&remaining[..start]);
+        let after_open = start + open.len();
+        let Some(relative_end) = remaining[after_open..].find(&close) else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let end = after_open + relative_end + close.len();
+        remaining = &remaining[end..];
+    }
+
+    output.push_str(remaining);
+    output
 }
 
 #[cfg(test)]
@@ -218,5 +251,19 @@ mod tests {
 
         ctx.update_skills(Some(make_skills()));
         assert!(ctx.skills.is_some());
+    }
+
+    #[test]
+    fn strip_injected_context_blocks_removes_context_from_display_text() {
+        let input = "deploy this\n<local_context>\nsecret cwd\n</local_context>\n<available_skills>\nlarge skill list\n</available_skills>";
+
+        assert_eq!(strip_injected_context_blocks(input), "deploy this");
+    }
+
+    #[test]
+    fn strip_injected_context_blocks_preserves_malformed_user_text() {
+        let input = "show me <available_skills> literally";
+
+        assert_eq!(strip_injected_context_blocks(input), input);
     }
 }
