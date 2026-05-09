@@ -3,10 +3,12 @@
 //! Provides access to Stakpak's non-inference APIs.
 
 use super::{
-    CheckpointState, CreateCheckpointRequest, CreateCheckpointResponse, CreateSessionRequest,
-    CreateSessionResponse, GetCheckpointResponse, GetSessionResponse, ListCheckpointsQuery,
-    ListCheckpointsResponse, ListSessionsQuery, ListSessionsResponse, SessionVisibility,
-    StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, models::*,
+    CheckpointState, CreateCheckpointRequest, CreateCheckpointResponse,
+    CreateKnowledgeFileResponse, CreateSessionRequest, CreateSessionResponse,
+    GetCheckpointResponse, GetSessionResponse, ListCheckpointsQuery, ListCheckpointsResponse,
+    ListKnowledgeFilesQuery, ListKnowledgeFilesResponse, ListSessionsQuery, ListSessionsResponse,
+    SessionVisibility, StakpakApiConfig, UpdateKnowledgeFileResponse, UpdateSessionRequest,
+    UpdateSessionResponse, models::*,
 };
 use crate::models::{
     CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
@@ -293,6 +295,102 @@ impl StakpakApiClient {
     pub async fn delete_rulebook(&self, uri: &str) -> Result<(), String> {
         let encoded_uri = urlencoding::encode(uri);
         let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
+        let response = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.handle_response_no_body(response).await
+    }
+
+    // =========================================================================
+    // Knowledge Store APIs
+    // =========================================================================
+
+    /// Read a knowledge file
+    pub async fn read_knowledge_file(&self, path: &str) -> Result<Vec<u8>, String> {
+        let encoded_path = urlencoding::encode(path);
+        let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if response.status().is_success() {
+            response
+                .bytes()
+                .await
+                .map(|b| b.to_vec())
+                .map_err(|e| e.to_string())
+        } else {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_default();
+            Err(format!(
+                "Failed to read knowledge file ({}): {}",
+                status, error_body
+            ))
+        }
+    }
+
+    /// List knowledge files with optional filtering
+    pub async fn list_knowledge_files(
+        &self,
+        query: &ListKnowledgeFilesQuery,
+    ) -> Result<ListKnowledgeFilesResponse, String> {
+        let url = format!("{}/v1/knowledge", self.base_url);
+        let response = self
+            .client
+            .get(&url)
+            .query(query)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.handle_response(response).await
+    }
+
+    /// Create a new knowledge file
+    pub async fn create_knowledge_file(
+        &self,
+        path: &str,
+        content: &[u8],
+    ) -> Result<CreateKnowledgeFileResponse, String> {
+        let encoded_path = urlencoding::encode(path);
+        let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
+        let response = self
+            .client
+            .post(&url)
+            .body(content.to_vec())
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.handle_response(response).await
+    }
+
+    /// Overwrite an existing knowledge file (or create if not exists)
+    pub async fn overwrite_knowledge_file(
+        &self,
+        path: &str,
+        content: &[u8],
+    ) -> Result<UpdateKnowledgeFileResponse, String> {
+        let encoded_path = urlencoding::encode(path);
+        let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
+        let response = self
+            .client
+            .put(&url)
+            .body(content.to_vec())
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.handle_response(response).await
+    }
+
+    /// Delete a knowledge file or directory
+    pub async fn delete_knowledge_file(&self, path: &str) -> Result<(), String> {
+        let encoded_path = urlencoding::encode(path);
+        let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self
             .client
             .delete(&url)

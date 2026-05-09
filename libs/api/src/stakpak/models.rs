@@ -215,6 +215,52 @@ pub struct GetCheckpointResponse {
 }
 
 // =============================================================================
+// Knowledge Store Types
+// =============================================================================
+
+/// Knowledge file metadata
+#[derive(Debug, Clone, Deserialize)]
+pub struct KnowledgeFile {
+    pub path: String,
+    pub size_bytes: i64,
+    pub content_hash: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Query parameters for listing knowledge files
+#[derive(Debug, Default, Serialize)]
+pub struct ListKnowledgeFilesQuery {
+    /// Path prefix to filter by
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Glob pattern to filter paths
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glob: Option<String>,
+    /// Grep pattern to filter file contents
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grep: Option<String>,
+    /// Make grep case-insensitive
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub casei: Option<bool>,
+}
+
+/// Response from listing knowledge files
+#[derive(Debug, Deserialize)]
+pub struct ListKnowledgeFilesResponse {
+    pub files: Vec<KnowledgeFile>,
+}
+
+/// Response from creating a knowledge file
+pub type CreateKnowledgeFileResponse = KnowledgeFile;
+
+/// Response from updating a knowledge file
+pub type UpdateKnowledgeFileResponse = KnowledgeFile;
+
+// =============================================================================
 // MCP Tool Request Types
 // =============================================================================
 
