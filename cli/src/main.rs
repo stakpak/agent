@@ -221,6 +221,10 @@ struct Cli {
     #[arg(long = "ignore-apps-md", default_value_t = false)]
     ignore_apps_md: bool,
 
+    /// Show session usage stats and URL after async mode completes
+    #[arg(long = "show-session-usage", default_value_t = false)]
+    show_session_usage: bool,
+
     /// Color theme: auto, dark, or light (default: auto)
     #[arg(long = "theme", default_value = "auto")]
     theme: String,
@@ -588,6 +592,7 @@ async fn main() {
                                 plan_feedback: cli.plan_feedback.clone(),
                                 plan_new: cli.plan_new,
                                 pause_on_approval: cli.pause_on_approval,
+                                show_session_usage: cli.show_session_usage,
                                 resume_input: if cli.approve.is_some()
                                     || cli.reject.is_some()
                                     || cli.approve_all
