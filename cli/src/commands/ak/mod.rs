@@ -396,7 +396,6 @@ fn create_backend(config: &AppConfig) -> Result<Rc<dyn StorageBackend>, String> 
     Ok(backend)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::AkCommands;
