@@ -665,6 +665,7 @@ impl TaskManager {
 
             loop {
                 tokio::select! {
+                    biased;
                     line = stdout_lines.next_line() => {
                         match line {
                             Ok(Some(line)) => {
