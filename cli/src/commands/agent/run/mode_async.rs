@@ -53,8 +53,8 @@ pub struct RunAsyncConfig {
     pub resume_input: Option<ResumeInput>,
     /// Auto-approve tool overrides from profile config.
     pub auto_approve_tools: Option<Vec<String>>,
-    /// When true, display session usage stats and browser URL after completion.
-    pub show_session_usage: bool,
+    /// When true, display session stats and browser URL after completion.
+    pub show_session_stats: bool,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -886,12 +886,44 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         print!("{}", renderer.render_final_completion(&chat_messages));
         println!();
 
+        if let Some(session_id) = current_session_id {
+            println!("Session ID: {}\n", session_id);
+        }
+
         // Print token usage at the end
         let model_display = format!("{}/{}", config.model.provider, config.model.name);
         print!(
             "{}",
             renderer.render_token_usage_stats(&total_usage, Some(&model_display))
         );
+
+        if let Some(session_id) = current_session_id {
+            // Print resume command and session ID if available
+            if let Some(resume_command) =
+                build_resume_command(current_session_id, current_checkpoint_id)
+            {
+                println!("\nTo resume, run:\n{}\n", resume_command);
+            }
+
+            if config.show_session_stats {
+                match client.get_session_stats(session_id).await {
+                    Ok(stats) => {
+                        print!("{}", renderer.render_session_stats(&stats));
+                    }
+                    Err(_) => {
+                        // Don't fail the whole operation if stats fetch fails
+                    }
+                }
+
+                // Display session URL (matching interactive mode behavior)
+                if let Ok(account) = client.get_my_account().await {
+                    println!(
+                        "To view full session in browser:\nhttps://stakpak.dev/{}/agent-sessions/{}",
+                        account.username, session_id
+                    );
+                }
+            }
+        }
     }
 
     // Save conversation to file
@@ -937,39 +969,6 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             "{}",
             renderer.render_info("No checkpoint available to save")
         );
-    }
-
-    if config.output_format != OutputFormat::Json {
-        // Print resume command and session ID if available
-        if let Some(resume_command) =
-            build_resume_command(current_session_id, current_checkpoint_id)
-        {
-            println!("\nTo resume, run:\n{}\n", resume_command);
-        }
-
-        if let Some(session_id) = current_session_id {
-            println!("Session ID: {}", session_id);
-
-            if config.show_session_usage {
-                // Fetch and display session stats (matching interactive mode behavior)
-                match client.get_session_stats(session_id).await {
-                    Ok(stats) => {
-                        print!("{}", renderer.render_session_stats(&stats));
-                    }
-                    Err(_) => {
-                        // Don't fail the whole operation if stats fetch fails
-                    }
-                }
-
-                // Display session URL (matching interactive mode behavior)
-                if let Ok(account) = client.get_my_account().await {
-                    println!(
-                        "To view full session in browser:\nhttps://stakpak.dev/{}/agent-sessions/{}",
-                        account.username, session_id
-                    );
-                }
-            }
-        }
     }
 
     // Gracefully shutdown MCP server and proxy
