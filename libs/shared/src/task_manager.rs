@@ -158,6 +158,41 @@ pub struct TaskCompletion {
     pub final_status: TaskStatus,
 }
 
+fn task_completion_from_exit_status(
+    mut output: String,
+    error: Option<String>,
+    exit_status: std::process::ExitStatus,
+) -> TaskCompletion {
+    if output.is_empty() {
+        output = "No output".to_string();
+    }
+
+    if exit_status.success() {
+        TaskCompletion {
+            output,
+            error,
+            final_status: TaskStatus::Completed,
+        }
+    } else if exit_status.code() == Some(10) {
+        TaskCompletion {
+            output,
+            error: None,
+            final_status: TaskStatus::Paused,
+        }
+    } else {
+        TaskCompletion {
+            output,
+            error: error.or_else(|| {
+                Some(format!(
+                    "Command failed with exit code: {:?}",
+                    exit_status.code()
+                ))
+            }),
+            final_status: TaskStatus::Failed,
+        }
+    }
+}
+
 struct TaskExecution {
     id: TaskId,
     command: String,
@@ -662,10 +697,12 @@ impl TaskManager {
         let stream_output = async {
             let mut final_output = String::new();
             let mut final_error: Option<String> = None;
+            let mut stdout_done = false;
+            let mut stderr_done = false;
 
             loop {
                 tokio::select! {
-                    line = stdout_lines.next_line() => {
+                    line = stdout_lines.next_line(), if !stdout_done => {
                         match line {
                             Ok(Some(line)) => {
                                 let output_line = format!("{}\n", line);
@@ -677,6 +714,7 @@ impl TaskManager {
                             }
                             Ok(None) => {
                                 // stdout stream ended
+                                stdout_done = true;
                             }
                             Err(err) => {
                                 final_error = Some(format!("Error reading stdout: {}", err));
@@ -684,7 +722,7 @@ impl TaskManager {
                             }
                         }
                     }
-                    line = stderr_lines.next_line() => {
+                    line = stderr_lines.next_line(), if !stderr_done => {
                         match line {
                             Ok(Some(line)) => {
                                 let output_line = format!("{}\n", line);
@@ -696,6 +734,7 @@ impl TaskManager {
                             }
                             Ok(None) => {
                                 // stderr stream ended
+                                stderr_done = true;
                             }
                             Err(err) => {
                                 final_error = Some(format!("Error reading stderr: {}", err));
@@ -706,30 +745,47 @@ impl TaskManager {
                     status = child.wait() => {
                         match status {
                             Ok(exit_status) => {
-                                if final_output.is_empty() {
-                                    final_output = "No output".to_string();
+                                while !stdout_done {
+                                    match stdout_lines.next_line().await {
+                                        Ok(Some(line)) => {
+                                            let output_line = format!("{}\n", line);
+                                            final_output.push_str(&output_line);
+                                            let _ = task_tx.send(TaskMessage::PartialUpdate {
+                                                id: id.clone(),
+                                                output: output_line,
+                                            });
+                                        }
+                                        Ok(None) => stdout_done = true,
+                                        Err(err) => {
+                                            final_error = Some(format!("Error reading stdout: {}", err));
+                                            break;
+                                        }
+                                    }
                                 }
 
-                                let completion = if exit_status.success() {
-                                    TaskCompletion {
-                                        output: final_output,
-                                        error: final_error,
-                                        final_status: TaskStatus::Completed,
+                                while !stderr_done {
+                                    match stderr_lines.next_line().await {
+                                        Ok(Some(line)) => {
+                                            let output_line = format!("{}\n", line);
+                                            final_output.push_str(&output_line);
+                                            let _ = task_tx.send(TaskMessage::PartialUpdate {
+                                                id: id.clone(),
+                                                output: output_line,
+                                            });
+                                        }
+                                        Ok(None) => stderr_done = true,
+                                        Err(err) => {
+                                            final_error = Some(format!("Error reading stderr: {}", err));
+                                            break;
+                                        }
                                     }
-                                } else if exit_status.code() == Some(10) {
-                                    TaskCompletion {
-                                        output: final_output,
-                                        error: None,
-                                        final_status: TaskStatus::Paused,
-                                    }
-                                } else {
-                                    TaskCompletion {
-                                        output: final_output,
-                                        error: final_error.or_else(|| Some(format!("Command failed with exit code: {:?}", exit_status.code()))),
-                                        final_status: TaskStatus::Failed,
-                                    }
-                                };
-                                return completion;
+                                }
+
+                                return task_completion_from_exit_status(
+                                    final_output,
+                                    final_error,
+                                    exit_status,
+                                );
                             }
                             Err(err) => {
                                 return TaskCompletion {
