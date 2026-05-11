@@ -14,13 +14,88 @@ use crate::models::{
     CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
     ListRulebooksResponse, RuleBook,
 };
-use reqwest::{Response, header};
+use reqwest::{Response, StatusCode, header};
 use rmcp::model::Content;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use stakpak_shared::models::billing::BillingResponse;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use uuid::Uuid;
+
+/// Structured error returned by the knowledge-store APIs.
+#[derive(Debug, Clone)]
+pub enum KnowledgeApiError {
+    /// Resource does not exist (HTTP 404).
+    NotFound { message: String },
+    /// Resource already exists (HTTP 409).
+    Conflict { message: String },
+    /// Caller is not authorized (HTTP 401 / 403).
+    Forbidden { message: String },
+    /// Request was rejected by the server (HTTP 400).
+    BadRequest { message: String },
+    /// Catch-all for any other HTTP error status, plus the raw body.
+    Http { status: StatusCode, message: String },
+    /// Transport / serialization / IO failure (no HTTP status available).
+    Transport { message: String },
+}
+
+impl KnowledgeApiError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::NotFound { message }
+            | Self::Conflict { message }
+            | Self::Forbidden { message }
+            | Self::BadRequest { message }
+            | Self::Http { message, .. }
+            | Self::Transport { message } => message,
+        }
+    }
+
+    /// Returns the HTTP status if the error came from the server.
+    pub fn status(&self) -> Option<StatusCode> {
+        match self {
+            Self::NotFound { .. } => Some(StatusCode::NOT_FOUND),
+            Self::Conflict { .. } => Some(StatusCode::CONFLICT),
+            Self::Forbidden { .. } => Some(StatusCode::FORBIDDEN),
+            Self::BadRequest { .. } => Some(StatusCode::BAD_REQUEST),
+            Self::Http { status, .. } => Some(*status),
+            Self::Transport { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Display for KnowledgeApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound { message } => write!(f, "not found: {}", message),
+            Self::Conflict { message } => write!(f, "conflict: {}", message),
+            Self::Forbidden { message } => write!(f, "forbidden: {}", message),
+            Self::BadRequest { message } => write!(f, "bad request: {}", message),
+            Self::Http { status, message } => write!(f, "http {}: {}", status, message),
+            Self::Transport { message } => write!(f, "transport error: {}", message),
+        }
+    }
+}
+
+impl std::error::Error for KnowledgeApiError {}
+
+impl From<reqwest::Error> for KnowledgeApiError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Transport {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Percent-encode each segment of a path independently, preserving `/`
+/// separators so the URL still matches Axum's `{*path}` greedy capture
+/// after the server's path extractor decodes it.
+fn encode_path_segments(path: &str) -> String {
+    path.split('/')
+        .map(|seg| urlencoding::encode(seg).into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
 
 /// Client for Stakpak's non-inference APIs
 #[derive(Clone, Debug)]
@@ -308,30 +383,63 @@ impl StakpakApiClient {
     // Knowledge Store APIs
     // =========================================================================
 
-    /// Read a knowledge file
-    pub async fn read_knowledge_file(&self, path: &str) -> Result<Vec<u8>, String> {
-        let encoded_path = urlencoding::encode(path);
+    /// Read a knowledge file.
+    pub async fn read_knowledge_file(&self, path: &str) -> Result<Vec<u8>, KnowledgeApiError> {
+        self.read_knowledge_file_inner(path, false).await
+    }
+
+    /// Read at most the first `max_bytes` of a knowledge file. The server
+    /// supports a `peek` query parameter that returns a compact preview; if
+    /// the response exceeds `max_bytes` we truncate client-side.
+    pub async fn peek_knowledge_file(
+        &self,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, KnowledgeApiError> {
+        let mut bytes = self.read_knowledge_file_inner(path, true).await?;
+        if bytes.len() > max_bytes {
+            bytes.truncate(max_bytes);
+        }
+        Ok(bytes)
+    }
+
+    async fn read_knowledge_file_inner(
+        &self,
+        path: &str,
+        peek_only: bool,
+    ) -> Result<Vec<u8>, KnowledgeApiError> {
+        let encoded_path = encode_path_segments(path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut request = self.client.get(&url);
+        if peek_only {
+            request = request.query(&[("peek", "true")]);
+        }
+        let response = request.send().await?;
 
         if response.status().is_success() {
             response
                 .bytes()
                 .await
                 .map(|b| b.to_vec())
-                .map_err(|e| e.to_string())
+                .map_err(Into::into)
         } else {
-            let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
-            Err(format!(
-                "Failed to read knowledge file ({}): {}",
-                status, error_body
-            ))
+            Err(Self::knowledge_error_from_response(response).await)
+        }
+    }
+
+    /// Cheap existence check using HTTP HEAD. Does not transfer the body.
+    pub async fn knowledge_file_exists(&self, path: &str) -> Result<bool, KnowledgeApiError> {
+        let encoded_path = encode_path_segments(path);
+        let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
+        let response = self.client.head(&url).send().await?;
+
+        let status = response.status();
+        if status.is_success() {
+            Ok(true)
+        } else if status == StatusCode::NOT_FOUND {
+            Ok(false)
+        } else {
+            Err(Self::knowledge_error_from_response(response).await)
         }
     }
 
@@ -339,34 +447,29 @@ impl StakpakApiClient {
     pub async fn list_knowledge_files(
         &self,
         query: &ListKnowledgeFilesQuery,
-    ) -> Result<ListKnowledgeFilesResponse, String> {
+    ) -> Result<ListKnowledgeFilesResponse, KnowledgeApiError> {
         let url = format!("{}/v1/knowledge", self.base_url);
-        let response = self
-            .client
-            .get(&url)
-            .query(query)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        self.handle_response(response).await
+        let response = self.client.get(&url).query(query).send().await?;
+        self.handle_knowledge_response(response).await
     }
 
-    /// Create a new knowledge file
+    /// Create a new knowledge file. Returns `Conflict` if a file already
+    /// exists at the target path.
     pub async fn create_knowledge_file(
         &self,
         path: &str,
         content: &[u8],
-    ) -> Result<CreateKnowledgeFileResponse, String> {
-        let encoded_path = urlencoding::encode(path);
+    ) -> Result<CreateKnowledgeFileResponse, KnowledgeApiError> {
+        let encoded_path = encode_path_segments(path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self
             .client
             .post(&url)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
             .body(content.to_vec())
             .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        self.handle_response(response).await
+            .await?;
+        self.handle_knowledge_response(response).await
     }
 
     /// Overwrite an existing knowledge file (or create if not exists)
@@ -374,30 +477,92 @@ impl StakpakApiClient {
         &self,
         path: &str,
         content: &[u8],
-    ) -> Result<UpdateKnowledgeFileResponse, String> {
-        let encoded_path = urlencoding::encode(path);
+    ) -> Result<UpdateKnowledgeFileResponse, KnowledgeApiError> {
+        let encoded_path = encode_path_segments(path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self
             .client
             .put(&url)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
             .body(content.to_vec())
             .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        self.handle_response(response).await
+            .await?;
+        self.handle_knowledge_response(response).await
     }
 
     /// Delete a knowledge file or directory
-    pub async fn delete_knowledge_file(&self, path: &str) -> Result<(), String> {
-        let encoded_path = urlencoding::encode(path);
+    pub async fn delete_knowledge_file(&self, path: &str) -> Result<(), KnowledgeApiError> {
+        let encoded_path = encode_path_segments(path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
-        let response = self
-            .client
-            .delete(&url)
-            .send()
+        let response = self.client.delete(&url).send().await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(Self::knowledge_error_from_response(response).await)
+        }
+    }
+
+    /// Decode a JSON body on success; otherwise convert the response into a
+    /// typed [`KnowledgeApiError`].
+    async fn handle_knowledge_response<T: DeserializeOwned>(
+        &self,
+        response: Response,
+    ) -> Result<T, KnowledgeApiError> {
+        if !response.status().is_success() {
+            return Err(Self::knowledge_error_from_response(response).await);
+        }
+        let url = response.url().to_string();
+        let status = response.status();
+        let body = response
+            .text()
             .await
-            .map_err(|e| e.to_string())?;
-        self.handle_response_no_body(response).await
+            .map_err(|e| KnowledgeApiError::Transport {
+                message: format!(
+                    "Failed to read response body from {} (status {}): {}",
+                    url, status, e
+                ),
+            })?;
+        serde_json::from_str(&body).map_err(|e| {
+            let truncated_body: String = body.chars().take(500).collect();
+            KnowledgeApiError::Transport {
+                message: format!(
+                    "Failed to decode response from {} (status {}): {} | body: {}",
+                    url, status, e, truncated_body
+                ),
+            }
+        })
+    }
+
+    /// Map a non-success HTTP response into a [`KnowledgeApiError`], using
+    /// the structured `ApiError` payload when present so we can surface the
+    /// server-provided message verbatim.
+    async fn knowledge_error_from_response(response: Response) -> KnowledgeApiError {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        let message = serde_json::from_str::<ApiError>(&body)
+            .map(|api| api.error.message)
+            .unwrap_or_else(|_| {
+                if body.is_empty() {
+                    status.canonical_reason().unwrap_or("error").to_string()
+                } else {
+                    body.clone()
+                }
+            });
+
+        match status {
+            StatusCode::NOT_FOUND => KnowledgeApiError::NotFound { message },
+            StatusCode::CONFLICT => KnowledgeApiError::Conflict { message },
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                KnowledgeApiError::Forbidden { message }
+            }
+            StatusCode::BAD_REQUEST => KnowledgeApiError::BadRequest { message },
+            other => KnowledgeApiError::Http {
+                status: other,
+                message,
+            },
+        }
     }
 
     // =========================================================================

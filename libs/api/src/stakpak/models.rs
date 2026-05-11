@@ -224,9 +224,14 @@ pub struct KnowledgeFile {
     pub path: String,
     pub size_bytes: i64,
     pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peek: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -240,12 +245,6 @@ pub struct ListKnowledgeFilesQuery {
     /// Glob pattern to filter paths
     #[serde(skip_serializing_if = "Option::is_none")]
     pub glob: Option<String>,
-    /// Grep pattern to filter file contents
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grep: Option<String>,
-    /// Make grep case-insensitive
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub casei: Option<bool>,
 }
 
 /// Response from listing knowledge files

@@ -367,7 +367,7 @@ fn print_rendered(rendered: &str) {
 }
 
 /// Create the appropriate backend based on configuration
-/// - If explicit AK_STORE, use LocalFsBackend 
+/// - If explicit AK_STORE, use LocalFsBackend
 /// - If Stakpak API key is available, use RemoteBackend
 /// - Otherwise, fall back to LocalFsBackend
 fn create_backend(config: &AppConfig) -> Result<Rc<dyn StorageBackend>, String> {

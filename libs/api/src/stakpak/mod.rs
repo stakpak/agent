@@ -10,7 +10,7 @@ mod client;
 mod models;
 pub mod storage;
 
-pub use client::StakpakApiClient;
+pub use client::{KnowledgeApiError, StakpakApiClient};
 pub use models::*;
 
 /// Configuration for StakpakApiClient
