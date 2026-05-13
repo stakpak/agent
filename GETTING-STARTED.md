@@ -184,6 +184,13 @@ stakpak --disable-secret-redaction
 ### Privacy Mode
 - Redacts IP addresses, AWS account IDs, and other sensitive data
 - Perfect for sharing logs or screenshots
+### Privacy-First Defaults
+
+- Auto-update checks, machine fingerprinting, and telemetry collection are disabled by default
+- Requires explicit opt-in via environment variables:
+  - `STAKPAK_ENABLE_UPDATES=1` for update checks
+  - `STAKPAK_GENERATE_MACHINE_ID=1` for machine fingerprinting
+  - `STAKPAK_ENABLE_TELEMETRY=1` for telemetry collection
 
 ## 🛠️ Core Capabilities
 

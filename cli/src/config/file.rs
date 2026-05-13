@@ -26,8 +26,10 @@ impl Default for ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
-                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
-                collect_telemetry: Some(true),
+                // DO NOT generate anonymous_id by default - only if telemetry is enabled
+                anonymous_id: None,
+                // DEFAULT: Telemetry is OPT-IN, never OPT-OUT
+                collect_telemetry: Some(false),
                 editor: Some("nano".to_string()),
             },
         }
@@ -38,15 +40,16 @@ impl ConfigFile {
     /// Create a config file with a default profile.
     pub(crate) fn with_default_profile() -> Self {
         ConfigFile {
-            profiles: HashMap::from([(
-                "default".into(),
+            profiles: HashMap::from([("default".into(),
                 ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
             )]),
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
-                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
-                collect_telemetry: Some(true),
+                // DO NOT generate anonymous_id by default - only if telemetry is enabled
+                anonymous_id: None,
+                // DEFAULT: Telemetry is OPT-IN, never OPT-OUT
+                collect_telemetry: Some(false),
                 editor: Some("nano".to_string()),
             },
         }
@@ -97,7 +100,9 @@ impl ConfigFile {
         self.settings = Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
+            // Only set anonymous_id if config explicitly provides it (telemetry enabled)
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
+            // Only set collect_telemetry if config explicitly provides it
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
             editor: config.editor.or(existing_editor),
         };
@@ -173,8 +178,7 @@ impl From<OldAppConfig> for ConfigFile {
     fn from(old_config: OldAppConfig) -> Self {
         let settings: Settings = old_config.clone().into();
         ConfigFile {
-            profiles: HashMap::from([(
-                "default".to_string(),
+            profiles: HashMap::from([("default".to_string(),
                 ProfileConfig::migrated_from_old_config(old_config),
             )]),
             settings,

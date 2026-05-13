@@ -24,6 +24,8 @@ pub struct Settings {
     #[serde(alias = "user_id")]
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
+    /// **DEFAULT: false (opt-in required for privacy)**
+    /// Users must explicitly set this to `true` to enable telemetry
     pub collect_telemetry: Option<bool>,
     /// Preferred external editor (e.g. vim, nano, code)
     pub editor: Option<String>,
@@ -43,8 +45,10 @@ impl From<OldAppConfig> for Settings {
         Settings {
             machine_name: old_config.machine_name,
             auto_append_gitignore: old_config.auto_append_gitignore,
-            anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
-            collect_telemetry: Some(true),
+            // Do NOT generate anonymous_id by default - only if telemetry is enabled
+            anonymous_id: None,
+            // DEFAULT: Telemetry is OPT-IN, never OPT-OUT
+            collect_telemetry: Some(false),
             editor: Some("nano".to_string()),
         }
     }
