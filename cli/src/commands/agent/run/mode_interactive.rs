@@ -1300,7 +1300,7 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
-                    OutputEvent::InitCommandCalled => {
+                    OutputEvent::CommandCalled(command_name) => {
                         if let Some(ref anonymous_id) = ctx_clone.anonymous_id
                             && ctx_clone.collect_telemetry.unwrap_or(true)
                         {
@@ -1308,7 +1308,7 @@ pub async fn run_interactive(
                                 anonymous_id,
                                 ctx_clone.machine_name.as_deref(),
                                 true,
-                                TelemetryEvent::InitCommandCalled,
+                                TelemetryEvent::CommandCalled(command_name),
                             );
                         }
                         continue;
