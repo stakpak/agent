@@ -6,6 +6,15 @@ use stakpak_shared::models::agent_runtime::{ToolCallResult, ToolCallResultStatus
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
 
+const CANCELLED_TOOL_RESULT_MARKER: &str = "TOOL_CALL_CANCELLED";
+const ERROR_TOOL_RESULT_MARKERS: [&str; 5] = [
+    "TOOL_CALL_REJECTED",
+    "INVALID_ARGUMENTS",
+    "MCP_TOOL_CALL_ERROR",
+    "MCP_ERROR",
+    "UNEXPECTED_RESPONSE",
+];
+
 pub async fn get_checkpoint_messages(
     client: &dyn AgentProvider,
     checkpoint_id: &str,
@@ -95,8 +104,8 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
                         input_tx,
                         InputEvent::ToolResult(ToolCallResult {
                             call: tool_call,
-                            result: content.to_string(),
-                            status: ToolCallResultStatus::Success,
+                            result: tool_result_content_string(&content),
+                            status: tool_result_status_from_content(&content),
                         }),
                     )
                     .await;
@@ -172,6 +181,66 @@ pub fn extract_checkpoint_id_from_messages(messages: &[Message]) -> Option<Strin
         })
 }
 
+fn tool_result_content_string(content: &serde_json::Value) -> String {
+    content
+        .as_str()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| content.to_string())
+}
+
+fn tool_result_status_from_content(content: &serde_json::Value) -> ToolCallResultStatus {
+    if value_contains_marker(content, CANCELLED_TOOL_RESULT_MARKER) {
+        return ToolCallResultStatus::Cancelled;
+    }
+
+    if ERROR_TOOL_RESULT_MARKERS
+        .iter()
+        .any(|marker| value_contains_marker(content, marker))
+    {
+        return ToolCallResultStatus::Error;
+    }
+
+    let serde_json::Value::Object(obj) = content else {
+        return ToolCallResultStatus::Success;
+    };
+
+    if obj
+        .get("is_error")
+        .or_else(|| obj.get("isError"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        || obj.contains_key("error")
+        || obj.contains_key("errors")
+    {
+        return ToolCallResultStatus::Error;
+    }
+
+    match obj.get("status").and_then(serde_json::Value::as_str) {
+        Some(status) if status.eq_ignore_ascii_case("cancelled") => ToolCallResultStatus::Cancelled,
+        Some(status)
+            if status.eq_ignore_ascii_case("error")
+                || status.eq_ignore_ascii_case("failed")
+                || status.eq_ignore_ascii_case("rejected") =>
+        {
+            ToolCallResultStatus::Error
+        }
+        _ => ToolCallResultStatus::Success,
+    }
+}
+
+fn value_contains_marker(value: &serde_json::Value, marker: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => text.contains(marker),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| value_contains_marker(value, marker)),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|value| value_contains_marker(value, marker)),
+        _ => false,
+    }
+}
+
 /// Resumes a session from a checkpoint, loading messages and tool calls
 pub async fn resume_session_from_checkpoint(
     client: &dyn AgentProvider,
@@ -207,7 +276,26 @@ pub async fn resume_session_from_checkpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use tokio::sync::mpsc;
+
+    fn assistant_tool_call_message(tool_call_id: &str) -> Message {
+        Message::new(
+            Role::Assistant,
+            MessageContent::Parts(vec![ContentPart::tool_call(
+                tool_call_id,
+                "test_tool",
+                json!({"path": "README.md"}),
+            )]),
+        )
+    }
+
+    fn tool_result_message(tool_call_id: &str, content: serde_json::Value) -> Message {
+        Message::new(
+            Role::Tool,
+            MessageContent::Parts(vec![ContentPart::tool_result(tool_call_id, content)]),
+        )
+    }
 
     #[tokio::test]
     async fn extract_checkpoint_messages_replays_user_text_without_injected_context_blocks() {
@@ -238,6 +326,71 @@ mod tests {
 
         match input_rx.recv().await.expect("input event") {
             InputEvent::AddUserMessage(content) => assert_eq!(content, "fix tests"),
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_cancelled_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!("TOOL_CALL_CANCELLED")),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Cancelled);
+                assert_eq!(result.result, "TOOL_CALL_CANCELLED");
+            }
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_rejected_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!("TOOL_CALL_REJECTED")),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Error);
+                assert_eq!(result.result, "TOOL_CALL_REJECTED");
+            }
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_structured_error_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!({"isError": true, "message": "bad args"})),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Error);
+            }
             event => panic!("unexpected input event: {event:?}"),
         }
     }

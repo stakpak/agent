@@ -2508,11 +2508,15 @@ pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
         return "Ask user questions...".to_string();
     }
 
-    if !tool_call.arguments.is_null() {
-        return format_json_value(&tool_call.arguments);
-    }
+    let raw_arguments = match &tool_call.arguments {
+        Value::String(raw_arguments) => raw_arguments.as_str(),
+        Value::Null => "",
+        _ => return format_json_value(&tool_call.arguments),
+    };
 
-    let raw_arguments = tool_call.arguments.as_str().unwrap_or("");
+    if let Ok(value) = serde_json::from_str::<Value>(raw_arguments) {
+        return format_json_value(&value);
+    }
 
     // If arguments are a malformed JSON string, try regex patterns
     let patterns = vec![
@@ -2794,34 +2798,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_various_formats() {
-        // Test cases based on your examples
-        let test_cases = vec![
-            (r#"{"path":"."}"#, "path=."),
-            (r#"{"confidence":1.0}"#, "confidence=1.0"),
-            (r#"{"command":"ls -la"}"#, "command=ls -la"),
-            (
-                r#"{"action":"view","target":"file.txt"}"#,
-                "action=view, target=file.txt",
-            ),
-            (r#"path: ".", mode: "list""#, "path=., mode=list"),
-            ("", "function_name=test"),
-        ];
+    fn extract_full_command_arguments_recovers_from_string_arguments() {
+        let tool_call = ToolCall {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            arguments: serde_json::Value::String(r#"path: ".", mode: "list""#.to_string()),
+            metadata: None,
+        };
 
-        for (input, expected) in test_cases {
-            let tool_call = ToolCall {
-                id: "test".to_string(),
-                name: "test".to_string(),
-                arguments: serde_json::from_str(input)
-                    .unwrap_or_else(|_| serde_json::Value::String(input.to_string())),
-                metadata: None,
-            };
+        let result = extract_full_command_arguments(&tool_call);
 
-            let result = extract_full_command_arguments(&tool_call);
-            println!(
-                "Input: '{}' -> Output: '{}' (Expected: '{}')",
-                input, result, expected
-            );
-        }
+        assert_eq!(result, "path = ., mode = list");
+    }
+
+    #[test]
+    fn extract_full_command_arguments_parses_json_string_arguments() {
+        let tool_call = ToolCall {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            arguments: serde_json::Value::String(r#"{"files":["a.txt","b.txt"]}"#.to_string()),
+            metadata: None,
+        };
+
+        let result = extract_full_command_arguments(&tool_call);
+
+        assert_eq!(result, "files = [a.txt, b.txt]");
+    }
+
+    #[test]
+    fn extract_full_command_arguments_formats_object_arguments_directly() {
+        let tool_call = ToolCall {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            arguments: serde_json::json!({"command": "ls -la"}),
+            metadata: None,
+        };
+
+        let result = extract_full_command_arguments(&tool_call);
+
+        assert_eq!(result, "command = ls -la");
     }
 }

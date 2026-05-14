@@ -1,6 +1,6 @@
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, CancelledNotification, CancelledNotificationParam,
-    ServerResult,
+    Content, ServerResult,
 };
 use stakpak_api::AgentProvider;
 use stakpak_api::storage::ListSessionsQuery;
@@ -45,8 +45,10 @@ pub async fn run_tool_call(
     let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
 
     if tool_exists {
-        // Parse arguments safely
-        let arguments = tool_call.arguments.as_object().cloned();
+        let arguments = match mcp_tool_arguments(tool_call) {
+            Ok(arguments) => arguments,
+            Err(error) => return Ok(Some(error)),
+        };
 
         // Call tool and handle errors gracefully
         let metadata = Some({
@@ -162,4 +164,62 @@ pub async fn run_tool_call(
     }
 
     Ok(None)
+}
+
+fn mcp_tool_arguments(
+    tool_call: &stakai::ToolCall,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, CallToolResult> {
+    match &tool_call.arguments {
+        serde_json::Value::Object(arguments) => Ok(Some(arguments.clone())),
+        serde_json::Value::Null => Ok(None),
+        other => Err(CallToolResult::error(vec![
+            Content::text("INVALID_ARGUMENTS"),
+            Content::text(format!(
+                "Tool '{}' arguments must be a JSON object, got {}",
+                tool_call.name,
+                json_type_name(other)
+            )),
+        ])),
+    }
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_tool_arguments_rejects_string_arguments() {
+        let tool_call = stakai::ToolCall {
+            id: "tc_1".to_string(),
+            name: "test_tool".to_string(),
+            arguments: serde_json::Value::String(r#"{"path":"README.md"}"#.to_string()),
+            metadata: None,
+        };
+
+        let error = mcp_tool_arguments(&tool_call).expect_err("string arguments should be invalid");
+        let content: Vec<&str> = error
+            .content
+            .iter()
+            .filter_map(|content| content.raw.as_text().map(|text| text.text.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(error.is_error, Some(true));
+        assert_eq!(content.first(), Some(&"INVALID_ARGUMENTS"));
+        assert!(
+            content
+                .get(1)
+                .is_some_and(|message| message.contains("must be a JSON object"))
+        );
+    }
 }
