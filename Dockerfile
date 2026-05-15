@@ -69,7 +69,8 @@ RUN chmod +x /usr/local/bin/stakpak
 # entrypoint script then patches /etc/passwd, chowns writable paths, and
 # drops to the target user via gosu.
 RUN groupadd -g 1000 agent && useradd -u 1000 -g 1000 -s /bin/bash -m agent \
-    && mkdir -p /agent && chown -R agent:agent /agent
+    && mkdir -p /agent /home/agent/.stakpak/data /home/agent/.agent-board \
+    && chown -R agent:agent /agent /home/agent/.stakpak /home/agent/.agent-board
 # Create docker group and add agent user to it
 RUN groupadd -r docker && usermod -aG docker agent
 
