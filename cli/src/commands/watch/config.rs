@@ -555,10 +555,16 @@ impl ScheduleConfig {
             if !trimmed.is_empty() {
                 notifications.gateway_token = Some(trimmed.to_string());
             }
-            // Fill the URL only when missing/empty; the user may have set a
-            // custom external gateway URL that should be preserved.
-            if notifications.gateway_url.trim().is_empty() {
-                notifications.gateway_url = url.to_string();
+            // Fill missing URLs and refresh loopback URLs. Loopback values are
+            // runtime-derived and can become stale when the server bind changes.
+            // External gateway URLs remain user-authored and are preserved.
+            if notifications.gateway_url.trim().is_empty()
+                || is_loopback_gateway_url(&notifications.gateway_url)
+            {
+                let trimmed_url = url.trim();
+                if !trimmed_url.is_empty() {
+                    notifications.gateway_url = trimmed_url.to_string();
+                }
             }
         }
     }
@@ -569,9 +575,27 @@ impl ScheduleConfig {
             return false;
         };
 
-        let url = notifications.gateway_url.to_ascii_lowercase();
-        url.contains("127.0.0.1") || url.contains("localhost")
+        is_loopback_gateway_url(&notifications.gateway_url)
     }
+}
+
+fn is_loopback_gateway_url(url: &str) -> bool {
+    let trimmed = url.trim().to_ascii_lowercase();
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(&trimmed);
+
+    let host = if let Some(rest) = without_scheme.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else {
+        without_scheme
+            .split([':', '/', '?', '#'])
+            .next()
+            .unwrap_or_default()
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1243,6 +1267,23 @@ prompt = "test"
         assert_eq!(
             notifications.gateway_url, custom_url,
             "user-configured external gateway URL should not be overwritten"
+        );
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token"),
+        );
+    }
+
+    #[test]
+    fn test_apply_credentials_replaces_stale_loopback_gateway_url() {
+        let mut config = config_with_notifications("http://127.0.0.1:4096", None);
+
+        config.apply_runtime_gateway_credentials("http://127.0.0.1:4097", "runtime-token");
+
+        let notifications = config.notifications.expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, "http://127.0.0.1:4097",
+            "stale loopback gateway_url should follow the current runtime bind"
         );
         assert_eq!(
             notifications.gateway_token.as_deref(),
