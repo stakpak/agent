@@ -106,6 +106,15 @@ impl Default for ProviderRegistry {
             registry = registry.register("google", provider);
         }
 
+        // Register MiniMax if API key is available
+        use crate::providers::minimax::{MiniMaxConfig, MiniMaxProvider};
+        if let Ok(api_key) = std::env::var("MINIMAX_API_KEY")
+            && !api_key.is_empty()
+            && let Ok(provider) = MiniMaxProvider::new(MiniMaxConfig::new(api_key))
+        {
+            registry = registry.register("minimax", provider);
+        }
+
         registry
     }
 }

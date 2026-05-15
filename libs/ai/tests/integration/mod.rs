@@ -12,3 +12,6 @@ mod anthropic;
 
 #[cfg(test)]
 mod gemini;
+
+#[cfg(test)]
+mod minimax;

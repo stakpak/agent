@@ -163,7 +163,7 @@ docker pull ghcr.io/stakpak/agent:latest
 ```
 
 ## Usage
-You can [use your own Anthropic or OpenAI API keys](#option-b-running-without-a-stakpak-api-key), [custom OpenAI compatible endpoint](#option-b-running-without-a-stakpak-api-key), or [a Stakpak API key](#option-a-running-with-a-stakpak-api-key).
+You can [use your own Anthropic or OpenAI API keys](#option-b-running-without-a-stakpak-api-key), [custom OpenAI compatible endpoint](#option-b-running-without-a-stakpak-api-key), [MiniMax API keys](#option-b-running-without-a-stakpak-api-key), or [a Stakpak API key](#option-a-running-with-a-stakpak-api-key).
 
 ### Option A: Running with a Stakpak API Key (no card required)
 
@@ -207,6 +207,9 @@ stakpak auth login --provider openai --api-key $OPENAI_API_KEY
 
 # Gemini
 stakpak auth login --provider gemini --api-key $GEMINI_API_KEY
+
+# MiniMax
+stakpak auth login --provider minimax --api-key $MINIMAX_API_KEY
 ```
 
 #### Manual configuration
@@ -222,7 +225,7 @@ provider = "local"
 model = "anthropic/claude-sonnet-4-5"
 
 # Built-in providers - credentials can also be set via environment variables
-# (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
+# (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, MINIMAX_API_KEY)
 [profiles.byok.providers.anthropic]
 type = "anthropic"
 api_key = "sk-ant-..."
@@ -233,6 +236,10 @@ api_key = "sk-..."
 
 [profiles.byok.providers.gemini]
 type = "gemini"
+api_key = "..."
+
+[profiles.byok.providers.minimax]
+type = "minimax"
 api_key = "..."
 
 [settings]
