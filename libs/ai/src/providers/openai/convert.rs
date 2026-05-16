@@ -106,8 +106,8 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
 fn to_openai_messages_with_mode(msg: &Message, mode: SystemMessageMode) -> Vec<ChatMessage> {
     let role_str = match msg.role {
         Role::System => match mode {
-                SystemMessageMode::System => "system",
-                SystemMessageMode::Developer => "developer",
+            SystemMessageMode::System => "system",
+            SystemMessageMode::Developer => "developer",
             SystemMessageMode::Remove => return Vec::new(),
         },
         Role::User => "user",
@@ -1249,5 +1249,4 @@ mod tests {
         assert_eq!(tool_msgs[0].tool_call_id.as_deref(), Some("call_only"));
         assert_eq!(tool_msgs[0].content, Some(json!("ok")));
     }
-
 }
