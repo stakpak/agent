@@ -25,6 +25,7 @@ use uuid::Uuid;
 pub struct StakpakApiClient {
     client: reqwest::Client,
     base_url: String,
+    rulebook_base_url: String,
 }
 
 /// API error response format
@@ -64,9 +65,16 @@ impl StakpakApiClient {
                 .with_timeout(std::time::Duration::from_secs(300)),
         )?;
 
+        // Use rulebook_base_url if provided, otherwise fall back to api_endpoint
+        let rulebook_base_url = config
+            .rulebook_base_url
+            .clone()
+            .unwrap_or_else(|| config.api_endpoint.clone());
+
         Ok(Self {
             client,
             base_url: config.api_endpoint.clone(),
+            rulebook_base_url,
         })
     }
 
@@ -239,11 +247,10 @@ impl StakpakApiClient {
 
     // =========================================================================
     // Rulebook APIs
-    // =========================================================================
 
     /// List all rulebooks
     pub async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String> {
-        let url = format!("{}/v1/rules", self.base_url);
+        let url = format!("{}/v1/rules", self.rulebook_base_url);
         let response = self
             .client
             .get(&url)
@@ -263,7 +270,7 @@ impl StakpakApiClient {
     /// Get a rulebook by URI
     pub async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
         let encoded_uri = urlencoding::encode(uri);
-        let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
+        let url = format!("{}/v1/rules/{}", self.rulebook_base_url, encoded_uri);
         let response = self
             .client
             .get(&url)
