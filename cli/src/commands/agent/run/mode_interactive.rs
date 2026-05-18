@@ -29,8 +29,8 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
-use stakpak_shared::task_manager::TaskManager;
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::task_manager::TaskManager;
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
