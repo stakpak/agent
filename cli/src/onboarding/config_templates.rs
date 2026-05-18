@@ -199,6 +199,7 @@ pub enum BuiltinProvider {
     OpenAI,
     Gemini,
     Anthropic,
+    OpenRouter,
 }
 
 impl BuiltinProvider {
@@ -207,6 +208,7 @@ impl BuiltinProvider {
             BuiltinProvider::OpenAI => "OpenAI",
             BuiltinProvider::Gemini => "Gemini",
             BuiltinProvider::Anthropic => "Anthropic",
+            BuiltinProvider::OpenRouter => "OpenRouter",
         }
     }
 
@@ -215,6 +217,7 @@ impl BuiltinProvider {
             BuiltinProvider::OpenAI => "gpt-4.1",
             BuiltinProvider::Gemini => "gemini-2.5-pro",
             BuiltinProvider::Anthropic => DEFAULT_MODEL,
+            BuiltinProvider::OpenRouter => "openrouter/anthropic/claude-sonnet-4",
         }
     }
 }
@@ -273,6 +276,16 @@ pub fn generate_multi_provider_profile(
                         api_key: Some(setup.api_key),
                         api_endpoint: None,
                         access_token: None,
+                        auth: None,
+                    },
+                );
+            }
+            BuiltinProvider::OpenRouter => {
+                profile.providers.insert(
+                    "openrouter".to_string(),
+                    ProviderConfig::OpenRouter {
+                        api_key: Some(setup.api_key),
+                        api_endpoint: None,
                         auth: None,
                     },
                 );

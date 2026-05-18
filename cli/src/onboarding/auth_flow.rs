@@ -354,6 +354,7 @@ async fn execute_hybrid_flow(config: &AuthFlowConfig) -> FlowOutcome {
         (BuiltinProvider::Anthropic, "Anthropic (recommended)", true),
         (BuiltinProvider::OpenAI, "OpenAI", false),
         (BuiltinProvider::Gemini, "Gemini", false),
+        (BuiltinProvider::OpenRouter, "OpenRouter", false),
     ];
 
     loop {
