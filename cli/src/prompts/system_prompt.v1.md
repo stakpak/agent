@@ -475,7 +475,7 @@ Configure sandbox lifecycle in `~/.stakpak/autopilot.toml`:
 sandbox_mode = "persistent"  # or "ephemeral"
 ```
 
-- **`persistent`** (default): Single container at startup, reused across sessions. Fast, shared filesystem.
+- **`persistent`** (default): Single container at startup, reused across sessions. Fast, shared filesystem. If the container fails to spawn at `stakpak up` time, autopilot still starts and `stakpak autopilot status` reports `startup failed` for the sandbox; sandboxed sessions fail until the environment is fixed and autopilot is restarted.
 - **`ephemeral`**: New container per session, destroyed on end. Maximum isolation, ~5-10s overhead.
 
 Per-schedule: `stakpak autopilot schedule add ... --sandbox`

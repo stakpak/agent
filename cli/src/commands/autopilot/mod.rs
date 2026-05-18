@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashSet};
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -669,6 +670,7 @@ struct SandboxStatusJson {
     consecutive_failures: Option<u64>,
     last_ok: Option<String>,
     last_error: Option<String>,
+    startup_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -791,6 +793,58 @@ async fn run_startup_preflight(config: &AppConfig, bind_addr: &str) -> Result<()
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StartupReadinessPhase {
+    Ready,
+    Waiting(String),
+}
+
+fn startup_readiness_phase(
+    expects_sandbox: bool,
+    body: &serde_json::Value,
+) -> StartupReadinessPhase {
+    if !expects_sandbox {
+        return StartupReadinessPhase::Ready;
+    }
+
+    if let Some(sandbox) = body.get("sandbox")
+        && (sandbox.get("healthy").and_then(|v| v.as_bool()) == Some(true)
+            || sandbox
+                .get("startup_error")
+                .and_then(|v| v.as_str())
+                .is_some())
+    {
+        return StartupReadinessPhase::Ready;
+    }
+
+    StartupReadinessPhase::Waiting("Starting sandbox container...".to_string())
+}
+
+async fn attach_persistent_sandbox_if_configured<F, Fut>(
+    app_state: stakpak_server::AppState,
+    sandbox_mode: &stakpak_server::SandboxMode,
+    sandbox_config: &stakpak_server::SandboxConfig,
+    spawn: F,
+) -> stakpak_server::AppState
+where
+    F: FnOnce(stakpak_server::SandboxConfig) -> Fut,
+    Fut: Future<Output = Result<stakpak_server::PersistentSandbox, String>>,
+{
+    if *sandbox_mode != stakpak_server::SandboxMode::Persistent {
+        return app_state;
+    }
+
+    tracing::info!("Persistent sandbox mode: spawning sandbox at startup");
+    match spawn(sandbox_config.clone()).await {
+        Ok(persistent) => app_state.with_persistent_sandbox(persistent),
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to spawn persistent sandbox at startup");
+            tracing::warn!("continuing without persistent sandbox");
+            app_state.with_persistent_sandbox_startup_error(error)
+        }
+    }
 }
 
 async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Result<(), String> {
@@ -942,7 +996,13 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
     // user just sees a frozen "waiting" message. By pulling here we inherit
     // stdout/stderr so Docker's progress bars are visible. This applies to both
     // persistent and ephemeral modes since both need the image.
-    ensure_sandbox_image_available()?;
+    if let Err(error) = ensure_sandbox_image_available() {
+        tracing::warn!(error = %error, "Failed to pre-pull sandbox image; continuing startup");
+        eprintln!("  ⚠ Failed to pre-pull sandbox image; continuing startup");
+        eprintln!(
+            "    Persistent sandbox startup will report the failure if Docker cannot pull it in the service."
+        );
+    }
 
     let expects_sandbox = effective_server.sandbox_mode == stakpak_server::SandboxMode::Persistent;
 
@@ -971,24 +1031,14 @@ async fn start_autopilot(config: &mut AppConfig, options: StartOptions) -> Resul
         // Determine current phase for display
         let phase = match reqwest::get(&health_url).await {
             Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(body) => {
-                    if expects_sandbox {
-                        if let Some(sandbox) = body.get("sandbox")
-                            && sandbox.get("healthy").and_then(|v| v.as_bool()) == Some(true)
-                        {
-                            // Clear the spinner line and break
-                            print!("\r\x1b[2K");
-                            let _ = std::io::Write::flush(&mut std::io::stdout());
-                            break true;
-                        }
-                        "Starting sandbox container...".to_string()
-                    } else {
-                        // Server is up and no sandbox needed — done
+                Ok(body) => match startup_readiness_phase(expects_sandbox, &body) {
+                    StartupReadinessPhase::Ready => {
                         print!("\r\x1b[2K");
                         let _ = std::io::Write::flush(&mut std::io::stdout());
                         break true;
                     }
-                }
+                    StartupReadinessPhase::Waiting(phase) => phase,
+                },
                 Err(_) => "Starting server...".to_string(),
             },
             Err(_) => "Starting server...".to_string(),
@@ -1323,17 +1373,14 @@ async fn start_foreground_runtime(
     tracing::info!(image = %stakpak_image, mode = %sandbox_mode, warden = %sandbox_config.warden_path, "Sandbox config initialized");
     let app_state = app_state.with_sandbox(sandbox_config.clone());
 
-    // If persistent mode, spawn the sandbox now so sessions get near-zero startup overhead.
-    // This is a hard requirement — if the sandbox fails to start, the server cannot operate.
-    let app_state = if *sandbox_mode == stakpak_server::SandboxMode::Persistent {
-        tracing::info!("Persistent sandbox mode: spawning sandbox at startup");
-        let persistent = stakpak_server::PersistentSandbox::spawn(&sandbox_config)
-            .await
-            .map_err(|e| format!("Failed to spawn persistent sandbox: {e}. The server requires a healthy sandbox to operate. Check Docker is running and the image is available."))?;
-        app_state.with_persistent_sandbox(persistent)
-    } else {
-        app_state
-    };
+    // Non-fatal: keep gateway/scheduler/API up even if the sandbox can't spawn.
+    let app_state = attach_persistent_sandbox_if_configured(
+        app_state,
+        sandbox_mode,
+        &sandbox_config,
+        |config| async move { stakpak_server::PersistentSandbox::spawn(&config).await },
+    )
+    .await;
 
     // --- 2. Loopback connection for schedule + gateway runtimes ---
     let loopback_url = loopback_server_url(listener_addr);
@@ -2639,6 +2686,22 @@ fn gateway_channel_count(config_path: &Path) -> Result<usize, String> {
     Ok(config.enabled_channels().len())
 }
 
+fn format_sandbox_status(sandbox: &SandboxStatusJson, server_reachable: bool) -> String {
+    if let Some(error) = sandbox.startup_error.as_deref() {
+        return format!("✗ {} (startup failed: {error})", sandbox.mode);
+    }
+
+    match (sandbox.healthy, sandbox.mode.as_str()) {
+        (Some(true), mode) => format!("✓ healthy ({mode})"),
+        (Some(false), mode) => {
+            let err = sandbox.last_error.as_deref().unwrap_or("unknown error");
+            format!("✗ unhealthy ({mode}) — {err}")
+        }
+        (None, mode) if server_reachable => format!("- {mode} (no health data)"),
+        (None, mode) => format!("- {mode} (server unreachable)"),
+    }
+}
+
 async fn status_autopilot(
     config: &AppConfig,
     json: bool,
@@ -2689,6 +2752,10 @@ async fn status_autopilot(
                                 .get("last_error")
                                 .and_then(|v| v.as_str())
                                 .map(String::from),
+                            startup_error: s
+                                .get("startup_error")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
                         })
                     });
                 (true, sandbox)
@@ -2711,6 +2778,7 @@ async fn status_autopilot(
         } else {
             Some("Server unreachable — cannot determine sandbox health".to_string())
         },
+        startup_error: None,
     });
 
     let server = EndpointStatusJson {
@@ -2789,15 +2857,7 @@ async fn status_autopilot(
         describe_tool_policy(&resolved_tool_policy)
     );
     // Sandbox status
-    let sandbox_display = match (sandbox.healthy, sandbox.mode.as_str()) {
-        (Some(true), mode) => format!("✓ healthy ({mode})"),
-        (Some(false), mode) => {
-            let err = sandbox.last_error.as_deref().unwrap_or("unknown error");
-            format!("✗ unhealthy ({mode}) — {err}")
-        }
-        (None, mode) if server_reachable => format!("- {mode} (no health data)"),
-        (None, mode) => format!("- {mode} (server unreachable)"),
-    };
+    let sandbox_display = format_sandbox_status(&sandbox, server_reachable);
     println!("  Sandbox         {sandbox_display}");
 
     // Scheduler status
@@ -3362,7 +3422,7 @@ fn ensure_sandbox_image_available() -> Result<(), String> {
         format!(
             "{e}\n\n\
              Troubleshoot:\n  \
-             docker pull --platform linux/amd64 {image}    Pull manually\n  \
+             docker pull {image}                         Pull manually\n  \
              STAKPAK_AGENT_IMAGE=<img>                     Override image"
         )
     })?;
@@ -4731,6 +4791,108 @@ max_turns = 12
         assert!(gateway_cfg.gateway.approval_allowlist.is_empty());
     }
 
+    #[tokio::test]
+    async fn soft_fail_persistent_sandbox_spawn_records_error_without_handle() {
+        let storage_backend = stakpak_api::LocalStorage::new(":memory:")
+            .await
+            .expect("local storage should initialize");
+        let storage: Arc<dyn stakpak_api::SessionStorage> = Arc::new(storage_backend);
+        let model = stakai::Model::custom("test-model", "openai");
+        let state = stakpak_server::AppState::new(
+            storage,
+            Arc::new(stakpak_server::EventLog::new(16)),
+            Arc::new(stakpak_server::IdempotencyStore::new(
+                std::time::Duration::from_secs(60),
+            )),
+            Arc::new(stakai::Inference::new()),
+            vec![model.clone()],
+            Some(model),
+            stakpak_server::ToolApprovalPolicy::with_defaults(),
+        );
+        let sandbox_config = stakpak_server::SandboxConfig {
+            warden_path: "warden".to_string(),
+            image: "ghcr.io/stakpak/agent:does-not-exist-xyz".to_string(),
+            volumes: Vec::new(),
+            mode: stakpak_server::SandboxMode::Persistent,
+            user_mapping: stakpak_server::SandboxUserMapping::ImageDefault,
+        };
+
+        let result = attach_persistent_sandbox_if_configured(
+            state.with_sandbox(sandbox_config.clone()),
+            &stakpak_server::SandboxMode::Persistent,
+            &sandbox_config,
+            |_config| async { Err("image not found".to_string()) },
+        )
+        .await;
+
+        assert!(result.persistent_sandbox.is_none());
+        assert_eq!(
+            result.persistent_sandbox_startup_error.as_deref(),
+            Some("image not found")
+        );
+    }
+
+    #[test]
+    fn startup_waiter_treats_missing_sandbox_expectation_as_ready() {
+        let body = serde_json::json!({ "status": "ok" });
+
+        assert_eq!(
+            startup_readiness_phase(false, &body),
+            StartupReadinessPhase::Ready
+        );
+    }
+
+    #[test]
+    fn startup_waiter_treats_healthy_persistent_sandbox_as_ready() {
+        let body = serde_json::json!({
+            "status": "ok",
+            "sandbox": {
+                "mode": "persistent",
+                "healthy": true
+            }
+        });
+
+        assert_eq!(
+            startup_readiness_phase(true, &body),
+            StartupReadinessPhase::Ready
+        );
+    }
+
+    #[test]
+    fn startup_waiter_treats_persistent_sandbox_startup_failure_as_ready() {
+        let body = serde_json::json!({
+            "status": "ok",
+            "sandbox": {
+                "mode": "persistent",
+                "healthy": false,
+                "startup_error": "image not found"
+            }
+        });
+
+        assert_eq!(
+            startup_readiness_phase(true, &body),
+            StartupReadinessPhase::Ready
+        );
+    }
+
+    #[test]
+    fn sandbox_status_display_distinguishes_startup_failure() {
+        let sandbox = SandboxStatusJson {
+            mode: "persistent".to_string(),
+            healthy: Some(false),
+            consecutive_ok: None,
+            consecutive_failures: None,
+            last_ok: None,
+            last_error: Some("image not found".to_string()),
+            startup_error: Some("image not found".to_string()),
+        };
+
+        assert_eq!(
+            format_sandbox_status(&sandbox, true),
+            "✗ persistent (startup failed: image not found)"
+        );
+    }
+
     #[test]
     fn status_json_schema_contains_core_fields() {
         let payload = AutopilotStatusJson {
@@ -4762,6 +4924,7 @@ max_turns = 12
                 consecutive_failures: Some(0),
                 last_ok: Some("2026-01-01T00:00:00Z".to_string()),
                 last_error: None,
+                startup_error: None,
             },
             scheduler: SchedulerStatusJson {
                 expected_enabled: true,
