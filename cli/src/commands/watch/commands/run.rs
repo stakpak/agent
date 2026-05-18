@@ -2431,6 +2431,65 @@ auto_approve = []
     }
 
     #[tokio::test]
+    async fn test_config_reload_replaces_stale_loopback_gateway_url() {
+        let temp = tempdir().expect("failed to create temp directory");
+        let config_path = temp.path().join("autopilot.toml");
+        let db_path = temp.path().join("autopilot.db");
+
+        write_autopilot_config_with_notifications(
+            &config_path,
+            &db_path,
+            &[("alpha", "*/10 * * * *", true)],
+            "http://127.0.0.1:4096",
+            None,
+        );
+
+        let config = ScheduleConfig::load(&config_path).expect("failed to load initial config");
+        let (scheduler, snapshot, config_state, _event_rx) = build_runtime_state(&config).await;
+
+        let server = AgentServerConnection {
+            url: "http://127.0.0.1:4097".to_string(),
+            token: "runtime-token".to_string(),
+            model: None,
+            default_allowed_tools: HashSet::new(),
+            boot_profile: "default".to_string(),
+            config_path: "/tmp/config.toml".to_string(),
+        };
+
+        let loader_path = config_path.clone();
+        let success = trigger_config_reload_with_loader(
+            &scheduler,
+            &config_state,
+            &snapshot,
+            &server,
+            move || ScheduleConfig::load(&loader_path),
+        )
+        .await;
+        assert!(success);
+
+        let config_guard = config_state.read().await;
+        let notifications = config_guard
+            .notifications
+            .as_ref()
+            .expect("notifications should exist");
+        assert_eq!(
+            notifications.gateway_url, "http://127.0.0.1:4097",
+            "loopback gateway URL must follow the current runtime server URL after reload"
+        );
+        assert_eq!(
+            notifications.gateway_token.as_deref(),
+            Some("runtime-token")
+        );
+        drop(config_guard);
+
+        let mut scheduler_guard = scheduler.lock().await;
+        scheduler_guard
+            .shutdown()
+            .await
+            .expect("failed to shutdown scheduler");
+    }
+
+    #[tokio::test]
     async fn test_config_reload_preserves_custom_external_gateway_url() {
         // Users may point notifications at an external gateway (not loopback).
         // The reload must preserve their custom URL, only injecting the token.

@@ -125,6 +125,7 @@ impl AuthConfig {
 pub struct SubagentConfig {
     pub profile_name: Option<String>,
     pub config_path: Option<String>,
+    pub model: Option<String>,
 }
 
 pub struct MCPServerConfig {

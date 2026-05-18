@@ -30,6 +30,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::task_manager::TaskManager;
+use stakpak_shared::secret_manager::SecretManager;
 
 /// Bundled infrastructure analysis prompt (embedded at compile time)
 /// analyze the infrastructure and provide a summary of the current state
@@ -248,6 +249,7 @@ pub async fn run_interactive(
         let enabled_tools = config.enabled_tools.clone();
         let redact_secrets = config.redact_secrets;
         let privacy_mode = config.privacy_mode;
+        let secret_manager = SecretManager::new(redact_secrets, privacy_mode);
         let enable_mtls = config.enable_mtls;
         let is_git_repo = config.is_git_repo;
         let study_mode = config.study_mode;
@@ -404,6 +406,7 @@ pub async fn run_interactive(
                 subagent_config: stakpak_mcp_server::SubagentConfig {
                     profile_name: Some(ctx_clone.profile_name.clone()),
                     config_path: Some(ctx_clone.config_path.clone()),
+                    model: ctx_clone.subagent_model(),
                 },
                 task_manager_handle: Some(task_manager_handle_for_mcp),
             };
@@ -654,16 +657,19 @@ pub async fn run_interactive(
                             user_input
                         };
 
+                        let redacted_user_input =
+                            secret_manager.redact_and_store_secrets(&user_input, None);
+
                         // Create message with ContentParts from TUI
                         let user_msg = if image_parts.is_empty() {
-                            user_message(user_input)
+                            user_message(redacted_user_input)
                         } else {
                             let mut parts = Vec::new();
-                            if !user_input.trim().is_empty() {
+                            if !redacted_user_input.trim().is_empty() {
                                 parts.push(
                                     stakpak_shared::models::integrations::openai::ContentPart {
                                         r#type: "text".to_string(),
-                                        text: Some(user_input),
+                                        text: Some(redacted_user_input),
                                         image_url: None,
                                     },
                                 );
@@ -1309,7 +1315,7 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
-                    OutputEvent::InitCommandCalled => {
+                    OutputEvent::CommandCalled(command_name) => {
                         if let Some(ref anonymous_id) = ctx_clone.anonymous_id
                             && ctx_clone.collect_telemetry.unwrap_or(true)
                         {
@@ -1317,7 +1323,7 @@ pub async fn run_interactive(
                                 anonymous_id,
                                 ctx_clone.machine_name.as_deref(),
                                 true,
-                                TelemetryEvent::InitCommandCalled,
+                                TelemetryEvent::CommandCalled(command_name),
                             );
                         }
                         continue;

@@ -320,6 +320,9 @@ pub fn filter_commands(query: &str) -> Vec<Command> {
 
 /// Execute a command by its ID
 pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result<(), String> {
+    let _ = ctx
+        .output_tx
+        .try_send(OutputEvent::CommandCalled(command_id.to_string()));
     match command_id {
         "/help" => {
             push_help_message(ctx.state);
@@ -558,7 +561,6 @@ pub fn execute_command(command_id: CommandId<'_>, ctx: CommandContext) -> Result
                 }
             };
 
-            let _ = ctx.output_tx.try_send(OutputEvent::InitCommandCalled);
             ctx.state
                 .messages_scrolling_state
                 .messages
@@ -729,8 +731,6 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.side_panel_state.changeset = crate::services::changeset::Changeset::default();
     state.side_panel_state.todos.clear();
 
-    state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
-
     // Invalidate caches
     crate::services::message::invalidate_message_lines_cache(state);
 
@@ -798,6 +798,9 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
             state,
         ));
     render_system_message(state, "New session started.");
+
+    // Reset tool call state
+    state.session_tool_calls_state = crate::app::SessionToolCallsState::default();
 
     // Reset scroll state
     state.messages_scrolling_state.scroll = 0;

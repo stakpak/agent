@@ -17,6 +17,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -52,6 +53,8 @@ pub struct RunAsyncConfig {
     pub resume_input: Option<ResumeInput>,
     /// Auto-approve tool overrides from profile config.
     pub auto_approve_tools: Option<Vec<String>>,
+    /// When true, display session stats and browser URL after completion.
+    pub show_session_stats: bool,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -185,6 +188,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut total_usage = LLMTokenUsage::default();
     let renderer = OutputRenderer::new(config.output_format.clone(), config.verbose);
+    let secret_manager = SecretManager::new(config.redact_secrets, config.privacy_mode);
 
     // Build auto-approve config if pause_on_approval is enabled
     let auto_approve = if config.pause_on_approval {
@@ -212,6 +216,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         subagent_config: stakpak_mcp_server::SubagentConfig {
             profile_name: Some(ctx.profile_name.clone()),
             config_path: Some(ctx.config_path.clone()),
+            model: ctx.subagent_model(),
         },
         ..McpInitConfig::default()
     };
@@ -419,7 +424,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             config.prompt.clone()
         };
 
-        chat_messages.push(user_message(user_input));
+        let redacted_user_input = secret_manager.redact_and_store_secrets(&user_input, None);
+        chat_messages.push(user_message(redacted_user_input));
     }
 
     let mut step = 0;
@@ -470,7 +476,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         } else {
             feedback_text
         };
-        chat_messages.push(user_message(feedback_msg));
+        let redacted_feedback = secret_manager.redact_and_store_secrets(&feedback_msg, None);
+        chat_messages.push(user_message(redacted_feedback));
         print!("{}", renderer.render_info("Plan feedback loaded from file"));
     }
 
@@ -880,12 +887,44 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         print!("{}", renderer.render_final_completion(&chat_messages));
         println!();
 
+        if let Some(session_id) = current_session_id {
+            println!("Session ID: {}\n", session_id);
+        }
+
         // Print token usage at the end
         let model_display = format!("{}/{}", config.model.provider, config.model.name);
         print!(
             "{}",
             renderer.render_token_usage_stats(&total_usage, Some(&model_display))
         );
+
+        if let Some(session_id) = current_session_id {
+            // Print resume command and session ID if available
+            if let Some(resume_command) =
+                build_resume_command(current_session_id, current_checkpoint_id)
+            {
+                println!("\nTo resume, run:\n{}\n", resume_command);
+            }
+
+            if config.show_session_stats {
+                match client.get_session_stats(session_id).await {
+                    Ok(stats) => {
+                        print!("{}", renderer.render_session_stats(&stats));
+                    }
+                    Err(_) => {
+                        // Don't fail the whole operation if stats fetch fails
+                    }
+                }
+
+                // Display session URL (matching interactive mode behavior)
+                if let Ok(account) = client.get_my_account().await {
+                    println!(
+                        "To view full session in browser:\nhttps://stakpak.dev/{}/agent-sessions/{}",
+                        account.username, session_id
+                    );
+                }
+            }
+        }
     }
 
     // Save conversation to file
@@ -931,19 +970,6 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             "{}",
             renderer.render_info("No checkpoint available to save")
         );
-    }
-
-    if config.output_format != OutputFormat::Json {
-        // Print resume command and session ID if available
-        if let Some(resume_command) =
-            build_resume_command(current_session_id, current_checkpoint_id)
-        {
-            println!("\nTo resume, run:\n{}\n", resume_command);
-        }
-
-        if let Some(session_id) = current_session_id {
-            println!("Session ID: {}", session_id);
-        }
     }
 
     // Gracefully shutdown MCP server and proxy

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -1237,6 +1237,7 @@ async fn start_foreground_runtime(
         subagent_config: stakpak_mcp_server::SubagentConfig {
             profile_name: Some(config.profile_name.clone()),
             config_path: Some(config.config_path.clone()),
+            model: config.subagent_model(),
         },
         ..crate::commands::agent::run::mcp_init::McpInitConfig::default()
     };
@@ -1362,7 +1363,7 @@ async fn start_foreground_runtime(
     apply_gateway_policy_from_resolved_tools(&mut gateway_cfg, &resolved_tool_policy);
 
     let gateway_profile_overrides = stakpak_gateway::runtime::DispatcherProfileOverrides::new(
-        gateway_cfg.channels.profiles_map(),
+        gateway_channel_profiles_with_default(&gateway_cfg.channels, &config.profile_name),
         Arc::new(ProfileRunOverrideResolver::new(config.config_path.clone())),
     );
 
@@ -1655,6 +1656,35 @@ impl stakpak_gateway::dispatcher::RunOverrideResolver for ProfileRunOverrideReso
             Some(overrides)
         }
     }
+}
+
+fn gateway_channel_profiles_with_default(
+    channels: &stakpak_gateway::config::ChannelConfigs,
+    default_profile: &str,
+) -> HashMap<String, String> {
+    let mut profiles = channels.profiles_map();
+    let default_profile = normalize_optional_string(Some(default_profile.to_string()))
+        .unwrap_or_else(|| "default".to_string());
+
+    if channels.telegram.is_some() {
+        profiles
+            .entry("telegram".to_string())
+            .or_insert_with(|| default_profile.clone());
+    }
+
+    if channels.discord.is_some() {
+        profiles
+            .entry("discord".to_string())
+            .or_insert_with(|| default_profile.clone());
+    }
+
+    if channels.slack.is_some() {
+        profiles
+            .entry("slack".to_string())
+            .or_insert_with(|| default_profile.clone());
+    }
+
+    profiles
 }
 
 fn approved_tools_from_policy(policy: &stakpak_server::ToolApprovalPolicy) -> Vec<String> {
@@ -3873,6 +3903,7 @@ mod tests {
             config_path: config_path.to_string_lossy().to_string(),
             allowed_tools: None,
             auto_approve: None,
+            subagent: None,
             rulebooks: None,
             warden: None,
             providers: std::collections::HashMap::new(),
@@ -4678,6 +4709,36 @@ max_turns = 12
         let profiles = gateway_cfg.channels.profiles_map();
         assert_eq!(profiles.get("slack").map(String::as_str), Some("ops"));
         assert!(!profiles.contains_key("telegram"));
+    }
+
+    #[test]
+    fn gateway_channel_profiles_default_to_boot_profile_when_omitted() {
+        let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
+        gateway_cfg.channels.slack = Some(stakpak_gateway::config::SlackConfig {
+            bot_token: "xoxb-token".to_string(),
+            app_token: "xapp-token".to_string(),
+            model: None,
+            auto_approve: None,
+            profile: None,
+        });
+
+        let profiles = gateway_channel_profiles_with_default(&gateway_cfg.channels, "default");
+        assert_eq!(profiles.get("slack").map(String::as_str), Some("default"));
+    }
+
+    #[test]
+    fn gateway_channel_profiles_preserve_explicit_profile_over_default() {
+        let mut gateway_cfg = stakpak_gateway::GatewayConfig::default();
+        gateway_cfg.channels.slack = Some(stakpak_gateway::config::SlackConfig {
+            bot_token: "xoxb-token".to_string(),
+            app_token: "xapp-token".to_string(),
+            model: None,
+            auto_approve: None,
+            profile: Some("ops".to_string()),
+        });
+
+        let profiles = gateway_channel_profiles_with_default(&gateway_cfg.channels, "default");
+        assert_eq!(profiles.get("slack").map(String::as_str), Some("ops"));
     }
 
     #[test]

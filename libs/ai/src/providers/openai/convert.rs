@@ -67,11 +67,11 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
             }
         });
 
-    // Convert messages with system message mode handling
+    // Tool messages may fan out to multiple OpenAI messages.
     let messages: Vec<ChatMessage> = req
         .messages
         .iter()
-        .filter_map(|msg| to_openai_message_with_mode(msg, system_message_mode))
+        .flat_map(|msg| to_openai_messages_with_mode(msg, system_message_mode))
         .collect();
 
     let temp = match is_reasoning_model(&req.model.id) {
@@ -102,25 +102,44 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
     }
 }
 
-/// Convert SDK message to OpenAI message with system message mode handling
-fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option<ChatMessage> {
-    let role = match msg.role {
-        Role::System => {
-            match mode {
-                SystemMessageMode::System => "system",
-                SystemMessageMode::Developer => "developer",
-                SystemMessageMode::Remove => return None, // Skip system messages
-            }
-        }
+/// Convert an SDK message to one or more OpenAI Chat Completions messages.
+fn to_openai_messages_with_mode(msg: &Message, mode: SystemMessageMode) -> Vec<ChatMessage> {
+    let role_str = match msg.role {
+        Role::System => match mode {
+            SystemMessageMode::System => "system",
+            SystemMessageMode::Developer => "developer",
+            SystemMessageMode::Remove => return Vec::new(),
+        },
         Role::User => "user",
         Role::Assistant => "assistant",
         Role::Tool => "tool",
     };
 
-    // Get content parts from the message
     let parts = msg.parts();
 
-    // Check if this is a tool result message
+    // OpenAI needs one tool message per tool_call_id.
+    if msg.role == Role::Tool {
+        let mut out: Vec<ChatMessage> = Vec::new();
+        for part in parts.iter() {
+            if let ContentPart::ToolResult {
+                tool_call_id,
+                content,
+                ..
+            } = part
+            {
+                out.push(ChatMessage {
+                    role: role_str.to_string(),
+                    content: Some(content.clone()),
+                    name: msg.name.clone(),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call_id.clone()),
+                });
+            }
+        }
+        // Tool messages without ToolResult parts are invalid for OpenAI.
+        return out;
+    }
+
     let tool_call_id = parts.iter().find_map(|part| match part {
         ContentPart::ToolResult { tool_call_id, .. } => Some(tool_call_id.clone()),
         _ => None,
@@ -199,13 +218,13 @@ fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option
         ))
     };
 
-    Some(ChatMessage {
-        role: role.to_string(),
+    vec![ChatMessage {
+        role: role_str.to_string(),
         content,
         name: msg.name.clone(),
         tool_calls,
         tool_call_id,
-    })
+    }]
 }
 
 /// Convert OpenAI response to SDK response
@@ -1121,5 +1140,113 @@ mod tests {
 
         assert_eq!(responses_req.temperature, Some(0.7));
         assert_eq!(responses_req.top_p, Some(0.9));
+    }
+
+    #[test]
+    fn test_chat_completions_fans_out_parallel_tool_results() {
+        use crate::types::MessageContent;
+
+        // SDK message representing the merged result of 3 parallel tool calls.
+        let merged_tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![
+                ContentPart::tool_result("call_a", json!("result_a")),
+                ContentPart::tool_result("call_b", json!("result_b")),
+                ContentPart::tool_result("call_c", json!("result_c")),
+            ]),
+            name: None,
+            provider_options: None,
+        };
+
+        // Need a preceding assistant message with matching tool_calls so that
+        // the sanitizer doesn't drop our tool messages as orphans.
+        let assistant_msg = Message {
+            role: Role::Assistant,
+            content: MessageContent::Parts(vec![
+                ContentPart::tool_call("call_a", "noop".to_string(), json!({})),
+                ContentPart::tool_call("call_b", "noop".to_string(), json!({})),
+                ContentPart::tool_call("call_c", "noop".to_string(), json!({})),
+            ]),
+            name: None,
+            provider_options: None,
+        };
+
+        let req = GenerateRequest::new(
+            Model::custom("gpt-4o", "openai"),
+            vec![
+                Message::new(Role::User, "do three"),
+                assistant_msg,
+                merged_tool_msg,
+            ],
+        );
+
+        let openai_req = to_openai_request(&req, false);
+
+        // Collect all tool messages and their ids.
+        let tool_ids: Vec<Option<String>> = openai_req
+            .messages
+            .iter()
+            .filter(|m| m.role == "tool")
+            .map(|m| m.tool_call_id.clone())
+            .collect();
+
+        // We must see exactly 3 tool messages, one per parallel tool_call.
+        assert_eq!(tool_ids.len(), 3, "expected fan-out into 3 tool messages");
+        assert_eq!(tool_ids[0], Some("call_a".to_string()));
+        assert_eq!(tool_ids[1], Some("call_b".to_string()));
+        assert_eq!(tool_ids[2], Some("call_c".to_string()));
+
+        // And every result content must be carried, in order.
+        let tool_msgs: Vec<&ChatMessage> = openai_req
+            .messages
+            .iter()
+            .filter(|m| m.role == "tool")
+            .collect();
+        assert_eq!(tool_msgs[0].content, Some(json!("result_a")));
+        assert_eq!(tool_msgs[1].content, Some(json!("result_b")));
+        assert_eq!(tool_msgs[2].content, Some(json!("result_c")));
+    }
+
+    #[test]
+    fn test_chat_completions_single_tool_result_still_one_message() {
+        use crate::types::MessageContent;
+
+        let tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![ContentPart::tool_result(
+                "call_only",
+                json!("ok"),
+            )]),
+            name: None,
+            provider_options: None,
+        };
+
+        let assistant_msg = Message {
+            role: Role::Assistant,
+            content: MessageContent::Parts(vec![ContentPart::tool_call(
+                "call_only",
+                "noop".to_string(),
+                json!({}),
+            )]),
+            name: None,
+            provider_options: None,
+        };
+
+        let req = GenerateRequest::new(
+            Model::custom("gpt-4o", "openai"),
+            vec![Message::new(Role::User, "hi"), assistant_msg, tool_msg],
+        );
+
+        let openai_req = to_openai_request(&req, false);
+
+        let tool_msgs: Vec<&ChatMessage> = openai_req
+            .messages
+            .iter()
+            .filter(|m| m.role == "tool")
+            .collect();
+
+        assert_eq!(tool_msgs.len(), 1);
+        assert_eq!(tool_msgs[0].tool_call_id.as_deref(), Some("call_only"));
+        assert_eq!(tool_msgs[0].content, Some(json!("ok")));
     }
 }

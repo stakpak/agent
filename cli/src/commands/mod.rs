@@ -194,7 +194,11 @@ pub enum Commands {
     )]
     Ak(ak::AkCommands),
     /// Update Stakpak Agent to the latest version
-    Update,
+    Update {
+        /// Internal flag used by startup auto-update to suppress terminal output.
+        #[arg(long, hide = true)]
+        background: bool,
+    },
 
     /// Autonomous 24/7 lifecycle commands
     #[command(subcommand)]
@@ -270,7 +274,7 @@ impl Commands {
                 | Commands::Config(_)
                 | Commands::Version
                 | Commands::Completion { .. }
-                | Commands::Update
+                | Commands::Update { .. }
                 | Commands::Acp { .. }
                 | Commands::Auth(_)
                 | Commands::Autopilot(_)
@@ -522,8 +526,8 @@ impl Commands {
             Commands::Ak(command) => {
                 command.run()?;
             }
-            Commands::Update => {
-                auto_update::run_auto_update(false).await?;
+            Commands::Update { background } => {
+                auto_update::run_auto_update(background).await?;
             }
             Commands::Autopilot(autopilot_command) => {
                 autopilot_command.run(config).await?;
@@ -548,9 +552,19 @@ impl Commands {
             Commands::Acp { system_prompt_file } => {
                 // Force auto-update before starting ACP session (no prompt)
                 use crate::utils::check_update::force_auto_update;
-                if let Err(e) = force_auto_update().await {
-                    // Log error but continue - don't block ACP if update check fails
-                    eprintln!("Update check failed: {}", e);
+                match force_auto_update().await {
+                    Ok(true) => {
+                        if let Err(e) = auto_update::restart_current_process() {
+                            eprintln!("Failed to restart after update: {}", e);
+                            std::process::exit(1);
+                        }
+                        return Ok(());
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        // Log error but continue - don't block ACP if update check fails
+                        eprintln!("Update check failed: {}", e);
+                    }
                 }
 
                 let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {

@@ -22,7 +22,7 @@ use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     ProgressType, TaskPauseInfo, TaskUpdate, ToolCallResultProgress,
 };
-use stakpak_shared::task_manager::TaskInfo;
+use stakpak_shared::task_manager::{StartTaskOptions, TaskInfo};
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{
     LocalFileSystemProvider, generate_directory_tree, handle_large_output, sanitize_text_output,
@@ -401,7 +401,15 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
 
         let result = self
             .get_task_manager()
-            .start_task(command, description, timeout_duration, None)
+            .start_task(
+                command,
+                StartTaskOptions {
+                    description,
+                    timeout: timeout_duration,
+                    remote_connection: None,
+                    child_env: self.task_child_env_defaults(None),
+                },
+            )
             .await;
 
         Self::format_task_result(result)
@@ -454,13 +462,17 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             private_key_path,
         };
 
+        let child_env = self.task_child_env_defaults(Some(&remote_connection));
         let result = self
             .get_task_manager()
             .start_task(
                 command,
-                description,
-                timeout_duration,
-                Some(remote_connection),
+                StartTaskOptions {
+                    description,
+                    timeout: timeout_duration,
+                    remote_connection: Some(remote_connection),
+                    child_env,
+                },
             )
             .await;
 
@@ -1271,6 +1283,31 @@ SAFETY NOTES:
         }
     }
 
+    fn apply_local_command_env(&self, cmd: &mut Command) {
+        if let Some(profile_name) = self.local_runtime_defaults.active_profile_name() {
+            cmd.env("STAKPAK_PROFILE", profile_name);
+        }
+    }
+
+    fn local_child_env_defaults(&self) -> std::collections::HashMap<String, String> {
+        let mut child_env = std::collections::HashMap::new();
+        if let Some(profile_name) = self.local_runtime_defaults.active_profile_name() {
+            child_env.insert("STAKPAK_PROFILE".to_string(), profile_name.to_string());
+        }
+        child_env
+    }
+
+    fn task_child_env_defaults(
+        &self,
+        remote_connection: Option<&RemoteConnectionInfo>,
+    ) -> std::collections::HashMap<String, String> {
+        if remote_connection.is_some() {
+            std::collections::HashMap::new()
+        } else {
+            self.local_child_env_defaults()
+        }
+    }
+
     /// Execute command either locally or remotely based on parameters.
     async fn execute_command_unified(
         &self,
@@ -1339,6 +1376,7 @@ SAFETY NOTES:
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        self.apply_local_command_env(&mut cmd);
         #[cfg(unix)]
         {
             cmd.env("DEBIAN_FRONTEND", "noninteractive")
@@ -3367,6 +3405,94 @@ mod tests {
         assert!(
             result.is_err(),
             "RunCommandRequest must reject unknown 'password' field"
+        );
+    }
+
+    fn local_container_with_profile(profile_name: Option<&str>) -> ToolContainer {
+        let task_manager = stakpak_shared::task_manager::TaskManager::new();
+        ToolContainer::new(
+            None,
+            crate::EnabledToolsConfig::default(),
+            task_manager.handle(),
+            ToolContainer::tool_router_local(),
+            Vec::new(),
+            crate::SubagentConfig {
+                profile_name: profile_name.map(str::to_string),
+                config_path: None,
+                model: None,
+            },
+        )
+        .expect("tool container should be constructed")
+    }
+
+    async fn run_profile_probe(container: &ToolContainer, shell: &str) -> String {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.env_remove("STAKPAK_PROFILE")
+            .arg("-c")
+            .arg(shell)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        container.apply_local_command_env(&mut cmd);
+
+        let output = cmd.output().await.expect("profile probe should spawn");
+        assert!(
+            output.status.success(),
+            "profile probe should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("profile probe output should be utf8")
+    }
+
+    #[tokio::test]
+    async fn run_command_spawn_inherits_active_profile_env() {
+        let container = local_container_with_profile(Some("ops"));
+
+        let output = run_profile_probe(&container, "printf '%s' \"$STAKPAK_PROFILE\"").await;
+
+        assert_eq!(output, "ops");
+    }
+
+    #[tokio::test]
+    async fn run_command_spawn_does_not_inject_empty_profile_env() {
+        let container = local_container_with_profile(Some("   "));
+
+        let output = run_profile_probe(
+            &container,
+            "if [ \"${STAKPAK_PROFILE+x}\" = x ]; then printf 'present:%s' \"$STAKPAK_PROFILE\"; else printf missing; fi",
+        )
+        .await;
+
+        assert_eq!(output, "missing");
+    }
+
+    #[tokio::test]
+    async fn run_command_inline_profile_env_override_wins() {
+        let container = local_container_with_profile(Some("ops"));
+
+        let output = run_profile_probe(
+            &container,
+            "STAKPAK_PROFILE=readonly sh -c 'printf %s \"$STAKPAK_PROFILE\"'",
+        )
+        .await;
+
+        assert_eq!(output, "readonly");
+    }
+
+    #[test]
+    fn remote_command_task_gets_no_local_profile_child_env_defaults() {
+        let container = local_container_with_profile(Some("ops"));
+        let remote_connection = RemoteConnectionInfo {
+            connection_string: "user@example.com".to_string(),
+            password: None,
+            private_key_path: None,
+        };
+
+        let child_env = container.task_child_env_defaults(Some(&remote_connection));
+
+        assert!(
+            !child_env.contains_key("STAKPAK_PROFILE"),
+            "remote task child env must not inherit the local profile"
         );
     }
 

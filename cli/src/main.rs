@@ -28,7 +28,9 @@ use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
 use std::{
     env,
+    ffi::OsString,
     path::{Path, PathBuf},
+    process::{Command as ProcessCommand, Stdio},
     sync::Arc,
 };
 
@@ -54,7 +56,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agent_context::AgentContext;
 use utils::agents_md::discover_agents_md;
 use utils::apps_md::discover_apps_md;
-use utils::check_update::{auto_update, check_update};
+use utils::check_update::check_update;
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
@@ -69,6 +71,40 @@ fn config_has_any_auth(config: &AppConfig) -> bool {
 
 fn config_has_any_auth_flags(has_stakpak_key: bool, has_provider_keys: bool) -> bool {
     has_stakpak_key || has_provider_keys
+}
+
+fn should_spawn_auto_update(cli: &Cli, skip_warden: bool) -> bool {
+    cli.command.is_none() && !cli.r#async && !cli.print && !skip_warden
+}
+
+fn background_auto_update_args(cli: &Cli) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if let Some(profile) = &cli.profile {
+        args.push(OsString::from("--profile"));
+        args.push(OsString::from(profile));
+    }
+    if let Some(config_path) = &cli.config_path {
+        args.push(OsString::from("--config"));
+        args.push(config_path.as_os_str().to_os_string());
+    }
+    args.push(OsString::from("update"));
+    args.push(OsString::from("--background"));
+    args
+}
+
+fn spawn_background_auto_update(cli: &Cli) -> std::io::Result<()> {
+    let current_exe = env::current_exe()?;
+    spawn_background_auto_update_with_exe(&current_exe, cli)
+}
+
+fn spawn_background_auto_update_with_exe(executable: &Path, cli: &Cli) -> std::io::Result<()> {
+    ProcessCommand::new(executable)
+        .args(background_auto_update_args(cli))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
@@ -185,6 +221,10 @@ struct Cli {
     #[arg(long = "ignore-apps-md", default_value_t = false)]
     ignore_apps_md: bool,
 
+    /// Show session stats and URL after async mode completes
+    #[arg(long = "show-session-stats", default_value_t = false)]
+    show_session_stats: bool,
+
     /// Color theme: auto, dark, or light (default: auto)
     #[arg(long = "theme", default_value = "auto")]
     theme: String,
@@ -238,17 +278,8 @@ async fn main() {
         Cli::parse()
     };
 
-    // Only run auto-update in interactive mode (when no command is specified)
-    if cli.command.is_none()
-        && !cli.r#async
-        && !cli.print
-        && let Err(e) = auto_update().await
-    {
-        eprintln!("Auto-update failed: {}", e);
-    }
-
-    if let Some(workdir) = cli.workdir {
-        let workdir = Path::new(&workdir);
+    if let Some(workdir) = &cli.workdir {
+        let workdir = Path::new(workdir);
         if let Err(e) = env::set_current_dir(workdir) {
             eprintln!("Failed to set current directory: {}", e);
             std::process::exit(1);
@@ -268,10 +299,19 @@ async fn main() {
     // Determine which profile to use: CLI arg > STAKPAK_PROFILE env var > "default"
     let profile_name = cli
         .profile
+        .clone()
         .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
         .unwrap_or_else(|| "default".to_string());
 
-    match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
+    let config_result = AppConfig::load(&profile_name, cli.config_path.as_deref());
+
+    if config_result.is_ok()
+        && should_spawn_auto_update(&cli, std::env::var("STAKPAK_SKIP_WARDEN").is_ok())
+    {
+        let _ = spawn_background_auto_update(&cli);
+    }
+
+    match config_result {
         Ok(mut config) => {
             // Check if warden is enabled in profile and we're not already inside warden
             let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
@@ -552,6 +592,7 @@ async fn main() {
                                 plan_feedback: cli.plan_feedback.clone(),
                                 plan_new: cli.plan_new,
                                 pause_on_approval: cli.pause_on_approval,
+                                show_session_stats: cli.show_session_stats,
                                 resume_input: if cli.approve.is_some()
                                     || cli.reject.is_some()
                                     || cli.approve_all
@@ -678,6 +719,11 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn agent_dockerfile_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Dockerfile")
+    }
+
+    #[cfg(unix)]
     fn setup_fake_entrypoint_bin(fake_bin: &std::path::Path) -> String {
         std::fs::create_dir_all(fake_bin).expect("create fake bin");
 
@@ -692,6 +738,10 @@ mod tests {
         write_executable_script(
             &fake_bin.join("find"),
             "#!/bin/sh\nprintf 'find:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
+        );
+        write_executable_script(
+            &fake_bin.join("chown"),
+            "#!/bin/sh\nprintf 'chown:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
         );
         write_executable_script(
             &fake_bin.join("gosu"),
@@ -713,6 +763,108 @@ mod tests {
     #[test]
     fn config_has_any_auth_flags_true_when_provider_is_configured() {
         assert!(config_has_any_auth_flags(false, true));
+    }
+
+    #[test]
+    fn auto_update_gate_is_false_inside_warden() {
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        assert!(!should_spawn_auto_update(&cli, true));
+    }
+
+    #[test]
+    fn auto_update_gate_is_true_for_default_interactive_startup() {
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        assert!(should_spawn_auto_update(&cli, false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_dockerfile_precreates_persistent_storage_mount_parents() {
+        let dockerfile = std::fs::read_to_string(agent_dockerfile_path()).expect("read Dockerfile");
+
+        assert!(
+            dockerfile.contains("/home/agent/.stakpak/data"),
+            "Dockerfile must pre-create the parent of the local.db file bind mount"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.agent-board"),
+            "Dockerfile must pre-create the parent of the agent-board data.db file bind mount"
+        );
+        assert!(
+            dockerfile.contains("chown -R agent:agent"),
+            "Dockerfile must assign agent ownership to writable image paths"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.stakpak"),
+            "Dockerfile must make the stakpak home tree agent-owned"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.agent-board"),
+            "Dockerfile must make the agent-board storage parent agent-owned"
+        );
+    }
+
+    #[test]
+    fn background_auto_update_preserves_root_profile_and_config_args() {
+        let cli = Cli::try_parse_from([
+            "stakpak",
+            "--profile",
+            "byok",
+            "--config",
+            "/tmp/stakpak-config.toml",
+        ])
+        .expect("parse cli");
+
+        let args = background_auto_update_args(&cli);
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("--profile"),
+                OsString::from("byok"),
+                OsString::from("--config"),
+                OsString::from("/tmp/stakpak-config.toml"),
+                OsString::from("update"),
+                OsString::from("--background"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_auto_update_spawn_runs_update_subcommand_with_background_flag() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_stakpak = temp_dir.path().join("stakpak");
+        let log_path = temp_dir.path().join("update.log");
+
+        std::fs::write(
+            &fake_stakpak,
+            format!(
+                "#!/bin/sh\nprintf 'args=%s\\n' \"$*\" > '{}'\n",
+                log_path.display()
+            ),
+        )
+        .expect("write fake stakpak");
+        let mut permissions = std::fs::metadata(&fake_stakpak)
+            .expect("fake stakpak metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_stakpak, permissions).expect("chmod fake stakpak");
+
+        let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
+        spawn_background_auto_update_with_exe(&fake_stakpak, &cli)
+            .expect("spawn background auto update");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !log_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let log = std::fs::read_to_string(&log_path).expect("read background update log");
+        assert!(log.contains("args=update --background"), "got: {log}");
     }
 
     #[cfg(unix)]
@@ -794,6 +946,52 @@ mod tests {
         assert!(
             log.contains(&aqua_log_fragment),
             "expected aqua-cache ownership fixup, got: {log}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_fixes_known_file_mount_parent_dirs() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+        let path_env = setup_fake_entrypoint_bin(&fake_bin);
+        let home_dir = temp_dir.path().join("agent-home");
+        let stakpak_data_dir = home_dir.join(".stakpak/data");
+        let agent_board_dir = home_dir.join(".agent-board");
+        std::fs::create_dir_all(&stakpak_data_dir).expect("create stakpak data dir");
+        std::fs::create_dir_all(&agent_board_dir).expect("create agent board dir");
+
+        let output = std::process::Command::new("sh")
+            .arg(entrypoint_script_path())
+            .arg("/usr/local/bin/stakpak")
+            .arg("mcp")
+            .arg("start")
+            .env("PATH", path_env)
+            .env("ENTRYPOINT_LOG", &log_path)
+            .env("STAKPAK_TARGET_UID", "1000")
+            .env("STAKPAK_TARGET_GID", "1000")
+            .env("STAKPAK_HOME_DIR", &home_dir)
+            .output()
+            .expect("run entrypoint");
+
+        assert!(
+            output.status.success(),
+            "entrypoint failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read entrypoint log");
+        let stakpak_data_chown = format!("chown:1000:1000 {}", stakpak_data_dir.display());
+        let agent_board_chown = format!("chown:1000:1000 {}", agent_board_dir.display());
+        assert!(
+            log.contains(&stakpak_data_chown),
+            "expected stakpak data dir ownership fixup, got: {log}"
+        );
+        assert!(
+            log.contains(&agent_board_chown),
+            "expected agent-board dir ownership fixup, got: {log}"
         );
     }
 

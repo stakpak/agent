@@ -11,6 +11,12 @@ use super::rulebook::RulebookConfig;
 use super::types::{OldAppConfig, ProviderType};
 use super::warden::WardenConfig;
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SubagentConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Configuration for a specific profile (environment).
 ///
 /// # New Config Format (v2)
@@ -75,6 +81,11 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
+    /// Subagent-specific settings, allowing the subagent model to be configured
+    /// independently from the parent agent's model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentConfig>,
+
     /// Recently used models (most recent first, max 5)
     /// Stores model IDs which may include provider prefix for Stakpak API routing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -124,6 +135,7 @@ impl ProfileConfig {
                 providers: default.providers.clone(),
                 // Copy unified model field only (legacy fields are not copied)
                 model: default.model.clone(),
+                subagent: default.subagent.clone(),
                 // Copy recent models + runtime overrides
                 recent_models: default.recent_models.clone(),
                 system_prompt: default.system_prompt.clone(),
@@ -397,6 +409,10 @@ impl ProfileConfig {
                 .model
                 .clone()
                 .or_else(|| other.and_then(|config| config.model.clone())),
+            subagent: self
+                .subagent
+                .clone()
+                .or_else(|| other.and_then(|config| config.subagent.clone())),
             // Recent models - use self's if non-empty, otherwise other's
             recent_models: if !self.recent_models.is_empty() {
                 self.recent_models.clone()
