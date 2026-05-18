@@ -596,16 +596,20 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 registry = registry.register("stakpak", provider);
             }
             ProviderConfig::OpenRouter { api_endpoint, .. } => {
-                let Some(api_key) = provider_config.api_key() else {
-                    continue;
-                };
-                let mut openrouter_config = OpenRouterConfig::new(api_key.to_string());
-                if let Some(endpoint) = api_endpoint {
-                    openrouter_config = openrouter_config.with_base_url(endpoint.clone());
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut openrouter_config = OpenRouterConfig::new(api_key.to_string());
+                    openrouter_config = openrouter_config.with_http_referer("https://stakpak.dev/");
+                    openrouter_config = openrouter_config.with_site_title("Stakpak");
+                    if let Some(endpoint) = api_endpoint {
+                        openrouter_config = openrouter_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = OpenRouterProvider::new(openrouter_config).map_err(
+                        |e: stakai::prelude::Error| {
+                            format!("Failed to create OpenRouter provider: {}", e)
+                        },
+                    )?;
+                    registry = registry.register("openrouter", provider);
                 }
-                let provider = OpenRouterProvider::new(openrouter_config)
-                    .map_err(|e| format!("Failed to create OpenRouter provider: {}", e))?;
-                registry = registry.register("openrouter", provider);
             }
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
                 if let Some(access_token) = provider_config.access_token() {
