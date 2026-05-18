@@ -20,6 +20,7 @@ use stakpak_mcp_server::{
 };
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::task_manager::TaskManagerHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -46,6 +47,9 @@ pub struct McpInitConfig {
     pub redact_secrets: bool,
     /// Whether to enable privacy mode (redact IPs, account IDs, etc.)
     pub privacy_mode: bool,
+    /// Optional handle to a pre-created TaskManager (e.g., shared with TUI).
+    /// If not provided, MCP server startup creates and manages its own TaskManager.
+    pub task_manager_handle: Option<Arc<TaskManagerHandle>>,
 }
 
 impl Default for McpInitConfig {
@@ -58,6 +62,7 @@ impl Default for McpInitConfig {
             subagent_config: SubagentConfig::default(),
             redact_secrets: true,
             privacy_mode: false,
+            task_manager_handle: None,
         }
     }
 }
@@ -141,6 +146,7 @@ async fn start_mcp_server(
     let enabled_tools = mcp_config.enabled_tools.clone();
     let enable_subagents = mcp_config.enable_subagents;
     let subagent_config = mcp_config.subagent_config.clone();
+    let task_manager_handle = mcp_config.task_manager_handle.clone();
 
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
@@ -153,6 +159,7 @@ async fn start_mcp_server(
             skill_directories: default_skill_directories(),
             subagent_config,
             server_tls_config: None,
+            task_manager_handle,
         };
 
         // Signal that we're about to start

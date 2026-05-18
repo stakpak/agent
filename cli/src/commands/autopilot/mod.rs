@@ -1239,6 +1239,7 @@ async fn start_foreground_runtime(
             config_path: Some(config.config_path.clone()),
             model: config.subagent_model(),
         },
+        ..crate::commands::agent::run::mcp_init::McpInitConfig::default()
     };
 
     let mcp_init_result = crate::commands::agent::run::mcp_init::initialize_mcp_server_and_tools(

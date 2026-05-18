@@ -1598,6 +1598,9 @@ pub fn update(
             // These are handled in the intercept block above when popup is visible
             // If we reach here, the popup is not visible, so ignore
         }
+        InputEvent::RunningBackgroundTasksCount(count) => {
+            state.background_tasks_state.running_background_tasks = count;
+        }
         // Policy persistence modal events are handled in the intercept block above
         InputEvent::ShowApprovalSettingsPersistenceModal
         | InputEvent::ApprovalSettingsPersistenceNavigate(_)
@@ -1636,6 +1639,7 @@ mod tests {
             board_agent_id: None,
             init_prompt_content: None,
             recent_models: Vec::new(),
+            task_manager_handle: None,
         })
     }
 

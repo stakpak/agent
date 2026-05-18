@@ -596,6 +596,7 @@ mod tests {
     /// Helper to create a minimal AppState for testing
     fn create_test_state() -> AppState {
         AppState::new(AppStateOptions {
+            task_manager_handle: None,
             latest_version: None,
             redact_secrets: false,
             privacy_mode: false,
