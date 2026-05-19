@@ -116,6 +116,7 @@ pub async fn run_server(
                 model: config.subagent_model(),
             },
             server_tls_config,
+            task_manager_handle: None,
         },
         Some(listener),
         None,

@@ -53,6 +53,14 @@ if [ "$CURRENT_UID" = "0" ] && [ -n "$STAKPAK_TARGET_UID" ]; then
         fi
     fi
 
+    # Docker creates missing parent directories for single-file bind mounts as
+    # root before this script runs. These Stakpak-owned SQLite parents must stay
+    # writable after gosu drops to the target agent user, even when the target
+    # UID/GID already matches the image defaults.
+    for dir in "$HOME/.stakpak/data" "$HOME/.agent-board"; do
+        [ -d "$dir" ] && chown "$TARGET_UID:$TARGET_GID" "$dir" 2>/dev/null || true
+    done
+
     # Drop to the (now-remapped) agent user.
     exec gosu agent "$@"
 fi

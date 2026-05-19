@@ -6,6 +6,7 @@ use stakai::{
     providers::copilot::{CopilotConfig, CopilotProvider},
     providers::gemini::{GeminiConfig, GeminiProvider},
     providers::openai::{OpenAIConfig, OpenAIProvider},
+    providers::openrouter::{OpenRouterConfig, OpenRouterProvider},
     providers::stakpak::{StakpakProvider, StakpakProviderConfig},
     registry::ProviderRegistry,
 };
@@ -114,6 +115,14 @@ fn build_provider_registry(config: &LLMProviderConfig) -> Result<ProviderRegistr
                     registry = registry.register("github-copilot", provider);
                 }
             }
+            ProviderConfig::OpenRouter { api_endpoint, .. } => {
+                if let Some(config) = openrouter_config(provider_config, api_endpoint.as_deref()) {
+                    let provider = OpenRouterProvider::new(config).map_err(|error| {
+                        format!("Failed to create OpenRouter provider: {error}")
+                    })?;
+                    registry = registry.register("openrouter", provider);
+                }
+            }
             ProviderConfig::Custom { api_endpoint, .. } => {
                 let key = provider_config.api_key().unwrap_or_default().to_string();
                 let config = OpenAIConfig::new(key).with_base_url(api_endpoint.clone());
@@ -152,6 +161,21 @@ fn anthropic_config(
     } else {
         return None;
     };
+
+    if let Some(endpoint) = api_endpoint {
+        config = config.with_base_url(endpoint);
+    }
+
+    Some(config)
+}
+
+fn openrouter_config(
+    provider_config: &ProviderConfig,
+    api_endpoint: Option<&str>,
+) -> Option<OpenRouterConfig> {
+    let mut config = OpenRouterConfig::new(provider_config.api_key()?.to_string())
+        .with_http_referer("https://stakpak.dev/")
+        .with_site_title("Stakpak");
 
     if let Some(endpoint) = api_endpoint {
         config = config.with_base_url(endpoint);

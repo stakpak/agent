@@ -224,6 +224,8 @@ pub enum InputEvent {
     // Session events
     SetSessionId(String),
 
+    // Background task status
+    RunningBackgroundTasksCount(usize),
     // Approval settings persistence modal events
     ShowApprovalSettingsPersistenceModal,
     ApprovalSettingsPersistenceNavigate(i32),
@@ -275,6 +277,7 @@ impl InputEvent {
                 | InputEvent::RecentModelsUpdated(_)
                 | InputEvent::RulebooksLoaded(_)
                 | InputEvent::CurrentRulebooksLoaded(_)
+                | InputEvent::RunningBackgroundTasksCount(_)
         )
     }
 }
@@ -310,8 +313,8 @@ pub enum OutputEvent {
     PlanFeedback(String),
     /// Plan approved — transition to Executing phase.
     PlanApproved,
-    /// /init command was invoked.
-    InitCommandCalled,
+    /// A slash command was invoked.
+    CommandCalled(String),
     /// Response from ask_user popup with the tool call and result
     AskUserResponse(ToolCallResult),
     /// Save auto-approve settings to the profile config (tool names set to Auto)

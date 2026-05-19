@@ -4,7 +4,7 @@ use crate::config::{ProfileConfig, ProviderType};
 use crate::onboarding::auth_flow::{AuthFlowConfig, run_provider_auth_flow};
 use crate::onboarding::config_templates::{
     generate_anthropic_profile, generate_gemini_profile, generate_github_copilot_profile,
-    generate_openai_profile,
+    generate_openai_profile, generate_openrouter_profile,
 };
 use crate::onboarding::menu::select_option_no_header;
 use crate::onboarding::navigation::NavResult;
@@ -361,6 +361,7 @@ async fn handle_non_interactive_api_setup(
         "anthropic" => generate_anthropic_profile(),
         "openai" => generate_openai_profile(),
         "gemini" => generate_gemini_profile(),
+        "openrouter" => generate_openrouter_profile(),
         "github-copilot" => {
             return Err("GitHub Copilot does not support API key authentication.\n\
                 It requires OAuth via your GitHub account.\n\n\
@@ -373,7 +374,7 @@ async fn handle_non_interactive_api_setup(
         }
         _ => {
             return Err(format!(
-                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, stakpak, amazon-bedrock, github-copilot\n\
+                "Unsupported provider '{}'. Supported: anthropic, openai, gemini, openrouter, stakpak, amazon-bedrock, github-copilot\n\
                  For bedrock, use: stakpak auth login --provider amazon-bedrock --region <region>\n\
                  For github-copilot, run without --api-key to use the device flow.",
                 provider_id

@@ -221,6 +221,10 @@ struct Cli {
     #[arg(long = "ignore-apps-md", default_value_t = false)]
     ignore_apps_md: bool,
 
+    /// Show session stats and URL after async mode completes
+    #[arg(long = "show-session-stats", default_value_t = false)]
+    show_session_stats: bool,
+
     /// Color theme: auto, dark, or light (default: auto)
     #[arg(long = "theme", default_value = "auto")]
     theme: String,
@@ -588,6 +592,7 @@ async fn main() {
                                 plan_feedback: cli.plan_feedback.clone(),
                                 plan_new: cli.plan_new,
                                 pause_on_approval: cli.pause_on_approval,
+                                show_session_stats: cli.show_session_stats,
                                 resume_input: if cli.approve.is_some()
                                     || cli.reject.is_some()
                                     || cli.approve_all
@@ -714,6 +719,11 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn agent_dockerfile_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Dockerfile")
+    }
+
+    #[cfg(unix)]
     fn setup_fake_entrypoint_bin(fake_bin: &std::path::Path) -> String {
         std::fs::create_dir_all(fake_bin).expect("create fake bin");
 
@@ -728,6 +738,10 @@ mod tests {
         write_executable_script(
             &fake_bin.join("find"),
             "#!/bin/sh\nprintf 'find:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
+        );
+        write_executable_script(
+            &fake_bin.join("chown"),
+            "#!/bin/sh\nprintf 'chown:%s\\n' \"$*\" >> \"$ENTRYPOINT_LOG\"\nexit 0\n",
         );
         write_executable_script(
             &fake_bin.join("gosu"),
@@ -761,6 +775,33 @@ mod tests {
     fn auto_update_gate_is_true_for_default_interactive_startup() {
         let cli = Cli::try_parse_from(["stakpak"]).expect("parse cli");
         assert!(should_spawn_auto_update(&cli, false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_dockerfile_precreates_persistent_storage_mount_parents() {
+        let dockerfile = std::fs::read_to_string(agent_dockerfile_path()).expect("read Dockerfile");
+
+        assert!(
+            dockerfile.contains("/home/agent/.stakpak/data"),
+            "Dockerfile must pre-create the parent of the local.db file bind mount"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.agent-board"),
+            "Dockerfile must pre-create the parent of the agent-board data.db file bind mount"
+        );
+        assert!(
+            dockerfile.contains("chown -R agent:agent"),
+            "Dockerfile must assign agent ownership to writable image paths"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.stakpak"),
+            "Dockerfile must make the stakpak home tree agent-owned"
+        );
+        assert!(
+            dockerfile.contains("/home/agent/.agent-board"),
+            "Dockerfile must make the agent-board storage parent agent-owned"
+        );
     }
 
     #[test]
@@ -905,6 +946,52 @@ mod tests {
         assert!(
             log.contains(&aqua_log_fragment),
             "expected aqua-cache ownership fixup, got: {log}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entrypoint_fixes_known_file_mount_parent_dirs() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let fake_bin = temp_dir.path().join("fake-bin");
+        let log_path = temp_dir.path().join("entrypoint.log");
+        let path_env = setup_fake_entrypoint_bin(&fake_bin);
+        let home_dir = temp_dir.path().join("agent-home");
+        let stakpak_data_dir = home_dir.join(".stakpak/data");
+        let agent_board_dir = home_dir.join(".agent-board");
+        std::fs::create_dir_all(&stakpak_data_dir).expect("create stakpak data dir");
+        std::fs::create_dir_all(&agent_board_dir).expect("create agent board dir");
+
+        let output = std::process::Command::new("sh")
+            .arg(entrypoint_script_path())
+            .arg("/usr/local/bin/stakpak")
+            .arg("mcp")
+            .arg("start")
+            .env("PATH", path_env)
+            .env("ENTRYPOINT_LOG", &log_path)
+            .env("STAKPAK_TARGET_UID", "1000")
+            .env("STAKPAK_TARGET_GID", "1000")
+            .env("STAKPAK_HOME_DIR", &home_dir)
+            .output()
+            .expect("run entrypoint");
+
+        assert!(
+            output.status.success(),
+            "entrypoint failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read entrypoint log");
+        let stakpak_data_chown = format!("chown:1000:1000 {}", stakpak_data_dir.display());
+        let agent_board_chown = format!("chown:1000:1000 {}", agent_board_dir.display());
+        assert!(
+            log.contains(&stakpak_data_chown),
+            "expected stakpak data dir ownership fixup, got: {log}"
+        );
+        assert!(
+            log.contains(&agent_board_chown),
+            "expected agent-board dir ownership fixup, got: {log}"
         );
     }
 
