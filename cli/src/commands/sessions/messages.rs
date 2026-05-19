@@ -2,7 +2,7 @@
 //!
 //! Applies `--role`, `--limit`, and `--offset` flags to a checkpoint's messages.
 
-use stakpak_shared::models::integrations::openai::{ChatMessage, Role};
+use stakai::{Message, Role};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleFilter {
@@ -18,7 +18,7 @@ impl RoleFilter {
             RoleFilter::User => matches!(role, Role::User),
             RoleFilter::Assistant => matches!(role, Role::Assistant),
             RoleFilter::Tool => matches!(role, Role::Tool),
-            RoleFilter::System => matches!(role, Role::System | Role::Developer),
+            RoleFilter::System => matches!(role, Role::System),
         }
     }
 }
@@ -45,12 +45,12 @@ impl std::str::FromStr for RoleFilter {
 /// Ordering: filter by role first, then compute a chronological window anchored at
 /// the newest end of the filtered list.
 pub fn filter_messages(
-    messages: Vec<ChatMessage>,
+    messages: Vec<Message>,
     role: Option<RoleFilter>,
     limit: Option<u32>,
     offset: u32,
-) -> (Vec<ChatMessage>, u32) {
-    let filtered: Vec<ChatMessage> = match role {
+) -> (Vec<Message>, u32) {
+    let filtered: Vec<Message> = match role {
         Some(filter) => messages
             .into_iter()
             .filter(|m| filter.matches(&m.role))
@@ -81,17 +81,12 @@ pub fn filter_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stakpak_shared::models::integrations::openai::MessageContent;
 
-    fn msg(role: Role, text: &str) -> ChatMessage {
-        ChatMessage {
-            role,
-            content: Some(MessageContent::String(text.to_string())),
-            ..Default::default()
-        }
+    fn msg(role: Role, text: &str) -> Message {
+        Message::new(role, text.to_string())
     }
 
-    fn sample() -> Vec<ChatMessage> {
+    fn sample() -> Vec<Message> {
         vec![
             msg(Role::System, "sys"),
             msg(Role::User, "u1"),
@@ -102,13 +97,10 @@ mod tests {
         ]
     }
 
-    fn contents(messages: &[ChatMessage]) -> Vec<&str> {
+    fn contents(messages: &[Message]) -> Vec<String> {
         messages
             .iter()
-            .map(|message| match &message.content {
-                Some(MessageContent::String(content)) => content.as_str(),
-                other => panic!("expected string content, got {other:?}"),
-            })
+            .map(|message| message.content.text().expect("expected text content"))
             .collect()
     }
 
@@ -127,12 +119,11 @@ mod tests {
     }
 
     #[test]
-    fn role_filter_system_includes_developer_and_reports_total() {
-        let mut msgs = sample();
-        msgs.push(msg(Role::Developer, "dev"));
+    fn role_filter_system_keeps_only_system_messages_and_reports_total() {
+        let msgs = sample();
         let (out, total) = filter_messages(msgs, Some(RoleFilter::System), None, 0);
-        assert_eq!(contents(&out), vec!["sys", "dev"]);
-        assert_eq!(total, 2);
+        assert_eq!(contents(&out), vec!["sys"]);
+        assert_eq!(total, 1);
     }
 
     #[test]

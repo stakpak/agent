@@ -1,10 +1,6 @@
 use super::common::{HistoryItem, HistoryProcessingOptions, messages_to_history};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use stakpak_shared::models::{
-    integrations::openai::{ChatMessage, Role},
-    llm::{LLMMessage, LLMMessageContent},
-};
 use std::collections::HashMap;
 
 pub struct ScratchpadContextManager {
@@ -12,12 +8,12 @@ pub struct ScratchpadContextManager {
 }
 
 impl super::ContextManager for ScratchpadContextManager {
-    fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage> {
+    fn reduce_context(&self, messages: Vec<stakai::Message>) -> Vec<stakai::Message> {
         let mut scratchpad = HashMap::new();
 
         for message in messages.iter() {
-            if let Some(content) = message.content.clone()
-                && let Some(scratchpad_content) = extract_scratchpad(&content.to_string())
+            if let Some(content) = message.text()
+                && let Some(scratchpad_content) = extract_scratchpad(&content)
             {
                 scratchpad.extend(scratchpad_content);
             }
@@ -26,10 +22,7 @@ impl super::ContextManager for ScratchpadContextManager {
         let history = messages_to_history(&messages, &self.options);
         let context_content = self.history_to_text(&history, &scratchpad);
 
-        vec![LLMMessage {
-            role: Role::User.to_string(),
-            content: LLMMessageContent::String(context_content),
-        }]
+        vec![stakai::Message::new(stakai::Role::User, context_content)]
     }
 }
 

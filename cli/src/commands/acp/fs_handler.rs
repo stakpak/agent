@@ -80,14 +80,13 @@ pub fn spawn_fs_handler(
 /// Execute filesystem tool using native ACP protocol via channel
 pub async fn execute_acp_fs_tool(
     fs_tx: &mpsc::UnboundedSender<FsOperation>,
-    tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
+    tool_call: &stakai::ToolCall,
     session_id: &acp::SessionId,
 ) -> Result<Option<rmcp::model::CallToolResult>, String> {
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .map_err(|e| format!("Failed to parse tool arguments: {}", e))?;
+    let args = tool_call.arguments.clone();
 
     use super::tool_names;
-    let stripped_name = super::utils::strip_tool_name(&tool_call.function.name);
+    let stripped_name = super::utils::strip_tool_name(&tool_call.name);
     match stripped_name {
         tool_names::VIEW => {
             let path = args
@@ -278,9 +277,6 @@ pub async fn execute_acp_fs_tool(
                 structured_content: None,
             }))
         }
-        _ => Err(format!(
-            "Unknown filesystem tool: {}",
-            tool_call.function.name
-        )),
+        _ => Err(format!("Unknown filesystem tool: {}", tool_call.name)),
     }
 }

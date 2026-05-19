@@ -5,7 +5,7 @@ use rmcp::{
     service::RunningService,
     transport::TokioChildProcess,
 };
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::models::agent_runtime::ToolCallResultProgress;
 use tokio::process::Command;
 use tokio::sync::mpsc::Sender;
 
