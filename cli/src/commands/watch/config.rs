@@ -66,10 +66,10 @@ fn default_log_dir() -> String {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckTriggerOn {
-    /// Trigger agent only on exit code 0 (default behavior).
-    #[default]
+    /// Trigger agent only on exit code 0.
     Success,
-    /// Trigger agent on any non-zero exit code (1+).
+    /// Trigger agent on any non-zero exit code (1+), the default behavior.
+    #[default]
     Failure,
     /// Trigger agent regardless of exit code (only timeout/error prevents trigger).
     Any,
@@ -129,8 +129,8 @@ pub struct ScheduleDefaults {
     pub sandbox: bool,
 
     /// Determines which check script exit codes trigger the agent.
-    /// - "success" (default): trigger on exit 0
-    /// - "failure": trigger on non-zero exit codes (1+)
+    /// - "success": trigger on exit 0
+    /// - "failure" (default): trigger on non-zero exit codes (1+)
     /// - "any": trigger regardless of exit code
     #[serde(default)]
     pub trigger_on: CheckTriggerOn,
@@ -181,14 +181,18 @@ pub struct NotificationConfig {
     #[serde(default)]
     pub channel: Option<String>,
     #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
     pub chat_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct DeliveryConfig {
+pub struct NotificationRoute {
     pub channel: String,
-    pub chat_id: String,
+    pub target: String,
 }
+
+pub type DeliveryConfig = NotificationRoute;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -223,10 +227,10 @@ impl NotificationConfig {
 
     pub fn default_delivery(&self) -> Option<DeliveryConfig> {
         let channel = self.channel.as_ref()?;
-        let chat_id = self.chat_id.as_ref()?;
+        let target = self.target.as_ref().or(self.chat_id.as_ref())?;
         Some(DeliveryConfig {
             channel: channel.clone(),
-            chat_id: chat_id.clone(),
+            target: target.clone(),
         })
     }
 }
@@ -271,6 +275,9 @@ pub struct Schedule {
     #[serde(default, with = "option_humantime_serde")]
     pub timeout: Option<Duration>,
 
+    /// Maximum agent turns for this scheduled run.
+    pub max_turns: Option<usize>,
+
     /// Enable Slack tools for agent (experimental).
     /// Falls back to defaults.enable_slack_tools if not specified.
     pub enable_slack_tools: Option<bool>,
@@ -293,8 +300,16 @@ pub struct Schedule {
     /// Notification delivery channel override.
     pub notify_channel: Option<String>,
 
-    /// Notification chat target override.
+    /// Notification target override.
+    pub notify_target: Option<String>,
+
+    /// Legacy notification chat target override.
+    #[serde(default)]
     pub notify_chat_id: Option<String>,
+
+    /// Legacy schedule destination key, formerly named "channel".
+    #[serde(default, rename = "channel", skip_serializing)]
+    pub legacy_channel: Option<String>,
 
     /// Interactive execution mode.
     #[serde(default)]
@@ -347,7 +362,7 @@ impl Schedule {
         self.sandbox.unwrap_or(defaults.sandbox)
     }
 
-    /// Resolve notification delivery target using schedule overrides and global defaults.
+    /// Resolve notification route using schedule overrides and global defaults.
     pub fn effective_delivery(&self, notifications: &NotificationConfig) -> Option<DeliveryConfig> {
         let channel = self
             .notify_channel
@@ -355,13 +370,24 @@ impl Schedule {
             .cloned()
             .or_else(|| notifications.channel.clone())?;
 
-        let chat_id = self
-            .notify_chat_id
+        let target = self
+            .notify_target
             .as_ref()
             .cloned()
+            .or_else(|| self.notify_chat_id.clone())
+            .or_else(|| self.legacy_channel.clone())
+            .or_else(|| notifications.target.clone())
             .or_else(|| notifications.chat_id.clone())?;
 
-        Some(DeliveryConfig { channel, chat_id })
+        Some(DeliveryConfig { channel, target })
+    }
+
+    pub fn resolved_notify_target(&self) -> Option<&str> {
+        self.notify_target
+            .as_ref()
+            .or(self.notify_chat_id.as_ref())
+            .or(self.legacy_channel.as_ref())
+            .map(String::as_str)
     }
 }
 
@@ -1049,7 +1075,7 @@ cron = "0 * * * *"
 
     #[test]
     fn test_check_trigger_on_default() {
-        assert_eq!(CheckTriggerOn::default(), CheckTriggerOn::Success);
+        assert_eq!(CheckTriggerOn::default(), CheckTriggerOn::Failure);
     }
 
     #[test]
@@ -1179,6 +1205,215 @@ interaction = "silent"
 
         let config = ScheduleConfig::parse(config_str).expect("config should parse");
         assert_eq!(config.schedules[0].interaction, InteractionMode::Silent);
+    }
+
+    #[test]
+    fn test_legacy_schedule_channel_is_notification_target() {
+        let config_str = r#"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+
+[[schedules]]
+name = "slack-alert"
+cron = "0 * * * *"
+prompt = "Test"
+channel = "C1234567890"
+"#;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule channel should provide notification target");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "C1234567890");
+    }
+
+    #[test]
+    fn test_canonical_notification_target_is_default_route_target() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#ops"
+
+[[schedules]]
+name = "slack-alert"
+cron = "0 * * * *"
+prompt = "Test"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = notifications
+            .default_delivery()
+            .expect("default route should resolve");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "#ops");
+    }
+
+    #[test]
+    fn test_legacy_notification_chat_id_still_loads() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+chat_id = "C1234567890"
+
+[[schedules]]
+name = "slack-alert"
+cron = "0 * * * *"
+prompt = "Test"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = notifications
+            .default_delivery()
+            .expect("legacy default route should resolve");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "C1234567890");
+    }
+
+    #[test]
+    fn test_canonical_target_wins_over_legacy_chat_id() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#ops"
+chat_id = "#old"
+
+[[schedules]]
+name = "slack-alert"
+cron = "0 * * * *"
+prompt = "Test"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = notifications
+            .default_delivery()
+            .expect("canonical default route should resolve");
+
+        assert_eq!(delivery.target, "#ops");
+    }
+
+    #[test]
+    fn test_schedule_notify_target_overrides_default_target() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#default"
+
+[[schedules]]
+name = "slack-alert"
+cron = "0 * * * *"
+prompt = "Test"
+notify_target = "#ops"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule route should resolve");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "#ops");
+    }
+
+    #[test]
+    fn test_schedule_notify_channel_and_target_override_default_route() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#default"
+
+[[schedules]]
+name = "discord-alert"
+cron = "0 * * * *"
+prompt = "Test"
+notify_channel = "discord"
+notify_target = "987654321"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule route should resolve");
+
+        assert_eq!(delivery.channel, "discord");
+        assert_eq!(delivery.target, "987654321");
+    }
+
+    #[test]
+    fn test_canonical_schedule_notify_target_wins_over_legacy_aliases() {
+        let config_str = r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#default"
+
+[[schedules]]
+name = "mixed-alert"
+cron = "0 * * * *"
+prompt = "Test"
+notify_target = "#ops"
+notify_chat_id = "#old-chat"
+channel = "#old-channel"
+"##;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+        let notifications = config
+            .notifications
+            .as_ref()
+            .expect("notifications should parse");
+        let delivery = config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule route should resolve");
+
+        assert_eq!(delivery.target, "#ops");
+    }
+
+    #[test]
+    fn test_schedule_max_turns_loads_runtime_override() {
+        let config_str = r#"
+[[schedules]]
+name = "turn-limited"
+cron = "0 * * * *"
+prompt = "Test"
+max_turns = 16
+"#;
+
+        let config = ScheduleConfig::parse(config_str).expect("config should parse");
+
+        assert_eq!(config.schedules[0].max_turns, Some(16));
     }
 
     // ========================================================================
