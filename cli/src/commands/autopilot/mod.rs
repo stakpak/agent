@@ -154,19 +154,31 @@ pub enum AutopilotScheduleCommands {
         #[arg(long)]
         check: Option<String>,
 
-        /// When to trigger after check
-        #[arg(long, default_value_t = ScheduleTriggerOn::Failure)]
-        trigger_on: ScheduleTriggerOn,
+        /// When to trigger after check (default: failure)
+        #[arg(long)]
+        trigger_on: Option<ScheduleTriggerOn>,
 
         // /// Working directory for this schedule
         // #[arg(long)]
         // workdir: Option<String>,
-        /// Max agent steps
-        #[arg(long, default_value_t = 50)]
-        max_steps: u32,
-
-        /// Report results to this channel
+        /// Max agent turns for this schedule
         #[arg(long)]
+        max_turns: Option<usize>,
+
+        /// Deprecated alias for --max-turns
+        #[arg(long, hide = true)]
+        max_steps: Option<usize>,
+
+        /// Notification channel override (slack, telegram, discord)
+        #[arg(long)]
+        notify_channel: Option<String>,
+
+        /// Notification target override (Slack channel/ID, Telegram chat ID, Discord channel ID)
+        #[arg(long)]
+        notify_target: Option<String>,
+
+        /// Deprecated alias for --notify-target
+        #[arg(long, hide = true)]
         channel: Option<String>,
 
         /// Profile from config.toml used for this schedule's sessions
@@ -236,7 +248,7 @@ pub enum AutopilotChannelCommands {
 
     /// Add a channel
     #[command(
-        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n\n    RECOMMENDED: Use the app manifest for quick setup:\n    1. Go to https://api.slack.com/apps → Create New App → From an app manifest\n    2. Paste the manifest from: https://github.com/stakpak/agent/blob/main/libs/gateway/src/channels/slack-manifest.yaml\n    3. Basic Information → App-Level Tokens → generate token with connections:write scope (xapp-...)\n    4. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n    Manual setup (if you already have an app):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add Bot Token Scopes:\n       app_mentions:read, channels:history, channels:read, chat:write,\n       groups:history, groups:read, im:history, im:read,\n       mpim:history, mpim:read, reactions:read, reactions:write\n    4. Event Subscriptions → subscribe to bot events:\n       message.channels, message.groups, message.im, app_mention\n    5. Interactivity & Shortcuts → enable\n    6. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/chat_id for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
+        after_long_help = "HOW TO GET TOKENS:\n\n  Slack (requires both --bot-token and --app-token):\n\n    RECOMMENDED: Use the app manifest for quick setup:\n    1. Go to https://api.slack.com/apps → Create New App → From an app manifest\n    2. Paste the manifest from: https://github.com/stakpak/agent/blob/main/libs/gateway/src/channels/slack-manifest.yaml\n    3. Basic Information → App-Level Tokens → generate token with connections:write scope (xapp-...)\n    4. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n    Manual setup (if you already have an app):\n    1. Create app at https://api.slack.com/apps\n    2. Enable Socket Mode → generate app-level token (xapp-...) with connections:write scope\n    3. OAuth & Permissions → add Bot Token Scopes:\n       app_mentions:read, channels:history, channels:read, chat:write,\n       groups:history, groups:read, im:history, im:read,\n       mpim:history, mpim:read, reactions:read, reactions:write\n    4. Event Subscriptions → subscribe to bot events:\n       message.channels, message.groups, message.im, app_mention\n    5. Interactivity & Shortcuts → enable\n    6. Install to Workspace → copy Bot User OAuth Token (xoxb-...)\n\n  Telegram:\n    1. Message @BotFather on Telegram\n    2. Send /newbot → choose name and username (must end in 'bot')\n    3. Copy the bot token (format: 123456789:ABCdef...)\n\n  Discord:\n    1. Create app at https://discord.com/developers/applications\n    2. Bot tab → copy the bot token\n    3. OAuth2 → enable bot scope and required permissions\n\n  Optional default notification target:\n    --target sets [notifications].channel/target for watch alerts\n    Example: --target \"#engineering\" (Slack)\n"
     )]
     Add {
         /// Channel type (slack, telegram, discord)
@@ -255,7 +267,7 @@ pub enum AutopilotChannelCommands {
         #[arg(long)]
         app_token: Option<String>,
 
-        /// Default notification target (Slack channel, Telegram chat_id, Discord channel_id)
+        /// Default notification target (Slack channel/ID, Telegram chat ID, Discord channel ID)
         #[arg(long)]
         target: Option<String>,
 
@@ -380,13 +392,23 @@ struct AutopilotScheduleConfig {
     #[serde(default)]
     check: Option<String>,
     #[serde(default)]
-    trigger_on: ScheduleTriggerOn,
+    trigger_on: Option<ScheduleTriggerOn>,
     // #[serde(default)]
     // workdir: Option<String>,
-    #[serde(default = "default_schedule_max_steps")]
-    max_steps: u32,
-    #[serde(default)]
-    channel: Option<String>,
+    #[serde(default, alias = "max_steps", skip_serializing_if = "Option::is_none")]
+    max_turns: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    notify_channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    notify_target: Option<String>,
+    #[serde(
+        default,
+        rename = "notify_chat_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    legacy_notify_chat_id: Option<String>,
+    #[serde(default, rename = "channel", skip_serializing)]
+    legacy_channel: Option<String>,
     #[serde(default)]
     profile: Option<String>,
     #[serde(default)]
@@ -407,6 +429,16 @@ impl Default for AutopilotServerConfig {
             auto_approve_all: false,
             sandbox_mode: stakpak_server::SandboxMode::default(),
         }
+    }
+}
+
+impl AutopilotScheduleConfig {
+    fn resolved_notify_target(&self) -> Option<&str> {
+        self.notify_target
+            .as_ref()
+            .or(self.legacy_notify_chat_id.as_ref())
+            .or(self.legacy_channel.as_ref())
+            .map(String::as_str)
     }
 }
 
@@ -485,11 +517,13 @@ impl AutopilotConfigFile {
             );
         }
 
-        root.insert(
-            "schedules".to_string(),
-            toml::Value::try_from(&self.schedules)
-                .map_err(|e| format!("Failed to serialize schedules: {}", e))?,
-        );
+        if !root.contains_key("schedules") {
+            root.insert(
+                "schedules".to_string(),
+                toml::Value::try_from(&self.schedules)
+                    .map_err(|e| format!("Failed to serialize schedules: {}", e))?,
+            );
+        }
 
         write_toml_root_table(path, root)
     }
@@ -498,6 +532,7 @@ impl AutopilotConfigFile {
         self.schedules.iter().find(|schedule| schedule.name == name)
     }
 
+    #[cfg(test)]
     fn find_schedule_mut(&mut self, name: &str) -> Option<&mut AutopilotScheduleConfig> {
         self.schedules
             .iter_mut()
@@ -533,10 +568,6 @@ fn default_server_listen() -> String {
 
 fn default_enabled() -> bool {
     true
-}
-
-fn default_schedule_max_steps() -> u32 {
-    50
 }
 
 fn load_toml_root_table(path: &Path) -> Result<toml::value::Table, String> {
@@ -702,6 +733,17 @@ struct AutopilotScheduleStatusJson {
     enabled: bool,
     sandbox: bool,
     next_run: Option<String>,
+    notification: ScheduleNotificationStatusJson,
+}
+
+#[derive(Debug, Serialize)]
+struct ScheduleNotificationStatusJson {
+    channel: Option<String>,
+    target: Option<String>,
+    route: Option<String>,
+    ready: bool,
+    state: String,
+    hint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1965,18 +2007,22 @@ async fn run_schedule_command(
             check,
             trigger_on,
             // workdir,
+            max_turns,
             max_steps,
+            notify_channel,
+            notify_target,
             channel,
             profile,
             pause_on_approval,
             sandbox,
             enabled,
         } => {
-            let mut autopilot_config = AutopilotConfigFile::load_or_default_async().await?;
             let profile = normalize_optional_string(profile);
             if let Some(profile_name) = profile.as_deref() {
                 validate_profile_reference(profile_name, config)?;
             }
+            let notify_target = resolve_schedule_notify_target(notify_target, channel)?;
+            let max_turns = resolve_schedule_max_turns(max_turns, max_steps)?;
 
             let schedule = AutopilotScheduleConfig {
                 name: name.clone(),
@@ -1985,16 +2031,18 @@ async fn run_schedule_command(
                 check,
                 trigger_on,
                 // workdir,
-                max_steps,
-                channel,
+                max_turns,
+                notify_channel: normalize_optional_string(notify_channel),
+                notify_target,
+                legacy_notify_chat_id: None,
+                legacy_channel: None,
                 profile,
                 pause_on_approval,
                 sandbox,
                 enabled,
             };
             let check_path = schedule.check.clone();
-            add_schedule_in_config(&mut autopilot_config, schedule)?;
-            autopilot_config.save()?;
+            add_schedule_to_path(AutopilotConfigFile::path().as_path(), schedule)?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "added", signaled);
@@ -2009,27 +2057,21 @@ async fn run_schedule_command(
             Ok(())
         }
         AutopilotScheduleCommands::Remove { name } => {
-            let mut config = AutopilotConfigFile::load_or_default_async().await?;
-            remove_schedule_in_config(&mut config, &name)?;
-            config.save()?;
+            remove_schedule_at_path(AutopilotConfigFile::path().as_path(), &name)?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "removed", signaled);
             Ok(())
         }
         AutopilotScheduleCommands::Enable { name } => {
-            let mut config = AutopilotConfigFile::load_or_default_async().await?;
-            set_schedule_enabled_in_config(&mut config, &name, true)?;
-            config.save()?;
+            set_schedule_enabled_at_path(AutopilotConfigFile::path().as_path(), &name, true)?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "enabled", signaled);
             Ok(())
         }
         AutopilotScheduleCommands::Disable { name } => {
-            let mut config = AutopilotConfigFile::load_or_default_async().await?;
-            set_schedule_enabled_in_config(&mut config, &name, false)?;
-            config.save()?;
+            set_schedule_enabled_at_path(AutopilotConfigFile::path().as_path(), &name, false)?;
 
             let signaled = signal_scheduler_reload().await;
             print_schedule_mutation_feedback(&name, "disabled", signaled);
@@ -2392,17 +2434,19 @@ async fn list_schedules() -> Result<(), String> {
         println!("No schedules configured.");
         return Ok(());
     }
+    let notification_defaults =
+        load_notification_defaults(AutopilotConfigFile::path().as_path()).ok();
+    let statuses = build_schedule_statuses(&config.schedules, notification_defaults.as_ref());
 
     println!(
-        "{:<20} {:<16} {:<10} {:<8} {:<24}",
-        "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN"
+        "{:<20} {:<16} {:<10} {:<8} {:<24} {:<24}",
+        "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN", "NOTIFICATION"
     );
 
-    for schedule in &config.schedules {
-        let next_run =
-            next_run_for_cron(&schedule.cron, schedule.enabled).unwrap_or_else(|| "-".to_string());
+    for schedule in &statuses {
+        let notification = describe_notification_for_table(&schedule.notification);
         println!(
-            "{:<20} {:<16} {:<10} {:<8} {:<24}",
+            "{:<20} {:<16} {:<10} {:<8} {:<24} {:<24}",
             truncate_text(&schedule.name, 20),
             truncate_text(&schedule.cron, 16),
             if schedule.enabled {
@@ -2411,7 +2455,8 @@ async fn list_schedules() -> Result<(), String> {
                 "disabled"
             },
             if schedule.sandbox { "yes" } else { "no" },
-            truncate_text(&next_run, 24)
+            truncate_text(schedule.next_run.as_deref().unwrap_or("-"), 24),
+            truncate_text(&notification, 24)
         );
     }
 
@@ -2494,6 +2539,46 @@ fn uses_home_tilde_prefix(path: &str) -> bool {
     path == "~" || path.starts_with("~/") || path.starts_with("~\\")
 }
 
+fn resolve_schedule_notify_target(
+    notify_target: Option<String>,
+    legacy_channel: Option<String>,
+) -> Result<Option<String>, String> {
+    let notify_target = normalize_optional_string(notify_target);
+    let legacy_channel = normalize_optional_string(legacy_channel);
+
+    match (notify_target, legacy_channel) {
+        (Some(target), Some(channel_alias)) => Err(format!(
+            "Conflicting notification target flags: --notify-target '{}' and deprecated --channel '{}'. Use only --notify-target.",
+            target, channel_alias
+        )),
+        (Some(target), None) => Ok(Some(target)),
+        (None, Some(target)) => {
+            eprintln!("Warning: --channel is deprecated; use --notify-target instead.");
+            Ok(Some(target))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn resolve_schedule_max_turns(
+    max_turns: Option<usize>,
+    max_steps: Option<usize>,
+) -> Result<Option<usize>, String> {
+    match (max_turns, max_steps) {
+        (Some(turns), Some(steps)) => Err(format!(
+            "Conflicting turn limit flags: --max-turns {} and deprecated --max-steps {}. Use only --max-turns.",
+            turns, steps
+        )),
+        (Some(turns), None) => Ok(Some(turns)),
+        (None, Some(steps)) => {
+            eprintln!("Warning: --max-steps is deprecated; use --max-turns instead.");
+            Ok(Some(steps))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+#[cfg(test)]
 fn add_schedule_in_config(
     config: &mut AutopilotConfigFile,
     schedule: AutopilotScheduleConfig,
@@ -2508,6 +2593,135 @@ fn add_schedule_in_config(
     Ok(())
 }
 
+fn schedule_array_mut(root: &mut toml::value::Table) -> Result<&mut Vec<toml::Value>, String> {
+    if !root.contains_key("schedules") {
+        root.insert("schedules".to_string(), toml::Value::Array(Vec::new()));
+    }
+
+    match root.get_mut("schedules") {
+        Some(toml::Value::Array(schedules)) => Ok(schedules),
+        Some(_) => Err("Autopilot config field 'schedules' must be an array".to_string()),
+        None => unreachable!("schedules was just initialized"),
+    }
+}
+
+fn schedule_name_from_value(value: &toml::Value) -> Option<&str> {
+    value
+        .as_table()
+        .and_then(|table| table.get("name"))
+        .and_then(toml::Value::as_str)
+}
+
+fn build_schedule_toml_table(schedule: &AutopilotScheduleConfig) -> toml::value::Table {
+    let mut table = toml::value::Table::new();
+    table.insert(
+        "name".to_string(),
+        toml::Value::String(schedule.name.clone()),
+    );
+    table.insert(
+        "cron".to_string(),
+        toml::Value::String(schedule.cron.clone()),
+    );
+    table.insert(
+        "prompt".to_string(),
+        toml::Value::String(schedule.prompt.clone()),
+    );
+
+    if let Some(check) = schedule.check.as_ref() {
+        table.insert("check".to_string(), toml::Value::String(check.clone()));
+    }
+    if let Some(trigger_on) = schedule.trigger_on {
+        table.insert(
+            "trigger_on".to_string(),
+            toml::Value::String(trigger_on.to_string()),
+        );
+    }
+    if let Some(max_turns) = schedule.max_turns {
+        table.insert(
+            "max_turns".to_string(),
+            toml::Value::Integer(i64::try_from(max_turns).unwrap_or(i64::MAX)),
+        );
+    }
+    if let Some(notify_channel) = schedule.notify_channel.as_ref() {
+        table.insert(
+            "notify_channel".to_string(),
+            toml::Value::String(notify_channel.clone()),
+        );
+    }
+    if let Some(notify_target) = schedule.notify_target.as_ref() {
+        table.insert(
+            "notify_target".to_string(),
+            toml::Value::String(notify_target.clone()),
+        );
+    }
+    if let Some(profile) = schedule.profile.as_ref() {
+        table.insert("profile".to_string(), toml::Value::String(profile.clone()));
+    }
+    if schedule.pause_on_approval {
+        table.insert(
+            "pause_on_approval".to_string(),
+            toml::Value::Boolean(schedule.pause_on_approval),
+        );
+    }
+    if schedule.sandbox {
+        table.insert(
+            "sandbox".to_string(),
+            toml::Value::Boolean(schedule.sandbox),
+        );
+    }
+    table.insert(
+        "enabled".to_string(),
+        toml::Value::Boolean(schedule.enabled),
+    );
+    table
+}
+
+fn add_schedule_to_path(path: &Path, schedule: AutopilotScheduleConfig) -> Result<(), String> {
+    validate_schedule(&schedule)?;
+
+    let mut root = load_toml_root_table(path)?;
+    let schedules = schedule_array_mut(&mut root)?;
+    if schedules
+        .iter()
+        .any(|value| schedule_name_from_value(value) == Some(schedule.name.as_str()))
+    {
+        return Err(format!("Schedule '{}' already exists", schedule.name));
+    }
+
+    schedules.push(toml::Value::Table(build_schedule_toml_table(&schedule)));
+    write_toml_root_table(path, root)
+}
+
+fn remove_schedule_at_path(path: &Path, name: &str) -> Result<(), String> {
+    let mut root = load_toml_root_table(path)?;
+    let schedules = schedule_array_mut(&mut root)?;
+    let initial_len = schedules.len();
+    schedules.retain(|value| schedule_name_from_value(value) != Some(name));
+
+    if schedules.len() == initial_len {
+        return Err(format!("Schedule '{}' not found", name));
+    }
+
+    write_toml_root_table(path, root)
+}
+
+fn set_schedule_enabled_at_path(path: &Path, name: &str, enabled: bool) -> Result<(), String> {
+    let mut root = load_toml_root_table(path)?;
+    let schedules = schedule_array_mut(&mut root)?;
+    let schedule = schedules
+        .iter_mut()
+        .find(|value| schedule_name_from_value(value) == Some(name))
+        .ok_or_else(|| format!("Schedule '{}' not found", name))?;
+
+    let table = schedule
+        .as_table_mut()
+        .ok_or_else(|| format!("Schedule '{}' is not a TOML table", name))?;
+    table.insert("enabled".to_string(), toml::Value::Boolean(enabled));
+
+    write_toml_root_table(path, root)
+}
+
+#[cfg(test)]
 fn remove_schedule_in_config(config: &mut AutopilotConfigFile, name: &str) -> Result<(), String> {
     let initial_len = config.schedules.len();
     config.schedules.retain(|schedule| schedule.name != name);
@@ -2519,6 +2733,7 @@ fn remove_schedule_in_config(config: &mut AutopilotConfigFile, name: &str) -> Re
     Ok(())
 }
 
+#[cfg(test)]
 fn set_schedule_enabled_in_config(
     config: &mut AutopilotConfigFile,
     name: &str,
@@ -2575,7 +2790,17 @@ fn autopilot_db_path() -> Result<String, String> {
 #[derive(Debug, Clone)]
 struct NotificationDefaults {
     channel: String,
-    chat_id: Option<String>,
+    target: Option<String>,
+    legacy_chat_id: Option<String>,
+}
+
+impl NotificationDefaults {
+    fn resolved_target(&self) -> Option<&str> {
+        self.target
+            .as_ref()
+            .or(self.legacy_chat_id.as_ref())
+            .map(String::as_str)
+    }
 }
 
 fn load_notification_defaults(path: &Path) -> Result<NotificationDefaults, String> {
@@ -2591,12 +2816,66 @@ fn load_notification_defaults(path: &Path) -> Result<NotificationDefaults, Strin
         .ok_or_else(|| "Notifications channel is not configured".to_string())?
         .to_string();
 
-    let chat_id = notifications
+    let target = notifications
+        .get("target")
+        .and_then(toml::Value::as_str)
+        .map(str::to_string);
+    let legacy_chat_id = notifications
         .get("chat_id")
         .and_then(toml::Value::as_str)
         .map(str::to_string);
 
-    Ok(NotificationDefaults { channel, chat_id })
+    Ok(NotificationDefaults {
+        channel,
+        target,
+        legacy_chat_id,
+    })
+}
+
+fn notification_route_config_warnings(root: &toml::value::Table) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if let Some(notifications) = root.get("notifications").and_then(toml::Value::as_table) {
+        let target = notifications.get("target").and_then(toml::Value::as_str);
+        let chat_id = notifications.get("chat_id").and_then(toml::Value::as_str);
+        if let (Some(target), Some(chat_id)) = (target, chat_id)
+            && target != chat_id
+        {
+            warnings.push(format!(
+                "[notifications].target ('{target}') overrides legacy [notifications].chat_id ('{chat_id}')"
+            ));
+        }
+    }
+
+    if let Some(schedules) = root.get("schedules").and_then(toml::Value::as_array) {
+        for schedule in schedules {
+            let Some(table) = schedule.as_table() else {
+                continue;
+            };
+            let name = table
+                .get("name")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("<unnamed>");
+            let canonical = table.get("notify_target").and_then(toml::Value::as_str);
+            let legacy_chat = table.get("notify_chat_id").and_then(toml::Value::as_str);
+            let legacy_channel = table.get("channel").and_then(toml::Value::as_str);
+
+            if let Some(canonical) = canonical {
+                for (key, legacy) in [("notify_chat_id", legacy_chat), ("channel", legacy_channel)]
+                {
+                    if let Some(legacy) = legacy
+                        && canonical != legacy
+                    {
+                        warnings.push(format!(
+                            "[[schedules]] '{name}' notify_target ('{canonical}') overrides legacy {key} ('{legacy}')"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    warnings
 }
 
 fn resolve_default_gateway_url(root: &toml::value::Table) -> String {
@@ -2635,9 +2914,10 @@ fn apply_default_notification_target(
         toml::Value::String(channel.trim().to_string()),
     );
     notifications.insert(
-        "chat_id".to_string(),
+        "target".to_string(),
         toml::Value::String(target.trim().to_string()),
     );
+    notifications.remove("chat_id");
 
     Ok(())
 }
@@ -2686,9 +2966,10 @@ async fn status_autopilot(
     let base_url = loopback_base_url_from_bind(&server_config.listen);
     let probe_client = build_probe_http_client();
 
-    let schedules = build_schedule_statuses(&autopilot_config.schedules);
     let gateway_config = load_gateway_config_allowing_no_channels(config_path.as_path())?;
     let notification_defaults = load_notification_defaults(config_path.as_path()).ok();
+    let schedules =
+        build_schedule_statuses(&autopilot_config.schedules, notification_defaults.as_ref());
     let channels = build_channel_statuses(&gateway_config, notification_defaults.as_ref());
 
     let service_path = autopilot_service_path();
@@ -2858,12 +3139,13 @@ async fn status_autopilot(
         println!();
         println!("  Schedules:");
         println!(
-            "    {:<20} {:<16} {:<10} {:<8} {:<20}",
-            "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN"
+            "    {:<20} {:<16} {:<10} {:<8} {:<20} {:<24}",
+            "NAME", "CRON", "STATUS", "SANDBOX", "NEXT RUN", "NOTIFICATION"
         );
         for schedule in &schedules {
+            let notification = describe_notification_for_table(&schedule.notification);
             println!(
-                "    {:<20} {:<16} {:<10} {:<8} {:<20}",
+                "    {:<20} {:<16} {:<10} {:<8} {:<20} {:<24}",
                 truncate_text(&schedule.name, 20),
                 truncate_text(&schedule.cron, 16),
                 if schedule.enabled {
@@ -2872,7 +3154,8 @@ async fn status_autopilot(
                     "disabled"
                 },
                 if schedule.sandbox { "yes" } else { "no" },
-                schedule.next_run.as_deref().unwrap_or("-")
+                schedule.next_run.as_deref().unwrap_or("-"),
+                truncate_text(&notification, 24)
             );
         }
     }
@@ -3031,9 +3314,24 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
 
     let base_url = loopback_base_url_from_bind(&autopilot_config.server.listen);
     let server_health_url = format!("{}/v1/health", base_url);
+    let gateway_status_url = format!("{}/v1/gateway/status", base_url);
     let probe_client = build_probe_http_client();
     let server_reachable = if let Some(client) = probe_client.as_ref() {
         endpoint_ok(client, &server_health_url).await
+    } else {
+        false
+    };
+    let live_sandbox = if server_reachable {
+        if let Some(client) = probe_client.as_ref() {
+            fetch_live_sandbox_status(client, &server_health_url).await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let gateway_reachable = if let Some(client) = probe_client.as_ref() {
+        endpoint_ok(client, &gateway_status_url).await
     } else {
         false
     };
@@ -3068,6 +3366,19 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
         }
     }
 
+    if let Ok(root) = load_toml_root_table(gateway_path.as_path()) {
+        for warning in notification_route_config_warnings(&root) {
+            println!("⚠ {}", warning);
+        }
+    }
+
+    let notification_defaults = load_notification_defaults(gateway_path.as_path()).ok();
+    let schedule_statuses =
+        build_schedule_statuses(&autopilot_config.schedules, notification_defaults.as_ref());
+    for diagnostic in notification_doctor_diagnostics(&schedule_statuses, gateway_reachable) {
+        println!("{}", diagnostic);
+    }
+
     let scheduler_status = collect_scheduler_status(None).await;
     if scheduler_status.config_valid {
         if scheduler_status.trigger_count == 0 {
@@ -3097,6 +3408,20 @@ async fn doctor_autopilot(config: &AppConfig) -> Result<(), String> {
 
     if server_reachable {
         println!("✓ Server health endpoint reachable");
+        if let Some(sandbox) = live_sandbox {
+            match sandbox.healthy {
+                Some(true) => println!("✓ Live sandbox healthy ({})", sandbox.mode),
+                Some(false) => {
+                    failures += 1;
+                    println!(
+                        "✗ Live sandbox unhealthy ({}): {}",
+                        sandbox.mode,
+                        sandbox.last_error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                None => println!("⚠ Live sandbox health unknown ({})", sandbox.mode),
+            }
+        }
     } else {
         println!("⚠ Server health endpoint not reachable (not running is OK before start)");
     }
@@ -3288,6 +3613,7 @@ async fn collect_scheduler_status(recent_runs: Option<u32>) -> SchedulerStatusJs
 
 fn build_schedule_statuses(
     schedules: &[AutopilotScheduleConfig],
+    notification_defaults: Option<&NotificationDefaults>,
 ) -> Vec<AutopilotScheduleStatusJson> {
     schedules
         .iter()
@@ -3297,8 +3623,128 @@ fn build_schedule_statuses(
             enabled: schedule.enabled,
             sandbox: schedule.sandbox,
             next_run: next_run_for_cron(&schedule.cron, schedule.enabled),
+            notification: resolve_schedule_notification_status(schedule, notification_defaults),
         })
         .collect()
+}
+
+fn resolve_schedule_notification_status(
+    schedule: &AutopilotScheduleConfig,
+    notification_defaults: Option<&NotificationDefaults>,
+) -> ScheduleNotificationStatusJson {
+    let channel = schedule
+        .notify_channel
+        .clone()
+        .or_else(|| notification_defaults.map(|defaults| defaults.channel.clone()));
+    let target = schedule
+        .resolved_notify_target()
+        .map(str::to_string)
+        .or_else(|| {
+            notification_defaults
+                .and_then(|defaults| defaults.resolved_target().map(str::to_string))
+        });
+    let route = channel
+        .as_ref()
+        .zip(target.as_ref())
+        .map(|(channel, target)| format!("{channel}:{target}"));
+
+    if !schedule.enabled {
+        return ScheduleNotificationStatusJson {
+            channel,
+            target,
+            route,
+            ready: false,
+            state: "disabled".to_string(),
+            hint: None,
+        };
+    }
+
+    let (ready, state, hint) = match (channel.as_ref(), target.as_ref()) {
+        (Some(_), Some(_)) => (true, "ready".to_string(), None),
+        (Some(channel), None) => (
+            false,
+            "missing_target".to_string(),
+            Some(format!(
+                "Set a notification target: stakpak autopilot channel add {channel} --target <target>"
+            )),
+        ),
+        (None, Some(_)) => (
+            false,
+            "missing_channel".to_string(),
+            Some("Set a notification channel: add --notify-channel <channel> or configure [notifications].channel".to_string()),
+        ),
+        (None, None) => (
+            false,
+            "missing_route".to_string(),
+            Some("Set a notification route: stakpak autopilot channel add slack --target <target>".to_string()),
+        ),
+    };
+
+    ScheduleNotificationStatusJson {
+        channel,
+        target,
+        route,
+        ready,
+        state,
+        hint,
+    }
+}
+
+fn describe_notification_for_table(status: &ScheduleNotificationStatusJson) -> String {
+    if let Some(route) = status.route.as_deref() {
+        if status.ready {
+            route.to_string()
+        } else {
+            format!("{} ({})", route, status.state)
+        }
+    } else {
+        status.state.clone()
+    }
+}
+
+fn notification_doctor_diagnostics(
+    schedules: &[AutopilotScheduleStatusJson],
+    gateway_reachable: bool,
+) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+
+    for schedule in schedules {
+        let notification = &schedule.notification;
+        if !schedule.enabled {
+            diagnostics.push(format!(
+                "ℹ Schedule '{}' is disabled; it will not run or send notifications.",
+                schedule.name
+            ));
+            continue;
+        }
+
+        if notification.ready {
+            let route = notification.route.as_deref().unwrap_or("configured");
+            if gateway_reachable {
+                diagnostics.push(format!(
+                    "✓ Schedule '{}' notification route ready: {}",
+                    schedule.name, route
+                ));
+            } else {
+                diagnostics.push(format!(
+                    "⚠ Schedule '{}' notification route {} cannot currently deliver because the gateway health endpoint is unreachable.",
+                    schedule.name, route
+                ));
+            }
+            continue;
+        }
+
+        let hint = notification
+            .hint
+            .as_deref()
+            .unwrap_or("Configure a notification route with channel and target.");
+        diagnostics.push(format!(
+            "⚠ Schedule '{}' notification route {}. {}",
+            schedule.name, notification.state, hint
+        ));
+    }
+
+    diagnostics
 }
 
 fn build_channel_statuses(
@@ -3334,7 +3780,7 @@ fn build_single_channel_status(
 ) -> AutopilotChannelStatusJson {
     let target = notification_defaults
         .filter(|defaults| defaults.channel == channel_name)
-        .and_then(|defaults| defaults.chat_id.clone())
+        .and_then(|defaults| defaults.resolved_target().map(str::to_string))
         .unwrap_or_else(|| "-".to_string());
 
     AutopilotChannelStatusJson {
@@ -3415,6 +3861,37 @@ async fn endpoint_ok(client: &reqwest::Client, url: &str) -> bool {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
     }
+}
+
+async fn fetch_live_sandbox_status(
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<SandboxStatusJson> {
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let value = response.json::<serde_json::Value>().await.ok()?;
+    let sandbox = value.get("sandbox")?;
+    Some(SandboxStatusJson {
+        mode: sandbox.get("mode")?.as_str()?.to_string(),
+        healthy: sandbox.get("healthy").and_then(|value| value.as_bool()),
+        consecutive_ok: sandbox
+            .get("consecutive_ok")
+            .and_then(|value| value.as_u64()),
+        consecutive_failures: sandbox
+            .get("consecutive_failures")
+            .and_then(|value| value.as_u64()),
+        last_ok: sandbox
+            .get("last_ok")
+            .and_then(|value| value.as_str())
+            .map(String::from),
+        last_error: sandbox
+            .get("last_error")
+            .and_then(|value| value.as_str())
+            .map(String::from),
+    })
 }
 
 async fn wait_for_shutdown_signal() {
@@ -3963,10 +4440,13 @@ mod tests {
             cron: "*/5 * * * *".to_string(),
             prompt: "Check infra".to_string(),
             check: None,
-            trigger_on: ScheduleTriggerOn::Failure,
+            trigger_on: Some(ScheduleTriggerOn::Failure),
             // workdir: None,
-            max_steps: 50,
-            channel: None,
+            max_turns: None,
+            notify_channel: None,
+            notify_target: None,
+            legacy_notify_chat_id: None,
+            legacy_channel: None,
             profile: None,
             pause_on_approval: false,
             sandbox: false,
@@ -4177,7 +4657,8 @@ app_token = "xapp-test"
         assert!(reloaded.contains("[channels.slack]"));
         assert!(reloaded.contains("[notifications]"));
         assert!(reloaded.contains("channel = \"slack\""));
-        assert!(reloaded.contains("chat_id = \"#ops\""));
+        assert!(reloaded.contains("target = \"#ops\""));
+        assert!(!reloaded.contains("chat_id = \"#ops\""));
 
         let _ = std::fs::remove_file(path);
     }
@@ -4223,7 +4704,8 @@ prompt = "Check system health"
         assert!(reloaded.contains("app_token = \"xapp-test\""));
         assert!(reloaded.contains("[notifications]"));
         assert!(reloaded.contains("channel = \"slack\""));
-        assert!(reloaded.contains("chat_id = \"#eng\""));
+        assert!(reloaded.contains("target = \"#eng\""));
+        assert!(!reloaded.contains("chat_id = \"#eng\""));
         assert!(reloaded.contains("[[schedules]]"));
 
         let _ = std::fs::remove_file(path);
@@ -4360,10 +4842,13 @@ app_token = "xapp-test"
             cron: "*/5 * * * *".to_string(),
             prompt: "hello".to_string(),
             check: None,
-            trigger_on: ScheduleTriggerOn::Failure,
+            trigger_on: Some(ScheduleTriggerOn::Failure),
             // workdir: None,
-            max_steps: 50,
-            channel: None,
+            max_turns: None,
+            notify_channel: None,
+            notify_target: None,
+            legacy_notify_chat_id: None,
+            legacy_channel: None,
             profile: None,
             pause_on_approval: false,
             sandbox: false,
@@ -4372,6 +4857,266 @@ app_token = "xapp-test"
         let result = add_schedule_in_config(&mut config, schedule);
         assert!(result.is_ok());
         assert!(config.find_schedule("demo").is_some());
+    }
+
+    #[test]
+    fn schedule_notify_target_saves_as_runtime_notification_target() {
+        let path = temp_file_path("autopilot-schedule-channel-target");
+        let write_result = std::fs::write(
+            &path,
+            r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+"##,
+        );
+        assert!(write_result.is_ok());
+
+        let mut config = AutopilotConfigFile::load_from_path(&path)
+            .expect("config should load with notifications");
+        let mut schedule = sample_schedule("slack-alert");
+        schedule.notify_target = Some("C1234567890".to_string());
+        let add_result = add_schedule_in_config(&mut config, schedule);
+        assert!(add_result.is_ok());
+
+        let save_result = config.save_to_path(&path);
+        assert!(save_result.is_ok());
+
+        let runtime_config = crate::commands::watch::ScheduleConfig::load(&path)
+            .expect("runtime config should load");
+        let notifications = runtime_config
+            .notifications
+            .as_ref()
+            .expect("notifications should be preserved");
+        let delivery = runtime_config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule target should be runtime-readable");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "C1234567890");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn schedule_add_to_path_writes_canonical_notification_and_turn_fields() {
+        let path = temp_file_path("autopilot-schedule-add-canonical");
+        std::fs::write(
+            &path,
+            r##"
+[notifications]
+gateway_url = "http://127.0.0.1:4096"
+channel = "slack"
+target = "#default"
+"##,
+        )
+        .expect("write config");
+
+        let mut schedule = sample_schedule("slack-alert");
+        schedule.trigger_on = Some(ScheduleTriggerOn::Any);
+        schedule.max_turns = Some(16);
+        schedule.notify_channel = Some("slack".to_string());
+        schedule.notify_target = Some("#ops".to_string());
+
+        add_schedule_to_path(&path, schedule).expect("schedule should be added");
+
+        let reloaded = std::fs::read_to_string(&path).expect("read config");
+        assert!(reloaded.contains("notify_channel = \"slack\""));
+        assert!(reloaded.contains("notify_target = \"#ops\""));
+        assert!(reloaded.contains("max_turns = 16"));
+        assert!(reloaded.contains("trigger_on = \"any\""));
+        assert!(!reloaded.contains("notify_chat_id"));
+        assert!(!reloaded.contains("channel = \"#ops\""));
+
+        let runtime_config =
+            crate::commands::watch::ScheduleConfig::load(&path).expect("runtime should load");
+        assert_eq!(runtime_config.schedules[0].max_turns, Some(16));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn schedule_destination_flag_conflicts_are_rejected_before_write() {
+        let path = temp_file_path("autopilot-schedule-conflict");
+        std::fs::write(
+            &path,
+            r#"
+[[schedules]]
+name = "existing"
+cron = "*/5 * * * *"
+prompt = "Existing"
+"#,
+        )
+        .expect("write config");
+
+        let before = std::fs::read_to_string(&path).expect("read before");
+        let result =
+            resolve_schedule_notify_target(Some("#ops".to_string()), Some("#old".to_string()));
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).expect("read after"), before);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn schedule_turn_limit_flag_conflicts_are_rejected_before_write() {
+        let result = resolve_schedule_max_turns(Some(16), Some(32));
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .expect_err("expected conflict")
+                .contains("--max-turns")
+        );
+    }
+
+    #[test]
+    fn schedule_add_help_uses_canonical_notification_and_turn_flags() {
+        let mut command =
+            AutopilotScheduleCommands::augment_subcommands(clap::Command::new("schedule"));
+        let add = command
+            .find_subcommand_mut("add")
+            .expect("add subcommand should exist");
+        let help = add.render_long_help().to_string();
+
+        assert!(help.contains("--notify-target"));
+        assert!(help.contains("--notify-channel"));
+        assert!(help.contains("--max-turns"));
+        assert!(!help.contains("--max-steps"));
+        assert!(!help.contains("--channel <"));
+    }
+
+    #[test]
+    fn schedule_crud_preserves_runtime_and_unknown_fields() {
+        let path = temp_file_path("autopilot-schedule-preserve-fields");
+        std::fs::write(
+            &path,
+            r##"
+[[schedules]]
+name = "keep"
+cron = "*/5 * * * *"
+prompt = "Keep"
+timeout = "45m"
+check_timeout = "1m"
+notify_on = "failures"
+notify_channel = "slack"
+notify_target = "#ops"
+interaction = "silent"
+unknown_future = "preserve-me"
+enabled = true
+
+[[schedules]]
+name = "toggle"
+cron = "*/10 * * * *"
+prompt = "Toggle"
+enabled = true
+"##,
+        )
+        .expect("write config");
+
+        set_schedule_enabled_at_path(&path, "keep", false).expect("disable keep");
+        let disabled = std::fs::read_to_string(&path).expect("read disabled");
+        assert!(disabled.contains("timeout = \"45m\""));
+        assert!(disabled.contains("check_timeout = \"1m\""));
+        assert!(disabled.contains("notify_on = \"failures\""));
+        assert!(disabled.contains("notify_channel = \"slack\""));
+        assert!(disabled.contains("notify_target = \"#ops\""));
+        assert!(disabled.contains("interaction = \"silent\""));
+        assert!(disabled.contains("unknown_future = \"preserve-me\""));
+        assert!(disabled.contains("enabled = false"));
+
+        set_schedule_enabled_at_path(&path, "keep", true).expect("enable keep");
+        remove_schedule_at_path(&path, "toggle").expect("remove toggle");
+        let removed = std::fs::read_to_string(&path).expect("read removed");
+        assert!(removed.contains("name = \"keep\""));
+        assert!(!removed.contains("name = \"toggle\""));
+        assert!(removed.contains("unknown_future = \"preserve-me\""));
+        assert!(removed.contains("enabled = true"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn notification_status_resolves_route_and_disabled_state() {
+        let defaults = NotificationDefaults {
+            channel: "slack".to_string(),
+            target: Some("#ops".to_string()),
+            legacy_chat_id: None,
+        };
+        let enabled = sample_schedule("enabled");
+        let mut disabled = sample_schedule("disabled");
+        disabled.enabled = false;
+
+        let statuses = build_schedule_statuses(&[enabled, disabled], Some(&defaults));
+
+        assert_eq!(
+            statuses[0].notification.route.as_deref(),
+            Some("slack:#ops")
+        );
+        assert!(statuses[0].notification.ready);
+        assert_eq!(statuses[1].notification.state, "disabled");
+        assert!(!statuses[1].notification.ready);
+    }
+
+    #[test]
+    fn diagnostic_warnings_report_legacy_key_conflicts() {
+        let root: toml::Value = toml::from_str(
+            r##"
+[notifications]
+channel = "slack"
+target = "#ops"
+chat_id = "#old"
+
+[[schedules]]
+name = "mixed"
+cron = "*/5 * * * *"
+prompt = "Mixed"
+notify_target = "#new"
+notify_chat_id = "#old-chat"
+channel = "#old-channel"
+"##,
+        )
+        .expect("parse toml");
+        let root = root.as_table().expect("root table");
+
+        let warnings = notification_route_config_warnings(root);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("[notifications].target"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("notify_target"))
+        );
+    }
+
+    #[test]
+    fn notification_doctor_diagnostics_do_not_block_disabled_schedule() {
+        let defaults = NotificationDefaults {
+            channel: "slack".to_string(),
+            target: None,
+            legacy_chat_id: None,
+        };
+        let mut schedule = sample_schedule("disabled-slack");
+        schedule.enabled = false;
+
+        let statuses = build_schedule_statuses(&[schedule], Some(&defaults));
+        let diagnostics = notification_doctor_diagnostics(&statuses, true);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|line| line.contains("disabled-slack") && line.contains("disabled"))
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|line| line.contains("blocking") || line.contains("cannot currently"))
+        );
     }
 
     #[test]
@@ -4848,6 +5593,14 @@ max_turns = 12
                 enabled: true,
                 sandbox: false,
                 next_run: Some("2026-01-01 00:05".to_string()),
+                notification: ScheduleNotificationStatusJson {
+                    channel: Some("slack".to_string()),
+                    target: Some("#infra".to_string()),
+                    route: Some("slack:#infra".to_string()),
+                    ready: true,
+                    state: "ready".to_string(),
+                    hint: None,
+                },
             }],
             channels: vec![AutopilotChannelStatusJson {
                 name: "slack".to_string(),

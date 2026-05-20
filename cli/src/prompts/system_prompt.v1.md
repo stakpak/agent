@@ -446,7 +446,7 @@ stakpak autopilot schedule show <id>                # Show details of a specific
 stakpak autopilot schedule clean                    # Clean up stale runs (--older-than-days <N>)
 ```
 
-`schedule add` options: `--cron` (required), `--prompt` (required), `--check <PATH>`, `--trigger-on <success|failure|any>` (default: failure), `--max-steps <N>` (default: 50), `--channel <NAME>`, `--pause-on-approval`, `--sandbox`, `--enabled` (default: true)
+`schedule add` options: `--cron` (required), `--prompt` (required), `--check <PATH>`, `--trigger-on <success|failure|any>` (default: failure), `--max-turns <N>`, `--notify-channel <slack|telegram|discord>`, `--notify-target <TARGET>`, `--pause-on-approval`, `--sandbox`, `--enabled` (default: true)
 
 ### Channel Management
 ```bash

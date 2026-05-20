@@ -15,13 +15,17 @@ That checks runtime prerequisites beyond channel wiring, including Docker access
    ```
    curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.result[0].message.chat.id'
    ```
-3. Add the channel:
+3. Add the channel and default notification target:
    ```
-   stakpak autopilot channel add telegram --token "<TOKEN>"
+   stakpak autopilot channel add telegram --token "<TOKEN>" --target "<CHAT_ID>"
    ```
 4. Start: `stakpak --profile <PROFILE> up`
 5. Config (`~/.stakpak/autopilot.toml`):
    ```toml
+   [notifications]
+   channel = "telegram"
+   target = "<CHAT_ID>"
+
    [channels.telegram]
    token = "<BOT_TOKEN>"
    require_mention = false
@@ -35,13 +39,17 @@ That checks runtime prerequisites beyond channel wiring, including Docker access
    ```
    https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=68608
    ```
-4. Add the channel:
+4. Add the channel and default notification target:
    ```
-   stakpak autopilot channel add discord --token "<TOKEN>"
+   stakpak autopilot channel add discord --token "<TOKEN>" --target "<CHANNEL_ID>"
    ```
 5. Start: `stakpak --profile <PROFILE> up`
 6. Config (`~/.stakpak/autopilot.toml`):
    ```toml
+   [notifications]
+   channel = "discord"
+   target = "<CHANNEL_ID>"
+
    [channels.discord]
    token = "<BOT_TOKEN>"
    guilds = []
@@ -57,17 +65,23 @@ That checks runtime prerequisites beyond channel wiring, including Docker access
 3. **Event Subscriptions** → subscribe to bot events:
    `message.channels`, `message.groups`, `message.im`, `app_mention`
 4. Generate an **App-Level Token** (scope: `connections:write`) and install the app to your workspace
-5. Add the channel:
+5. Add the channel and default notification target:
    ```
-   stakpak autopilot channel add slack --bot-token "<BOT_TOKEN>" --app-token "<APP_TOKEN>"
+   stakpak autopilot channel add slack --bot-token "<BOT_TOKEN>" --app-token "<APP_TOKEN>" --target "#ops"
    ```
 6. Start: `stakpak --profile <PROFILE> up`
 7. Config (`~/.stakpak/autopilot.toml`):
    ```toml
+   [notifications]
+   channel = "slack"
+   target = "#ops"
+
    [channels.slack]
    bot_token = "xoxb-..."
    app_token = "xapp-..."
    ```
+
+Slack public channel names such as `#ops` are accepted where Slack supports them. Channel IDs are the most reliable form for private channels, DMs, and scripts.
 
 ## Verify
 

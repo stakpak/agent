@@ -85,9 +85,9 @@ The gateway is managed through the autopilot system. There are no standalone `st
 
 ```bash
 # Add channels via autopilot CLI
-stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"
-stakpak autopilot channel add telegram --token "$TELEGRAM_BOT_TOKEN"
-stakpak autopilot channel add discord --token "$DISCORD_BOT_TOKEN"
+stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN" --target "#ops"
+stakpak autopilot channel add telegram --token "$TELEGRAM_BOT_TOKEN" --target "$TELEGRAM_CHAT_ID"
+stakpak autopilot channel add discord --token "$DISCORD_BOT_TOKEN" --target "$DISCORD_CHANNEL_ID"
 
 # Verify channels
 stakpak autopilot channel list
@@ -112,11 +112,12 @@ Gateway routes are available at `http://127.0.0.1:4096/v1/gateway/*`.
 ```bash
 stakpak autopilot channel list
 stakpak autopilot channel test
-stakpak autopilot channel add <type> --token ...
+stakpak autopilot channel add <type> --token ... --target <target>
 stakpak autopilot channel remove <type>
 ```
 
 Configuration is stored in `~/.stakpak/autopilot.toml`.
+Channel `profile` controls the behavior of sessions started from inbound channel messages. The `--target` value controls the default destination for scheduled notifications and does not affect model, tools, or approval policy.
 
 ---
 
@@ -187,7 +188,7 @@ Socket Mode also requires an **App-Level Token** (`xapp-*`) with the `connection
 4. Review and create the app
 5. **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope (this is your `xapp-*` token)
 6. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-*`)
-7. Run `stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN"`
+7. Run `stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN" --target "#ops"`
 
 **Manual setup:**
 

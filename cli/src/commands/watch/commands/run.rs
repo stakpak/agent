@@ -735,6 +735,7 @@ async fn handle_schedule_event(
     let profile_name = schedule.effective_profile(&config.defaults).to_string();
     let (profile_overrides, profile_allowed_tools) =
         resolve_schedule_profile_overrides(&profile_name, server);
+    let run_overrides = apply_schedule_run_overrides(profile_overrides, schedule);
 
     // Spawn agent
     let spawn_config = SpawnConfig {
@@ -749,7 +750,7 @@ async fn handle_schedule_event(
         caller_context,
         allowed_tools: profile_allowed_tools
             .unwrap_or_else(|| server.default_allowed_tools.clone()),
-        overrides: profile_overrides,
+        overrides: run_overrides,
         server: server.clone(),
     };
 
@@ -910,6 +911,19 @@ fn resolve_schedule_profile_overrides(
     };
 
     (overrides, normalized_allowed_tools)
+}
+
+fn apply_schedule_run_overrides(
+    profile_overrides: Option<RunOverrides>,
+    schedule: &crate::commands::watch::Schedule,
+) -> Option<RunOverrides> {
+    let Some(max_turns) = schedule.max_turns else {
+        return profile_overrides;
+    };
+
+    let mut overrides = profile_overrides.unwrap_or_default();
+    overrides.max_turns = Some(max_turns);
+    Some(overrides)
 }
 
 fn normalize_tool_list(tools: Vec<String>) -> Vec<String> {
@@ -1343,10 +1357,10 @@ async fn maybe_send_notification(
 
 fn build_gateway_target(delivery: &crate::commands::watch::DeliveryConfig) -> serde_json::Value {
     match delivery.channel.as_str() {
-        "telegram" => serde_json::json!({ "chat_id": delivery.chat_id }),
-        "discord" => serde_json::json!({ "channel_id": delivery.chat_id }),
-        "slack" => serde_json::json!({ "channel": delivery.chat_id }),
-        _ => serde_json::json!({ "chat_id": delivery.chat_id }),
+        "telegram" => serde_json::json!({ "chat_id": delivery.target }),
+        "discord" => serde_json::json!({ "channel_id": delivery.target }),
+        "slack" => serde_json::json!({ "channel": delivery.target }),
+        _ => serde_json::json!({ "chat_id": delivery.target }),
     }
 }
 
@@ -1602,9 +1616,10 @@ fn print_event(event_type: &str, trigger_name: &str, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_GATEWAY_CHECK_OUTPUT_CHARS, build_interactive_caller_context, interactive_run_max_age,
-        normalized_check_output, resolve_schedule_profile_overrides,
-        trigger_config_reload_with_loader, validate_prior_scheduler_state,
+        MAX_GATEWAY_CHECK_OUTPUT_CHARS, apply_schedule_run_overrides, build_gateway_target,
+        build_interactive_caller_context, interactive_run_max_age, normalized_check_output,
+        resolve_schedule_profile_overrides, trigger_config_reload_with_loader,
+        validate_prior_scheduler_state,
     };
     use crate::commands::watch::config::{ScheduleDefaults, ScheduleSettings};
     use crate::commands::watch::db::{RELOAD_SENTINEL, SchedulerState};
@@ -1614,6 +1629,7 @@ mod tests {
         Scheduler,
     };
     use chrono::{Duration, Utc};
+    use stakpak_gateway::client::RunOverrides;
     use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -2065,13 +2081,16 @@ mod tests {
             profile: None,
             board_id: None,
             timeout: None,
+            max_turns: None,
             enable_slack_tools: None,
             enable_subagents: None,
             pause_on_approval: None,
             sandbox: None,
             notify_on: None,
             notify_channel: None,
+            notify_target: None,
             notify_chat_id: None,
+            legacy_channel: None,
             interaction: InteractionMode::Interactive,
             enabled: true,
         }
@@ -2136,6 +2155,43 @@ mod tests {
         let max_age = interactive_run_max_age(&config, "missing");
 
         assert!(max_age.num_hours() >= 24);
+    }
+
+    #[test]
+    fn test_gateway_target_conversion_uses_provider_native_fields() {
+        let slack = build_gateway_target(&crate::commands::watch::DeliveryConfig {
+            channel: "slack".to_string(),
+            target: "#ops".to_string(),
+        });
+        let telegram = build_gateway_target(&crate::commands::watch::DeliveryConfig {
+            channel: "telegram".to_string(),
+            target: "123456789".to_string(),
+        });
+        let discord = build_gateway_target(&crate::commands::watch::DeliveryConfig {
+            channel: "discord".to_string(),
+            target: "987654321".to_string(),
+        });
+
+        assert_eq!(slack, serde_json::json!({ "channel": "#ops" }));
+        assert_eq!(telegram, serde_json::json!({ "chat_id": "123456789" }));
+        assert_eq!(discord, serde_json::json!({ "channel_id": "987654321" }));
+    }
+
+    #[test]
+    fn test_schedule_max_turns_overrides_profile_run_override() {
+        let schedule = Schedule {
+            max_turns: Some(16),
+            ..sample_schedule_for_context("turn-limited")
+        };
+        let profile_overrides = RunOverrides {
+            max_turns: Some(32),
+            ..RunOverrides::default()
+        };
+
+        let overrides = apply_schedule_run_overrides(Some(profile_overrides), &schedule)
+            .expect("schedule max_turns should create overrides");
+
+        assert_eq!(overrides.max_turns, Some(16));
     }
 
     #[test]
