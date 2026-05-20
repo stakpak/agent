@@ -13,7 +13,7 @@ use crate::types::{
     OutputTokenDetails, ResponseContent, Role, Usage,
 };
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Check whether the target model belongs to the Opus 4.7 (or later) family.
 ///
@@ -521,6 +521,8 @@ fn sanitize_anthropic_message(msg: &mut AnthropicMessage) {
 /// 6. Conversation must not end with role="assistant" (no prefill — some
 ///    models reject it; defensive for cross-model compatibility)
 /// 7. Re-merges consecutive same-role messages after mutations
+/// 8. Tool IDs must match Anthropic-family provider validation
+///    (`^[a-zA-Z0-9_-]+$`)
 fn sanitize_message_sequence(messages: &mut Vec<AnthropicMessage>) {
     if messages.is_empty() {
         return;
@@ -561,6 +563,10 @@ fn sanitize_message_sequence(messages: &mut Vec<AnthropicMessage>) {
 
     // Step 7: Ensure the conversation does not end with an assistant message.
     ensure_not_trailing_assistant(messages);
+
+    // Step 8: Rewrite invalid tool_use/tool_result IDs after all structural
+    // fixes, so injected placeholder results are covered too.
+    sanitize_tool_use_ids(messages);
 }
 
 /// Ensure every `tool_use` in assistant messages has a matching `tool_result`
@@ -855,6 +861,96 @@ fn inject_placeholder_tool_results(msg: &mut AnthropicMessage, missing_ids: &[St
             msg.content = AnthropicMessageContent::Blocks(blocks);
         }
     }
+}
+
+/// Rewrite invalid `tool_use.id` and matching `tool_result.tool_use_id` values
+/// in the outgoing request. This preserves local conversation history while
+/// satisfying Anthropic-family validators that require `^[a-zA-Z0-9_-]+$`.
+fn sanitize_tool_use_ids(messages: &mut [AnthropicMessage]) {
+    let mut id_map = HashMap::new();
+    let mut used_ids = HashSet::new();
+
+    for message in messages {
+        let AnthropicMessageContent::Blocks(blocks) = &mut message.content else {
+            continue;
+        };
+
+        for block in blocks {
+            match block {
+                AnthropicContent::ToolUse { id, .. } => {
+                    rewrite_tool_id(id, &mut id_map, &mut used_ids);
+                }
+                AnthropicContent::ToolResult { tool_use_id, .. } => {
+                    rewrite_tool_id(tool_use_id, &mut id_map, &mut used_ids);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn rewrite_tool_id(
+    id: &mut String,
+    id_map: &mut HashMap<String, String>,
+    used_ids: &mut HashSet<String>,
+) {
+    if is_anthropic_tool_id(id) && !used_ids.contains(id) {
+        used_ids.insert(id.clone());
+        id_map.insert(id.clone(), id.clone());
+        return;
+    }
+
+    let safe_id = safe_anthropic_tool_id(id, id_map, used_ids);
+    if safe_id != *id {
+        *id = safe_id;
+    }
+}
+
+fn safe_anthropic_tool_id(
+    original_id: &str,
+    id_map: &mut HashMap<String, String>,
+    used_ids: &mut HashSet<String>,
+) -> String {
+    if let Some(mapped) = id_map.get(original_id) {
+        return mapped.clone();
+    }
+
+    let base = normalize_anthropic_tool_id(original_id);
+    let mut candidate = if base.is_empty() {
+        "toolu".to_string()
+    } else {
+        base
+    };
+
+    if used_ids.contains(&candidate) {
+        let base = candidate;
+        let mut suffix = 2usize;
+        loop {
+            candidate = format!("{base}_{suffix}");
+            if !used_ids.contains(&candidate) {
+                break;
+            }
+            suffix += 1;
+        }
+    }
+
+    used_ids.insert(candidate.clone());
+    id_map.insert(original_id.to_string(), candidate.clone());
+    candidate
+}
+
+fn normalize_anthropic_tool_id(id: &str) -> String {
+    id.chars()
+        .map(|c| if is_anthropic_tool_id_char(c) { c } else { '_' })
+        .collect()
+}
+
+fn is_anthropic_tool_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(is_anthropic_tool_id_char)
+}
+
+fn is_anthropic_tool_id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
 /// Set cache_control on an AnthropicContent block.
@@ -2729,6 +2825,58 @@ mod tests {
 
     fn anthropic_config() -> crate::providers::anthropic::types::AnthropicConfig {
         crate::providers::anthropic::types::AnthropicConfig::new("key")
+    }
+
+    #[test]
+    fn test_anthropic_request_rewrites_invalid_tool_use_ids() {
+        let invalid_id = "kimi.tool/use:1";
+        let request = crate::types::GenerateRequest::new(
+            crate::types::Model::custom("claude-opus-4-5", "anthropic"),
+            vec![
+                crate::types::Message::new(crate::types::Role::User, "Use the tool."),
+                crate::types::Message::new(
+                    crate::types::Role::Assistant,
+                    MessageContent::Parts(vec![ContentPart::tool_call(
+                        invalid_id,
+                        "search",
+                        serde_json::json!({"query": "rust"}),
+                    )]),
+                ),
+                crate::types::Message::new(
+                    crate::types::Role::Tool,
+                    MessageContent::Parts(vec![ContentPart::tool_result(
+                        invalid_id,
+                        serde_json::json!("result"),
+                    )]),
+                ),
+            ],
+        );
+
+        let result = to_anthropic_request(&request, &anthropic_config(), false).unwrap();
+
+        let tool_use_id = match &result.request.messages[1].content {
+            AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                AnthropicContent::ToolUse { id, .. } => id.as_str(),
+                other => panic!("Expected tool_use block, got {other:?}"),
+            },
+            other => panic!("Expected blocks content, got {other:?}"),
+        };
+        let tool_result_id = match &result.request.messages[2].content {
+            AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                AnthropicContent::ToolResult { tool_use_id, .. } => tool_use_id.as_str(),
+                other => panic!("Expected tool_result block, got {other:?}"),
+            },
+            other => panic!("Expected blocks content, got {other:?}"),
+        };
+
+        assert_ne!(tool_use_id, invalid_id);
+        assert_eq!(tool_result_id, tool_use_id);
+        assert!(
+            tool_use_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "Anthropic tool_use.id must match ^[a-zA-Z0-9_-]+$, got {tool_use_id}"
+        );
     }
 
     #[test]
