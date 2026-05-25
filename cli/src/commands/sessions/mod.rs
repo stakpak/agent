@@ -104,6 +104,7 @@ async fn build_storage(config: &AppConfig) -> Result<Arc<dyn SessionStorage>, St
     let stakpak = config.get_stakpak_api_key().map(|api_key| StakpakConfig {
         api_key,
         api_endpoint: config.api_endpoint.clone(),
+        rulebook_base_url: None,
     });
     AgentClient::build_session_storage(stakpak, None, Some(config.profile_name.clone())).await
 }

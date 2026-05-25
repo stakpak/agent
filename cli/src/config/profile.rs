@@ -45,6 +45,9 @@ pub struct SubagentConfig {
 pub struct ProfileConfig {
     /// API endpoint URL
     pub api_endpoint: Option<String>,
+    /// Base URL for downloading rulebooks/skills/playbooks
+    /// If not set, api_endpoint is used for content downloads
+    pub rulebook_base_url: Option<String>,
     /// API key for authentication
     pub api_key: Option<String>,
     /// Provider type (remote or local)
@@ -376,6 +379,10 @@ impl ProfileConfig {
                 .api_endpoint
                 .clone()
                 .or_else(|| other.and_then(|config| config.api_endpoint.clone())),
+            rulebook_base_url: self
+                .rulebook_base_url
+                .clone()
+                .or_else(|| other.and_then(|config| config.rulebook_base_url.clone())),
             api_key: self
                 .api_key
                 .clone()
@@ -616,6 +623,7 @@ impl From<OldAppConfig> for ProfileConfig {
     fn from(old_config: OldAppConfig) -> Self {
         ProfileConfig {
             api_endpoint: Some(old_config.api_endpoint),
+            rulebook_base_url: old_config.rulebook_base_url,
             api_key: old_config.api_key,
             ..ProfileConfig::default()
         }

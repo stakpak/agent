@@ -61,6 +61,9 @@ pub struct AppConfig {
     pub collect_telemetry: Option<bool>,
     /// Editor command
     pub editor: Option<String>,
+    /// Base URL for downloading rulebooks/skills/playbooks
+    /// If not set, api_endpoint is used for content downloads
+    pub rulebook_base_url: Option<String>,
     /// Recently used model IDs (most recent first)
     pub recent_models: Vec<String>,
 }
@@ -155,6 +158,11 @@ impl AppConfig {
             api_key: std::env::var("STAKPAK_API_KEY")
                 .ok()
                 .or(profile_config.api_key),
+            rulebook_base_url: std::env::var("STAKPAK_RULEBOOK_BASE_URL").ok().or(
+                profile_config
+                    .rulebook_base_url
+                    .or(settings.rulebook_base_url),
+            ),
             mcp_server_host: None,
             machine_name: settings.machine_name,
             auto_append_gitignore: settings.auto_append_gitignore,
@@ -990,6 +998,7 @@ impl From<AppConfig> for Settings {
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
             editor: config.editor,
+            rulebook_base_url: config.rulebook_base_url,
         }
     }
 }
@@ -1017,6 +1026,8 @@ impl From<AppConfig> for ProfileConfig {
             eco_model: None,
             smart_model: None,
             recovery_model: None,
+            // New field for rulebook base URL
+            rulebook_base_url: config.rulebook_base_url,
         }
     }
 }
