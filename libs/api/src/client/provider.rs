@@ -957,7 +957,10 @@ impl AgentClient {
             let message = if tool_calls.is_empty() {
                 Message::new(stakai::Role::Assistant, text)
             } else {
-                let mut parts = vec![ContentPart::text(text)];
+                let mut parts: Vec<ContentPart> = Vec::new();
+                if !text.is_empty() {
+                    parts.push(ContentPart::text(text));
+                }
                 parts.extend(tool_calls);
                 Message::new(stakai::Role::Assistant, parts)
             };
