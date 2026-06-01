@@ -82,7 +82,7 @@ pub fn to_bedrock_body(
 mod tests {
     use super::*;
     use crate::providers::anthropic::types::AnthropicConfig;
-    use crate::types::{GenerateRequest, Message, Model, Role};
+    use crate::types::{ContentPart, GenerateRequest, Message, MessageContent, Model, Role};
 
     /// Helper to create a dummy AnthropicConfig for Bedrock conversion
     /// (Bedrock doesn't use the API key, but the conversion layer needs a valid config)
@@ -174,6 +174,51 @@ mod tests {
         let messages = result.body["messages"].as_array().unwrap();
         assert!(!messages.is_empty());
         assert_eq!(messages[0]["role"], "user");
+    }
+
+    #[test]
+    fn test_bedrock_body_rewrites_invalid_tool_use_ids() {
+        let invalid_id = "kimi.tool/use:1";
+        let request = GenerateRequest::new(
+            Model::custom("anthropic.claude-opus-4-5-20251101-v1:0", "bedrock"),
+            vec![
+                Message::new(Role::User, "Use the tool."),
+                Message::new(
+                    Role::Assistant,
+                    MessageContent::Parts(vec![ContentPart::tool_call(
+                        invalid_id,
+                        "search",
+                        serde_json::json!({"query": "rust"}),
+                    )]),
+                ),
+                Message::new(
+                    Role::Tool,
+                    MessageContent::Parts(vec![ContentPart::tool_result(
+                        invalid_id,
+                        serde_json::json!("result"),
+                    )]),
+                ),
+            ],
+        );
+
+        let result = to_bedrock_body(&request, &dummy_anthropic_config()).unwrap();
+        let messages = result.body["messages"].as_array().expect("messages array");
+
+        let tool_use_id = messages[1]["content"][0]["id"]
+            .as_str()
+            .expect("tool_use id");
+        let tool_result_id = messages[2]["content"][0]["tool_use_id"]
+            .as_str()
+            .expect("tool_result id");
+
+        assert_ne!(tool_use_id, invalid_id);
+        assert_eq!(tool_result_id, tool_use_id);
+        assert!(
+            tool_use_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "Bedrock tool_use.id must match ^[a-zA-Z0-9_-]+$, got {tool_use_id}"
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::types::{
     OutputTokenDetails, ResponseContent, Role, Usage,
 };
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Check whether the target model belongs to the Opus 4.7 (or later) family.
 ///
@@ -521,6 +521,8 @@ fn sanitize_anthropic_message(msg: &mut AnthropicMessage) {
 /// 6. Conversation must not end with role="assistant" (no prefill — some
 ///    models reject it; defensive for cross-model compatibility)
 /// 7. Re-merges consecutive same-role messages after mutations
+/// 8. Tool IDs must match Anthropic-family provider validation
+///    (`^[a-zA-Z0-9_-]+$`)
 fn sanitize_message_sequence(messages: &mut Vec<AnthropicMessage>) {
     if messages.is_empty() {
         return;
@@ -561,6 +563,10 @@ fn sanitize_message_sequence(messages: &mut Vec<AnthropicMessage>) {
 
     // Step 7: Ensure the conversation does not end with an assistant message.
     ensure_not_trailing_assistant(messages);
+
+    // Step 8: Rewrite invalid tool_use/tool_result IDs after all structural
+    // fixes, so injected placeholder results are covered too.
+    sanitize_tool_use_ids(messages);
 }
 
 /// Ensure every `tool_use` in assistant messages has a matching `tool_result`
@@ -855,6 +861,132 @@ fn inject_placeholder_tool_results(msg: &mut AnthropicMessage, missing_ids: &[St
             msg.content = AnthropicMessageContent::Blocks(blocks);
         }
     }
+}
+
+/// Rewrite invalid `tool_use.id` and matching `tool_result.tool_use_id` values
+/// in the outgoing request. This preserves local conversation history while
+/// satisfying Anthropic-family validators that require `^[a-zA-Z0-9_-]+$`.
+///
+/// Uses a two-pass approach to avoid clobbering originally-valid IDs:
+///
+/// 1. **Reserve pass**: collect every already-valid ID (matches
+///    `^[a-zA-Z0-9_-]+$`) into `used_ids`/`id_map` (mapping it to itself).
+///    These IDs are never rewritten, even if a later invalid ID would
+///    normalize to the same value.
+/// 2. **Rewrite pass**: visit every block again and only rename invalid or
+///    empty IDs. Collision resolution in `safe_anthropic_tool_id` then suffixes
+///    the *sanitized* ID (e.g. `a_b_2`) instead of stealing a reserved valid
+///    original (`a_b`).
+fn sanitize_tool_use_ids(messages: &mut [AnthropicMessage]) {
+    let mut id_map = HashMap::new();
+    let mut used_ids = HashSet::new();
+
+    // Pass 1: reserve all already-valid IDs so they cannot be clobbered by
+    // a later invalid ID that normalizes to the same value.
+    for message in messages.iter() {
+        let AnthropicMessageContent::Blocks(blocks) = &message.content else {
+            continue;
+        };
+
+        for block in blocks {
+            let id = match block {
+                AnthropicContent::ToolUse { id, .. } => id,
+                AnthropicContent::ToolResult { tool_use_id, .. } => tool_use_id,
+                _ => continue,
+            };
+
+            if is_anthropic_tool_id(id) && !used_ids.contains(id) {
+                used_ids.insert(id.clone());
+                id_map.insert(id.clone(), id.clone());
+            }
+        }
+    }
+
+    // Pass 2: rewrite only invalid/empty IDs. Already-valid IDs were
+    // registered above and are short-circuited by the lookup in
+    // `safe_anthropic_tool_id`.
+    for message in messages {
+        let AnthropicMessageContent::Blocks(blocks) = &mut message.content else {
+            continue;
+        };
+
+        for block in blocks {
+            match block {
+                AnthropicContent::ToolUse { id, .. } => {
+                    rewrite_tool_id(id, &mut id_map, &mut used_ids);
+                }
+                AnthropicContent::ToolResult { tool_use_id, .. } => {
+                    rewrite_tool_id(tool_use_id, &mut id_map, &mut used_ids);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn rewrite_tool_id(
+    id: &mut String,
+    id_map: &mut HashMap<String, String>,
+    used_ids: &mut HashSet<String>,
+) {
+    // Already-valid IDs were reserved in pass 1 of `sanitize_tool_use_ids`
+    // and are therefore present in `id_map` (mapped to themselves). Nothing
+    // to do here.
+    if is_anthropic_tool_id(id) && id_map.get(id).is_some_and(|mapped| mapped == id) {
+        return;
+    }
+
+    let safe_id = safe_anthropic_tool_id(id, id_map, used_ids);
+    if safe_id != *id {
+        *id = safe_id;
+    }
+}
+
+fn safe_anthropic_tool_id(
+    original_id: &str,
+    id_map: &mut HashMap<String, String>,
+    used_ids: &mut HashSet<String>,
+) -> String {
+    if let Some(mapped) = id_map.get(original_id) {
+        return mapped.clone();
+    }
+
+    let base = normalize_anthropic_tool_id(original_id);
+    let mut candidate = if base.is_empty() {
+        "toolu".to_string()
+    } else {
+        base
+    };
+
+    if used_ids.contains(&candidate) {
+        let base = candidate;
+        let mut suffix = 2usize;
+        loop {
+            candidate = format!("{base}_{suffix}");
+            if !used_ids.contains(&candidate) {
+                break;
+            }
+            suffix += 1;
+        }
+    }
+
+    used_ids.insert(candidate.clone());
+    id_map.insert(original_id.to_string(), candidate.clone());
+    candidate
+}
+
+fn normalize_anthropic_tool_id(id: &str) -> String {
+    id.chars()
+        .map(|c| if is_anthropic_tool_id_char(c) { c } else { '_' })
+        .collect()
+}
+
+fn is_anthropic_tool_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(is_anthropic_tool_id_char)
+}
+
+fn is_anthropic_tool_id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
 /// Set cache_control on an AnthropicContent block.
@@ -2729,6 +2861,153 @@ mod tests {
 
     fn anthropic_config() -> crate::providers::anthropic::types::AnthropicConfig {
         crate::providers::anthropic::types::AnthropicConfig::new("key")
+    }
+
+    #[test]
+    fn test_anthropic_request_rewrites_invalid_tool_use_ids() {
+        let invalid_id = "kimi.tool/use:1";
+        let request = crate::types::GenerateRequest::new(
+            crate::types::Model::custom("claude-opus-4-5", "anthropic"),
+            vec![
+                crate::types::Message::new(crate::types::Role::User, "Use the tool."),
+                crate::types::Message::new(
+                    crate::types::Role::Assistant,
+                    MessageContent::Parts(vec![ContentPart::tool_call(
+                        invalid_id,
+                        "search",
+                        serde_json::json!({"query": "rust"}),
+                    )]),
+                ),
+                crate::types::Message::new(
+                    crate::types::Role::Tool,
+                    MessageContent::Parts(vec![ContentPart::tool_result(
+                        invalid_id,
+                        serde_json::json!("result"),
+                    )]),
+                ),
+            ],
+        );
+
+        let result = to_anthropic_request(&request, &anthropic_config(), false).unwrap();
+
+        let tool_use_id = match &result.request.messages[1].content {
+            AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                AnthropicContent::ToolUse { id, .. } => id.as_str(),
+                other => panic!("Expected tool_use block, got {other:?}"),
+            },
+            other => panic!("Expected blocks content, got {other:?}"),
+        };
+        let tool_result_id = match &result.request.messages[2].content {
+            AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                AnthropicContent::ToolResult { tool_use_id, .. } => tool_use_id.as_str(),
+                other => panic!("Expected tool_result block, got {other:?}"),
+            },
+            other => panic!("Expected blocks content, got {other:?}"),
+        };
+
+        assert_ne!(tool_use_id, invalid_id);
+        assert_eq!(tool_result_id, tool_use_id);
+        assert!(
+            tool_use_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "Anthropic tool_use.id must match ^[a-zA-Z0-9_-]+$, got {tool_use_id}"
+        );
+    }
+
+    /// Regression test: an invalid ID that normalizes to a value already used
+    /// by a separate, originally-valid ID must NOT clobber the valid one.
+    ///
+    /// Setup:
+    ///   - assistant emits tool_use `a/b` (invalid) — normalizes to `a_b`
+    ///   - tool result for `a/b`
+    ///   - assistant emits tool_use `a_b` (already valid) — must keep `a_b`
+    ///   - tool result for `a_b`
+    ///
+    /// Expectation: the valid `a_b` stays as `a_b`; the sanitized `a/b`
+    /// becomes a suffixed variant (e.g. `a_b_2`). Each tool_use still pairs
+    /// with its matching tool_result.
+    #[test]
+    fn test_sanitize_preserves_valid_id_when_invalid_id_normalizes_to_it() {
+        use crate::providers::anthropic::types::{AnthropicMessage, AnthropicMessageContent};
+
+        let mut messages = vec![
+            // assistant: tool_use with INVALID id "a/b"
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: AnthropicMessageContent::Blocks(vec![AnthropicContent::ToolUse {
+                    id: "a/b".to_string(),
+                    name: "search".to_string(),
+                    input: serde_json::json!({}),
+                    cache_control: None,
+                }]),
+            },
+            // user: tool_result for "a/b"
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: AnthropicMessageContent::Blocks(vec![AnthropicContent::ToolResult {
+                    tool_use_id: "a/b".to_string(),
+                    content: Some(AnthropicMessageContent::String("r1".to_string())),
+                    is_error: None,
+                    cache_control: None,
+                }]),
+            },
+            // assistant: tool_use with VALID id "a_b"
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: AnthropicMessageContent::Blocks(vec![AnthropicContent::ToolUse {
+                    id: "a_b".to_string(),
+                    name: "search".to_string(),
+                    input: serde_json::json!({}),
+                    cache_control: None,
+                }]),
+            },
+            // user: tool_result for "a_b"
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: AnthropicMessageContent::Blocks(vec![AnthropicContent::ToolResult {
+                    tool_use_id: "a_b".to_string(),
+                    content: Some(AnthropicMessageContent::String("r2".to_string())),
+                    is_error: None,
+                    cache_control: None,
+                }]),
+            },
+        ];
+
+        sanitize_tool_use_ids(&mut messages);
+
+        let extract_id = |msg: &AnthropicMessage| -> String {
+            match &msg.content {
+                AnthropicMessageContent::Blocks(blocks) => match &blocks[0] {
+                    AnthropicContent::ToolUse { id, .. } => id.clone(),
+                    AnthropicContent::ToolResult { tool_use_id, .. } => tool_use_id.clone(),
+                    other => panic!("unexpected block: {other:?}"),
+                },
+                other => panic!("expected blocks: {other:?}"),
+            }
+        };
+
+        let invalid_use_id = extract_id(&messages[0]);
+        let invalid_result_id = extract_id(&messages[1]);
+        let valid_use_id = extract_id(&messages[2]);
+        let valid_result_id = extract_id(&messages[3]);
+
+        // The originally-valid `a_b` must not be rewritten.
+        assert_eq!(valid_use_id, "a_b", "valid id must not be clobbered");
+        assert_eq!(valid_result_id, "a_b");
+
+        // The sanitized invalid `a/b` must NOT collide with the reserved `a_b`.
+        assert_ne!(invalid_use_id, "a_b");
+        assert_ne!(invalid_use_id, "a/b");
+        assert_eq!(invalid_use_id, invalid_result_id, "use/result must pair");
+
+        // And it must still be a valid Anthropic tool id.
+        assert!(
+            invalid_use_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "rewritten id must be valid, got {invalid_use_id}"
+        );
     }
 
     #[test]
