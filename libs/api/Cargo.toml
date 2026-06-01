@@ -28,6 +28,9 @@ serde_yaml = "0.9.34"
 once_cell = "1.21.3"
 regex.workspace = true
 tempfile = { workspace = true }
+sha2 = { workspace = true }
+dirs = "5.0"
+tracing = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
