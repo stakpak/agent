@@ -127,4 +127,4 @@ runs.
 
 Schedule this skill via the canonical one-liner:
 
-    stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)"
+    stakpak autopilot schedule add retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)"

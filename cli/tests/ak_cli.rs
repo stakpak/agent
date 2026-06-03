@@ -2,7 +2,7 @@ use std::process::Command;
 
 const RETROSPECT_MARKDOWN: &str = include_str!("../../libs/ak/src/skills/retrospect.v1.md");
 
-const AUTOPILOT_ONE_LINER: &str = r#"stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#;
+const AUTOPILOT_ONE_LINER: &str = r#"stakpak autopilot schedule add retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#;
 
 #[test]
 fn ak_skill_retrospect_prints_bundled_prompt() {

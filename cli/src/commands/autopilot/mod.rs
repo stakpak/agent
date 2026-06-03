@@ -570,6 +570,9 @@ fn default_enabled() -> bool {
     true
 }
 
+const MIN_SCHEDULE_MAX_TURNS: usize = 1;
+const MAX_SCHEDULE_MAX_TURNS: usize = 256;
+
 fn load_toml_root_table(path: &Path) -> Result<toml::value::Table, String> {
     if !path.exists() {
         return Ok(toml::value::Table::new());
@@ -2560,6 +2563,14 @@ fn resolve_schedule_notify_target(
     }
 }
 
+fn validate_schedule_max_turns(flag: &str, value: usize) -> Result<usize, String> {
+    if (MIN_SCHEDULE_MAX_TURNS..=MAX_SCHEDULE_MAX_TURNS).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("{flag} must be 1-256, got {value}"))
+    }
+}
+
 fn resolve_schedule_max_turns(
     max_turns: Option<usize>,
     max_steps: Option<usize>,
@@ -2569,13 +2580,24 @@ fn resolve_schedule_max_turns(
             "Conflicting turn limit flags: --max-turns {} and deprecated --max-steps {}. Use only --max-turns.",
             turns, steps
         )),
-        (Some(turns), None) => Ok(Some(turns)),
+        (Some(turns), None) => validate_schedule_max_turns("--max-turns", turns).map(Some),
         (None, Some(steps)) => {
+            let steps = validate_schedule_max_turns("--max-steps", steps)?;
             eprintln!("Warning: --max-steps is deprecated; use --max-turns instead.");
             Ok(Some(steps))
         }
         (None, None) => Ok(None),
     }
+}
+
+fn schedule_has_notification_route(schedule: &AutopilotScheduleConfig) -> bool {
+    schedule
+        .notify_channel
+        .as_deref()
+        .is_some_and(|channel| !channel.trim().is_empty())
+        || schedule
+            .resolved_notify_target()
+            .is_some_and(|target| !target.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -2680,6 +2702,10 @@ fn add_schedule_to_path(path: &Path, schedule: AutopilotScheduleConfig) -> Resul
     validate_schedule(&schedule)?;
 
     let mut root = load_toml_root_table(path)?;
+    if schedule_has_notification_route(&schedule) {
+        ensure_notification_gateway_config(&mut root);
+    }
+
     let schedules = schedule_array_mut(&mut root)?;
     if schedules
         .iter()
@@ -2887,6 +2913,17 @@ fn resolve_default_gateway_url(root: &toml::value::Table) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:4096".to_string())
 }
 
+fn ensure_notification_gateway_config(root: &mut toml::value::Table) {
+    let default_gateway_url = resolve_default_gateway_url(root);
+    let notifications = ensure_toml_table(root, "notifications");
+    if !notifications.contains_key("gateway_url") {
+        notifications.insert(
+            "gateway_url".to_string(),
+            toml::Value::String(default_gateway_url),
+        );
+    }
+}
+
 fn apply_default_notification_target(
     root: &mut toml::value::Table,
     channel: &str,
@@ -2900,15 +2937,8 @@ fn apply_default_notification_target(
         return Err("Target cannot be empty".to_string());
     }
 
-    let default_gateway_url = resolve_default_gateway_url(root);
-
+    ensure_notification_gateway_config(root);
     let notifications = ensure_toml_table(root, "notifications");
-    if !notifications.contains_key("gateway_url") {
-        notifications.insert(
-            "gateway_url".to_string(),
-            toml::Value::String(default_gateway_url),
-        );
-    }
     notifications.insert(
         "channel".to_string(),
         toml::Value::String(channel.trim().to_string()),
@@ -4936,6 +4966,46 @@ target = "#default"
     }
 
     #[test]
+    fn schedule_add_to_path_creates_notification_gateway_for_schedule_route() {
+        let path = temp_file_path("autopilot-schedule-add-route-gateway");
+        std::fs::write(
+            &path,
+            r##"
+[server]
+listen = "127.0.0.1:4097"
+"##,
+        )
+        .expect("write config");
+
+        let mut schedule = sample_schedule("slack-alert");
+        schedule.notify_channel = Some("slack".to_string());
+        schedule.notify_target = Some("#ops".to_string());
+
+        add_schedule_to_path(&path, schedule).expect("schedule should be added");
+
+        let reloaded = std::fs::read_to_string(&path).expect("read config");
+        assert!(reloaded.contains("[notifications]"));
+        assert!(reloaded.contains("gateway_url = \"http://127.0.0.1:4097\""));
+        assert!(reloaded.contains("notify_channel = \"slack\""));
+        assert!(reloaded.contains("notify_target = \"#ops\""));
+
+        let runtime_config =
+            crate::commands::watch::ScheduleConfig::load(&path).expect("runtime should load");
+        let notifications = runtime_config
+            .notifications
+            .as_ref()
+            .expect("notifications should be created for schedule-specific route");
+        let delivery = runtime_config.schedules[0]
+            .effective_delivery(notifications)
+            .expect("schedule route should be runtime-readable");
+
+        assert_eq!(delivery.channel, "slack");
+        assert_eq!(delivery.target, "#ops");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn schedule_destination_flag_conflicts_are_rejected_before_write() {
         let path = temp_file_path("autopilot-schedule-conflict");
         std::fs::write(
@@ -4969,6 +5039,25 @@ prompt = "Existing"
                 .expect_err("expected conflict")
                 .contains("--max-turns")
         );
+    }
+
+    #[test]
+    fn schedule_turn_limit_bounds_are_rejected_before_write() {
+        assert_eq!(resolve_schedule_max_turns(Some(1), None), Ok(Some(1)));
+        assert_eq!(resolve_schedule_max_turns(Some(256), None), Ok(Some(256)));
+
+        for result in [
+            resolve_schedule_max_turns(Some(0), None),
+            resolve_schedule_max_turns(Some(257), None),
+            resolve_schedule_max_turns(None, Some(0)),
+            resolve_schedule_max_turns(None, Some(257)),
+        ] {
+            assert!(
+                result
+                    .expect_err("turn limits outside server bounds should be rejected")
+                    .contains("1-256")
+            );
+        }
     }
 
     #[test]
