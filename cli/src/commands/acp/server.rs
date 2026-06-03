@@ -1,5 +1,5 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
-use crate::commands::agent::run::stream::ToolCallAccumulator;
+use crate::commands::agent::run::stream::{ToolCallAccumulator, tool_call_content_part};
 use crate::config::AppConfig;
 use agent_client_protocol::{
     self as acp, Client as AcpClient, ModelInfo, SessionModelState, SessionNotification,
@@ -1305,9 +1305,7 @@ impl StakpakAcpAgent {
             if !text.is_empty() {
                 parts.push(ContentPart::text(text));
             }
-            parts.extend(final_tool_calls.into_iter().map(|tool_call| {
-                ContentPart::tool_call(tool_call.id, tool_call.name, tool_call.arguments)
-            }));
+            parts.extend(final_tool_calls.into_iter().map(tool_call_content_part));
             Message::new(Role::Assistant, MessageContent::Parts(parts))
         };
 

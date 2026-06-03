@@ -656,9 +656,7 @@ fn response_to_message(response: &stakai::GenerateResponse) -> Message {
     for content in &response.content {
         match content {
             ResponseContent::Text { text } => parts.push(ContentPart::text(text.clone())),
-            ResponseContent::Reasoning { reasoning } => {
-                parts.push(ContentPart::text(format!("[Reasoning: {reasoning}]")));
-            }
+            ResponseContent::Reasoning { .. } => {}
             ResponseContent::ToolCall(tool_call) => {
                 let mut part = ContentPart::tool_call(
                     tool_call.id.clone(),
@@ -671,6 +669,10 @@ fn response_to_message(response: &stakai::GenerateResponse) -> Message {
                 parts.push(part);
             }
         }
+    }
+
+    if parts.is_empty() {
+        return Message::new(stakai::Role::Assistant, "");
     }
 
     if parts.len() == 1
@@ -945,9 +947,11 @@ impl AgentClient {
                     } => {
                         usage = final_usage.clone();
                     }
-                    StreamEvent::Start { .. }
-                    | StreamEvent::ReasoningDelta { .. }
-                    | StreamEvent::Error { .. } => {}
+                    StreamEvent::Error { message } => {
+                        let _ = tx.send(Err(message.clone())).await;
+                        return Err(message.clone());
+                    }
+                    StreamEvent::Start { .. } | StreamEvent::ReasoningDelta { .. } => {}
                 }
                 if tx.send(Ok(StreamMessage::Event(event))).await.is_err() {
                     break;
@@ -957,7 +961,10 @@ impl AgentClient {
             let message = if tool_calls.is_empty() {
                 Message::new(stakai::Role::Assistant, text)
             } else {
-                let mut parts = vec![ContentPart::text(text)];
+                let mut parts = Vec::new();
+                if !text.is_empty() {
+                    parts.push(ContentPart::text(text));
+                }
                 parts.extend(tool_calls);
                 Message::new(stakai::Role::Assistant, parts)
             };
@@ -1043,5 +1050,152 @@ impl AgentClient {
             .map_err(|e| e.to_string())?;
 
         Ok(response.text())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::stakai::StakAIClient;
+    use crate::local::storage::LocalStorage;
+    use futures_util::stream;
+    use stakai::provider::Provider;
+    use stakai::{
+        FinishReason, GenerateRequest, GenerateResponse, GenerateStream, Headers, MessageContent,
+        ProviderRegistry, Role, Usage,
+    };
+    use stakpak_shared::hooks::HookContext;
+    use std::sync::Arc;
+
+    #[derive(Clone)]
+    struct FakeProvider {
+        events: Vec<StreamEvent>,
+        response: GenerateResponse,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for FakeProvider {
+        fn provider_id(&self) -> &str {
+            "fake"
+        }
+
+        fn build_headers(&self, _custom_headers: Option<&Headers>) -> Headers {
+            Headers::new()
+        }
+
+        async fn generate(&self, _request: GenerateRequest) -> stakai::Result<GenerateResponse> {
+            Ok(self.response.clone())
+        }
+
+        async fn stream(&self, _request: GenerateRequest) -> stakai::Result<GenerateStream> {
+            let events = self.events.clone().into_iter().map(Ok::<_, stakai::Error>);
+            Ok(GenerateStream::new(Box::pin(stream::iter(events))))
+        }
+    }
+
+    fn generate_response(content: Vec<ResponseContent>) -> GenerateResponse {
+        GenerateResponse {
+            content,
+            usage: Usage::default(),
+            finish_reason: FinishReason::stop(),
+            metadata: None,
+            warnings: None,
+        }
+    }
+
+    async fn agent_client_with_fake_provider(
+        events: Vec<StreamEvent>,
+        response: GenerateResponse,
+    ) -> AgentClient {
+        let registry = ProviderRegistry::new().register("fake", FakeProvider { events, response });
+        let stakai = StakAIClient::with_registry(registry).expect("fake stakai client");
+        let session_storage = Arc::new(
+            LocalStorage::new(":memory:")
+                .await
+                .expect("in-memory local storage"),
+        );
+
+        AgentClient {
+            stakai,
+            stakpak_api: None,
+            session_storage,
+            hook_registry: Arc::new(stakpak_shared::hooks::HookRegistry::<AgentState>::default()),
+            stakpak: None,
+        }
+    }
+
+    async fn run_completion_with_stream_events(
+        events: Vec<StreamEvent>,
+    ) -> Result<Message, String> {
+        let client = agent_client_with_fake_provider(events, generate_response(Vec::new())).await;
+        let model = Model::custom("fake-model", "fake");
+        let messages = vec![Message::new(Role::User, "hello")];
+        let mut state = AgentState::new(model.clone(), messages.clone(), None, None);
+        state.set_llm_input(Some(GenerateRequest::new(model, messages)));
+        let mut ctx = HookContext::new(None, state);
+        let (tx, _rx) = mpsc::channel(16);
+
+        client.run_agent_completion(&mut ctx, Some(tx)).await
+    }
+
+    #[test]
+    fn response_to_message_drops_reasoning_content() {
+        let response = generate_response(vec![
+            ResponseContent::Text {
+                text: "visible".to_string(),
+            },
+            ResponseContent::Reasoning {
+                reasoning: "hidden chain of thought".to_string(),
+            },
+        ]);
+
+        let message = response_to_message(&response);
+
+        assert_eq!(message.text().as_deref(), Some("visible"));
+    }
+
+    #[test]
+    fn response_to_message_drops_reasoning_only_content() {
+        let response = generate_response(vec![ResponseContent::Reasoning {
+            reasoning: "hidden chain of thought".to_string(),
+        }]);
+
+        let message = response_to_message(&response);
+
+        assert_eq!(message.text().as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn streaming_completion_treats_stream_error_event_as_failure() {
+        let result = run_completion_with_stream_events(vec![StreamEvent::Error {
+            message: "provider overloaded".to_string(),
+        }])
+        .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .err()
+                .is_some_and(|err| err.contains("provider overloaded"))
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_completion_omits_empty_text_part_for_tool_only_messages() {
+        let message = run_completion_with_stream_events(vec![StreamEvent::ToolCallEnd {
+            id: "tc_1".to_string(),
+            name: "test_tool".to_string(),
+            arguments: serde_json::json!({"path": "README.md"}),
+            metadata: None,
+        }])
+        .await
+        .expect("stream completion");
+
+        let MessageContent::Parts(parts) = message.content else {
+            panic!("expected parts content");
+        };
+
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(parts[0], ContentPart::ToolCall { .. }));
     }
 }

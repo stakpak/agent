@@ -119,6 +119,24 @@ impl ToolCallAccumulator {
     }
 }
 
+pub(crate) fn tool_call_content_part(tool_call: ToolCall) -> ContentPart {
+    let ToolCall {
+        id,
+        name,
+        arguments,
+        metadata,
+    } = tool_call;
+    let mut part = ContentPart::tool_call(id, name, arguments);
+    if let ContentPart::ToolCall {
+        metadata: part_metadata,
+        ..
+    } = &mut part
+    {
+        *part_metadata = metadata;
+    }
+    part
+}
+
 pub async fn process_responses_stream(
     stream: impl Stream<Item = Result<AgentStreamEvent, ApiStreamError>>,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
@@ -226,9 +244,7 @@ pub async fn process_responses_stream(
         if !text.is_empty() {
             parts.push(ContentPart::text(text));
         }
-        parts.extend(final_tool_calls.into_iter().map(|tool_call| {
-            ContentPart::tool_call(tool_call.id, tool_call.name, tool_call.arguments)
-        }));
+        parts.extend(final_tool_calls.into_iter().map(tool_call_content_part));
         Message::new(stakai::Role::Assistant, MessageContent::Parts(parts))
     };
 
@@ -330,5 +346,34 @@ mod tests {
             tool_calls[0].2,
             serde_json::Value::String("{\"key\":\"value\"}".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn preserves_tool_call_metadata_in_final_assistant_message() {
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel(100);
+        let metadata = serde_json::json!({"thought_signature": "sig-123"});
+        let responses = vec![event(StreamEvent::ToolCallEnd {
+            id: "tool-1".to_string(),
+            name: "my_function".to_string(),
+            arguments: serde_json::json!({"key": "value"}),
+            metadata: Some(metadata.clone()),
+        })];
+
+        let test_stream = stream::iter(responses);
+        tokio::spawn(async move { while input_rx.recv().await.is_some() {} });
+
+        let response = process_responses_stream(test_stream, &input_tx)
+            .await
+            .unwrap();
+        let tool_call_metadata = response
+            .message
+            .parts()
+            .into_iter()
+            .find_map(|part| match part {
+                ContentPart::ToolCall { metadata, .. } => metadata,
+                _ => None,
+            });
+
+        assert_eq!(tool_call_metadata, Some(metadata));
     }
 }

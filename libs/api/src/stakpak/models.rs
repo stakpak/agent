@@ -88,7 +88,10 @@ pub struct CheckpointSummary {
 /// Checkpoint state containing messages
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CheckpointState {
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::message_compat::deserialize_messages"
+    )]
     pub messages: Vec<stakai::Message>,
     /// Optional metadata for context trimming state, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]

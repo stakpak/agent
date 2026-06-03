@@ -47,11 +47,7 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         .find(|message| message.role != Role::User && message.role != Role::Tool)
         && last_message.role == Role::Assistant
     {
-        last_message.content = MessageContent::Text(format!(
-            "{}\n<checkpoint_id>{}</checkpoint_id>",
-            last_message.content.text().unwrap_or_default(),
-            checkpoint_id
-        ));
+        append_checkpoint_id_to_message(last_message, checkpoint_id);
     }
 
     for message in &checkpoint_messages {
@@ -167,6 +163,22 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         .unwrap_or_default();
 
     Ok((checkpoint_messages, pending_tool_calls))
+}
+
+fn append_checkpoint_id_to_message(message: &mut Message, checkpoint_id: &str) {
+    let checkpoint_tag = format!("<checkpoint_id>{checkpoint_id}</checkpoint_id>");
+
+    match &mut message.content {
+        MessageContent::Text(text) => {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&checkpoint_tag);
+        }
+        MessageContent::Parts(parts) => {
+            parts.push(ContentPart::text(format!("\n{checkpoint_tag}")));
+        }
+    }
 }
 
 pub fn extract_checkpoint_id_from_messages(messages: &[Message]) -> Option<String> {
@@ -326,6 +338,46 @@ mod tests {
 
         match input_rx.recv().await.expect("input event") {
             InputEvent::AddUserMessage(content) => assert_eq!(content, "fix tests"),
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_preserves_pending_tool_calls_when_injecting_checkpoint_id()
+    {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![Message::new(
+            Role::Assistant,
+            MessageContent::Parts(vec![
+                ContentPart::text("I need to inspect the file."),
+                ContentPart::tool_call("tc_1", "test_tool", json!({"path": "README.md"})),
+            ]),
+        )];
+
+        let (checkpoint_messages, pending_tool_calls) =
+            extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+                .await
+                .expect("checkpoint extraction");
+
+        assert_eq!(pending_tool_calls.len(), 1);
+        assert_eq!(pending_tool_calls[0].id, "tc_1");
+
+        let parts = checkpoint_messages[0].parts();
+        assert!(
+            parts
+                .iter()
+                .any(|part| matches!(part, ContentPart::ToolCall { id, .. } if id == "tc_1"))
+        );
+        assert!(checkpoint_messages[0].text().is_some_and(|text| {
+            text.contains("I need to inspect the file.")
+                && text.contains("<checkpoint_id>checkpoint-id</checkpoint_id>")
+        }));
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::StreamAssistantMessage(_, content) => {
+                assert!(content.contains("I need to inspect the file."));
+                assert!(content.contains("<checkpoint_id>checkpoint-id</checkpoint_id>"));
+            }
             event => panic!("unexpected input event: {event:?}"),
         }
     }

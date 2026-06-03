@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub mod client;
 pub mod commands;
 pub mod local;
+mod message_compat;
 pub mod models;
 pub mod stakpak;
 pub mod storage;
