@@ -210,7 +210,7 @@ impl StakpakApiClient {
     }
 
     /// Read a knowledge file. Uses the on-disk cache at
-    /// `~/.stakpak/remote-cache/knowledge/<account>/<path>` together with the
+    /// `~/.stakpak/remote-knowledge/<account>/<path>` together with the
     /// server's `If-None-Match` support to avoid re-downloading unchanged
     /// content.
     pub async fn read_knowledge_file(&self, path: &str) -> Result<Vec<u8>, KnowledgeApiError> {
