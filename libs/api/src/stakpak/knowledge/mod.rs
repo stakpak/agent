@@ -12,6 +12,7 @@ use super::models::*;
 use crate::models::GetMyAccountResponse;
 use reqwest::{Response, StatusCode, header};
 use serde::de::DeserializeOwned;
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::debug;
 
@@ -105,6 +106,38 @@ fn encode_path_segments(path: &str) -> String {
         .map(|seg| urlencoding::encode(seg).into_owned())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Normalize and validate a knowledge-store path using the same component
+/// rules as local AK path resolution.
+///
+/// Rejected components:
+/// - `..` parent traversal
+/// - absolute/rooted paths
+/// - platform prefixes (e.g. `C:` on Windows)
+///
+/// Accepted and normalized:
+/// - `.` components are removed
+/// - repeated separators collapse via component iteration
+fn normalize_knowledge_path(path: &str) -> Result<String, KnowledgeApiError> {
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut relative = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(KnowledgeApiError::BadRequest {
+                    message: format!("invalid store path: {path}"),
+                });
+            }
+        }
+    }
+
+    Ok(relative.to_string_lossy().into_owned())
 }
 
 impl StakpakApiClient {
@@ -207,17 +240,18 @@ impl StakpakApiClient {
         path: &str,
         peek_only: bool,
     ) -> Result<Vec<u8>, KnowledgeApiError> {
-        let encoded_path = encode_path_segments(path);
+        let normalized_path = normalize_knowledge_path(path)?;
+        let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
 
         // Cache is only consulted for full reads. Peek bodies are different
         // content for the same path - mixing them would corrupt the cache.
-        let cache_target: Option<std::path::PathBuf> = if peek_only {
+        let cache_target: Option<PathBuf> = if peek_only {
             None
         } else {
             self.resolve_cache_account()
                 .await
-                .and_then(|account| cache::cached_path(&account, path))
+                .and_then(|account| cache::cached_path(&account, &normalized_path))
         };
 
         let cached = match &cache_target {
@@ -267,7 +301,8 @@ impl StakpakApiClient {
 
     /// Cheap existence check using HTTP HEAD. Does not transfer the body.
     pub async fn knowledge_file_exists(&self, path: &str) -> Result<bool, KnowledgeApiError> {
-        let encoded_path = encode_path_segments(path);
+        let normalized_path = normalize_knowledge_path(path)?;
+        let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self.client.head(&url).send().await?;
 
@@ -287,8 +322,23 @@ impl StakpakApiClient {
         &self,
         query: &ListKnowledgeFilesQuery,
     ) -> Result<ListKnowledgeFilesResponse, KnowledgeApiError> {
+        let normalized_path = query
+            .path
+            .as_deref()
+            .map(normalize_knowledge_path)
+            .transpose()?;
+        let normalized_query = ListKnowledgeFilesQuery {
+            path: normalized_path,
+            glob: query.glob.clone(),
+        };
+
         let url = format!("{}/v1/knowledge", self.base_url);
-        let response = self.client.get(&url).query(query).send().await?;
+        let response = self
+            .client
+            .get(&url)
+            .query(&normalized_query)
+            .send()
+            .await?;
         self.handle_knowledge_response(response).await
     }
 
@@ -303,7 +353,8 @@ impl StakpakApiClient {
         path: &str,
         content: &[u8],
     ) -> Result<CreateKnowledgeFileResponse, KnowledgeApiError> {
-        let encoded_path = encode_path_segments(path);
+        let normalized_path = normalize_knowledge_path(path)?;
+        let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self
             .client
@@ -326,7 +377,8 @@ impl StakpakApiClient {
         path: &str,
         content: &[u8],
     ) -> Result<UpdateKnowledgeFileResponse, KnowledgeApiError> {
-        let encoded_path = encode_path_segments(path);
+        let normalized_path = normalize_knowledge_path(path)?;
+        let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self
             .client
@@ -341,7 +393,8 @@ impl StakpakApiClient {
     /// Delete a knowledge file or directory. On success, evicts the matching
     /// cache entry (file or directory tree).
     pub async fn delete_knowledge_file(&self, path: &str) -> Result<(), KnowledgeApiError> {
-        let encoded_path = encode_path_segments(path);
+        let normalized_path = normalize_knowledge_path(path)?;
+        let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
         let response = self.client.delete(&url).send().await?;
 
@@ -350,7 +403,7 @@ impl StakpakApiClient {
         }
 
         if let Some(account) = self.resolve_cache_account().await
-            && let Some(target) = cache::cached_path(&account, path)
+            && let Some(target) = cache::cached_path(&account, &normalized_path)
         {
             cache::evict_cached(&target).await;
         }
@@ -418,5 +471,34 @@ impl StakpakApiClient {
                 message,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KnowledgeApiError, encode_path_segments, normalize_knowledge_path};
+
+    #[test]
+    fn normalize_path_rejects_parent_components() {
+        let err = normalize_knowledge_path("docs/../secrets.txt").unwrap_err();
+        assert!(matches!(err, KnowledgeApiError::BadRequest { .. }));
+    }
+
+    #[test]
+    fn normalize_path_rejects_absolute_paths() {
+        let err = normalize_knowledge_path("/etc/passwd").unwrap_err();
+        assert!(matches!(err, KnowledgeApiError::BadRequest { .. }));
+    }
+
+    #[test]
+    fn normalize_path_removes_dot_and_empty_segments() {
+        let normalized = normalize_knowledge_path("docs//./guides///intro.md").unwrap();
+        assert_eq!(normalized, "docs/guides/intro.md");
+    }
+
+    #[test]
+    fn encode_keeps_separators_and_encodes_each_segment() {
+        let encoded = encode_path_segments("team notes/2026 plan.md");
+        assert_eq!(encoded, "team%20notes/2026%20plan.md");
     }
 }
