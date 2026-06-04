@@ -487,9 +487,11 @@ impl RemoteBackend {
 
 impl StorageBackend for RemoteBackend {
     fn create(&self, path: &str, content: &[u8]) -> Result<(), Error> {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            Error::Parse("remote backend requires a running tokio runtime".to_string())
+        })?;
         tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.client.create_knowledge_file(path, content).await })
+            handle.block_on(async { self.client.create_knowledge_file(path, content).await })
         })
         .map(|_| ())
         .map_err(|e| map_knowledge_err(path, e))
