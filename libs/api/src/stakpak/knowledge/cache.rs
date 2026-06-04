@@ -24,12 +24,12 @@ fn knowledge_cache_root(account: &str) -> Option<PathBuf> {
 
 /// Compute the absolute on-disk path for a cached knowledge file.
 ///
-/// Refuses to resolve paths that contain [`..`, absolute paths, Windows-style backslashe] and returns `None`.
+/// Refuses to resolve paths that contain `..`, absolute paths (leading `/`), or Windows-style backslashes and returns `None`.
 pub fn cached_path(account: &str, rel_path: &str) -> Option<PathBuf> {
-    if rel_path.is_empty() || rel_path.contains("..") || rel_path.contains('\\') {
+    if rel_path.is_empty() || rel_path.starts_with('/') || rel_path.contains('\\') {
         return None;
     }
-    let trimmed = rel_path.trim_start_matches('/');
+    let trimmed = rel_path;
     if trimmed.is_empty() {
         return None;
     }
