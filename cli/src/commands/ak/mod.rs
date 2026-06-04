@@ -164,6 +164,10 @@ Use `usage` to teach an agent how to navigate and write to the store. Use `maint
 
 impl AkCommands {
     pub fn run(self, config: AppConfig) -> Result<(), String> {
+        if let Self::Skill { ref name } = self {
+            return run_skill(name);
+        }
+
         let backend = create_backend(&config)?;
         match self {
             Self::Search {
@@ -176,7 +180,9 @@ impl AkCommands {
             Self::Read { paths } => run_read(backend.clone(), &paths)?,
             Self::Write { path, file, force } => run_write(backend.clone(), path, file, force)?,
             Self::Remove { path } => run_remove(backend.clone(), &path)?,
-            Self::Skill { name } => run_skill(&name)?,
+            Self::Skill { .. } => {
+                unreachable!("Will never reach here because of the early return above")
+            }
         }
 
         Ok(())
