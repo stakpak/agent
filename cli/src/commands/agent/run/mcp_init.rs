@@ -187,6 +187,8 @@ async fn start_mcp_server(
 fn build_proxy_config(
     local_server_url: String,
     server_cert_chain: Arc<Option<CertificateChain>>,
+    api_endpoint: &str,
+    api_key: Option<&str>,
 ) -> ClientPoolConfig {
     let mut servers: HashMap<String, ServerConfig> = HashMap::new();
 
@@ -201,12 +203,32 @@ fn build_proxy_config(
         },
     );
 
-    // Add external paks server
+    // Add external paks server (derived from api_endpoint so local profiles work)
+    let api_base = api_endpoint.trim_end_matches('/');
     servers.insert(
         "paks".to_string(),
         ServerConfig::Http {
-            url: "https://apiv2.stakpak.dev/v1/paks/mcp".to_string(),
+            url: format!("{api_base}/v1/paks/mcp"),
             headers: None,
+            certificate_chain: Arc::new(None),
+            client_tls_config: None,
+        },
+    );
+
+    // Add external aap server (derived from api_endpoint so local profiles work).
+    // AAP requires `Authorization: Bearer <api_key>` on every call. The session
+    // id is forwarded via the JSON-RPC `_meta["dev.stakpak/session-id"]` field
+    // (set in cli/src/commands/agent/run/tooling.rs), not as an HTTP header.
+    let aap_headers = api_key.map(|key| {
+        let mut h = HashMap::new();
+        h.insert("Authorization".to_string(), format!("Bearer {key}"));
+        h
+    });
+    servers.insert(
+        "aap".to_string(),
+        ServerConfig::Http {
+            url: format!("{api_base}/v1/aap/mcp"),
+            headers: aap_headers,
             certificate_chain: Arc::new(None),
             client_tls_config: None,
         },
@@ -218,7 +240,7 @@ fn build_proxy_config(
             Ok(external_servers) => {
                 let mut loaded_servers = 0;
                 for (name, config) in external_servers {
-                    if name == "stakpak" || name == "paks" {
+                    if name == "stakpak" || name == "paks" || name == "aap" {
                         tracing::warn!(
                             "Skipping external MCP server {} (reserved for stakpak's internal use)",
                             name
@@ -365,7 +387,12 @@ pub async fn initialize_mcp_server_and_tools(
     .await?;
 
     // 5. Build and start proxy
-    let pool_config = build_proxy_config(local_mcp_server_url, certs.server_chain);
+    let pool_config = build_proxy_config(
+        local_mcp_server_url,
+        certs.server_chain,
+        &app_config.api_endpoint,
+        app_config.api_key.as_deref(),
+    );
     start_proxy(
         pool_config,
         &mcp_config,

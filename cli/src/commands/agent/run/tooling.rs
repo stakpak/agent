@@ -63,9 +63,16 @@ pub async fn run_tool_call(
         let metadata = Some({
             let mut meta = serde_json::Map::new();
             if let Some(session_id) = session_id {
+                let session_id_str = session_id.to_string();
+                // Legacy key — consumed by the local stakpak MCP server (ctx.meta.get("session_id"))
                 meta.insert(
                     "session_id".to_string(),
-                    serde_json::Value::String(session_id.to_string()),
+                    serde_json::Value::String(session_id_str.clone()),
+                );
+                // MCP-spec-compliant reverse-DNS key — consumed by the AAP MCP server
+                meta.insert(
+                    "dev.stakpak/session-id".to_string(),
+                    serde_json::Value::String(session_id_str),
                 );
             }
             if let Some(model_id) = model_id {

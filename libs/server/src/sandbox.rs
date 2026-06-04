@@ -883,6 +883,17 @@ fn build_sandbox_proxy_config(
         },
     );
 
+    // Keep the external aap server accessible
+    servers.insert(
+        "aap".to_string(),
+        ServerConfig::Http {
+            url: "https://apiv2.stakpak.dev/v1/aap/mcp".to_string(),
+            headers: None,
+            certificate_chain: Arc::new(None),
+            client_tls_config: None,
+        },
+    );
+
     ClientPoolConfig::with_servers(servers)
 }
 
