@@ -47,7 +47,7 @@ stakpak autopilot up # start the autonomous agent, running 24/7 in the backgroun
 [For more installation options...](https://github.com/stakpak/agent#installation)
 
 You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
-Stakpak is built different:
+Stakpak is built differently:
 - **Secret Substitution** - The LLM works with your credentials without ever seeing them
 - **Warden Guardrails** - Network-level policies block destructive operations before they run
 - **DevOps Playbooks Baked-in** - Curated library of DevOps knowledge in Stakpak Rulebooks
