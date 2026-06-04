@@ -124,10 +124,10 @@ fn normalize_knowledge_path(path: &str) -> Result<String, KnowledgeApiError> {
         return Ok(String::new());
     }
 
-    let mut relative = PathBuf::new();
+    let mut parts: Vec<String> = Vec::new();
     for component in Path::new(path).components() {
         match component {
-            Component::Normal(part) => relative.push(part),
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(KnowledgeApiError::BadRequest {
@@ -137,7 +137,7 @@ fn normalize_knowledge_path(path: &str) -> Result<String, KnowledgeApiError> {
         }
     }
 
-    Ok(relative.to_string_lossy().into_owned())
+    Ok(parts.join("/"))
 }
 
 impl StakpakApiClient {
