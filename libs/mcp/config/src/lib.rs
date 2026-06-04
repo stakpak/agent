@@ -236,7 +236,7 @@ pub fn add_server(
     name: &str,
     entry: McpServerEntry,
 ) -> Result<(), String> {
-    if name == "stakpak" || name == "paks" {
+    if name == "stakpak" || name == "paks" || name == "aap" {
         return Err(format!("Cannot add server with reserved name '{name}'."));
     }
 
@@ -251,7 +251,7 @@ pub fn add_server(
 
 /// Remove a server entry. Fails if name not found.
 pub fn remove_server(config: &mut McpConfigFile, name: &str) -> Result<McpServerEntry, String> {
-    if name == "stakpak" || name == "paks" {
+    if name == "stakpak" || name == "paks" || name == "aap" {
         return Err(format!("Cannot remove internal server '{name}'."));
     }
 
@@ -267,7 +267,7 @@ pub fn set_server_disabled(
     name: &str,
     disabled: bool,
 ) -> Result<(), String> {
-    if name == "stakpak" || name == "paks" {
+    if name == "stakpak" || name == "paks" || name == "aap" {
         return Err(format!("Cannot modify internal server '{name}'."));
     }
 
