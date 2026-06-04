@@ -15,7 +15,11 @@ use tracing::{debug, warn};
 /// Returns `~/.stakpak/remote-knowledge/<account>`
 fn knowledge_cache_root(account: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    Some(home.join(".stakpak").join("remote-knowledge").join(account))
+    Some(
+        home.join(".stakpak")
+            .join("remote-knowledge")
+            .join(urlencoding::encode(account).as_ref()),
+    )
 }
 
 /// Compute the absolute on-disk path for a cached knowledge file.
