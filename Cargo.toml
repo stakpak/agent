@@ -106,6 +106,7 @@ open = "5.3.2"
 log = "0.4"
 libsql = "0.9.29"
 terminal-light = "1.8"
+sha2 = "0.10"
 
 # Required nightly
 [workspace.lints.clippy]

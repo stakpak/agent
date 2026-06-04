@@ -46,7 +46,7 @@ reqwest-retry = "0.8.0"
 itertools = "0.14.0"
 libsql = { workspace = true, optional = true }
 # OAuth dependencies
-sha2 = "0.10"
+sha2 = { workspace = true }
 base64 = "0.22"
 urlencoding = "2.1"
 

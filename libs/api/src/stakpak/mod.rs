@@ -7,10 +7,12 @@
 //! - Rulebooks
 
 mod client;
+mod knowledge;
 mod models;
 pub mod storage;
 
 pub use client::StakpakApiClient;
+pub use knowledge::KnowledgeApiError;
 pub use models::*;
 
 /// Configuration for StakpakApiClient

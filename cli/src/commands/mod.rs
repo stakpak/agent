@@ -524,7 +524,7 @@ impl Commands {
                 browser::run_browser(args).await?;
             }
             Commands::Ak(command) => {
-                command.run()?;
+                command.run(config)?;
             }
             Commands::Update { background } => {
                 auto_update::run_auto_update(background).await?;

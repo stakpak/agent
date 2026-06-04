@@ -6,7 +6,8 @@ use super::{
     CheckpointState, CreateCheckpointRequest, CreateCheckpointResponse, CreateSessionRequest,
     CreateSessionResponse, GetCheckpointResponse, GetSessionResponse, ListCheckpointsQuery,
     ListCheckpointsResponse, ListSessionsQuery, ListSessionsResponse, SessionVisibility,
-    StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, models::*,
+    StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, knowledge::AccountCacheState,
+    models::*,
 };
 use crate::models::{
     CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
@@ -18,25 +19,28 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use stakpak_shared::models::billing::BillingResponse;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Client for Stakpak's non-inference APIs
 #[derive(Clone, Debug)]
 pub struct StakpakApiClient {
-    client: reqwest::Client,
-    base_url: String,
+    pub(super) client: reqwest::Client,
+    pub(super) base_url: String,
+    pub(super) account_name: Arc<Mutex<AccountCacheState>>,
 }
 
 /// API error response format
 #[derive(Debug, serde::Deserialize)]
-struct ApiError {
-    error: ApiErrorDetail,
+pub(super) struct ApiError {
+    pub(super) error: ApiErrorDetail,
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct ApiErrorDetail {
-    key: String,
-    message: String,
+pub(super) struct ApiErrorDetail {
+    pub(super) key: String,
+    pub(super) message: String,
 }
 
 impl StakpakApiClient {
@@ -67,6 +71,7 @@ impl StakpakApiClient {
         Ok(Self {
             client,
             base_url: config.api_endpoint.clone(),
+            account_name: Arc::new(Mutex::new(AccountCacheState::Unknown)),
         })
     }
 

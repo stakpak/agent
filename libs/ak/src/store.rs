@@ -1,10 +1,25 @@
 use crate::Error;
 use serde::Serialize;
+use stakpak_api::stakpak::{
+    KnowledgeApiError, ListKnowledgeFilesQuery, StakpakApiClient, StakpakApiConfig,
+};
 use std::cmp::Ordering;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
+
+/// Translate a typed knowledge-API error into the local [`Error`] enum.
+///
+/// `path` is captured so we can build a `PathBuf` for `NotFound`/`AlreadyExists`
+/// variants without paying the cost on the success path.
+fn map_knowledge_err(path: &str, err: KnowledgeApiError) -> Error {
+    match err {
+        KnowledgeApiError::NotFound { .. } => Error::NotFound(PathBuf::from(path)),
+        KnowledgeApiError::Conflict { .. } => Error::AlreadyExists(PathBuf::from(path)),
+        other => Error::Parse(other.to_string()),
+    }
+}
 
 pub trait StorageBackend {
     fn create(&self, path: &str, content: &[u8]) -> Result<(), Error>;
@@ -447,6 +462,271 @@ fn is_hidden_path(path: &Path, root: &Path) -> bool {
                 .any(|component| matches!(component, Component::Normal(part) if part.to_string_lossy().starts_with('.')))
         })
         .unwrap_or(false)
+}
+
+// =============================================================================
+// Remote Backend
+// =============================================================================
+
+/// Remote storage backend that syncs to Stakpak cloud
+#[derive(Clone, Debug)]
+pub struct RemoteBackend {
+    client: StakpakApiClient,
+}
+
+impl RemoteBackend {
+    pub fn new(config: &StakpakApiConfig) -> Result<Self, Error> {
+        let client = StakpakApiClient::new(config).map_err(Error::Parse)?;
+        Ok(Self { client })
+    }
+
+    pub fn with_client(client: StakpakApiClient) -> Self {
+        Self { client }
+    }
+}
+
+impl StorageBackend for RemoteBackend {
+    fn create(&self, path: &str, content: &[u8]) -> Result<(), Error> {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            Error::Parse("remote backend requires a running tokio runtime".to_string())
+        })?;
+        tokio::task::block_in_place(|| {
+            handle.block_on(async { self.client.create_knowledge_file(path, content).await })
+        })
+        .map(|_| ())
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+
+    fn overwrite(&self, path: &str, content: &[u8]) -> Result<(), Error> {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.overwrite_knowledge_file(path, content).await })
+        })
+        .map(|_| ())
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+
+    fn read(&self, path: &str) -> Result<Vec<u8>, Error> {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.read_knowledge_file(path).await })
+        })
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+
+    fn read_prefix(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, Error> {
+        // Use the server's ?peek=true preview to avoid downloading the full
+        // body. If the server still returns more than `max_bytes` the client
+        // truncates locally.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.peek_knowledge_file(path, max_bytes).await })
+        })
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+
+    fn remove(&self, path: &str) -> Result<(), Error> {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.delete_knowledge_file(path).await })
+        })
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<Entry>, Error> {
+        let query = ListKnowledgeFilesQuery {
+            path: if path.is_empty() {
+                None
+            } else {
+                Some(path.to_string())
+            },
+            glob: None,
+        };
+
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.list_knowledge_files(&query).await })
+        })
+        .map_err(|e| map_knowledge_err(path, e))?;
+
+        // Empty path (root) is always a directory.
+        if path.is_empty() && response.files.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // If no files returned for a non-root path, it doesn't exist.
+        if response.files.is_empty() && !path.is_empty() {
+            return Err(Error::NotFound(PathBuf::from(path)));
+        }
+
+        // Server returned exactly one file whose path equals the requested
+        // path — it's a file, not a directory.
+        if response.files.len() == 1 && response.files[0].path == path {
+            return Err(Error::NotADirectory(PathBuf::from(path)));
+        }
+
+        // Group by first path component beneath `path` and decide whether
+        // each entry is a directory (has further components).
+        let prefix = Path::new(path);
+        let mut entries: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        for file in response.files {
+            let file_path = Path::new(&file.path);
+            if let Ok(relative) = file_path.strip_prefix(prefix) {
+                let mut components = relative.components();
+                if let Some(Component::Normal(name)) = components.next() {
+                    let name = name.to_string_lossy().to_string();
+                    let is_dir = components.next().is_some();
+                    // Promote to directory if any path under this name has
+                    // further components.
+                    entries
+                        .entry(name)
+                        .and_modify(|existing| *existing = *existing || is_dir)
+                        .or_insert(is_dir);
+                }
+            }
+        }
+
+        let mut result: Vec<Entry> = entries
+            .into_iter()
+            .map(|(name, is_dir)| Entry { name, is_dir })
+            .collect();
+        result.sort_by(|a, b| match b.is_dir.cmp(&a.is_dir) {
+            std::cmp::Ordering::Equal => a.name.cmp(&b.name),
+            other => other,
+        });
+        Ok(result)
+    }
+
+    fn tree(&self, prefix: &str) -> Result<TreeNode, Error> {
+        let query = ListKnowledgeFilesQuery {
+            path: if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix.to_string())
+            },
+            glob: None,
+        };
+
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.list_knowledge_files(&query).await })
+        })
+        .map_err(|e| map_knowledge_err(prefix, e))?;
+
+        // Build tree from flat file list
+        let name = if prefix.is_empty() {
+            ".".to_string()
+        } else {
+            Path::new(prefix)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| prefix.to_string())
+        };
+
+        let mut root = TreeNode {
+            name,
+            is_dir: true,
+            children: vec![],
+        };
+
+        for file in response.files {
+            self.add_file_to_tree(&mut root, &file.path, prefix);
+        }
+
+        Ok(root)
+    }
+
+    fn walk(&self, prefix: &str) -> Result<Vec<String>, Error> {
+        let query = ListKnowledgeFilesQuery {
+            path: if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix.to_string())
+            },
+            glob: None,
+        };
+
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.list_knowledge_files(&query).await })
+        })
+        .map_err(|e| map_knowledge_err(prefix, e))?;
+
+        let mut paths: Vec<String> = response.files.into_iter().map(|f| f.path).collect();
+        paths.sort();
+        Ok(paths)
+    }
+
+    fn exists(&self, path: &str) -> Result<bool, Error> {
+        // Use HEAD so we don't pay the cost of transferring the body.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.knowledge_file_exists(path).await })
+        })
+        .map_err(|e| map_knowledge_err(path, e))
+    }
+}
+
+impl RemoteBackend {
+    fn add_file_to_tree(&self, root: &mut TreeNode, file_path: &str, prefix: &str) {
+        let path = Path::new(file_path);
+        let prefix_path = if prefix.is_empty() {
+            Path::new("")
+        } else {
+            Path::new(prefix)
+        };
+
+        if let Ok(relative) = path.strip_prefix(prefix_path) {
+            let components: Vec<_> = relative.components().collect();
+            self.insert_components(root, &components, 0);
+        }
+    }
+
+    fn insert_components(
+        &self,
+        node: &mut TreeNode,
+        components: &[std::path::Component],
+        index: usize,
+    ) {
+        if index >= components.len() {
+            return;
+        }
+
+        if let Component::Normal(name) = components[index] {
+            let name = name.to_string_lossy().to_string();
+            let is_last = index == components.len() - 1;
+
+            // Find or create child
+            let child_index = node.children.iter().position(|c| c.name == name);
+
+            if let Some(idx) = child_index {
+                if !is_last {
+                    self.insert_components(&mut node.children[idx], components, index + 1);
+                }
+            } else {
+                let new_child = if is_last {
+                    TreeNode {
+                        name,
+                        is_dir: false,
+                        children: vec![],
+                    }
+                } else {
+                    let mut new_node = TreeNode {
+                        name: name.clone(),
+                        is_dir: true,
+                        children: vec![],
+                    };
+                    self.insert_components(&mut new_node, components, index + 1);
+                    new_node
+                };
+                node.children.push(new_child);
+                node.children.sort_by(|a, b| match b.is_dir.cmp(&a.is_dir) {
+                    std::cmp::Ordering::Equal => a.name.cmp(&b.name),
+                    other => other,
+                });
+            }
+        }
+    }
 }
 
 #[cfg(test)]

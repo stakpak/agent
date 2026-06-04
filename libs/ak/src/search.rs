@@ -6,6 +6,7 @@ use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use serde::Serialize;
 use std::path::Path;
+use std::rc::Rc;
 
 const BINARY_DETECTION_BYTES: usize = 8 * 1024;
 
@@ -39,15 +40,12 @@ pub struct GrepResult {
     pub matches: Vec<(usize, String)>,
 }
 
-pub struct TreeNavEngine<T> {
-    store: T,
+pub struct TreeNavEngine {
+    store: Rc<dyn StorageBackend>,
 }
 
-impl<T> TreeNavEngine<T>
-where
-    T: StorageBackend,
-{
-    pub fn new(store: T) -> Self {
+impl TreeNavEngine {
+    pub fn new(store: Rc<dyn StorageBackend>) -> Self {
         Self { store }
     }
 
@@ -58,12 +56,11 @@ where
     ) -> Result<Vec<PeekResult>, Error> {
         let mut results = Vec::new();
 
-        for relative_path in self.store.walk(path)? {
+        for relative_path in self.store.as_ref().walk(path)? {
             if !matches_glob(glob_matcher, &relative_path) {
                 continue;
             }
-
-            let content = self.store.read(&relative_path)?;
+            let content = self.store.as_ref().read(&relative_path)?;
             results.push(PeekResult {
                 path: relative_path,
                 peek: extract_peek(&String::from_utf8_lossy(&content)),
@@ -81,12 +78,11 @@ where
     ) -> Result<Vec<GrepResult>, Error> {
         let mut results = Vec::new();
 
-        for relative_path in self.store.walk(path)? {
+        for relative_path in self.store.as_ref().walk(path)? {
             if !matches_glob(glob_matcher, &relative_path) {
                 continue;
             }
-
-            let content = self.store.read(&relative_path)?;
+            let content = self.store.as_ref().read(&relative_path)?;
             if contains_nul_byte(&content[..content.len().min(BINARY_DETECTION_BYTES)]) {
                 continue;
             }
@@ -106,10 +102,7 @@ where
     }
 }
 
-impl<T> SearchEngine for TreeNavEngine<T>
-where
-    T: StorageBackend,
-{
+impl SearchEngine for TreeNavEngine {
     fn search_default(&self, path: &str) -> Result<Vec<PeekResult>, Error> {
         self.search_peeks(path, None)
     }
@@ -188,15 +181,13 @@ fn contains_nul_byte(content: &[u8]) -> bool {
 mod tests {
     use super::{GrepResult, PeekResult, SearchEngine, TreeNavEngine};
     use crate::store::{LocalFsBackend, StorageBackend};
+    use std::rc::Rc;
 
-    fn engine() -> (
-        tempfile::TempDir,
-        LocalFsBackend,
-        TreeNavEngine<LocalFsBackend>,
-    ) {
+    fn engine() -> (tempfile::TempDir, LocalFsBackend, TreeNavEngine) {
         let root = tempfile::TempDir::new().expect("temp dir");
         let backend = LocalFsBackend::with_root(root.path().join("store"));
-        let engine = TreeNavEngine::new(backend.clone());
+        let backend_rc: Rc<dyn StorageBackend> = Rc::new(backend.clone());
+        let engine = TreeNavEngine::new(backend_rc);
         (root, backend, engine)
     }
 

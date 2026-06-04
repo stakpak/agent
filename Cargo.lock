@@ -6200,7 +6200,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "stakpak-api",
  "tempfile",
+ "tokio",
  "walkdir",
 ]
 
@@ -6212,6 +6214,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.7",
  "chrono",
+ "dirs",
  "eventsource-stream",
  "futures-util",
  "include_dir",
@@ -6223,10 +6226,12 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "stakai",
  "stakpak-shared",
  "tempfile",
  "tokio",
+ "tracing",
  "urlencoding",
  "uuid",
 ]

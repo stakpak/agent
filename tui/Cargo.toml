@@ -40,7 +40,7 @@ base64 = "0.22"
 vt100 = "0.15.2"
 dirs = "5.0"
 serde_yaml = "0.9"
-sha2 = "0.10"
+sha2 = { workspace = true }
 
 [lints]
 workspace = true
