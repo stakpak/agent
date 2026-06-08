@@ -6,4 +6,4 @@ pub mod store;
 
 pub use error::Error;
 pub use search::{GrepResult, PeekResult, SearchEngine, TreeNavEngine};
-pub use store::{Entry, LocalFsBackend, RemoteBackend, StorageBackend, TreeNode};
+pub use store::{Entry, FileMeta, LocalFsBackend, RemoteBackend, StorageBackend, TreeNode};

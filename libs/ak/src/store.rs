@@ -3,6 +3,7 @@ use serde::Serialize;
 use stakpak_api::stakpak::{
     KnowledgeApiError, ListKnowledgeFilesQuery, StakpakApiClient, StakpakApiConfig,
 };
+use stakpak_shared::hash::sha256_hex;
 use std::cmp::Ordering;
 use std::fs;
 use std::io::ErrorKind;
@@ -35,6 +36,9 @@ pub trait StorageBackend {
     /// Returns sorted store-relative file paths under `prefix`, excluding dotfiles.
     /// Missing prefixes return an empty result.
     fn walk(&self, prefix: &str) -> Result<Vec<String>, Error>;
+    /// Like [`walk`](Self::walk), but each entry also carries the file's
+    /// content hash (hex SHA-256) and size in bytes.
+    fn list_with_meta(&self, prefix: &str) -> Result<Vec<FileMeta>, Error>;
     fn exists(&self, path: &str) -> Result<bool, Error>;
 }
 
@@ -42,6 +46,17 @@ pub trait StorageBackend {
 pub struct Entry {
     pub name: String,
     pub is_dir: bool,
+}
+
+/// Per-file metadata used for sync reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileMeta {
+    /// Store-relative path, using `/` as separator.
+    pub path: String,
+    /// Hex-encoded SHA-256 of the file body.
+    pub content_hash: String,
+    /// File size in bytes.
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -401,6 +416,25 @@ impl StorageBackend for LocalFsBackend {
         Ok(walked)
     }
 
+    fn list_with_meta(&self, prefix: &str) -> Result<Vec<FileMeta>, Error> {
+        let paths = self.walk(prefix)?;
+
+        let mut results = Vec::with_capacity(paths.len());
+        for path in paths {
+            let absolute = self.resolve_path(&path)?;
+            let bytes = fs::read(&absolute)?;
+            let size_bytes = bytes.len() as u64;
+            let content_hash = sha256_hex(&bytes);
+            results.push(FileMeta {
+                path,
+                content_hash,
+                size_bytes,
+            });
+        }
+
+        Ok(results)
+    }
+
     fn exists(&self, path: &str) -> Result<bool, Error> {
         let target = self.resolve_path(path)?;
         self.ensure_no_symlinks_below_root(&target)?;
@@ -657,6 +691,36 @@ impl StorageBackend for RemoteBackend {
         Ok(paths)
     }
 
+    fn list_with_meta(&self, prefix: &str) -> Result<Vec<FileMeta>, Error> {
+        let query = ListKnowledgeFilesQuery {
+            path: if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix.to_string())
+            },
+            glob: None,
+        };
+
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.client.list_knowledge_files(&query).await })
+        })
+        .map_err(|e| map_knowledge_err(prefix, e))?;
+
+        let mut results: Vec<FileMeta> = response
+            .files
+            .into_iter()
+            .map(|file| FileMeta {
+                path: file.path,
+                content_hash: file.content_hash,
+                size_bytes: file.size_bytes.max(0) as u64,
+            })
+            .collect();
+
+        results.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(results)
+    }
+
     fn exists(&self, path: &str) -> Result<bool, Error> {
         // Use HEAD so we don't pay the cost of transferring the body.
         tokio::task::block_in_place(|| {
@@ -731,7 +795,7 @@ impl RemoteBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, LocalFsBackend, StorageBackend, TreeNode};
+    use super::{Entry, FileMeta, LocalFsBackend, StorageBackend, TreeNode};
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -1190,5 +1254,83 @@ mod tests {
         let walked = backend.walk("missing").expect("walk missing prefix");
 
         assert!(walked.is_empty());
+    }
+
+    #[test]
+    fn list_with_meta_returns_hashes_and_sizes_for_local_files() {
+        use stakpak_shared::hash::sha256_hex;
+
+        let (_temp_dir, backend) = backend();
+        let alpha = b"alpha-content";
+        let beta = b"beta longer content body";
+        backend
+            .create("services/alpha.md", alpha)
+            .expect("create alpha");
+        backend
+            .create("services/sub/beta.md", beta)
+            .expect("create beta");
+
+        let mut metas = backend.list_with_meta("services").expect("list_with_meta");
+
+        // The trait contract promises sorted-by-path output.
+        metas.sort_by(|a, b| a.path.cmp(&b.path));
+
+        assert_eq!(
+            metas,
+            vec![
+                FileMeta {
+                    path: "services/alpha.md".to_string(),
+                    content_hash: sha256_hex(alpha),
+                    size_bytes: alpha.len() as u64,
+                },
+                FileMeta {
+                    path: "services/sub/beta.md".to_string(),
+                    content_hash: sha256_hex(beta),
+                    size_bytes: beta.len() as u64,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn list_with_meta_empty_for_missing_prefix() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("notes/todo.md", b"todo")
+            .expect("create notes file");
+
+        let metas = backend
+            .list_with_meta("nonexistent")
+            .expect("list_with_meta on missing prefix");
+
+        assert!(metas.is_empty());
+    }
+
+    #[test]
+    fn list_with_meta_skips_dotfiles() {
+        let (_temp_dir, backend) = backend();
+        backend
+            .create("notes/todo.md", b"todo")
+            .expect("create notes file");
+        // Drop a dotfile directly on disk — `create` would refuse it via
+        // the same path rules, so we sidestep the API to set up the case.
+        let dotfile_dir = backend.root().join(".secrets");
+        std::fs::create_dir_all(&dotfile_dir).expect("create dotfile dir");
+        std::fs::write(dotfile_dir.join("api-key"), b"shh").expect("write dotfile");
+        std::fs::write(backend.root().join(".env"), b"k=v").expect("write env dotfile");
+
+        let metas = backend.list_with_meta("").expect("list root");
+
+        assert_eq!(metas.len(), 1, "dotfiles must be excluded: {metas:?}");
+        assert_eq!(metas[0].path, "notes/todo.md");
+    }
+
+    #[test]
+    fn list_with_meta_returns_empty_for_empty_store() {
+        let (_temp_dir, backend) = backend();
+
+        let metas = backend.list_with_meta("").expect("list empty store");
+
+        assert!(metas.is_empty());
     }
 }

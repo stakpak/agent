@@ -6201,6 +6201,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "stakpak-api",
+ "stakpak-shared",
  "tempfile",
  "tokio",
  "walkdir",
