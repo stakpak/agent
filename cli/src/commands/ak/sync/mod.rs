@@ -1,9 +1,13 @@
 //! `stakpak ak sync` — reconcile the local ak knowledge store with the
 //! remote Stakpak knowledge store.
 
+mod display;
+pub mod execute;
+pub mod plan;
+
 use clap::{Subcommand, ValueEnum};
-use stakpak_ak::{FileMeta, StorageBackend};
-use std::collections::HashMap;
+use stakpak_ak::{LocalFsBackend, RemoteBackend};
+use stakpak_api::stakpak::StakpakApiConfig;
 
 use crate::config::AppConfig;
 
@@ -125,367 +129,78 @@ impl SyncCommand {
     }
 }
 
-pub fn run(cmd: SyncCommand, _config: AppConfig) -> Result<(), String> {
-    let _ = (cmd.direction(), cmd.dry_run(), cmd.strategy());
-    todo!();
-}
+pub fn run(cmd: SyncCommand, config: AppConfig) -> Result<(), String> {
+    let direction = cmd.direction();
+    let dry_run = cmd.dry_run();
+    let strategy = cmd.strategy();
 
-// ============================================================================
-// Plan
-// ============================================================================
+    let local =
+        LocalFsBackend::new().map_err(|e| format!("failed to open local knowledge store: {e}"))?;
 
-/// A single conflict: same path on both sides, different content.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Conflict {
-    pub path: String,
-    pub local_hash: String,
-    pub remote_hash: String,
-    pub local_size: u64,
-    pub remote_size: u64,
-}
+    let api_key = config
+        .get_stakpak_api_key()
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| {
+            "remote not configured. run `stakpak auth login` first to use ak sync".to_string()
+        })?;
+    let api_config = StakpakApiConfig::new(api_key).with_endpoint(config.api_endpoint.clone());
+    let remote = RemoteBackend::new(&api_config)
+        .map_err(|e| format!("failed to connect to remote knowledge store: {e}"))?;
 
-/// The full reconciliation plan produced by [`plan`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncPlan {
-    pub direction: SyncDirection,
-    pub uploads: Vec<FileMeta>,
-    pub downloads: Vec<FileMeta>,
-    pub skipped: Vec<String>,
-    pub conflicts: Vec<Conflict>,
-}
+    let p = plan::plan(&local, &remote, direction)?;
 
-impl SyncPlan {
-    pub fn is_empty(&self) -> bool {
-        self.uploads.is_empty() && self.downloads.is_empty() && self.conflicts.is_empty()
-    }
-}
-
-/// Build a [`SyncPlan`] by enumerating both sides and classifying each path.
-///
-/// Both backends are walked from the store root (`""`) and indexed by
-/// path. The classification rules follow the following rules
-///
-/// | Local | Remote | Hashes | Push          | Pull           |
-/// |-------|--------|--------|---------------|----------------|
-/// | yes   | no     | —      | upload        | (silently skip)|
-/// | no    | yes    | —      | (silently skip)| download      |
-/// | yes   | yes    | match  | skip          | skip           |
-/// | yes   | yes    | differ | conflict      | conflict       |
-///
-/// Output vectors are sorted by path for deterministic, diff-friendly output.
-pub fn plan(
-    local: &dyn StorageBackend,
-    remote: &dyn StorageBackend,
-    direction: SyncDirection,
-) -> Result<SyncPlan, String> {
-    let local_metas = local
-        .list_with_meta("")
-        .map_err(|e| format!("failed to enumerate local store: {e}"))?;
-    let remote_metas = remote
-        .list_with_meta("")
-        .map_err(|e| format!("failed to enumerate remote store: {e}"))?;
-
-    let mut local_index: HashMap<String, FileMeta> = local_metas
-        .into_iter()
-        .map(|meta| (meta.path.clone(), meta))
-        .collect();
-    let remote_index: HashMap<String, FileMeta> = remote_metas
-        .into_iter()
-        .map(|meta| (meta.path.clone(), meta))
-        .collect();
-
-    let mut uploads: Vec<FileMeta> = Vec::new();
-    let mut downloads: Vec<FileMeta> = Vec::new();
-    let mut skipped: Vec<String> = Vec::new();
-    let mut conflicts: Vec<Conflict> = Vec::new();
-
-    for (path, remote_meta) in &remote_index {
-        match local_index.remove(path) {
-            Some(local_meta) => {
-                if local_meta.content_hash == remote_meta.content_hash {
-                    skipped.push(path.clone());
-                } else {
-                    conflicts.push(Conflict {
-                        path: path.clone(),
-                        local_hash: local_meta.content_hash,
-                        remote_hash: remote_meta.content_hash.clone(),
-                        local_size: local_meta.size_bytes,
-                        remote_size: remote_meta.size_bytes,
-                    });
-                }
-            }
-            None => {
-                if matches!(direction, SyncDirection::Pull) {
-                    downloads.push(remote_meta.clone());
-                }
-            }
+    if dry_run {
+        display::print_plan(&p);
+        if !p.conflicts.is_empty() && strategy.is_none() {
+            println!();
+            println!(
+                "{} conflict(s) detected. live run would fail-fast — \
+                 rerun without --dry-run with `--strategy local|remote|skip` to resolve",
+                p.conflicts.len()
+            );
         }
+        return Ok(());
     }
 
-    for (_path, local_meta) in local_index.drain() {
-        if matches!(direction, SyncDirection::Push) {
-            uploads.push(local_meta);
-        }
-    }
+    if !p.conflicts.is_empty() && strategy.is_none() {
+        eprintln!("{} conflict(s) detected:", p.conflicts.len());
+        eprintln!();
+        display::print_conflicts_to_stderr(&p.conflicts);
+        eprintln!();
+        eprintln!(
+            "rerun with `--strategy local|remote|skip` to resolve, \
+             or `--dry-run` to inspect the plan without changing anything"
+        );
 
-    uploads.sort_by(|a, b| a.path.cmp(&b.path));
-    downloads.sort_by(|a, b| a.path.cmp(&b.path));
-    skipped.sort();
-    conflicts.sort_by(|a, b| a.path.cmp(&b.path));
-
-    Ok(SyncPlan {
-        direction,
-        uploads,
-        downloads,
-        skipped,
-        conflicts,
-    })
-}
-
-// ============================================================================
-// Execute
-// ============================================================================
-
-/// Per-file failure encountered during [`execute`].
-///
-/// Sync continues past failures (per the design doc's "network blip during
-/// execute" edge case) and surfaces the full list in [`SyncReport::failures`]
-/// so the caller can decide on the exit code.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Failure {
-    pub path: String,
-    pub error: String,
-}
-
-/// Outcome of [`execute`]. All vectors are sorted by path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncReport {
-    pub direction: SyncDirection,
-    /// Paths successfully pushed (push only).
-    pub uploaded: Vec<String>,
-    /// Paths successfully pulled (pull only).
-    pub downloaded: Vec<String>,
-    /// Paths whose hashes already matched, plus any conflict skipped via
-    /// `--strategy` ([`Strategy::Skip`] or the no-op side of the chosen
-    /// strategy for that direction).
-    pub skipped: Vec<String>,
-    /// Conflict paths where the chosen `--strategy` performed an
-    /// overwrite (e.g. `--strategy local` on a push pushed our local copy
-    /// over the remote's).
-    pub conflict_resolved: Vec<String>,
-    /// Per-file errors. Sync did not abort; the file was simply skipped.
-    pub failures: Vec<Failure>,
-}
-
-impl SyncReport {
-    fn new(direction: SyncDirection) -> Self {
-        Self {
-            direction,
-            uploaded: Vec::new(),
-            downloaded: Vec::new(),
-            skipped: Vec::new(),
-            conflict_resolved: Vec::new(),
-            failures: Vec::new(),
-        }
-    }
-
-    /// Whether any file failed to sync. The caller maps this to exit code 1.
-    pub fn has_failures(&self) -> bool {
-        !self.failures.is_empty()
-    }
-}
-
-/// Apply a [`SyncPlan`] against the two backends.
-///
-/// Execution is sequential and per-file fault-tolerant: a failure on one
-/// path is recorded in [`SyncReport::failures`] but does not stop sync of
-/// the remaining files
-///
-/// `strategy` is required if the plan contains conflicts. The CLI layer
-/// (`run()`) is responsible for fail-fast handling — calling `execute()`
-/// with conflicts but no strategy is a programming error and returns
-/// `Err`.
-///
-///
-/// | Strategy | Push (local → remote)              | Pull (remote → local)              |
-/// |----------|------------------------------------|------------------------------------|
-/// | Local    | overwrite remote with local        | keep local (skip download)         |
-/// | Remote   | skip (don't push the local change) | overwrite local with remote        |
-/// | Skip     | skip the conflict; sync the rest   | skip the conflict; sync the rest   |
-pub fn execute(
-    plan: SyncPlan,
-    local: &dyn StorageBackend,
-    remote: &dyn StorageBackend,
-    strategy: Option<Strategy>,
-) -> Result<SyncReport, String> {
-    if !plan.conflicts.is_empty() && strategy.is_none() {
         return Err(format!(
-            "execute() called with {} conflict(s) but no strategy",
-            plan.conflicts.len()
+            "{} conflict(s) detected. rerun with `--strategy local|remote|skip` to resolve",
+            p.conflicts.len()
         ));
     }
 
-    if matches!(strategy, Some(Strategy::Recent)) {
-        return Err(
-            "--strategy recent is not yet supported. use local, remote, or skip".to_string(),
-        );
-    }
-
-    let mut report = SyncReport::new(plan.direction);
-    // Skipped paths from the plan (hash already matched) carry through
-    // to the report so the user sees the full picture.
-    report.skipped.extend(plan.skipped.iter().cloned());
-
-    match plan.direction {
-        SyncDirection::Push => execute_push(&plan, local, remote, strategy, &mut report),
-        SyncDirection::Pull => execute_pull(&plan, local, remote, strategy, &mut report),
-    }
-
-    // Final ordering for deterministic output.
-    report.uploaded.sort();
-    report.downloaded.sort();
-    report.skipped.sort();
-    report.conflict_resolved.sort();
-    report.failures.sort_by(|a, b| a.path.cmp(&b.path));
-
-    Ok(report)
-}
-
-fn execute_push(
-    plan: &SyncPlan,
-    local: &dyn StorageBackend,
-    remote: &dyn StorageBackend,
-    strategy: Option<Strategy>,
-    report: &mut SyncReport,
-) {
-    // 1. Plain uploads (local-only files).
-    for meta in &plan.uploads {
-        match local.read(&meta.path) {
-            Ok(body) => match remote.create(&meta.path, &body) {
-                Ok(()) => report.uploaded.push(meta.path.clone()),
-                Err(stakpak_ak::Error::AlreadyExists(_)) => {
-                    // 409 race: file appeared on the remote between plan
-                    // and execute. Don't silently overwrite
-                    report.failures.push(Failure {
-                        path: meta.path.clone(),
-                        error: "remote file appeared between plan and execute (race). \
-                                rerun `ak sync push` to re-evaluate"
-                            .to_string(),
-                    });
-                }
-                Err(e) => report.failures.push(Failure {
-                    path: meta.path.clone(),
-                    error: format!("upload failed: {e}"),
-                }),
-            },
-            Err(e) => report.failures.push(Failure {
-                path: meta.path.clone(),
-                error: format!("local read failed: {e}"),
-            }),
+    if p.is_empty() {
+        if p.skipped.is_empty() {
+            println!("nothing to sync");
+        } else {
+            println!(
+                "nothing to sync — {} file(s) already in sync",
+                p.skipped.len()
+            );
         }
+        return Ok(());
     }
 
-    // 2. Conflicts (apply strategy).
-    for conflict in &plan.conflicts {
-        match strategy {
-            Some(Strategy::Local) => {
-                // Overwrite remote with local.
-                match local.read(&conflict.path) {
-                    Ok(body) => match remote.overwrite(&conflict.path, &body) {
-                        Ok(()) => report.conflict_resolved.push(conflict.path.clone()),
-                        Err(e) => report.failures.push(Failure {
-                            path: conflict.path.clone(),
-                            error: format!("conflict overwrite (remote) failed: {e}"),
-                        }),
-                    },
-                    Err(e) => report.failures.push(Failure {
-                        path: conflict.path.clone(),
-                        error: format!("local read for conflict failed: {e}"),
-                    }),
-                }
-            }
-            Some(Strategy::Remote) | Some(Strategy::Skip) => {
-                report.skipped.push(conflict.path.clone());
-            }
-            Some(Strategy::Recent) | None => {
-                // Already validated in execute(); unreachable here.
-                report.failures.push(Failure {
-                    path: conflict.path.clone(),
-                    error: "internal: conflict reached execute_push without resolvable strategy"
-                        .to_string(),
-                });
-            }
-        }
-    }
-}
+    let report = execute::execute(p, &local, &remote, strategy)?;
+    display::print_report(&report);
 
-fn execute_pull(
-    plan: &SyncPlan,
-    local: &dyn StorageBackend,
-    remote: &dyn StorageBackend,
-    strategy: Option<Strategy>,
-    report: &mut SyncReport,
-) {
-    // 1. Plain downloads (remote-only files).
-    for meta in &plan.downloads {
-        match remote.read(&meta.path) {
-            Ok(body) => match local.create(&meta.path, &body) {
-                Ok(()) => report.downloaded.push(meta.path.clone()),
-                Err(stakpak_ak::Error::AlreadyExists(_)) => {
-                    // Local race: file appeared locally between plan and
-                    // execute (e.g. concurrent `ak write`). Same handling
-                    // as the push race.
-                    report.failures.push(Failure {
-                        path: meta.path.clone(),
-                        error: "local file appeared between plan and execute (race). \
-                                rerun `ak sync pull` to re-evaluate"
-                            .to_string(),
-                    });
-                }
-                Err(e) => report.failures.push(Failure {
-                    path: meta.path.clone(),
-                    error: format!("local write failed: {e}"),
-                }),
-            },
-            Err(e) => report.failures.push(Failure {
-                path: meta.path.clone(),
-                error: format!("remote read failed: {e}"),
-            }),
-        }
+    if report.has_failures() {
+        return Err(format!(
+            "{} file(s) failed to sync — see report above",
+            report.failures.len()
+        ));
     }
 
-    // 2. Conflicts (apply strategy).
-    for conflict in &plan.conflicts {
-        match strategy {
-            Some(Strategy::Remote) => {
-                // Overwrite local with remote.
-                match remote.read(&conflict.path) {
-                    Ok(body) => match local.overwrite(&conflict.path, &body) {
-                        Ok(()) => report.conflict_resolved.push(conflict.path.clone()),
-                        Err(e) => report.failures.push(Failure {
-                            path: conflict.path.clone(),
-                            error: format!("conflict overwrite (local) failed: {e}"),
-                        }),
-                    },
-                    Err(e) => report.failures.push(Failure {
-                        path: conflict.path.clone(),
-                        error: format!("remote read for conflict failed: {e}"),
-                    }),
-                }
-            }
-            Some(Strategy::Local) | Some(Strategy::Skip) => {
-                // Pull: don't touch the local copy.
-                report.skipped.push(conflict.path.clone());
-            }
-            Some(Strategy::Recent) | None => {
-                report.failures.push(Failure {
-                    path: conflict.path.clone(),
-                    error: "internal: conflict reached execute_pull without resolvable strategy"
-                        .to_string(),
-                });
-            }
-        }
-    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -493,6 +208,7 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
     use clap::Parser;
+    use execute::SyncReport;
     use stakpak_ak::{LocalFsBackend, StorageBackend};
 
     #[derive(Parser, Debug)]
@@ -551,7 +267,7 @@ mod tests {
     #[test]
     fn plan_empty_stores() {
         let (_temp, local, remote) = pair();
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert!(p.uploads.is_empty());
         assert!(p.downloads.is_empty());
@@ -568,7 +284,7 @@ mod tests {
             .create("services/b.md", b"beta")
             .expect("create local");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert_eq!(p.uploads.len(), 2);
         assert_eq!(p.uploads[0].path, "notes/a.md");
@@ -588,7 +304,7 @@ mod tests {
             .create("services/b.md", b"beta")
             .expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Pull).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Pull).expect("plan");
 
         assert_eq!(p.downloads.len(), 2);
         assert_eq!(p.downloads[0].path, "notes/a.md");
@@ -607,7 +323,7 @@ mod tests {
             .create("only-remote.md", b"x")
             .expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert!(p.uploads.is_empty());
         assert!(p.downloads.is_empty());
@@ -620,7 +336,7 @@ mod tests {
         let (_temp, local, remote) = pair();
         local.create("only-local.md", b"x").expect("create local");
 
-        let p = plan(&local, &remote, SyncDirection::Pull).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Pull).expect("plan");
 
         assert!(p.uploads.is_empty());
         assert!(p.downloads.is_empty());
@@ -634,7 +350,7 @@ mod tests {
         local.create("shared.md", b"same").expect("create local");
         remote.create("shared.md", b"same").expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert_eq!(p.skipped, vec!["shared.md".to_string()]);
         assert!(p.uploads.is_empty());
@@ -652,7 +368,7 @@ mod tests {
             .create("shared.md", b"remote-version")
             .expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert_eq!(p.conflicts.len(), 1);
         let c = &p.conflicts[0];
@@ -692,7 +408,7 @@ mod tests {
             .create("conflict.md", b"remote-side")
             .expect("create conflict remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         assert_eq!(
             p.uploads
@@ -720,7 +436,7 @@ mod tests {
             remote.create(path, b"x").expect("create remote");
         }
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
 
         let upload_paths: Vec<&str> = p.uploads.iter().map(|m| m.path.as_str()).collect();
         assert_eq!(upload_paths, vec!["alpha.md", "mango.md", "zebra.md"]);
@@ -739,8 +455,8 @@ mod tests {
         direction: SyncDirection,
         strategy: Option<Strategy>,
     ) -> SyncReport {
-        let p = plan(local, remote, direction).expect("plan");
-        execute(p, local, remote, strategy).expect("execute")
+        let p = plan::plan(local, remote, direction).expect("plan");
+        execute::execute(p, local, remote, strategy).expect("execute")
     }
 
     #[test]
@@ -882,10 +598,10 @@ mod tests {
         local.create("c.md", b"L").expect("create local");
         remote.create("c.md", b"R").expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
         assert_eq!(p.conflicts.len(), 1);
 
-        let err = execute(p, &local, &remote, None).expect_err("must error");
+        let err = execute::execute(p, &local, &remote, None).expect_err("must error");
         assert!(err.contains("conflict"), "got: {err}");
     }
 
@@ -898,9 +614,9 @@ mod tests {
         local.create("c.md", b"L").expect("create local");
         remote.create("c.md", b"R").expect("create remote");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
-        let err =
-            execute(p, &local, &remote, Some(Strategy::Recent)).expect_err("recent unsupported");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let err = execute::execute(p, &local, &remote, Some(Strategy::Recent))
+            .expect_err("recent unsupported");
         assert!(err.contains("recent"), "got: {err}");
     }
 
@@ -914,7 +630,7 @@ mod tests {
         local.create("good.md", b"g").expect("create good");
         local.create("racy.md", b"r-local").expect("create racy");
 
-        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+        let p = plan::plan(&local, &remote, SyncDirection::Push).expect("plan");
         assert_eq!(p.uploads.len(), 2);
 
         // Inject the race: a different process created the file remotely
@@ -923,7 +639,7 @@ mod tests {
             .create("racy.md", b"r-remote")
             .expect("simulate race on remote");
 
-        let report = execute(p, &local, &remote, None).expect("execute");
+        let report = execute::execute(p, &local, &remote, None).expect("execute");
 
         // The good file made it through.
         assert_eq!(report.uploaded, vec!["good.md"]);
