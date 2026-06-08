@@ -2,6 +2,8 @@
 //! remote Stakpak knowledge store.
 
 use clap::{Subcommand, ValueEnum};
+use stakpak_ak::{FileMeta, StorageBackend};
+use std::collections::HashMap;
 
 use crate::config::AppConfig;
 
@@ -128,11 +130,124 @@ pub fn run(cmd: SyncCommand, _config: AppConfig) -> Result<(), String> {
     todo!();
 }
 
+// ============================================================================
+// Plan
+// ============================================================================
+
+/// A single conflict: same path on both sides, different content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conflict {
+    pub path: String,
+    pub local_hash: String,
+    pub remote_hash: String,
+    pub local_size: u64,
+    pub remote_size: u64,
+}
+
+/// The full reconciliation plan produced by [`plan`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPlan {
+    pub direction: SyncDirection,
+    pub uploads: Vec<FileMeta>,
+    pub downloads: Vec<FileMeta>,
+    pub skipped: Vec<String>,
+    pub conflicts: Vec<Conflict>,
+}
+
+impl SyncPlan {
+    pub fn is_empty(&self) -> bool {
+        self.uploads.is_empty() && self.downloads.is_empty() && self.conflicts.is_empty()
+    }
+}
+
+/// Build a [`SyncPlan`] by enumerating both sides and classifying each path.
+///
+/// Both backends are walked from the store root (`""`) and indexed by
+/// path. The classification rules follow the following rules
+///
+/// | Local | Remote | Hashes | Push          | Pull           |
+/// |-------|--------|--------|---------------|----------------|
+/// | yes   | no     | —      | upload        | (silently skip)|
+/// | no    | yes    | —      | (silently skip)| download      |
+/// | yes   | yes    | match  | skip          | skip           |
+/// | yes   | yes    | differ | conflict      | conflict       |
+///
+/// Output vectors are sorted by path for deterministic, diff-friendly output.
+pub fn plan(
+    local: &dyn StorageBackend,
+    remote: &dyn StorageBackend,
+    direction: SyncDirection,
+) -> Result<SyncPlan, String> {
+    let local_metas = local
+        .list_with_meta("")
+        .map_err(|e| format!("failed to enumerate local store: {e}"))?;
+    let remote_metas = remote
+        .list_with_meta("")
+        .map_err(|e| format!("failed to enumerate remote store: {e}"))?;
+
+    let mut local_index: HashMap<String, FileMeta> = local_metas
+        .into_iter()
+        .map(|meta| (meta.path.clone(), meta))
+        .collect();
+    let remote_index: HashMap<String, FileMeta> = remote_metas
+        .into_iter()
+        .map(|meta| (meta.path.clone(), meta))
+        .collect();
+
+    let mut uploads: Vec<FileMeta> = Vec::new();
+    let mut downloads: Vec<FileMeta> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut conflicts: Vec<Conflict> = Vec::new();
+
+    for (path, remote_meta) in &remote_index {
+        match local_index.remove(path) {
+            Some(local_meta) => {
+                if local_meta.content_hash == remote_meta.content_hash {
+                    skipped.push(path.clone());
+                } else {
+                    conflicts.push(Conflict {
+                        path: path.clone(),
+                        local_hash: local_meta.content_hash,
+                        remote_hash: remote_meta.content_hash.clone(),
+                        local_size: local_meta.size_bytes,
+                        remote_size: remote_meta.size_bytes,
+                    });
+                }
+            }
+            None => {
+                if matches!(direction, SyncDirection::Pull) {
+                    downloads.push(remote_meta.clone());
+                }
+            }
+        }
+    }
+
+    for (_path, local_meta) in local_index.drain() {
+        if matches!(direction, SyncDirection::Push) {
+            uploads.push(local_meta);
+        }
+    }
+
+    uploads.sort_by(|a, b| a.path.cmp(&b.path));
+    downloads.sort_by(|a, b| a.path.cmp(&b.path));
+    skipped.sort();
+    conflicts.sort_by(|a, b| a.path.cmp(&b.path));
+
+    Ok(SyncPlan {
+        direction,
+        uploads,
+        downloads,
+        skipped,
+        conflicts,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
     use clap::Parser;
+    use stakpak_ak::{LocalFsBackend, StorageBackend};
 
     #[derive(Parser, Debug)]
     struct TestCli {
@@ -175,5 +290,193 @@ mod tests {
     fn unknown_strategy_rejected() {
         let result = TestCli::try_parse_from(["test", "push", "--strategy", "force"]);
         assert!(result.is_err(), "unknown strategy should fail to parse");
+    }
+
+    /// Build a (local, remote) backend pair backed by tempdirs.
+    /// The tempdirs are returned so callers can keep them alive for the
+    /// duration of the test.
+    fn pair() -> (tempfile::TempDir, LocalFsBackend, LocalFsBackend) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let local = LocalFsBackend::with_root(temp.path().join("local"));
+        let remote = LocalFsBackend::with_root(temp.path().join("remote"));
+        (temp, local, remote)
+    }
+
+    #[test]
+    fn plan_empty_stores() {
+        let (_temp, local, remote) = pair();
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert!(p.uploads.is_empty());
+        assert!(p.downloads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(p.conflicts.is_empty());
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn plan_push_uploads_local_only_files() {
+        let (_temp, local, remote) = pair();
+        local.create("notes/a.md", b"alpha").expect("create local");
+        local
+            .create("services/b.md", b"beta")
+            .expect("create local");
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert_eq!(p.uploads.len(), 2);
+        assert_eq!(p.uploads[0].path, "notes/a.md");
+        assert_eq!(p.uploads[1].path, "services/b.md");
+        assert!(p.downloads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(p.conflicts.is_empty());
+    }
+
+    #[test]
+    fn plan_pull_downloads_remote_only_files() {
+        let (_temp, local, remote) = pair();
+        remote
+            .create("notes/a.md", b"alpha")
+            .expect("create remote");
+        remote
+            .create("services/b.md", b"beta")
+            .expect("create remote");
+
+        let p = plan(&local, &remote, SyncDirection::Pull).expect("plan");
+
+        assert_eq!(p.downloads.len(), 2);
+        assert_eq!(p.downloads[0].path, "notes/a.md");
+        assert_eq!(p.downloads[1].path, "services/b.md");
+        assert!(p.uploads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(p.conflicts.is_empty());
+    }
+
+    #[test]
+    fn plan_push_ignores_remote_only_files() {
+        // Sync is additive: a remote-only file should NOT appear in any
+        // bucket on push (no delete-on-remote, no skipped entry either).
+        let (_temp, local, remote) = pair();
+        remote
+            .create("only-remote.md", b"x")
+            .expect("create remote");
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert!(p.uploads.is_empty());
+        assert!(p.downloads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(p.conflicts.is_empty());
+    }
+
+    #[test]
+    fn plan_pull_ignores_local_only_files() {
+        let (_temp, local, remote) = pair();
+        local.create("only-local.md", b"x").expect("create local");
+
+        let p = plan(&local, &remote, SyncDirection::Pull).expect("plan");
+
+        assert!(p.uploads.is_empty());
+        assert!(p.downloads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(p.conflicts.is_empty());
+    }
+
+    #[test]
+    fn plan_skips_identical_files() {
+        let (_temp, local, remote) = pair();
+        local.create("shared.md", b"same").expect("create local");
+        remote.create("shared.md", b"same").expect("create remote");
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert_eq!(p.skipped, vec!["shared.md".to_string()]);
+        assert!(p.uploads.is_empty());
+        assert!(p.conflicts.is_empty());
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn plan_detects_conflicts() {
+        let (_temp, local, remote) = pair();
+        local
+            .create("shared.md", b"local-version")
+            .expect("create local");
+        remote
+            .create("shared.md", b"remote-version")
+            .expect("create remote");
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert_eq!(p.conflicts.len(), 1);
+        let c = &p.conflicts[0];
+        assert_eq!(c.path, "shared.md");
+        assert_ne!(c.local_hash, c.remote_hash);
+        assert_eq!(c.local_size, b"local-version".len() as u64);
+        assert_eq!(c.remote_size, b"remote-version".len() as u64);
+        assert!(p.uploads.is_empty());
+        assert!(p.skipped.is_empty());
+        assert!(!p.is_empty(), "conflicts make the plan non-noop");
+    }
+
+    #[test]
+    fn plan_combines_all_categories() {
+        // Mixed scenario:
+        //   only-local.md   -> upload (push)
+        //   only-remote.md  -> dropped (additive)
+        //   identical.md    -> skipped
+        //   conflict.md     -> conflict
+        let (_temp, local, remote) = pair();
+        local
+            .create("only-local.md", b"L")
+            .expect("create only-local");
+        remote
+            .create("only-remote.md", b"R")
+            .expect("create only-remote");
+        local
+            .create("identical.md", b"same")
+            .expect("create identical local");
+        remote
+            .create("identical.md", b"same")
+            .expect("create identical remote");
+        local
+            .create("conflict.md", b"local-side")
+            .expect("create conflict local");
+        remote
+            .create("conflict.md", b"remote-side")
+            .expect("create conflict remote");
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        assert_eq!(
+            p.uploads
+                .iter()
+                .map(|m| m.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["only-local.md"]
+        );
+        assert_eq!(p.skipped, vec!["identical.md".to_string()]);
+        assert_eq!(p.conflicts.len(), 1);
+        assert_eq!(p.conflicts[0].path, "conflict.md");
+        assert!(p.downloads.is_empty());
+    }
+
+    #[test]
+    fn plan_outputs_are_sorted() {
+        // Deterministic ordering matters for cache-friendly diff output
+        // and for tests downstream.
+        let (_temp, local, remote) = pair();
+        // Create in a deliberately non-alphabetical order.
+        for path in ["zebra.md", "alpha.md", "mango.md"] {
+            local.create(path, b"x").expect("create local");
+        }
+        for path in ["yak.md", "apple.md"] {
+            remote.create(path, b"x").expect("create remote");
+        }
+
+        let p = plan(&local, &remote, SyncDirection::Push).expect("plan");
+
+        let upload_paths: Vec<&str> = p.uploads.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(upload_paths, vec!["alpha.md", "mango.md", "zebra.md"]);
     }
 }
