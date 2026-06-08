@@ -421,16 +421,22 @@ impl StorageBackend for LocalFsBackend {
 
         let mut results = Vec::with_capacity(paths.len());
         for path in paths {
-            let absolute = self.resolve_path(&path)?;
+            // Normalize to forward slashes so local paths compare correctly with
+            // remote API paths (which are always `/`-separated), including on Windows.
+            let normalized_path = path.replace('\\', "/");
+            let absolute = self.resolve_path(&normalized_path)?;
             let bytes = fs::read(&absolute)?;
             let size_bytes = bytes.len() as u64;
             let content_hash = sha256_hex(&bytes);
             results.push(FileMeta {
-                path,
+                path: normalized_path,
                 content_hash,
                 size_bytes,
             });
         }
+
+        Ok(results)
+    }
 
         Ok(results)
     }
