@@ -11,6 +11,8 @@ use std::rc::Rc;
 
 use crate::config::AppConfig;
 
+mod sync;
+
 pub const AK_LONG_ABOUT: &str =
     "LLM-oriented commands for reading and writing persistent knowledge.
 
@@ -23,6 +25,7 @@ Key commands:
 - ak read <path>...: read one or more files in full
 - ak write <path>: create a new file; use --force to overwrite intentionally
 - ak remove <path>: remove a file or directory recursively
+- ak sync push|pull: reconcile the local store with the remote Stakpak knowledge store
 - ak skill <name>: print a built-in ak skill prompt
 
 Recommended discovery flow:
@@ -41,7 +44,9 @@ pub const AK_AFTER_HELP: &str = "Examples:
   stakpak ak read services/rate-limits.md services/auth-flow.md
   echo 'Rate limit is 1000/min' | stakpak ak write services/rate-limits.md
   stakpak ak write notes.md --file /tmp/notes.md
-  stakpak ak remove services/rate-limits.md";
+  stakpak ak remove services/rate-limits.md
+  stakpak ak sync push --dry-run
+  stakpak ak sync pull --strategy remote";
 
 #[derive(Subcommand, PartialEq, Debug)]
 #[command(
@@ -160,12 +165,22 @@ Use `usage` to teach an agent how to navigate and write to the store. Use `maint
         /// Built-in skill name: usage, maintain, or retrospect
         name: String,
     },
+
+    /// Reconcile the local ak knowledge store with the remote Stakpak knowledge store.
+    Sync {
+        #[command(subcommand)]
+        cmd: sync::SyncCommand,
+    },
 }
 
 impl AkCommands {
     pub fn run(self, config: AppConfig) -> Result<(), String> {
         if let Self::Skill { ref name } = self {
             return run_skill(name);
+        }
+
+        if let Self::Sync { cmd } = self {
+            return sync::run(cmd, config);
         }
 
         let backend = create_backend(&config)?;
@@ -180,8 +195,8 @@ impl AkCommands {
             Self::Read { paths } => run_read(backend.clone(), &paths)?,
             Self::Write { path, file, force } => run_write(backend.clone(), path, file, force)?,
             Self::Remove { path } => run_remove(backend.clone(), &path)?,
-            Self::Skill { .. } => {
-                unreachable!("Will never reach here because of the early return above")
+            Self::Skill { .. } | Self::Sync { .. } => {
+                unreachable!("Will never reach here because of the early returns above")
             }
         }
 
