@@ -28,7 +28,7 @@ pub fn format_size(bytes: u64) -> String {
 /// callers that pass shorter strings
 pub fn short_hash(hash: &str) -> &str {
     let end = hash.len().min(8);
-    &hash[..end]
+    hash.get(..end).unwrap_or(hash)
 }
 
 #[cfg(test)]
