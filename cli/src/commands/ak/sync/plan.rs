@@ -33,7 +33,7 @@ impl SyncPlan {
 /// Build a [`SyncPlan`] by enumerating both sides and classifying each path.
 ///
 /// Both backends are walked from the store root (`""`) and indexed by
-/// path. The classification rules follow the following rules
+/// path. The classification rules follow these rules
 ///
 /// | Local | Remote | Hashes | Push          | Pull           |
 /// |-------|--------|--------|---------------|----------------|
