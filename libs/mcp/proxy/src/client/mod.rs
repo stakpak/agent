@@ -25,12 +25,20 @@ impl ProxyClientHandler {
     }
 }
 
+fn progress_notification_for_forwarding(
+    notification: ProgressNotificationParam,
+) -> ProgressNotificationParam {
+    notification
+}
+
 impl ClientHandler for ProxyClientHandler {
     async fn on_progress(
         &self,
         notification: ProgressNotificationParam,
         _ctx: NotificationContext<RoleClient>,
     ) {
+        let notification = progress_notification_for_forwarding(notification);
+
         // Then forward progress notification from upstream server to downstream server
         let peer = self.downstream_peer.lock().await;
         if let Some(ref peer) = *peer {
@@ -282,6 +290,7 @@ fn substitute_env_vars(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::{NumberOrString, ProgressToken};
     use std::env;
     use std::sync::Mutex;
 
@@ -316,6 +325,28 @@ mod tests {
                 },
             }
         }
+    }
+
+    #[test]
+    fn progress_notification_forwarding_preserves_large_message_without_artifacting() {
+        let large_message = "progress line\n".repeat(400);
+        let notification = ProgressNotificationParam {
+            progress_token: ProgressToken(NumberOrString::Number(0)),
+            progress: 50.0,
+            total: None,
+            message: Some(large_message.clone()),
+        };
+
+        let forwarded = progress_notification_for_forwarding(notification);
+
+        assert_eq!(forwarded.message.as_deref(), Some(large_message.as_str()));
+        assert!(
+            !forwarded
+                .message
+                .as_deref()
+                .expect("message should be preserved")
+                .contains("Full output saved to ")
+        );
     }
 
     #[test]

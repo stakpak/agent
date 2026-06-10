@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use rand::Rng;
 use std::fs;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 use walkdir::DirEntry;
 
 /// Read .gitignore patterns from the specified base directory
@@ -250,6 +251,132 @@ pub fn truncate_chars_with_ellipsis(text: &str, max_chars: usize) -> String {
     truncated
 }
 
+pub struct LargeOutputLimits<'a> {
+    pub file_prefix: &'a str,
+    pub max_lines: usize,
+    pub max_bytes: usize,
+    pub show_head: bool,
+}
+
+fn sanitize_artifact_file_prefix(file_prefix: &str) -> String {
+    let sanitized = file_prefix
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(|c| matches!(c, '-' | '_' | '.'))
+        .to_string();
+
+    if sanitized.is_empty() {
+        "output".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn write_output_artifact(file_prefix: &str, output: &str) -> Result<String, String> {
+    let output_file = format!(
+        "{}.{}.txt",
+        sanitize_artifact_file_prefix(file_prefix),
+        Uuid::new_v4().simple()
+    );
+
+    LocalStore::write_session_data(&output_file, output)
+        .map_err(|e| format!("Failed to write session data: {}", e))
+}
+
+fn line_preview(
+    output_lines: &[&str],
+    output_file_path: &str,
+    max_lines: usize,
+    show_head: bool,
+) -> String {
+    let excerpt = if show_head {
+        let head_lines: Vec<&str> = output_lines.iter().take(max_lines).copied().collect();
+        head_lines.join("\n")
+    } else {
+        let mut tail_lines: Vec<&str> =
+            output_lines.iter().rev().take(max_lines).copied().collect();
+        tail_lines.reverse();
+        tail_lines.join("\n")
+    };
+
+    let position = if show_head { "first" } else { "last" };
+    format!(
+        "Showing the {} {} / {} output lines. Full output saved to {}\n{}\n{}",
+        position,
+        max_lines,
+        output_lines.len(),
+        output_file_path,
+        if show_head { "" } else { "...\n" },
+        excerpt
+    )
+}
+
+// start/end are adjusted to valid UTF-8 character boundaries before slicing.
+#[allow(clippy::string_slice)]
+fn byte_excerpt(output: &str, max_bytes: usize, show_head: bool) -> (&str, usize) {
+    if show_head {
+        let mut end = max_bytes.min(output.len());
+        while end > 0 && !output.is_char_boundary(end) {
+            end -= 1;
+        }
+        (&output[..end], end)
+    } else {
+        let mut start = output.len().saturating_sub(max_bytes);
+        while start < output.len() && !output.is_char_boundary(start) {
+            start += 1;
+        }
+        (&output[start..], output.len() - start)
+    }
+}
+
+fn byte_preview(output: &str, output_file_path: &str, max_bytes: usize, show_head: bool) -> String {
+    let (excerpt, excerpt_bytes) = byte_excerpt(output, max_bytes, show_head);
+    let position = if show_head { "first" } else { "last" };
+
+    format!(
+        "Showing the {} {} / {} output bytes. Full output saved to {}\n{}\n{}",
+        position,
+        excerpt_bytes,
+        output.len(),
+        output_file_path,
+        if show_head { "" } else { "...\n" },
+        excerpt
+    )
+}
+
+pub fn handle_large_output_with_limits(
+    output: &str,
+    limits: LargeOutputLimits<'_>,
+) -> Result<String, String> {
+    let output_lines = output.lines().collect::<Vec<_>>();
+    if output_lines.len() >= limits.max_lines {
+        let output_file_path = write_output_artifact(limits.file_prefix, output)?;
+        Ok(line_preview(
+            &output_lines,
+            &output_file_path,
+            limits.max_lines,
+            limits.show_head,
+        ))
+    } else if output.len() > limits.max_bytes {
+        let output_file_path = write_output_artifact(limits.file_prefix, output)?;
+        Ok(byte_preview(
+            output,
+            &output_file_path,
+            limits.max_bytes,
+            limits.show_head,
+        ))
+    } else {
+        Ok(output.to_string())
+    }
+}
+
 /// Handle large output: if the output has >= `max_lines`, save the full content to session
 /// storage and return a string showing only the first or last `max_lines` lines with a pointer
 /// to the saved file. Returns `Ok(final_string)` or `Err(error_string)` on failure.
@@ -259,44 +386,15 @@ pub fn handle_large_output(
     max_lines: usize,
     show_head: bool,
 ) -> Result<String, String> {
-    let output_lines = output.lines().collect::<Vec<_>>();
-    if output_lines.len() >= max_lines {
-        let mut __rng__ = rand::rng();
-        let output_file = format!(
-            "{}.{:06x}.txt",
+    handle_large_output_with_limits(
+        output,
+        LargeOutputLimits {
             file_prefix,
-            __rng__.random_range(0..=0xFFFFFF)
-        );
-        let output_file_path = match LocalStore::write_session_data(&output_file, output) {
-            Ok(path) => path,
-            Err(e) => {
-                return Err(format!("Failed to write session data: {}", e));
-            }
-        };
-
-        let excerpt = if show_head {
-            let head_lines: Vec<&str> = output_lines.iter().take(max_lines).copied().collect();
-            head_lines.join("\n")
-        } else {
-            let mut tail_lines: Vec<&str> =
-                output_lines.iter().rev().take(max_lines).copied().collect();
-            tail_lines.reverse();
-            tail_lines.join("\n")
-        };
-
-        let position = if show_head { "first" } else { "last" };
-        Ok(format!(
-            "Showing the {} {} / {} output lines. Full output saved to {}\n{}\n{}",
-            position,
             max_lines,
-            output_lines.len(),
-            output_file_path,
-            if show_head { "" } else { "...\n" },
-            excerpt
-        ))
-    } else {
-        Ok(output.to_string())
-    }
+            max_bytes: usize::MAX,
+            show_head,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -362,6 +460,7 @@ mod password_tests {
 #[cfg(test)]
 mod truncate_tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn normalize_optional_string_trims_and_drops_empty() {
@@ -385,6 +484,116 @@ mod truncate_tests {
         let value = "é".repeat(10);
         let truncated = truncate_chars_with_ellipsis(&value, 5);
         assert_eq!(truncated, "ééééé...");
+    }
+
+    fn artifact_path_from_preview(preview: &str) -> &str {
+        preview
+            .lines()
+            .next()
+            .and_then(|line| line.split_once("Full output saved to "))
+            .map(|(_, path)| path)
+            .expect("preview should contain saved artifact path")
+    }
+
+    #[test]
+    fn handle_large_output_line_trigger_artifacts_full_output() {
+        let output = (1..=4)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let preview = handle_large_output(&output, "line-test", 3, true)
+            .expect("large output should be handled");
+
+        assert!(preview.starts_with("Showing the first 3 / 4 output lines."));
+        assert!(preview.contains("\n\nline 1\nline 2\nline 3"));
+        assert!(!preview.contains("line 4"));
+
+        let artifact_path = artifact_path_from_preview(&preview);
+        let artifact = std::fs::read_to_string(artifact_path).expect("artifact should be readable");
+        assert_eq!(artifact, output);
+        std::fs::remove_file(artifact_path).expect("artifact should be removable");
+    }
+
+    #[test]
+    fn handle_large_output_with_limits_byte_trigger_artifacts_full_output() {
+        let output = "a".repeat(64);
+
+        let preview = handle_large_output_with_limits(
+            &output,
+            LargeOutputLimits {
+                file_prefix: "mcp tool/output",
+                max_lines: 300,
+                max_bytes: 32,
+                show_head: true,
+            },
+        )
+        .expect("large output should be handled");
+
+        assert!(preview.starts_with("Showing the first 32 / 64 output bytes."));
+        assert!(preview.contains("Full output saved to "));
+        assert!(preview.contains(&"a".repeat(32)));
+        assert!(!preview.contains(&"a".repeat(64)));
+
+        let artifact_path = artifact_path_from_preview(&preview);
+        let artifact = std::fs::read_to_string(artifact_path).expect("artifact should be readable");
+        assert_eq!(artifact, output);
+
+        let file_name = Path::new(artifact_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("artifact should have a valid UTF-8 file name");
+        assert!(file_name.starts_with("mcp-tool-output."));
+        assert!(file_name.ends_with(".txt"));
+        assert_eq!(
+            file_name.len(),
+            "mcp-tool-output.".len() + 32 + ".txt".len()
+        );
+
+        std::fs::remove_file(artifact_path).expect("artifact should be removable");
+    }
+
+    #[test]
+    fn handle_large_output_with_limits_byte_preview_is_utf8_safe() {
+        let output = format!("{}end", "é".repeat(20));
+
+        let preview = handle_large_output_with_limits(
+            &output,
+            LargeOutputLimits {
+                file_prefix: "utf8-test",
+                max_lines: 300,
+                max_bytes: 9,
+                show_head: true,
+            },
+        )
+        .expect("large output should be handled");
+
+        assert!(preview.starts_with("Showing the first 8 / 43 output bytes."));
+        assert!(preview.contains("\n\néééé"));
+        assert!(!preview.contains("end"));
+
+        let artifact_path = artifact_path_from_preview(&preview);
+        let artifact = std::fs::read_to_string(artifact_path).expect("artifact should be readable");
+        assert_eq!(artifact, output);
+        std::fs::remove_file(artifact_path).expect("artifact should be removable");
+    }
+
+    #[test]
+    fn handle_large_output_with_limits_small_output_passes_through() {
+        let output = "small\noutput";
+
+        let preview = handle_large_output_with_limits(
+            output,
+            LargeOutputLimits {
+                file_prefix: "small-test",
+                max_lines: 300,
+                max_bytes: 1024,
+                show_head: true,
+            },
+        )
+        .expect("small output should pass through");
+
+        assert_eq!(preview, output);
     }
 }
 

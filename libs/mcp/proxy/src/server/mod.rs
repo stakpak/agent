@@ -22,6 +22,7 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::paths::stakpak_home_dir;
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::utils::{LargeOutputLimits, handle_large_output_with_limits};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -124,6 +125,51 @@ fn restore_secrets_in_json_value(
         }
         _ => {}
     }
+}
+
+const PROXY_LARGE_OUTPUT_MAX_LINES: usize = 300;
+const PROXY_LARGE_OUTPUT_MAX_BYTES: usize = 64 * 1024;
+
+fn artifact_final_tool_result_text(
+    mut result: CallToolResult,
+    client_name: &str,
+    tool_name: &str,
+) -> CallToolResult {
+    let mut text_blocks = Vec::new();
+    let mut non_text_content = Vec::new();
+
+    for item in result.content {
+        if let Some(text_content) = item.raw.as_text() {
+            text_blocks.push(text_content.text.clone());
+        } else {
+            non_text_content.push(item);
+        }
+    }
+
+    if text_blocks.is_empty() {
+        result.content = non_text_content;
+        return result;
+    }
+
+    let flattened_text = text_blocks.join("\n");
+    let file_prefix = format!("tool-output.{}.{}", client_name, tool_name);
+    let processed_text = match handle_large_output_with_limits(
+        &flattened_text,
+        LargeOutputLimits {
+            file_prefix: &file_prefix,
+            max_lines: PROXY_LARGE_OUTPUT_MAX_LINES,
+            max_bytes: PROXY_LARGE_OUTPUT_MAX_BYTES,
+            show_head: false,
+        },
+    ) {
+        Ok(text) => text,
+        Err(e) => format!("FAILED_TO_HANDLE_LARGE_OUTPUT: {}", e),
+    };
+
+    result.content = std::iter::once(Content::text(processed_text))
+        .chain(non_text_content)
+        .collect();
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -670,6 +716,8 @@ impl ServerHandler for ProxyServer {
                 .collect();
         }
 
+        result = artifact_final_tool_result_text(result, &client_name, &tool_name);
+
         Ok(result)
     }
 
@@ -881,7 +929,39 @@ pub async fn start_proxy_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::ResourceContents;
     use serde_json::json;
+
+    fn text_content(content: &Content) -> &str {
+        content
+            .raw
+            .as_text()
+            .map(|text| text.text.as_str())
+            .expect("content should be text")
+    }
+
+    fn artifact_path_from_preview(preview: &str) -> &str {
+        preview
+            .lines()
+            .next()
+            .and_then(|line| line.split_once("Full output saved to "))
+            .map(|(_, path)| path)
+            .expect("preview should contain saved artifact path")
+    }
+
+    fn read_artifact_from_preview(preview: &str) -> String {
+        let artifact_path = artifact_path_from_preview(preview);
+        let artifact = std::fs::read_to_string(artifact_path).expect("artifact should be readable");
+        std::fs::remove_file(artifact_path).expect("artifact should be removable");
+        artifact
+    }
+
+    fn numbered_lines(prefix: &str, count: usize) -> String {
+        (1..=count)
+            .map(|line| format!("{prefix}-{line:03}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     /// Helper: build a redaction map from pairs
     fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -889,6 +969,109 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn artifact_final_tool_result_previews_large_success_text() {
+        let output = numbered_lines("success", 301);
+        let result = CallToolResult::success(vec![Content::text(output.clone())]);
+
+        let processed = artifact_final_tool_result_text(result, "stakpak", "run_command");
+
+        assert_eq!(processed.is_error, Some(false));
+        assert_eq!(processed.content.len(), 1);
+        let preview = text_content(&processed.content[0]);
+        assert!(preview.starts_with("Showing the last 300 / 301 output lines."));
+        assert!(preview.contains("Full output saved to "));
+        assert!(!preview.contains("success-001"));
+        assert!(preview.contains("success-301"));
+
+        let artifact = read_artifact_from_preview(preview);
+        assert_eq!(artifact, output);
+    }
+
+    #[test]
+    fn artifact_final_tool_result_preserves_large_error_status() {
+        let output = numbered_lines("error", 301);
+        let result = CallToolResult::error(vec![Content::text(output.clone())]);
+
+        let processed = artifact_final_tool_result_text(result, "stakpak", "get_task_details");
+
+        assert_eq!(processed.is_error, Some(true));
+        assert_eq!(processed.content.len(), 1);
+        let preview = text_content(&processed.content[0]);
+        assert!(preview.starts_with("Showing the last 300 / 301 output lines."));
+
+        let artifact = read_artifact_from_preview(preview);
+        assert_eq!(artifact, output);
+    }
+
+    #[test]
+    fn artifact_final_tool_result_flattens_multiple_text_blocks_once() {
+        let first = numbered_lines("first", 200);
+        let second = numbered_lines("second", 200);
+        let flattened = format!("{first}\n{second}");
+        let result = CallToolResult::success(vec![
+            Content::text(first.clone()),
+            Content::text(second.clone()),
+        ]);
+
+        let processed = artifact_final_tool_result_text(result, "docs", "search_docs");
+
+        assert_eq!(processed.content.len(), 1);
+        let preview = text_content(&processed.content[0]);
+        assert!(preview.starts_with("Showing the last 300 / 400 output lines."));
+
+        let artifact = read_artifact_from_preview(preview);
+        assert_eq!(artifact, flattened);
+    }
+
+    #[test]
+    fn artifact_final_tool_result_preserves_non_text_after_preview() {
+        let output = numbered_lines("image", 301);
+        let image = Content::image("abc123", "image/png");
+        let result = CallToolResult::success(vec![Content::text(output), image.clone()]);
+
+        let processed = artifact_final_tool_result_text(result, "vision", "inspect");
+
+        assert_eq!(processed.content.len(), 2);
+        assert!(text_content(&processed.content[0]).contains("Full output saved to "));
+        assert_eq!(processed.content[1], image);
+
+        let _ = read_artifact_from_preview(text_content(&processed.content[0]));
+    }
+
+    #[test]
+    fn artifact_final_tool_result_preserves_resource_after_small_text_normalization() {
+        let resource = Content::resource(ResourceContents::text("resource body", "file:///a.txt"));
+        let result = CallToolResult::success(vec![
+            Content::text("alpha"),
+            resource.clone(),
+            Content::text("beta"),
+        ]);
+
+        let processed = artifact_final_tool_result_text(result, "files", "read_resource");
+
+        assert_eq!(processed.content.len(), 2);
+        assert_eq!(text_content(&processed.content[0]), "alpha\nbeta");
+        assert_eq!(processed.content[1], resource);
+    }
+
+    #[test]
+    fn artifact_final_tool_result_previews_large_single_line_by_bytes() {
+        let output = "x".repeat(65 * 1024);
+        let result = CallToolResult::success(vec![Content::text(output.clone())]);
+
+        let processed = artifact_final_tool_result_text(result, "json", "large_payload");
+
+        assert_eq!(processed.content.len(), 1);
+        let preview = text_content(&processed.content[0]);
+        assert!(preview.starts_with("Showing the last 65536 / 66560 output bytes."));
+        assert!(preview.contains("Full output saved to "));
+        assert!(preview.len() < output.len());
+
+        let artifact = read_artifact_from_preview(preview);
+        assert_eq!(artifact, output);
     }
 
     // ---------------------------------------------------------------

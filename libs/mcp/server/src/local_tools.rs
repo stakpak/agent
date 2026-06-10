@@ -25,7 +25,7 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_shared::task_manager::{StartTaskOptions, TaskInfo};
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{
-    LocalFileSystemProvider, generate_directory_tree, handle_large_output, sanitize_text_output,
+    LocalFileSystemProvider, generate_directory_tree, sanitize_text_output,
 };
 use std::fs::{self};
 use std::path::Path;
@@ -309,8 +309,6 @@ impl ToolContainer {
     #[tool(
         description = "Execute a shell command locally with full system access.
 
-If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
-
 For remote command execution via SSH, use the run_remote_command tool instead."
     )]
     pub async fn run_command(
@@ -337,8 +335,6 @@ REMOTE EXECUTION:
 - Examples:
   * 'user@server.com' (uses default port 22 and auto-discovered keys)
   * 'user@server.com:2222' with password authentication
-
-If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
 
 For local command execution, use the run_command tool instead.")]
     pub async fn run_remote_command(
@@ -702,8 +698,6 @@ This tool provides comprehensive details about a background task started with ru
 - Complete command output
 - Error information if the task failed
 
-If the task output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
-
 Use this tool to check the progress and results of long-running background tasks."
     )]
     pub async fn get_task_details(
@@ -760,16 +754,7 @@ Use this tool to check the progress and results of long-running background tasks
                         // Subagent output - use Display impl for LLM-friendly formatting
                         manifest.to_string()
                     } else {
-                        // Regular task output - use standard handling
-                        match handle_large_output(output, "task.output", 300, false) {
-                            Ok(result) => result,
-                            Err(e) => {
-                                return Ok(CallToolResult::error(vec![
-                                    Content::text("OUTPUT_HANDLING_ERROR"),
-                                    Content::text(format!("Failed to handle task output: {}", e)),
-                                ]));
-                            }
-                        }
+                        output.clone()
                     }
                 } else {
                     "No output available".to_string()
@@ -1018,9 +1003,7 @@ SECURITY FEATURES:
 - Only allows HTTPS URLs for secure connections
 - Follows redirects safely with limits
 
-The tool fetches the HTML content from the specified URL and converts it to clean, readable markdown. This is useful for reading web articles, documentation, or any web content in a text-friendly format.
-
-The response will be truncated if it exceeds 300 lines, with the full content saved to a local file."
+The tool fetches the HTML content from the specified URL and converts it to clean, readable markdown. This is useful for reading web articles, documentation, or any web content in a text-friendly format."
     )]
     pub async fn view_web_page(
         &self,
@@ -1097,17 +1080,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         let markdown_content = html2md::rewrite_html(&html_content, false);
         let sanitized_content = sanitize_text_output(&markdown_content);
 
-        let result = match handle_large_output(&sanitized_content, "webpage", 300, false) {
-            Ok(result) => result,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("OUTPUT_HANDLING_ERROR"),
-                    Content::text(format!("Failed to handle output: {}", e)),
-                ]));
-            }
-        };
-
-        let formatted_output = format!("# Web Page Content: {}\n\n{}", url, result);
+        let formatted_output = format!("# Web Page Content: {}\n\n{}", url, sanitized_content);
 
         Ok(CallToolResult::success(vec![Content::text(
             &formatted_output,
@@ -1232,17 +1205,6 @@ SAFETY NOTES:
     fn format_command_result(
         command_result: &mut CommandResult,
     ) -> Result<CallToolResult, McpError> {
-        command_result.output =
-            match handle_large_output(&command_result.output, "command.output", 300, false) {
-                Ok(result) => result,
-                Err(e) => {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("OUTPUT_HANDLING_ERROR"),
-                        Content::text(format!("Failed to handle command output: {}", e)),
-                    ]));
-                }
-            };
-
         if command_result.output.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text("No output")]));
         }
