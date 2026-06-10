@@ -17,7 +17,7 @@ regex = { workspace = true }
 globset = { workspace = true }
 grep-matcher = { workspace = true }
 grep-regex = { workspace = true }
-stakpak-api = { path = "../api" }
+stakpak-api = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
