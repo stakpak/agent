@@ -152,7 +152,7 @@ fn artifact_final_tool_result_text(
     }
 
     let flattened_text = text_blocks.join("\n");
-    let file_prefix = format!("mcp-tool-output.{}.{}", client_name, tool_name);
+    let file_prefix = format!("tool-output.{}.{}", client_name, tool_name);
     let processed_text = match handle_large_output_with_limits(
         &flattened_text,
         LargeOutputLimits {
