@@ -21,6 +21,11 @@ pub struct TaskBoardContextHookOptions {
     pub keep_last_n_assistant_messages: Option<usize>,
     /// Fraction of the context window at which trimming triggers (e.g. 0.8 = 80%).
     pub context_budget_threshold: Option<f32>,
+    /// Override the model's context window size (in tokens).
+    /// When set, replaces the model's built-in `context_window` for budget
+    /// calculations. Useful for local/custom models where the window may
+    /// not be auto-detected correctly.
+    pub context_window: Option<u64>,
 }
 
 impl TaskBoardContextHook {
@@ -28,6 +33,7 @@ impl TaskBoardContextHook {
         let context_manager = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: options.keep_last_n_assistant_messages.unwrap_or(50),
             context_budget_threshold: options.context_budget_threshold.unwrap_or(0.8),
+            context_window: options.context_window,
         });
 
         Self { context_manager }
@@ -42,8 +48,15 @@ define_hook!(
             return Ok(HookAction::Continue);
         }
 
-        let model = ctx.state.active_model.clone();
+        let mut model = ctx.state.active_model.clone();
         let max_output_tokens: u64 = 16000;
+
+        // Apply context_window override if configured, so the budget-aware
+        // context trimming uses the user-specified window instead of the
+        // model's built-in limit.
+        if let Some(override_window) = self.context_manager.context_window {
+            model.limit.context = override_window;
+        }
 
         // Subtract fixed overhead from context window so the trimmer budgets
         // only the space actually available for chat messages.

@@ -61,6 +61,17 @@ pub struct AgentClientConfig {
     pub store_path: Option<String>,
     /// Hook registry for lifecycle events
     pub hook_registry: Option<HookRegistry<AgentState>>,
+    /// How many recent assistant messages to keep untrimmed when context
+    /// trimming is triggered (default: 5).
+    pub keep_last_n_assistant_messages: Option<usize>,
+    /// Fraction of the context window at which trimming triggers
+    /// (e.g. 0.8 = 80%, default: 0.8).
+    pub context_budget_threshold: Option<f32>,
+    /// Override the model's context window size (in tokens).
+    /// When set, replaces the model's built-in `context_window` for budget
+    /// calculations. Useful for local/custom models where the window may
+    /// not be auto-detected correctly.
+    pub context_window: Option<u64>,
 }
 
 impl AgentClientConfig {
@@ -92,6 +103,24 @@ impl AgentClientConfig {
     /// Set hook registry
     pub fn with_hook_registry(mut self, registry: HookRegistry<AgentState>) -> Self {
         self.hook_registry = Some(registry);
+        self
+    }
+
+    /// Set context trimming: number of recent assistant messages to preserve
+    pub fn with_keep_last_n_assistant_messages(mut self, n: usize) -> Self {
+        self.keep_last_n_assistant_messages = Some(n);
+        self
+    }
+
+    /// Set context trimming: budget threshold (0.0–1.0)
+    pub fn with_context_budget_threshold(mut self, threshold: f32) -> Self {
+        self.context_budget_threshold = Some(threshold);
+        self
+    }
+
+    /// Set context window override (in tokens)
+    pub fn with_context_window(mut self, window: u64) -> Self {
+        self.context_window = Some(window);
         self
     }
 }
@@ -221,8 +250,9 @@ impl AgentClient {
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {
-                keep_last_n_assistant_messages: Some(5), // Keep the last 5 assistant messages in context
-                context_budget_threshold: Some(0.8),     // defaults to 0.8 (80%)
+                keep_last_n_assistant_messages: config.keep_last_n_assistant_messages.or(Some(5)),
+                context_budget_threshold: config.context_budget_threshold.or(Some(0.8)),
+                context_window: config.context_window,
             })),
         );
         let hook_registry = Arc::new(hook_registry);

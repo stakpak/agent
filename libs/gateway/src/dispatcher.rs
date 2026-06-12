@@ -3198,6 +3198,7 @@ mod tests {
                     auto_approve: Some(AutoApproveOverride::AllowList(vec!["view".to_string()])),
                     system_prompt: Some("ops prompt".to_string()),
                     max_turns: Some(16),
+                    ..RunOverrides::default()
                 },
             )]),
         };

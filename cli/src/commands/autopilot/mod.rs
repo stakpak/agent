@@ -1648,6 +1648,9 @@ impl stakpak_gateway::dispatcher::RunOverrideResolver for ProfileRunOverrideReso
                 .map(stakpak_gateway::client::AutoApproveOverride::AllowList),
             system_prompt: resolved.system_prompt,
             max_turns: resolved.max_turns,
+            context_window: resolved.context_window,
+            context_budget_threshold: resolved.context_budget_threshold,
+            keep_last_n_assistant_messages: resolved.keep_last_n_assistant_messages,
         };
 
         if overrides.is_empty() {

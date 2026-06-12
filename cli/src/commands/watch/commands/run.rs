@@ -901,6 +901,9 @@ fn resolve_schedule_profile_overrides(
         auto_approve: normalized_auto_approve,
         system_prompt: resolved.system_prompt,
         max_turns: resolved.max_turns,
+        context_window: resolved.context_window,
+        context_budget_threshold: resolved.context_budget_threshold,
+        keep_last_n_assistant_messages: resolved.keep_last_n_assistant_messages,
     };
 
     let overrides = if overrides.is_empty() {

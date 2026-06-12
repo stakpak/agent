@@ -55,6 +55,12 @@ pub struct AppConfig {
     pub system_prompt: Option<String>,
     /// Optional max turn override for sessions using this profile.
     pub max_turns: Option<usize>,
+    /// Optional context window override for sessions using this profile.
+    pub context_window: Option<u64>,
+    /// Optional context budget threshold for sessions using this profile.
+    pub context_budget_threshold: Option<f32>,
+    /// Optional keep-last-N-assistant-messages for sessions using this profile.
+    pub keep_last_n_assistant_messages: Option<usize>,
     /// Unique ID for anonymous telemetry
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
@@ -170,6 +176,9 @@ impl AppConfig {
             subagent: profile_config.subagent,
             system_prompt: profile_config.system_prompt,
             max_turns: profile_config.max_turns,
+            context_window: profile_config.context_window,
+            context_budget_threshold: profile_config.context_budget_threshold,
+            keep_last_n_assistant_messages: profile_config.keep_last_n_assistant_messages,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
             editor: settings.editor,
