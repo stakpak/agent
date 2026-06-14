@@ -99,6 +99,23 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<usize>,
 
+    /// Override the model's context window size (in tokens).
+    /// When set, this value replaces the model's default context window
+    /// for budget and trimming calculations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+
+    /// Fraction of the context window at which context trimming triggers.
+    /// Range: 0.1–1.0 (e.g. 0.8 = start trimming at 80% of context window).
+    /// Default: 0.8 (80%).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_budget_threshold: Option<f32>,
+
+    /// Number of recent assistant messages to keep untrimmed during context
+    /// trimming. Default: 5.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_last_n_assistant_messages: Option<usize>,
+
     // =========================================================================
     // Legacy model fields - kept for backward compatibility during migration
     // These are read but deprecated (will migrate to 'model' field)
@@ -140,6 +157,9 @@ impl ProfileConfig {
                 recent_models: default.recent_models.clone(),
                 system_prompt: default.system_prompt.clone(),
                 max_turns: default.max_turns,
+                context_window: default.context_window,
+                context_budget_threshold: default.context_budget_threshold,
+                keep_last_n_assistant_messages: default.keep_last_n_assistant_messages,
                 // Enable warden for readonly sandboxed execution
                 warden: Some(WardenConfig::readonly_profile()),
                 // Don't copy allowed_tools/auto_approve - readonly has its own restrictions
@@ -437,6 +457,15 @@ impl ProfileConfig {
             max_turns: self
                 .max_turns
                 .or_else(|| other.and_then(|config| config.max_turns)),
+            context_window: self
+                .context_window
+                .or_else(|| other.and_then(|config| config.context_window)),
+            context_budget_threshold: self
+                .context_budget_threshold
+                .or_else(|| other.and_then(|config| config.context_budget_threshold)),
+            keep_last_n_assistant_messages: self
+                .keep_last_n_assistant_messages
+                .or_else(|| other.and_then(|config| config.keep_last_n_assistant_messages)),
             // Legacy fields - kept for reading only, not merged
             eco_model: None,
             smart_model: None,

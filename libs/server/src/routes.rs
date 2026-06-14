@@ -250,6 +250,12 @@ const DEFAULT_MAX_TURNS: usize = 64;
 const MIN_MAX_TURNS: usize = 1;
 const MAX_MAX_TURNS: usize = 256;
 const MAX_SYSTEM_PROMPT_CHARS: usize = 32 * 1024;
+const DEFAULT_CONTEXT_BUDGET_THRESHOLD: f32 = 0.8;
+const DEFAULT_KEEP_LAST_N_ASSISTANT_MESSAGES: usize = 5;
+const MIN_CONTEXT_BUDGET_THRESHOLD: f32 = 0.1;
+const MAX_CONTEXT_BUDGET_THRESHOLD: f32 = 1.0;
+const MIN_CONTEXT_WINDOW: u64 = 1_000;
+const MAX_CONTEXT_WINDOW: u64 = 2_000_000;
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
     public_router()
@@ -574,12 +580,23 @@ async fn sessions_message_handler(
                 // bypasses validate_session_message_request.
                 .clamp(MIN_MAX_TURNS, MAX_MAX_TURNS);
 
+            let context_window_override = overrides.and_then(|value| value.context_window);
+            let context_budget_threshold = overrides
+                .and_then(|value| value.context_budget_threshold)
+                .unwrap_or(DEFAULT_CONTEXT_BUDGET_THRESHOLD);
+            let keep_last_n_assistant_messages = overrides
+                .and_then(|value| value.keep_last_n_assistant_messages)
+                .unwrap_or(DEFAULT_KEEP_LAST_N_ASSISTANT_MESSAGES);
+
             let run_config = RunConfig {
                 model,
                 inference: state.inference.clone(),
                 tool_approval_policy,
                 system_prompt: system_prompt_override,
                 max_turns,
+                context_window: context_window_override,
+                context_budget_threshold: Some(context_budget_threshold),
+                keep_last_n_assistant_messages: Some(keep_last_n_assistant_messages),
             };
 
             let caller_context = map_caller_context_inputs(request.context.as_deref());
@@ -1096,6 +1113,30 @@ fn validate_session_message_request(request: &SessionMessageRequest) -> Option<R
                 StatusCode::BAD_REQUEST,
                 "invalid_overrides",
                 "system_prompt exceeds maximum length",
+            ));
+        }
+
+        if let Some(context_window) = overrides.context_window
+            && !(MIN_CONTEXT_WINDOW..=MAX_CONTEXT_WINDOW).contains(&context_window)
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                &format!(
+                    "context_window must be between {MIN_CONTEXT_WINDOW} and {MAX_CONTEXT_WINDOW}"
+                ),
+            ));
+        }
+
+        if let Some(threshold) = overrides.context_budget_threshold
+            && !(MIN_CONTEXT_BUDGET_THRESHOLD..=MAX_CONTEXT_BUDGET_THRESHOLD).contains(&threshold)
+        {
+            return Some(api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_overrides",
+                &format!(
+                    "context_budget_threshold must be between {MIN_CONTEXT_BUDGET_THRESHOLD} and {MAX_CONTEXT_BUDGET_THRESHOLD}"
+                ),
             ));
         }
     }
