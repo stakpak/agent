@@ -44,6 +44,9 @@ pub enum KnowledgeApiError {
     Forbidden { message: String },
     /// Request was rejected by the server (HTTP 400).
     BadRequest { message: String },
+    /// Optimistic lock mismatch — the `If-Match` header did not match the
+    /// current `content_hash` (HTTP 412).
+    PreconditionFailed { message: String },
     /// Catch-all for any other HTTP error status, plus the raw body.
     Http { status: StatusCode, message: String },
     /// Transport / serialization / IO failure (no HTTP status available).
@@ -57,6 +60,7 @@ impl KnowledgeApiError {
             | Self::Conflict { message }
             | Self::Forbidden { message }
             | Self::BadRequest { message }
+            | Self::PreconditionFailed { message }
             | Self::Http { message, .. }
             | Self::Transport { message } => message,
         }
@@ -69,6 +73,7 @@ impl KnowledgeApiError {
             Self::Conflict { .. } => Some(StatusCode::CONFLICT),
             Self::Forbidden { .. } => Some(StatusCode::FORBIDDEN),
             Self::BadRequest { .. } => Some(StatusCode::BAD_REQUEST),
+            Self::PreconditionFailed { .. } => Some(StatusCode::PRECONDITION_FAILED),
             Self::Http { status, .. } => Some(*status),
             Self::Transport { .. } => None,
         }
@@ -82,6 +87,9 @@ impl std::fmt::Display for KnowledgeApiError {
             Self::Conflict { message } => write!(f, "conflict: {}", message),
             Self::Forbidden { message } => write!(f, "forbidden: {}", message),
             Self::BadRequest { message } => write!(f, "bad request: {}", message),
+            Self::PreconditionFailed { message } => {
+                write!(f, "precondition failed: {}", message)
+            }
             Self::Http { status, message } => write!(f, "http {}: {}", status, message),
             Self::Transport { message } => write!(f, "transport error: {}", message),
         }
@@ -368,26 +376,84 @@ impl StakpakApiClient {
 
     /// Overwrite an existing knowledge file (or create if not exists).
     ///
-    /// The cache is not populated here. Any stale local copy will be
-    /// revalidated on the next read: `If-None-Match` will miss against the
-    /// new server ETag and the client will refetch + replace the cached
-    /// body.
+    /// Always sends an `If-Match` header for optimistic locking. The server
+    /// compares this value against the file's current `content_hash` and
+    /// returns `412 Precondition Failed` if they differ, preventing blind
+    /// clobbers from concurrent clients.
+    ///
+    /// The hash is resolved from, in order of priority:
+    /// 1. An explicit `expected_content_hash` value provided by the caller
+    /// 2. The on-disk cache (populated by a prior `read_knowledge_file`)
+    ///
+    /// If neither source provides a hash, the call fails with
+    /// `PreconditionFailed` — callers must read the file first.
+    ///
+    /// On success, the cache entry for this path is evicted so the next read
+    /// refetches the updated body.
     pub async fn overwrite_knowledge_file(
         &self,
         path: &str,
         content: &[u8],
+        expected_content_hash: Option<&str>,
     ) -> Result<UpdateKnowledgeFileResponse, KnowledgeApiError> {
         let normalized_path = normalize_knowledge_path(path)?;
         let encoded_path = encode_path_segments(&normalized_path);
         let url = format!("{}/v1/knowledge/{}", self.base_url, encoded_path);
-        let response = self
+
+        let if_match = match expected_content_hash {
+            Some(hash) => Some(hash.to_string()),
+            None => {
+                let account = self.resolve_cache_account().await;
+                match account {
+                    Some(account) => {
+                        let cache_target = cache::cached_path(&account, &normalized_path);
+                        match cache_target {
+                            Some(target) => cache::read_cached(&target).await.map(|(_, etag)| etag),
+                            None => None,
+                        }
+                    }
+                    None => None,
+                }
+            }
+        };
+
+        let if_match = match if_match {
+            Some(hash) => hash,
+            None => {
+                return Err(KnowledgeApiError::PreconditionFailed {
+                    message: format!(
+                        "no content_hash available for {} — read the file before overwriting",
+                        normalized_path
+                    ),
+                });
+            }
+        };
+
+        let request = self
             .client
             .put(&url)
             .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(content.to_vec())
-            .send()
-            .await?;
-        self.handle_knowledge_response(response).await
+            .header(header::IF_MATCH, &if_match);
+        let response = request.body(content.to_vec()).send().await?;
+
+        if response.status() == StatusCode::PRECONDITION_FAILED {
+            return Err(KnowledgeApiError::PreconditionFailed {
+                message: format!(
+                    "content_hash mismatch for {} — the file was modified by another client",
+                    normalized_path
+                ),
+            });
+        }
+
+        let result = self.handle_knowledge_response(response).await?;
+
+        if let Some(account) = self.resolve_cache_account().await
+            && let Some(target) = cache::cached_path(&account, &normalized_path)
+        {
+            cache::evict_cached(&target).await;
+        }
+
+        Ok(result)
     }
 
     /// Delete a knowledge file or directory. On success, evicts the matching
@@ -466,6 +532,7 @@ impl StakpakApiClient {
                 KnowledgeApiError::Forbidden { message }
             }
             StatusCode::BAD_REQUEST => KnowledgeApiError::BadRequest { message },
+            StatusCode::PRECONDITION_FAILED => KnowledgeApiError::PreconditionFailed { message },
             other => KnowledgeApiError::Http {
                 status: other,
                 message,
