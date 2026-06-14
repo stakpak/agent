@@ -94,17 +94,56 @@ See also: [cli/README.md](cli/README.md)
 #### Unified configuration (profiles + autopilot wiring)
 
 - `~/.stakpak/config.toml`: profile behavior (`model`, `allowed_tools`, `auto_approve`, `system_prompt`, `max_turns`, provider credentials)
-- `~/.stakpak/autopilot.toml`: runtime wiring (`schedules`, `channels`, service/server settings)
+- `~/.stakpak/autopilot.toml`: runtime wiring (`schedules`, `channels`, notification routes, service/server settings)
 
-Use `profile = "name"` on schedules/channels and keep behavior inside profile definitions.
+Use `profile = "name"` on schedules/channels and keep behavior inside profile definitions. Profiles control how the agent behaves: model, allowed tools, auto-approval, system prompt, max turns, and provider credentials. Notification routes only control where messages are delivered.
+
+Schedule and channel profiles are intentionally separate:
+
+- schedule `--profile monitoring`: behavior for runs started by that schedule
+- channel `--profile ops`: behavior for sessions started from inbound Slack/Telegram/Discord messages
+- notification `--target "#ops"`: where schedule notifications are sent; it does not choose the model or tools
+
+Notification routing uses two words everywhere:
+
+- `channel`: the transport, such as `slack`, `telegram`, or `discord`
+- `target`: the destination inside that transport, such as Slack `#ops` or `C1234567890`
+
+`autopilot channel add ... --target` sets the default notification route. Schedules inherit it unless you add `--notify-target` or `--notify-channel`.
 
 ```bash
-# schedule profile
+# default notification route: slack:#ops
+stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN" --profile ops --target "#ops"
+
+# schedule runs with the monitoring profile and inherits the default route
 stakpak autopilot schedule add health --cron '*/5 * * * *' --prompt 'Check health' --profile monitoring
 
-# channel profile
-stakpak autopilot channel add slack --bot-token "$SLACK_BOT_TOKEN" --app-token "$SLACK_APP_TOKEN" --profile ops
+# schedule still runs with monitoring, but notifies a different Slack target
+stakpak autopilot schedule add deploy-watch --cron '*/15 * * * *' --prompt 'Watch deploys' --profile monitoring --notify-target "#deploys"
 ```
+
+In `~/.stakpak/autopilot.toml`, the same setup is represented as:
+
+```toml
+[notifications]
+channel = "slack"
+target = "#ops"
+
+[[schedules]]
+name = "health"
+cron = "*/5 * * * *"
+prompt = "Check health"
+profile = "monitoring"
+
+[[schedules]]
+name = "deploy-watch"
+cron = "*/15 * * * *"
+prompt = "Watch deploys"
+profile = "monitoring"
+notify_target = "#deploys"
+```
+
+Slack public channel names such as `#ops` are accepted where Slack supports them. Channel IDs are most reliable for private channels, DMs, and scripts.
 
 Full setup guide: [cli/README.md](cli/README.md)
 

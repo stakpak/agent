@@ -8,7 +8,7 @@ pub const SKILL_MAINTAIN: &str = include_str!("skills/maintain.v1.md");
 mod tests {
     use super::{SKILL_RETROSPECT, SKILL_USAGE};
 
-    const AUTOPILOT_ONE_LINER: &str = r#"stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#;
+    const AUTOPILOT_ONE_LINER: &str = r#"stakpak autopilot schedule add retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#;
 
     #[test]
     fn retrospect_skill_matches_bundled_markdown() {
@@ -26,7 +26,7 @@ mod tests {
         );
         assert!(
             SKILL_RETROSPECT.trim_end().ends_with(
-                r#"stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#
+                r#"stakpak autopilot schedule add retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)""#
             ),
             "SKILL_RETROSPECT appears to have been trimmed or mutated at its tail"
         );

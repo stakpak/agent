@@ -7,8 +7,16 @@ This guide explains the current configuration model.
 ### TL;DR
 
 - `~/.stakpak/config.toml` is the **source of truth** for behavior profiles.
-- `~/.stakpak/autopilot.toml` is for **runtime wiring** (schedules/channels/service settings).
+- `~/.stakpak/autopilot.toml` is for **runtime wiring** (schedules/channels/notification routes/service settings).
 - Schedules/channels should reference profiles using `profile = "name"`.
+- Profiles control agent behavior, not delivery.
+  - Schedule profile: behavior for runs started by a schedule.
+  - Channel profile: behavior for sessions started from inbound Slack/Telegram/Discord messages.
+  - Notification route: where schedule notifications are sent.
+- Notification routes are always `channel` + `target`.
+  - `channel` is the transport: `slack`, `telegram`, or `discord`.
+  - `target` is the destination inside that transport: for example Slack `#ops` or `C1234567890`.
+  - Schedule-specific overrides are named `notify_channel` and `notify_target`.
 - Runtime fields transported per-run are:
   - `model`
   - `auto_approve`
@@ -126,6 +134,10 @@ Use this for schedules/channels and runtime config.
 [server]
 listen = "127.0.0.1:4096"
 
+[notifications]
+channel = "slack"
+target = "#ops"
+
 [[schedules]]
 name = "health-check"
 cron = "*/5 * * * *"
@@ -138,9 +150,23 @@ app_token = "xapp-..."
 profile = "ops"
 ```
 
+The default notification route is `slack:#ops`. Any schedule without `notify_target` inherits that route. The `health-check` schedule runs with the `monitoring` profile. Inbound Slack sessions run with the `ops` profile.
+
 ---
 
 ## CLI workflow
+
+### Add a default notification route
+
+```bash
+stakpak autopilot channel add slack \
+  --bot-token "$SLACK_BOT_TOKEN" \
+  --app-token "$SLACK_APP_TOKEN" \
+  --profile ops \
+  --target "#ops"
+```
+
+This writes Slack credentials under `[channels.slack]` and the default notification route under `[notifications]`. The `--profile ops` part applies to inbound Slack sessions. The `--target "#ops"` part sets where scheduled notifications go by default.
 
 ### Add schedules with profile
 
@@ -151,31 +177,51 @@ stakpak autopilot schedule add health-check \
   --profile monitoring
 ```
 
+This schedule inherits the default `slack:#ops` route. To send one schedule somewhere else, use schedule-specific notification flags:
+
+```bash
+stakpak autopilot schedule add deploy-watch \
+  --cron '*/15 * * * *' \
+  --prompt 'Watch deploys and report risky changes' \
+  --profile monitoring \
+  --notify-channel slack \
+  --notify-target "#deploys"
+```
+
+The `deploy-watch` schedule still uses the `monitoring` profile. `--notify-target "#deploys"` changes only the notification destination.
+
 `check` script paths support `~`, which resolves against the HOME of the user running autopilot.
 For systemd/launchd/container deployments, prefer absolute paths (for example, `/home/ec2-user/.stakpak/checks/endpoints.sh`).
+
+### Route resolution rules
+
+1. `notify_channel` overrides `[notifications].channel` when set.
+2. `notify_target` overrides `[notifications].target` when set.
+3. If only `notify_target` is set, the schedule inherits the default channel.
+4. If a schedule is disabled, it will not run or send notifications.
+
+### Profile resolution rules
+
+1. A schedule run uses the schedule's `profile` when set.
+2. If a schedule omits `profile`, it falls back to `[defaults].profile`, then the default profile.
+3. A channel session uses the channel's `profile` when set.
+4. Notification targets do not affect profile selection.
+
+Slack public channel names such as `#ops` are accepted where Slack supports them. Channel IDs are most reliable for private channels, DMs, and scripts.
+
+Both commands validate that profile names exist in `config.toml`.
 
 ### Example: nightly retrospect
 
 `stakpak ak skill retrospect` prints a prompt that walks the agent through turning past `stakpak sessions` into durable entries in the `ak` store. Schedule it nightly so knowledge accumulates without manual effort:
 
 ```bash
-stakpak autopilot schedule add --name retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)"
+stakpak autopilot schedule add retrospect --cron "0 3 * * *" --prompt "$(stakpak ak skill retrospect)"
 ```
 
 Each retrospect run processes candidate sessions newest-first and cites its sources in frontmatter. Idempotency falls out of those citations: sessions already cited are skipped on subsequent runs, so the schedule is safe to re-trigger and scale-insensitive to how many sessions have accumulated. See `stakpak ak skill retrospect` for the full workflow.
 
 `ak search`, `ak read`, `ak write`, `ak remove`, and `ak skill` are auto-approved by default for agent workflows.
-
-### Add channels with profile
-
-```bash
-stakpak autopilot channel add slack \
-  --bot-token "$SLACK_BOT_TOKEN" \
-  --app-token "$SLACK_APP_TOKEN" \
-  --profile ops
-```
-
-Both commands validate that profile names exist in `config.toml`.
 
 ---
 
