@@ -8,6 +8,7 @@ pub enum Error {
     NotFound(PathBuf),
     NotADirectory(PathBuf),
     UnsafePath(PathBuf),
+    Conflict(PathBuf),
     Parse(String),
 }
 
@@ -34,6 +35,11 @@ impl Display for Error {
             Self::UnsafePath(path) => write!(
                 f,
                 "unsafe path blocked: {}. ak paths must stay inside the store and cannot pass through symlinks",
+                path.display()
+            ),
+            Self::Conflict(path) => write!(
+                f,
+                "conflict: {} was modified by another client. re-read the file and retry",
                 path.display()
             ),
             Self::Parse(message) => write!(f, "invalid input: {message}"),
@@ -70,5 +76,15 @@ mod tests {
 
         assert!(rendered.contains("path already exists"));
         assert!(rendered.contains("choose a new path or overwrite intentionally"));
+    }
+
+    #[test]
+    fn conflict_error_suggests_re_read_and_retry() {
+        let error = Error::Conflict(PathBuf::from("docs/runbooks/deploy.md"));
+        let rendered = error.to_string();
+
+        assert!(rendered.contains("conflict"));
+        assert!(rendered.contains("modified by another client"));
+        assert!(rendered.contains("re-read"));
     }
 }
