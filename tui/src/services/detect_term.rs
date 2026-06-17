@@ -896,12 +896,12 @@ mod tests {
         // White background (15) should be light
         // This would require setting env var, so we test the parsing logic
         let colorfgbg_white = "0;15";
-        let bg_str = colorfgbg_white.split(';').last();
+        let bg_str = colorfgbg_white.split(';').next_back();
         assert_eq!(bg_str, Some("15"));
 
         // Light gray background (7) should be light
         let colorfgbg_light_gray = "0;7";
-        let bg_str = colorfgbg_light_gray.split(';').last();
+        let bg_str = colorfgbg_light_gray.split(';').next_back();
         assert_eq!(bg_str, Some("7"));
     }
 
@@ -909,12 +909,12 @@ mod tests {
     fn test_detect_theme_from_colorfgbg_dark() {
         // Black background (0) should be dark
         let colorfgbg_black = "15;0";
-        let bg_str = colorfgbg_black.split(';').last();
+        let bg_str = colorfgbg_black.split(';').next_back();
         assert_eq!(bg_str, Some("0"));
 
         // Other colors should default to dark
         let colorfgbg_blue = "15;4";
-        let bg_str = colorfgbg_blue.split(';').last();
+        let bg_str = colorfgbg_blue.split(';').next_back();
         assert_eq!(bg_str, Some("4"));
     }
 

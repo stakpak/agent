@@ -1,7 +1,7 @@
 use crossterm::style::Stylize;
 use serde_json::Value;
 use stakpak_api::storage::{SessionStats, ToolUsageStats};
-use stakpak_shared::models::{integrations::openai::ChatMessage, llm::LLMTokenUsage};
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::fmt;
 
 use crate::utils::cli_colors::crossterm_colors;
@@ -237,16 +237,17 @@ impl OutputRenderer {
         }
     }
 
-    pub fn render_final_completion(&self, messages: &[ChatMessage]) -> String {
+    pub fn render_final_completion(&self, messages: &[stakai::Message]) -> String {
         match self.format {
             OutputFormat::Json => {
                 if self.verbose {
                     serde_json::to_string_pretty(messages).unwrap_or_default()
                 } else {
                     // Find the last assistant message
-                    let final_message = messages.iter().rev().find(|m| {
-                        m.role == stakpak_shared::models::integrations::openai::Role::Assistant
-                    });
+                    let final_message = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == stakai::Role::Assistant);
 
                     if let Some(message) = final_message {
                         serde_json::to_string_pretty(message).unwrap_or_default()
@@ -260,11 +261,12 @@ impl OutputRenderer {
                 let mut output = String::new();
 
                 // Show final assistant message
-                if let Some(final_message) = messages.iter().rev().find(|m| {
-                    m.role == stakpak_shared::models::integrations::openai::Role::Assistant
-                }) && let Some(content) = &final_message.content
+                if let Some(final_message) = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == stakai::Role::Assistant)
                 {
-                    let content_str = self.extract_content_string(content);
+                    let content_str = self.extract_content_string(&final_message.content);
                     if !content_str.trim().is_empty() {
                         output.push_str(&self.format_final_assistant_message(&content_str));
                     }
@@ -273,7 +275,7 @@ impl OutputRenderer {
                 // } else {
                 //     // Show just the final assistant message content
                 //     if let Some(final_message) = messages.iter().rev().find(|m| {
-                //         m.role == stakpak_shared::models::integrations::openai::Role::Assistant
+                //         m.role == stakai::Role::Assistant
                 //     }) {
                 //         if let Some(content) = &final_message.content {
                 //             let content_str = self.extract_content_string(content);
@@ -288,16 +290,15 @@ impl OutputRenderer {
         }
     }
 
-    fn extract_content_string(
-        &self,
-        content: &stakpak_shared::models::integrations::openai::MessageContent,
-    ) -> String {
+    fn extract_content_string(&self, content: &stakai::MessageContent) -> String {
         match content {
-            stakpak_shared::models::integrations::openai::MessageContent::String(s) => s.clone(),
-            stakpak_shared::models::integrations::openai::MessageContent::Array(parts) => parts
+            stakai::MessageContent::Text(s) => s.clone(),
+            stakai::MessageContent::Parts(parts) => parts
                 .iter()
-                .filter_map(|part| part.text.as_ref())
-                .map(|text| text.as_str())
+                .filter_map(|part| match part {
+                    stakai::ContentPart::Text { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
                 .filter(|text| !text.starts_with("<checkpoint_id>"))
                 .collect::<Vec<&str>>()
                 .join("\n"),

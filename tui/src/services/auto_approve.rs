@@ -1,7 +1,7 @@
 use crate::app::InputEvent;
 use crate::constants::AUTO_APPROVE_CONFIG_PATH;
 use serde::{Deserialize, Serialize};
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakai::ToolCall;
 use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::fs;
@@ -253,7 +253,7 @@ impl AutoApproveManager {
     }
 
     pub fn get_policy_for_tool(&self, tool_call: &ToolCall) -> AutoApprovePolicy {
-        let binding = tool_call.function.name.clone();
+        let binding = tool_call.name.clone();
         let tool_name = strip_tool_name(&binding);
 
         // For shell commands, resolve hierarchical scope keys
@@ -469,9 +469,8 @@ fn resolve_shell_scope(
     rules: &HashMap<String, AutoApprovePolicy>,
     default: &AutoApprovePolicy,
 ) -> Option<AutoApprovePolicy> {
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
-    let command_str = args.get("command")?.as_str()?;
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let command_str = tool_call.arguments.get("command")?.as_str()?;
+    let tool_name = strip_tool_name(&tool_call.name);
     let fallback_scopes = if SHELL_TOOLS.contains(&tool_name) && tool_name != BASE_SHELL_TOOL {
         vec![BASE_SHELL_TOOL]
     } else {
@@ -654,16 +653,13 @@ mod tests {
 
     // --- Tests for hierarchical shell scope resolution ---
 
-    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
+    use stakai::ToolCall;
 
     fn make_tool_call(tool_name: &str, command: &str) -> ToolCall {
         ToolCall {
             id: "tc-1".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: tool_name.to_string(),
-                arguments: serde_json::json!({"command": command}).to_string(),
-            },
+            name: tool_name.to_string(),
+            arguments: serde_json::json!({"command": command}),
             metadata: None,
         }
     }
@@ -736,11 +732,8 @@ mod tests {
         let rules = HashMap::new();
         let tc = ToolCall {
             id: "tc-2".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "run_command".to_string(),
-                arguments: serde_json::json!({"command": ""}).to_string(),
-            },
+            name: "run_command".to_string(),
+            arguments: serde_json::json!({"command": ""}),
             metadata: None,
         };
         let result = resolve_shell_scope(&tc, &rules, &AutoApprovePolicy::Prompt);

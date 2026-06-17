@@ -1,13 +1,8 @@
-use stakpak_shared::models::{
-    integrations::openai::{ChatMessage, Role},
-    llm::{LLMMessage, LLMMessageContent},
-};
-
 #[allow(dead_code)]
 pub struct SimpleContextManager;
 
 impl super::ContextManager for SimpleContextManager {
-    fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage> {
+    fn reduce_context(&self, messages: Vec<stakai::Message>) -> Vec<stakai::Message> {
         if messages.is_empty() {
             return vec![];
         }
@@ -18,19 +13,22 @@ impl super::ContextManager for SimpleContextManager {
         if messages.len() > 1 {
             let history_content = messages[..messages.len() - 1]
                 .iter()
-                .map(|m| format!("{}: {}", m.role, m.content.clone().unwrap_or_default()))
+                .map(|m| {
+                    format!(
+                        "{}: {}",
+                        super::common::role_label(m.role),
+                        m.text().unwrap_or_default()
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            context.push(LLMMessage {
-                role: Role::User.to_string(),
-                content: LLMMessageContent::String(history_content),
-            });
+            context.push(stakai::Message::new(stakai::Role::User, history_content));
         }
 
         // 2. Preserve the last message (with images)
         if let Some(last_message) = messages.last() {
-            context.push(LLMMessage::from(last_message.clone()));
+            context.push(last_message.clone());
         }
 
         context

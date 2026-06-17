@@ -6,9 +6,9 @@ use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::services::commands::{CommandAction, CommandContext, execute_command, filter_commands};
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{Message, invalidate_message_lines_cache};
-use stakpak_shared::models::integrations::openai::{
-    ProgressType, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
-    ToolCallStreamInfo,
+use stakai::ToolCall;
+use stakpak_shared::models::agent_runtime::{
+    ProgressType, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus, ToolCallStreamInfo,
 };
 use stakpak_shared::utils::strip_tool_name;
 use tokio::sync::mpsc::Sender;
@@ -113,7 +113,7 @@ pub fn handle_stream_tool_result(
         .as_ref()
         .map(|tc| {
             matches!(
-                strip_tool_name(&tc.function.name),
+                strip_tool_name(&tc.name),
                 "run_command" | "run_remote_command"
             )
         })
@@ -600,14 +600,8 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
         return;
     }
 
-    let function_name = result.call.function.name.as_str();
-    let args_str = &result.call.function.arguments;
-
-    // Parse arguments
-    let args: serde_json::Value = match serde_json::from_str(args_str) {
-        Ok(v) => v,
-        Err(_) => return, // Should not happen if tool call was successful
-    };
+    let function_name = result.call.name.as_str();
+    let args = &result.call.arguments;
 
     // Normalize/Strip tool name for checking
     let tool_name_stripped = strip_tool_name(function_name);
@@ -902,29 +896,25 @@ fn extract_diff_preview(message: &str) -> Option<String> {
 pub fn extract_view_params_from_tool_call(
     tool_call: &ToolCall,
 ) -> (Option<String>, Option<String>, Option<String>) {
-    // Try to parse arguments as JSON
-    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
-        let path = args
-            .get("path")
-            .or(args.get("filePath"))
-            .or(args.get("file_path"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    let args = &tool_call.arguments;
+    let path = args
+        .get("path")
+        .or(args.get("filePath"))
+        .or(args.get("file_path"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-        let grep = args
-            .get("grep")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    let grep = args
+        .get("grep")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-        let glob = args
-            .get("glob")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    let glob = args
+        .get("glob")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-        return (path, grep, glob);
-    }
-
-    (None, None, None)
+    (path, grep, glob)
 }
 
 // ========== Approval Bar Handlers ==========
@@ -1019,7 +1009,7 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
     // Get the currently selected tool call
     if let Some(action) = state.dialog_approval_state.approval_bar.selected_action() {
         let tool_call = &action.tool_call;
-        let tool_name = strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.name);
 
         // Determine the approval state for display
         let auto_approve = action.status == crate::services::approval_bar::ApprovalStatus::Approved;
@@ -1043,21 +1033,18 @@ pub fn create_pending_block_for_selected_tool(state: &mut AppState) {
             state.messages_scrolling_state.messages.push(msg);
         } else if tool_name == "resume_subagent_task" {
             // For resume_subagent_task, use the special subagent pending block
-            let pause_info =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-                    .ok()
-                    .and_then(|args| {
-                        args.get("task_id")
-                            .and_then(|v| v.as_str())
-                            .map(String::from)
-                    })
-                    .and_then(|task_id| {
-                        state
-                            .tool_call_state
-                            .subagent_pause_info
-                            .get(&task_id)
-                            .cloned()
-                    });
+            let pause_info = tool_call
+                .arguments
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .and_then(|task_id| {
+                    state
+                        .tool_call_state
+                        .subagent_pause_info
+                        .get(&task_id)
+                        .cloned()
+                });
 
             let msg = Message::render_subagent_resume_pending_block(
                 tool_call.clone(),

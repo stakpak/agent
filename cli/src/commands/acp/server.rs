@@ -1,23 +1,19 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
-use crate::commands::agent::run::stream::ToolCallAccumulator;
+use crate::commands::agent::run::stream::{ToolCallAccumulator, tool_call_content_part};
 use crate::config::AppConfig;
 use agent_client_protocol::{
     self as acp, Client as AcpClient, ModelInfo, SessionModelState, SessionNotification,
     SetSessionModelRequest, SetSessionModelResponse,
 };
 use futures_util::StreamExt;
-use stakpak_api::models::ApiStreamError;
+use stakai::{ContentPart, Message, MessageContent, Role, StreamEvent, Tool, ToolCall};
+use stakpak_api::models::{AgentStreamEvent, ApiStreamError, CompletionResponse};
 use stakpak_api::storage::CreateSessionRequest;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use stakpak_api::{Model, ModelLimit};
 use stakpak_mcp_client::McpClient;
+use stakpak_shared::models::agent_runtime::{ToolCallResultProgress, ToolCallResultStatus};
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_shared::models::integrations::openai::{
-    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
-    FinishReason, MessageContent, Role, Tool, ToolCall, ToolCallResultProgress,
-    ToolCallResultStatus,
-};
-use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
 use std::path::Path;
 use std::sync::Arc;
@@ -38,7 +34,7 @@ pub struct StakpakAcpAgent {
     current_session_id: Cell<Option<Uuid>>,
     progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
     // Add persistent message history for conversation context
-    messages: Arc<tokio::sync::Mutex<Vec<ChatMessage>>>,
+    messages: Arc<tokio::sync::Mutex<Vec<Message>>>,
     // Add permission request channel
     permission_request_tx: Option<
         mpsc::UnboundedSender<(
@@ -59,6 +55,28 @@ pub struct StakpakAcpAgent {
     fs_operation_tx: Option<mpsc::UnboundedSender<crate::commands::acp::fs_handler::FsOperation>>,
     // Capabilities advertised by the client during initialization
     client_capabilities: Arc<tokio::sync::Mutex<acp::ClientCapabilities>>,
+}
+
+fn stakai_tool_calls_from_message(message: &Message) -> Vec<ToolCall> {
+    message
+        .parts()
+        .into_iter()
+        .filter_map(|part| match part {
+            ContentPart::ToolCall {
+                id,
+                name,
+                arguments,
+                metadata,
+                ..
+            } => Some(ToolCall {
+                id,
+                name,
+                arguments,
+                metadata,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 impl StakpakAcpAgent {
@@ -294,7 +312,7 @@ impl StakpakAcpAgent {
     ) -> Result<bool, acp::Error> {
         log::info!(
             "Requesting permission for tool: {} - {}",
-            tool_call.function.name,
+            tool_call.name,
             tool_title
         );
         log::info!("Tool Call ID: {}", tool_call_id);
@@ -320,10 +338,7 @@ impl StakpakAcpAgent {
                 acp::ToolCallId::new(tool_call_id.clone()),
                 acp::ToolCallUpdateFields::new()
                     .title(tool_title.to_string())
-                    .raw_input(
-                        serde_json::from_str(&tool_call.function.arguments)
-                            .unwrap_or(serde_json::Value::Null),
-                    ),
+                    .raw_input(tool_call.arguments.clone()),
             ),
             options,
         );
@@ -759,7 +774,7 @@ impl StakpakAcpAgent {
         &self,
         tool_calls: Vec<ToolCall>,
         session_id: &acp::SessionId,
-    ) -> Result<Vec<ChatMessage>, acp::Error> {
+    ) -> Result<Vec<Message>, acp::Error> {
         log::info!("Processing {} tool calls", tool_calls.len());
 
         let mut tool_calls_queue = tool_calls;
@@ -790,7 +805,7 @@ impl StakpakAcpAgent {
 
             log::info!(
                 "🔧 DEBUG: Processing tool call: {} (original_id: {}, new_id: {})",
-                tool_call.function.name,
+                tool_call.name,
                 tool_call.id,
                 tool_call_id
             );
@@ -800,10 +815,8 @@ impl StakpakAcpAgent {
                 let mut active_tool_calls = self.active_tool_calls.lock().await;
                 active_tool_calls.push(tool_call.clone());
             }
-            let raw_input = serde_json::from_str(&tool_call.function.arguments)
-                .unwrap_or(serde_json::Value::Null);
-            let stripped_name =
-                crate::commands::acp::utils::strip_tool_name(&tool_call.function.name);
+            let raw_input = tool_call.arguments.clone();
+            let stripped_name = crate::commands::acp::utils::strip_tool_name(&tool_call.name);
             let tool_title = self.generate_tool_title(stripped_name, &raw_input);
             let tool_kind = self.get_tool_kind(stripped_name);
 
@@ -938,7 +951,7 @@ impl StakpakAcpAgent {
             let result = if should_delegate {
                 log::info!(
                     "🔧 DEBUG: Executing filesystem tool via native ACP: {}",
-                    tool_call.function.name
+                    tool_call.name
                 );
 
                 // Execute using native ACP filesystem protocol
@@ -953,10 +966,7 @@ impl StakpakAcpAgent {
                         acp::Error::internal_error().data(format!("Tool execution failed: {e}"))
                     })?
             } else if let Some(ref mcp_client) = self.mcp_client {
-                log::info!(
-                    "Executing tool call: {} with MCP client",
-                    tool_call.function.name
-                );
+                log::info!("Executing tool call: {} with MCP client", tool_call.name);
 
                 // Create cancellation receiver for this tool call
                 let tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
@@ -976,10 +986,8 @@ impl StakpakAcpAgent {
                     acp::Error::internal_error().data(format!("MCP tool execution failed: {e}"))
                 })?
             } else {
-                let error_msg = format!(
-                    "No execution method available for tool: {}",
-                    tool_call.function.name
-                );
+                let error_msg =
+                    format!("No execution method available for tool: {}", tool_call.name);
                 log::error!("{error_msg}");
                 return Err(acp::Error::internal_error().data(error_msg));
             };
@@ -1138,38 +1146,22 @@ impl StakpakAcpAgent {
 
     async fn process_acp_streaming_response_with_cancellation(
         &self,
-        stream: impl futures_util::Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
+        stream: impl futures_util::Stream<Item = Result<AgentStreamEvent, ApiStreamError>>,
         session_id: &acp::SessionId,
-    ) -> Result<ChatCompletionResponse, String> {
+    ) -> Result<CompletionResponse, String> {
         let mut stream = Box::pin(stream);
         let current_model = self.model.read().await;
 
-        let mut chat_completion_response = ChatCompletionResponse {
+        let mut completion_response = CompletionResponse {
             id: "".to_string(),
-            object: "".to_string(),
             created: 0,
             model: current_model.id.clone(),
-            choices: vec![],
-            usage: LLMTokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
-            },
-            system_fingerprint: None,
+            message: Message::new(Role::Assistant, ""),
+            usage: stakai::Usage::default(),
             metadata: None,
         };
 
-        let mut chat_message = ChatMessage {
-            role: Role::Assistant,
-            content: None,
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            usage: None,
-            ..Default::default()
-        };
-
+        let mut text = String::new();
         let mut tool_call_accumulator = ToolCallAccumulator::new();
 
         // Compile regex once outside the loop
@@ -1208,35 +1200,18 @@ impl StakpakAcpAgent {
             };
 
             match &response {
-                Ok(response) => {
-                    if response.choices.is_empty() {
-                        continue;
+                Ok(response) => match response {
+                    AgentStreamEvent::Model(model) => {
+                        completion_response.model = model.id.clone();
                     }
-                    let delta = &response.choices[0].delta;
-
-                    chat_completion_response = ChatCompletionResponse {
-                        id: response.id.clone(),
-                        object: response.object.clone(),
-                        created: response.created,
-                        model: response.model.clone(),
-                        choices: vec![],
-                        usage: LLMTokenUsage {
-                            prompt_tokens: 0,
-                            completion_tokens: 0,
-                            total_tokens: 0,
-                            prompt_tokens_details: None,
-                        },
-                        system_fingerprint: None,
-                        metadata: None,
-                    };
-
-                    if let Some(content) = &delta.content {
-                        chat_message.content =
-                            Some(MessageContent::String(match chat_message.content {
-                                Some(MessageContent::String(old_content)) => old_content + content,
-                                _ => content.clone(),
-                            }));
-
+                    AgentStreamEvent::Metadata(metadata) => {
+                        completion_response.metadata = Some(metadata.clone());
+                    }
+                    AgentStreamEvent::Event(StreamEvent::Start { id }) => {
+                        completion_response.id = id.clone();
+                    }
+                    AgentStreamEvent::Event(StreamEvent::TextDelta { delta: content, .. }) => {
+                        text.push_str(content);
                         // Accumulate the raw content in the current streaming message BEFORE filtering
                         {
                             let mut current_message = self.current_streaming_message.lock().await;
@@ -1281,14 +1256,21 @@ impl StakpakAcpAgent {
                             rx.await.map_err(|_| "Failed to await streaming chunk")?;
                         }
                     }
-
-                    // Handle tool calls streaming
-                    if let Some(tool_calls) = &delta.tool_calls {
-                        for delta_tool_call in tool_calls {
-                            tool_call_accumulator.process_delta(delta_tool_call);
-                        }
+                    AgentStreamEvent::Event(
+                        event @ (StreamEvent::ToolCallStart { .. }
+                        | StreamEvent::ToolCallDelta { .. }
+                        | StreamEvent::ToolCallEnd { .. }),
+                    ) => {
+                        tool_call_accumulator.process_event(event);
                     }
-                }
+                    AgentStreamEvent::Event(StreamEvent::Finish { usage, .. }) => {
+                        completion_response.usage = usage.clone();
+                    }
+                    AgentStreamEvent::Event(StreamEvent::ReasoningDelta { .. }) => {}
+                    AgentStreamEvent::Event(StreamEvent::Error { message }) => {
+                        return Err(format!("Stream error: {}", message));
+                    }
+                },
                 Err(e) => {
                     return Err(format!("Stream error: {:?}", e));
                 }
@@ -1316,20 +1298,18 @@ impl StakpakAcpAgent {
 
         // Get accumulated tool calls (already filtered for empty IDs)
         let final_tool_calls = tool_call_accumulator.into_tool_calls();
-        chat_message.tool_calls = if final_tool_calls.is_empty() {
-            None
+        completion_response.message = if final_tool_calls.is_empty() {
+            Message::new(Role::Assistant, text)
         } else {
-            Some(final_tool_calls)
+            let mut parts = Vec::new();
+            if !text.is_empty() {
+                parts.push(ContentPart::text(text));
+            }
+            parts.extend(final_tool_calls.into_iter().map(tool_call_content_part));
+            Message::new(Role::Assistant, MessageContent::Parts(parts))
         };
 
-        chat_completion_response.choices.push(ChatCompletionChoice {
-            index: 0,
-            message: chat_message.clone(),
-            finish_reason: FinishReason::Stop,
-            logprobs: None,
-        });
-
-        Ok(chat_completion_response)
+        Ok(completion_response)
     }
 
     pub async fn run_stdio(&self) -> Result<(), String> {
@@ -1802,7 +1782,7 @@ impl acp::Agent for StakpakAcpAgent {
     async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {
         log::info!("Received prompt request {args:?}");
 
-        // Convert prompt to your ChatMessage format
+        // Convert prompt to StakAI message format
         let prompt_text = args
             .prompt
             .iter()
@@ -1878,48 +1858,20 @@ impl acp::Agent for StakpakAcpAgent {
             }
         };
         log::info!(
-            "Chat completion successful, response choices: {}",
-            response.choices.len()
+            "Chat completion successful, response message: {:?}",
+            response.message
         );
-        if !response.choices.is_empty() {
-            log::info!("First choice message: {:?}", response.choices[0].message);
-            log::info!(
-                "First choice content: {:?}",
-                response.choices[0].message.content
-            );
-        }
 
         // Add assistant response to conversation history
         {
             let mut messages = self.messages.lock().await;
-            messages.push(response.choices[0].message.clone());
+            messages.push(response.message.clone());
         }
 
-        let content = if let Some(content) = &response.choices[0].message.content {
-            match content {
-                MessageContent::String(s) => {
-                    log::info!("Content from chat completion: '{}'", s);
-                    s.clone()
-                }
-                MessageContent::Array(parts) => {
-                    let extracted_content = parts
-                        .iter()
-                        .filter_map(|part| part.text.as_ref())
-                        .map(|text| text.as_str())
-                        .filter(|text| !text.starts_with("<checkpoint_id>"))
-                        .collect::<Vec<&str>>()
-                        .join("\n");
-                    log::info!(
-                        "Content from chat completion array: '{}'",
-                        extracted_content
-                    );
-                    extracted_content
-                }
-            }
-        } else {
+        let content = response.message.content.text().unwrap_or_default();
+        if content.is_empty() {
             log::warn!("No content in chat completion response");
-            String::new()
-        };
+        }
 
         log::info!("Final content to send: '{}'", content);
 
@@ -1936,12 +1888,7 @@ impl acp::Agent for StakpakAcpAgent {
         };
 
         // Check if the initial response has tool calls
-        let mut has_tool_calls = response.choices[0]
-            .message
-            .tool_calls
-            .as_ref()
-            .map(|tc| !tc.is_empty())
-            .unwrap_or(false);
+        let mut has_tool_calls = !stakai_tool_calls_from_message(&response.message).is_empty();
 
         log::info!("Initial response has tool calls: {}", has_tool_calls);
 
@@ -1982,7 +1929,8 @@ impl acp::Agent for StakpakAcpAgent {
                 }
             };
 
-            if let Some(tool_calls) = latest_message.tool_calls.as_ref() {
+            let tool_calls = stakai_tool_calls_from_message(latest_message);
+            {
                 if tool_calls.is_empty() {
                     break; // No more tool calls, exit loop
                 }
@@ -1991,7 +1939,7 @@ impl acp::Agent for StakpakAcpAgent {
 
                 // Process tool calls with cancellation support
                 let tool_results = self
-                    .process_tool_calls_with_cancellation(tool_calls.clone(), &args.session_id)
+                    .process_tool_calls_with_cancellation(tool_calls, &args.session_id)
                     .await
                     .map_err(|e| {
                         log::error!("Tool call processing failed: {}", e);
@@ -2000,11 +1948,9 @@ impl acp::Agent for StakpakAcpAgent {
 
                 // Check if any tool calls were cancelled in the current processing
                 let has_cancelled_tool_calls = tool_results.iter().any(|msg| {
-                    if let Some(MessageContent::String(text)) = &msg.content {
-                        text.contains("TOOL_CALL_CANCELLED")
-                    } else {
-                        false
-                    }
+                    msg.content
+                        .text()
+                        .is_some_and(|text| text.contains("TOOL_CALL_CANCELLED"))
                 });
 
                 // Add tool results to conversation history
@@ -2073,24 +2019,21 @@ impl acp::Agent for StakpakAcpAgent {
                 // Add follow-up response to conversation history
                 {
                     let mut messages = self.messages.lock().await;
-                    messages.push(follow_up_response.choices[0].message.clone());
+                    messages.push(follow_up_response.message.clone());
                 }
 
                 // Update current_messages for the next iteration
-                current_messages.push(follow_up_response.choices[0].message.clone());
+                current_messages.push(follow_up_response.message.clone());
 
                 // Check if the follow-up response has more tool calls
-                has_tool_calls = follow_up_response.choices[0]
-                    .message
-                    .tool_calls
-                    .as_ref()
-                    .map(|tc| !tc.is_empty())
-                    .unwrap_or(false);
+                has_tool_calls = !stakai_tool_calls_from_message(
+                    current_messages
+                        .last()
+                        .unwrap_or(&Message::new(Role::Assistant, "")),
+                )
+                .is_empty();
 
                 log::info!("Follow-up response has tool calls: {}", has_tool_calls);
-            } else {
-                // No tool calls in the latest message, exit the loop
-                break;
             }
         }
 
@@ -2143,7 +2086,7 @@ impl acp::Agent for StakpakAcpAgent {
 
         // Add cancellation messages for each active tool call
         for tool_call in active_tool_calls {
-            log::info!("Cancelling tool call: {}", tool_call.function.name);
+            log::info!("Cancelling tool call: {}", tool_call.name);
 
             // Add cancellation message to conversation history (like rejection logic)
             {

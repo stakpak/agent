@@ -507,18 +507,28 @@ impl RemoteConnection {
                             && options.with_progress
                             && !text.trim().is_empty()
                         {
-                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
-                                    progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
+                            let _ = ctx
+                                .peer
+                                .notify_progress(rmcp::model::ProgressNotificationParam {
+                                    progress_token: rmcp::model::ProgressToken(
+                                        rmcp::model::NumberOrString::Number(0),
+                                    ),
                                     progress: 50.0,
                                     total: Some(100.0),
-                                    message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
-                                        id: progress_id,
-                                        message: text,
-                                        progress_type: None,
-                                        task_updates: None,
-                                        progress: None,
-                                    }).unwrap_or_default()),
-                                }).await;
+                                    message: Some(
+                                        serde_json::to_string(
+                                            &crate::models::agent_runtime::ToolCallResultProgress {
+                                                id: progress_id,
+                                                message: text,
+                                                progress_type: None,
+                                                task_updates: None,
+                                                progress: None,
+                                            },
+                                        )
+                                        .unwrap_or_default(),
+                                    ),
+                                })
+                                .await;
                         }
                     }
                     russh::ChannelMsg::ExtendedData { data, ext: _ } => {
@@ -533,18 +543,28 @@ impl RemoteConnection {
                             && options.with_progress
                             && !text.trim().is_empty()
                         {
-                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
-                                    progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
+                            let _ = ctx
+                                .peer
+                                .notify_progress(rmcp::model::ProgressNotificationParam {
+                                    progress_token: rmcp::model::ProgressToken(
+                                        rmcp::model::NumberOrString::Number(0),
+                                    ),
                                     progress: 50.0,
                                     total: Some(100.0),
-                                    message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
-                                        id: progress_id,
-                                        message: text,
-                                        progress_type: None,
-                                        task_updates: None,
-                                        progress: None,
-                                    }).unwrap_or_default()),
-                                }).await;
+                                    message: Some(
+                                        serde_json::to_string(
+                                            &crate::models::agent_runtime::ToolCallResultProgress {
+                                                id: progress_id,
+                                                message: text,
+                                                progress_type: None,
+                                                task_updates: None,
+                                                progress: None,
+                                            },
+                                        )
+                                        .unwrap_or_default(),
+                                    ),
+                                })
+                                .await;
                         }
                     }
                     russh::ChannelMsg::ExitStatus { exit_status } => {

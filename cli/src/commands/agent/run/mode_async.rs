@@ -15,13 +15,43 @@ use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, SessionS
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason, PendingToolCall};
-use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::utils::{backward_compatibility_mapping, strip_tool_name};
 use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
+
+fn message_text(message: &stakai::Message) -> Option<String> {
+    message.content.text().map(|text| {
+        text.lines()
+            .filter(|line| !line.starts_with("<checkpoint_id>"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+fn message_tool_calls(message: &stakai::Message) -> Vec<stakai::ToolCall> {
+    message
+        .parts()
+        .into_iter()
+        .filter_map(|part| match part {
+            stakai::ContentPart::ToolCall {
+                id,
+                name,
+                arguments,
+                metadata,
+                ..
+            } => Some(stakai::ToolCall {
+                id,
+                name,
+                arguments,
+                metadata,
+            }),
+            _ => None,
+        })
+        .collect()
+}
 
 pub struct RunAsyncConfig {
     pub prompt: String,
@@ -185,7 +215,7 @@ impl AsyncAutoApproveConfig {
 pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<AsyncOutcome, String> {
     let start_time = Instant::now();
     let mut llm_response_time = std::time::Duration::new(0, 0);
-    let mut chat_messages: Vec<ChatMessage> = Vec::new();
+    let mut chat_messages: Vec<stakai::Message> = Vec::new();
     let mut total_usage = LLMTokenUsage::default();
     let renderer = OutputRenderer::new(config.output_format.clone(), config.verbose);
     let secret_manager = SecretManager::new(config.redact_secrets, config.privacy_mode);
@@ -289,7 +319,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                     .state
                     .messages
                     .iter()
-                    .filter(|m| m.role == Role::Assistant)
+                    .filter(|m| m.role == stakai::Role::Assistant)
                     .count();
                 chat_messages.extend(checkpoint.state.messages);
             }
@@ -325,8 +355,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                     print!(
                         "{}",
                         renderer.render_tool_execution(
-                            &tool_call.function.name,
-                            &tool_call.function.arguments,
+                            &tool_call.name,
+                            &tool_call.arguments.to_string(),
                             0,
                             1,
                         )
@@ -353,10 +383,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                     {
                         Ok(result) => result?,
                         Err(_) => {
-                            let error_msg = format!(
-                                "Tool '{}' timed out after 60 minutes",
-                                tool_call.function.name
-                            );
+                            let error_msg =
+                                format!("Tool '{}' timed out after 60 minutes", tool_call.name);
                             print!("{}", renderer.render_error(&error_msg));
                             chat_messages.push(tool_result(tool_call.id.clone(), error_msg));
                             continue;
@@ -386,7 +414,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
                         "{}",
                         renderer.render_info(&format!(
                             "Rejected tool call: {} ({})",
-                            tool_call.function.name, tool_call.id
+                            tool_call.name, tool_call.id
                         ))
                     );
                     chat_messages.push(tool_result(
@@ -453,10 +481,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         if let Some(last_user_msg) = chat_messages
             .iter_mut()
             .rev()
-            .find(|m| m.role == Role::User)
-            && let Some(stakpak_shared::models::integrations::openai::MessageContent::String(
-                ref mut text,
-            )) = last_user_msg.content
+            .find(|m| m.role == stakai::Role::User)
+            && let stakai::MessageContent::Text(ref mut text) = last_user_msg.content
         {
             *text = format!("{instructions} {text}");
             plan_instructions_injected = true;
@@ -512,10 +538,11 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         llm_response_time += llm_start.elapsed();
 
         // Accumulate token usage
-        total_usage.prompt_tokens += response.usage.prompt_tokens;
-        total_usage.completion_tokens += response.usage.completion_tokens;
-        total_usage.total_tokens += response.usage.total_tokens;
-        if let Some(details) = &response.usage.prompt_tokens_details {
+        let response_usage = stakpak_api::models::stakai_usage_to_llm_usage(&response.usage);
+        total_usage.prompt_tokens += response_usage.prompt_tokens;
+        total_usage.completion_tokens += response_usage.completion_tokens;
+        total_usage.total_tokens += response_usage.total_tokens;
+        if let Some(details) = &response_usage.prompt_tokens_details {
             if total_usage.prompt_tokens_details.is_none() {
                 total_usage.prompt_tokens_details = Some(Default::default());
             }
@@ -534,7 +561,7 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             }
         }
 
-        chat_messages.push(response.choices[0].message.clone());
+        chat_messages.push(response.message.clone());
 
         // Update metadata from checkpoint state so the next
         // turn sees the latest trimming state.
@@ -559,27 +586,13 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
             }
         }
 
-        let tool_calls = response.choices[0].message.tool_calls.as_ref();
-        let tool_count = tool_calls.map(|t| t.len()).unwrap_or(0);
+        let tool_calls = message_tool_calls(&response.message);
+        let tool_count = tool_calls.len();
 
         print!("{}", renderer.render_step_header(step, tool_count));
 
         // Extract agent message content
-        let agent_message =
-            response.choices[0]
-                .message
-                .content
-                .as_ref()
-                .map(|content| match content {
-                    MessageContent::String(s) => s.clone(),
-                    MessageContent::Array(parts) => parts
-                        .iter()
-                        .filter_map(|part| part.text.as_ref())
-                        .map(|text| text.as_str())
-                        .filter(|text| !text.starts_with("<checkpoint_id>"))
-                        .collect::<Vec<&str>>()
-                        .join("\n"),
-                });
+        let agent_message = message_text(&response.message);
 
         // Show assistant response
         if let Some(content_str) = &agent_message
@@ -589,162 +602,144 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
         }
 
         // Check if there are tool calls to execute
-        if let Some(tool_calls) = tool_calls {
-            if tool_calls.is_empty() {
-                print!(
-                    "{}",
-                    renderer
-                        .render_success("No more tools to execute - agent completed successfully")
-                );
-                break;
-            }
-
-            // Check if pause_on_approval is enabled and any tools require approval
-            if let Some(ref auto_approve_config) = auto_approve {
-                let tool_names: Vec<&str> = tool_calls
-                    .iter()
-                    .map(|tc| tc.function.name.as_str())
-                    .collect();
-                if auto_approve_config.any_requires_approval(&tool_names) {
-                    // PAUSE: tools require approval
-                    let pending: Vec<PendingToolCall> =
-                        tool_calls.iter().map(PendingToolCall::from).collect();
-
-                    let checkpoint_id_str = current_checkpoint_id.map(|id| id.to_string());
-                    let session_id_str = current_session_id.map(|id| id.to_string());
-
-                    let pause_reason = PauseReason::ToolApprovalRequired {
-                        pending_tool_calls: pending,
-                    };
-
-                    let resume_hint = checkpoint_id_str
-                        .as_ref()
-                        .map(|cid| build_resume_hint(cid, &pause_reason));
-
-                    let manifest = AsyncManifest {
-                        outcome: "paused".to_string(),
-                        checkpoint_id: checkpoint_id_str.clone(),
-                        session_id: session_id_str.clone(),
-                        model: config.model.id.clone(),
-                        agent_message: agent_message.clone(),
-                        steps: step,
-                        total_steps: prior_steps + step,
-                        usage: total_usage.clone(),
-                        pause_reason: Some(pause_reason.clone()),
-                        resume_hint,
-                    };
-
-                    // Write pause manifest
-                    if let Err(e) = write_pause_manifest(&manifest) {
-                        print!(
-                            "{}",
-                            renderer
-                                .render_warning(&format!("Failed to write pause manifest: {}", e))
-                        );
-                    }
-
-                    // Output JSON to stdout if in JSON mode
-                    if config.output_format == OutputFormat::Json
-                        && let Ok(json) = serde_json::to_string_pretty(&manifest)
-                    {
-                        println!("{}", json);
-                    }
-
-                    print!(
-                        "{}",
-                        renderer.render_info("Agent paused - tools require approval")
-                    );
-
-                    // Shutdown MCP
-                    let _ = server_shutdown_tx.send(());
-                    let _ = proxy_shutdown_tx.send(());
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                    return Ok(AsyncOutcome::Paused {
-                        checkpoint_id: checkpoint_id_str,
-                        session_id: session_id_str,
-                        pause_reason,
-                        agent_message,
-                    });
-                }
-            }
-
-            // Execute all tool calls (either auto-approved or pause_on_approval is disabled)
-            for (i, tool_call) in tool_calls.iter().enumerate() {
-                // Print tool start with arguments
-                print!(
-                    "{}",
-                    renderer.render_tool_execution(
-                        &tool_call.function.name,
-                        &tool_call.function.arguments,
-                        i,
-                        tool_calls.len(),
-                    )
-                );
-
-                // Add timeout for tool execution
-                let tool_execution = async {
-                    run_tool_call(
-                        &mcp_client,
-                        &mcp_tools,
-                        tool_call,
-                        None,
-                        current_session_id,
-                        Some(config.model.id.clone()),
-                        Some(config.model.provider.clone()),
-                    )
-                    .await
-                };
-
-                let result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(60 * 60), // 60 minute timeout
-                    tool_execution,
-                )
-                .await
-                {
-                    Ok(result) => result?,
-                    Err(_) => {
-                        let error_msg = format!(
-                            "Tool '{}' timed out after 60 minutes",
-                            tool_call.function.name
-                        );
-                        print!("{}", renderer.render_error(&error_msg));
-                        chat_messages.push(tool_result(tool_call.id.clone(), error_msg));
-                        continue;
-                    }
-                };
-
-                if let Some(result) = result {
-                    let result_content = result
-                        .content
-                        .iter()
-                        .map(|c| match c.raw.as_text() {
-                            Some(text) => text.text.clone(),
-                            None => String::new(),
-                        })
-                        .collect::<Vec<String>>()
-                        .join("\n");
-
-                    // Print tool result
-                    print!("{}", renderer.render_tool_result(&result_content));
-
-                    chat_messages.push(tool_result(tool_call.id.clone(), result_content.clone()));
-                } else {
-                    print!(
-                        "{}",
-                        renderer.render_warning(&format!(
-                            "Tool '{}' returned no result",
-                            tool_call.function.name
-                        ))
-                    );
-                }
-            }
-        } else {
+        if tool_calls.is_empty() {
             print!(
                 "{}",
                 renderer.render_success("No more tools to execute - agent completed successfully")
             );
             break;
+        }
+
+        // Check if pause_on_approval is enabled and any tools require approval
+        if let Some(ref auto_approve_config) = auto_approve {
+            let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.name.as_str()).collect();
+            if auto_approve_config.any_requires_approval(&tool_names) {
+                // PAUSE: tools require approval
+                let pending: Vec<PendingToolCall> =
+                    tool_calls.iter().map(PendingToolCall::from).collect();
+
+                let checkpoint_id_str = current_checkpoint_id.map(|id| id.to_string());
+                let session_id_str = current_session_id.map(|id| id.to_string());
+
+                let pause_reason = PauseReason::ToolApprovalRequired {
+                    pending_tool_calls: pending,
+                };
+
+                let resume_hint = checkpoint_id_str
+                    .as_ref()
+                    .map(|cid| build_resume_hint(cid, &pause_reason));
+
+                let manifest = AsyncManifest {
+                    outcome: "paused".to_string(),
+                    checkpoint_id: checkpoint_id_str.clone(),
+                    session_id: session_id_str.clone(),
+                    model: config.model.id.clone(),
+                    agent_message: agent_message.clone(),
+                    steps: step,
+                    total_steps: prior_steps + step,
+                    usage: total_usage.clone(),
+                    pause_reason: Some(pause_reason.clone()),
+                    resume_hint,
+                };
+
+                // Write pause manifest
+                if let Err(e) = write_pause_manifest(&manifest) {
+                    print!(
+                        "{}",
+                        renderer.render_warning(&format!("Failed to write pause manifest: {}", e))
+                    );
+                }
+
+                // Output JSON to stdout if in JSON mode
+                if config.output_format == OutputFormat::Json
+                    && let Ok(json) = serde_json::to_string_pretty(&manifest)
+                {
+                    println!("{}", json);
+                }
+
+                print!(
+                    "{}",
+                    renderer.render_info("Agent paused - tools require approval")
+                );
+
+                // Shutdown MCP
+                let _ = server_shutdown_tx.send(());
+                let _ = proxy_shutdown_tx.send(());
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                return Ok(AsyncOutcome::Paused {
+                    checkpoint_id: checkpoint_id_str,
+                    session_id: session_id_str,
+                    pause_reason,
+                    agent_message,
+                });
+            }
+        }
+
+        // Execute all tool calls (either auto-approved or pause_on_approval is disabled)
+        for (i, tool_call) in tool_calls.iter().enumerate() {
+            // Print tool start with arguments
+            print!(
+                "{}",
+                renderer.render_tool_execution(
+                    &tool_call.name,
+                    &tool_call.arguments.to_string(),
+                    i,
+                    tool_calls.len(),
+                )
+            );
+
+            // Add timeout for tool execution
+            let tool_execution = async {
+                run_tool_call(
+                    &mcp_client,
+                    &mcp_tools,
+                    tool_call,
+                    None,
+                    current_session_id,
+                    Some(config.model.id.clone()),
+                    Some(config.model.provider.clone()),
+                )
+                .await
+            };
+
+            let result = match tokio::time::timeout(
+                std::time::Duration::from_secs(60 * 60), // 60 minute timeout
+                tool_execution,
+            )
+            .await
+            {
+                Ok(result) => result?,
+                Err(_) => {
+                    let error_msg = format!("Tool '{}' timed out after 60 minutes", tool_call.name);
+                    print!("{}", renderer.render_error(&error_msg));
+                    chat_messages.push(tool_result(tool_call.id.clone(), error_msg));
+                    continue;
+                }
+            };
+
+            if let Some(result) = result {
+                let result_content = result
+                    .content
+                    .iter()
+                    .map(|c| match c.raw.as_text() {
+                        Some(text) => text.text.clone(),
+                        None => String::new(),
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                // Print tool result
+                print!("{}", renderer.render_tool_result(&result_content));
+
+                chat_messages.push(tool_result(tool_call.id.clone(), result_content.clone()));
+            } else {
+                print!(
+                    "{}",
+                    renderer
+                        .render_warning(&format!("Tool '{}' returned no result", tool_call.name))
+                );
+            }
         }
 
         // Plan mode: check if plan.md status has changed after tool execution
@@ -818,18 +813,8 @@ pub async fn run_async(ctx: AppConfig, mut config: RunAsyncConfig) -> Result<Asy
     let final_message = chat_messages
         .iter()
         .rev()
-        .find(|m| m.role == Role::Assistant)
-        .and_then(|m| m.content.as_ref())
-        .map(|content| match content {
-            MessageContent::String(s) => s.clone(),
-            MessageContent::Array(parts) => parts
-                .iter()
-                .filter_map(|part| part.text.as_ref())
-                .map(|text| text.as_str())
-                .filter(|text| !text.starts_with("<checkpoint_id>"))
-                .collect::<Vec<&str>>()
-                .join("\n"),
-        });
+        .find(|m| m.role == stakai::Role::Assistant)
+        .and_then(message_text);
 
     // Use generic renderer functions to build the completion output
     print!("{}", renderer.render_section_break());

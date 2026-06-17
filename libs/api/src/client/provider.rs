@@ -13,18 +13,11 @@ use crate::storage::{
     UpdateSessionRequest as StorageUpdateSessionRequest,
 };
 use async_trait::async_trait;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
-use stakai::Model;
+use stakai::{ContentPart, Message, Model, ResponseContent, StreamEvent};
 use stakpak_shared::hooks::{HookContext, LifecycleEvent};
-use stakpak_shared::models::integrations::openai::{
-    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, Role, Tool,
-};
-use stakpak_shared::models::llm::{
-    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMStreamInput,
-};
 use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -45,7 +38,7 @@ use super::AgentClient;
 
 #[derive(Debug)]
 pub(crate) enum StreamMessage {
-    Delta(GenerationDelta),
+    Event(StreamEvent),
     Ctx(Box<HookContext<AgentState>>),
 }
 
@@ -178,11 +171,11 @@ impl AgentProvider for AgentClient {
     async fn chat_completion(
         &self,
         model: Model,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
+        messages: Vec<Message>,
+        tools: Option<Vec<stakai::Tool>>,
         session_id: Option<Uuid>,
         metadata: Option<serde_json::Value>,
-    ) -> Result<ChatCompletionResponse, String> {
+    ) -> Result<CompletionResponse, String> {
         let mut ctx = HookContext::new(
             session_id,
             AgentState::new(model, messages, tools, metadata),
@@ -238,9 +231,8 @@ impl AgentProvider for AgentClient {
             meta.insert("state_metadata".to_string(), state_metadata.clone());
         }
 
-        Ok(ChatCompletionResponse {
+        Ok(CompletionResponse {
             id: ctx.new_checkpoint_id.unwrap().to_string(),
-            object: "chat.completion".to_string(),
             created: checkpoint_created_at,
             model: ctx
                 .state
@@ -248,19 +240,18 @@ impl AgentProvider for AgentClient {
                 .as_ref()
                 .map(|llm_input| llm_input.model.id.clone())
                 .unwrap_or_default(),
-            choices: vec![ChatCompletionChoice {
-                index: 0,
-                message: ctx.state.messages.last().cloned().unwrap(),
-                logprobs: None,
-                finish_reason: FinishReason::Stop,
-            }],
+            message: ctx
+                .state
+                .messages
+                .last()
+                .cloned()
+                .unwrap_or_else(|| Message::new(stakai::Role::Assistant, "")),
             usage: ctx
                 .state
                 .llm_output
                 .as_ref()
                 .map(|u| u.usage.clone())
                 .unwrap_or_default(),
-            system_fingerprint: None,
             metadata: if meta.is_empty() {
                 None
             } else {
@@ -272,16 +263,14 @@ impl AgentProvider for AgentClient {
     async fn chat_completion_stream(
         &self,
         model: Model,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
+        messages: Vec<Message>,
+        tools: Option<Vec<stakai::Tool>>,
         _headers: Option<HeaderMap>,
         session_id: Option<Uuid>,
         metadata: Option<serde_json::Value>,
     ) -> Result<
         (
-            Pin<
-                Box<dyn Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>> + Send>,
-            >,
+            Pin<Box<dyn Stream<Item = Result<AgentStreamEvent, ApiStreamError>> + Send>>,
             Option<String>,
         ),
         String,
@@ -369,6 +358,8 @@ impl AgentProvider for AgentClient {
 
         let hook_registry = self.hook_registry.clone();
         let stream = async_stream::stream! {
+            yield Ok(AgentStreamEvent::Model(ctx.state.active_model.clone()));
+
             while let Some(delta_result) = rx.recv().await {
                 match delta_result {
                     Ok(delta) => match delta {
@@ -384,38 +375,11 @@ impl AgentProvider for AgentClient {
                                 if let Some(state_metadata) = &ctx.state.metadata {
                                     meta.insert("state_metadata".to_string(), state_metadata.clone());
                                 }
-                                yield Ok(ChatCompletionStreamResponse {
-                                    id: ctx.request_id.to_string(),
-                                    object: "chat.completion.chunk".to_string(),
-                                    created: chrono::Utc::now().timestamp() as u64,
-                                    model: String::new(),
-                                    choices: vec![],
-                                    usage: None,
-                                    metadata: Some(serde_json::Value::Object(meta)),
-                                });
+                                yield Ok(AgentStreamEvent::Metadata(serde_json::Value::Object(meta)));
                             }
                         }
-                        StreamMessage::Delta(delta) => {
-                            // Extract usage from Usage delta variant
-                            let usage = if let GenerationDelta::Usage { usage } = &delta {
-                                Some(usage.clone())
-                            } else {
-                                None
-                            };
-
-                            yield Ok(ChatCompletionStreamResponse {
-                                id: ctx.request_id.to_string(),
-                                object: "chat.completion.chunk".to_string(),
-                                created: chrono::Utc::now().timestamp() as u64,
-                                model: ctx.state.llm_input.as_ref().map(|llm_input| llm_input.model.clone().to_string()).unwrap_or_default(),
-                                choices: vec![ChatCompletionStreamChoice {
-                                    index: 0,
-                                    delta: delta.into(),
-                                    finish_reason: None,
-                                }],
-                                usage,
-                                metadata: None,
-                            })
+                        StreamMessage::Event(event) => {
+                            yield Ok(AgentStreamEvent::Event(event))
                         }
                     }
                     Err(e) => yield Err(ApiStreamError::Unknown(e)),
@@ -686,6 +650,101 @@ impl crate::storage::SessionStorage for super::AgentClient {
 // Helper Methods
 // =============================================================================
 
+fn response_to_message(response: &stakai::GenerateResponse) -> Message {
+    let mut parts = Vec::new();
+
+    for content in &response.content {
+        match content {
+            ResponseContent::Text { text } => parts.push(ContentPart::text(text.clone())),
+            ResponseContent::Reasoning { .. } => {}
+            ResponseContent::ToolCall(tool_call) => {
+                let mut part = ContentPart::tool_call(
+                    tool_call.id.clone(),
+                    tool_call.name.clone(),
+                    tool_call.arguments.clone(),
+                );
+                if let ContentPart::ToolCall { metadata, .. } = &mut part {
+                    *metadata = tool_call.metadata.clone();
+                }
+                parts.push(part);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Message::new(stakai::Role::Assistant, "");
+    }
+
+    if parts.len() == 1
+        && let ContentPart::Text { text, .. } = &parts[0]
+    {
+        return Message::new(stakai::Role::Assistant, text.clone());
+    }
+
+    Message::new(stakai::Role::Assistant, parts)
+}
+
+fn accumulate_stream_tool_event(parts: &mut Vec<ContentPart>, event: &StreamEvent) {
+    let (id, event_name, event_arguments, event_delta, event_metadata) = match event {
+        StreamEvent::ToolCallStart { id, name } => (id, Some(name), None, None, None),
+        StreamEvent::ToolCallDelta { id, delta } => (id, None, None, Some(delta), None),
+        StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+            metadata,
+        } => (id, Some(name), Some(arguments), None, metadata.as_ref()),
+        _ => return,
+    };
+
+    let existing = parts
+        .iter_mut()
+        .find(|part| matches!(part, ContentPart::ToolCall { id: part_id, .. } if part_id == id));
+
+    match existing {
+        Some(ContentPart::ToolCall {
+            name,
+            arguments,
+            metadata,
+            ..
+        }) => {
+            if let Some(new_name) = event_name
+                && name.is_empty()
+            {
+                *name = new_name.clone();
+            }
+            if let Some(arguments_value) = event_arguments {
+                *arguments = arguments_value.clone();
+            }
+            if let Some(delta) = event_delta {
+                if let serde_json::Value::String(current) = arguments {
+                    current.push_str(delta);
+                } else {
+                    *arguments = serde_json::Value::String(delta.clone());
+                }
+            }
+            if let Some(new_metadata) = event_metadata {
+                *metadata = Some(new_metadata.clone());
+            }
+        }
+        _ => {
+            parts.push(ContentPart::tool_call(
+                id.clone(),
+                event_name.cloned().unwrap_or_default(),
+                event_arguments
+                    .cloned()
+                    .or_else(|| event_delta.cloned().map(serde_json::Value::String))
+                    .unwrap_or_else(|| serde_json::Value::String(String::new())),
+            ));
+            if let Some(new_metadata) = event_metadata
+                && let Some(ContentPart::ToolCall { metadata, .. }) = parts.last_mut()
+            {
+                *metadata = Some(new_metadata.clone());
+            }
+        }
+    }
+}
+
 const TITLE_GENERATOR_PROMPT: &str = include_str!("../prompts/session_title_generator.v1.txt");
 
 impl AgentClient {
@@ -789,13 +848,14 @@ impl AgentClient {
         })
     }
 
-    fn fallback_session_title(messages: &[ChatMessage]) -> String {
+    fn fallback_session_title(messages: &[Message]) -> String {
         messages
             .iter()
-            .find(|m| m.role == Role::User)
-            .and_then(|m| m.content.as_ref())
-            .map(|c| {
-                let text = c.to_string();
+            .find(|m| m.role == stakai::Role::User)
+            .into_iter()
+            .filter_map(Message::text)
+            .next()
+            .map(|text| {
                 text.split_whitespace()
                     .take(5)
                     .collect::<Vec<_>>()
@@ -808,7 +868,7 @@ impl AgentClient {
     pub(crate) async fn save_checkpoint(
         &self,
         current: &SessionInfo,
-        messages: Vec<ChatMessage>,
+        messages: Vec<Message>,
         metadata: Option<serde_json::Value>,
     ) -> Result<SessionInfo, String> {
         let mut checkpoint_request =
@@ -836,7 +896,7 @@ impl AgentClient {
         &self,
         ctx: &mut HookContext<AgentState>,
         stream_channel_tx: Option<mpsc::Sender<Result<StreamMessage, String>>>,
-    ) -> Result<ChatMessage, String> {
+    ) -> Result<Message, String> {
         // Execute before inference hooks
         self.hook_registry
             .execute_hooks(ctx, &LifecycleEvent::BeforeInference)
@@ -855,48 +915,68 @@ impl AgentClient {
 
         // Inject session_id header if available
         if let Some(session_id) = ctx.session_id {
-            let headers = input
+            input
+                .options
                 .headers
-                .get_or_insert_with(std::collections::HashMap::new);
-            headers.insert("X-Session-Id".to_string(), session_id.to_string());
+                .get_or_insert_with(stakai::Headers::new)
+                .insert("X-Session-Id", session_id.to_string());
         }
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             // Streaming mode
-            let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
-            let stream_input = LLMStreamInput {
-                model: input.model,
-                messages: input.messages,
-                max_tokens: input.max_tokens,
-                tools: input.tools,
-                stream_channel_tx: internal_tx,
-                provider_options: input.provider_options,
-                headers: input.headers,
-            };
+            let mut stream = self
+                .stakai
+                .stream(&input)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut text = String::new();
+            let mut tool_calls: Vec<ContentPart> = Vec::new();
+            let mut usage = stakai::Usage::default();
 
-            let stakai = self.stakai.clone();
-            let chat_future = async move {
-                stakai
-                    .chat_stream(stream_input)
-                    .await
-                    .map_err(|e| e.to_string())
-            };
-
-            let receive_future = async move {
-                while let Some(delta) = internal_rx.recv().await {
-                    if tx.send(Ok(StreamMessage::Delta(delta))).await.is_err() {
-                        break;
+            while let Some(event_result) = stream.next().await {
+                let event = event_result.map_err(|e| e.to_string())?;
+                match &event {
+                    StreamEvent::TextDelta { delta, .. } => text.push_str(delta),
+                    StreamEvent::ToolCallStart { .. }
+                    | StreamEvent::ToolCallDelta { .. }
+                    | StreamEvent::ToolCallEnd { .. } => {
+                        accumulate_stream_tool_event(&mut tool_calls, &event);
                     }
+                    StreamEvent::Finish {
+                        usage: final_usage, ..
+                    } => {
+                        usage = final_usage.clone();
+                    }
+                    StreamEvent::Error { message } => {
+                        let _ = tx.send(Err(message.clone())).await;
+                        return Err(message.clone());
+                    }
+                    StreamEvent::Start { .. } | StreamEvent::ReasoningDelta { .. } => {}
                 }
-            };
+                if tx.send(Ok(StreamMessage::Event(event))).await.is_err() {
+                    break;
+                }
+            }
 
-            let (chat_result, _) = tokio::join!(chat_future, receive_future);
-            let response = chat_result?;
-            (response.choices[0].message.clone(), response.usage)
+            let message = if tool_calls.is_empty() {
+                Message::new(stakai::Role::Assistant, text)
+            } else {
+                let mut parts: Vec<ContentPart> = Vec::new();
+                if !text.is_empty() {
+                    parts.push(ContentPart::text(text));
+                }
+                parts.extend(tool_calls);
+                Message::new(stakai::Role::Assistant, parts)
+            };
+            (message, usage)
         } else {
             // Non-streaming mode
-            let response = self.stakai.chat(input).await.map_err(|e| e.to_string())?;
-            (response.choices[0].message.clone(), response.usage)
+            let response = self
+                .stakai
+                .generate(&input)
+                .await
+                .map_err(|e| e.to_string())?;
+            (response_to_message(&response), response.usage)
         };
 
         ctx.state.set_llm_output(response_message, usage);
@@ -914,11 +994,11 @@ impl AgentClient {
             .as_ref()
             .ok_or_else(|| "LLM output is missing from state".to_string())?;
 
-        Ok(ChatMessage::from(llm_output))
+        Ok(llm_output.new_message.clone())
     }
 
     /// Generate a title for a new session
-    async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
+    async fn generate_session_title(&self, messages: &[Message]) -> Result<String, String> {
         // Pick a cheap model from the user's configured providers
         let use_stakpak = self.stakpak.is_some();
         let providers = self.stakai.registry().list_providers();
@@ -940,38 +1020,182 @@ impl AgentClient {
             })
             .ok_or_else(|| "No model available for title generation".to_string())?;
 
-        let llm_messages = vec![
-            LLMMessage {
-                role: Role::System.to_string(),
-                content: LLMMessageContent::String(TITLE_GENERATOR_PROMPT.to_string()),
-            },
-            LLMMessage {
-                role: Role::User.to_string(),
-                content: LLMMessageContent::String(
-                    messages
-                        .iter()
-                        .map(|msg| {
-                            msg.content
-                                .as_ref()
-                                .unwrap_or(&MessageContent::String("".to_string()))
-                                .to_string()
-                        })
-                        .collect(),
-                ),
-            },
+        let title_messages = vec![
+            Message::new(stakai::Role::System, TITLE_GENERATOR_PROMPT),
+            Message::new(
+                stakai::Role::User,
+                messages
+                    .iter()
+                    .filter_map(Message::text)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
         ];
 
-        let input = LLMInput {
+        let input = stakai::GenerateRequest {
             model,
-            messages: llm_messages,
-            max_tokens: 100,
-            tools: None,
+            messages: title_messages,
+            options: stakai::GenerateOptions {
+                max_tokens: Some(100),
+                ..Default::default()
+            },
             provider_options: None,
-            headers: None,
+            telemetry_metadata: None,
         };
 
-        let response = self.stakai.chat(input).await.map_err(|e| e.to_string())?;
+        let response = self
+            .stakai
+            .generate(&input)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        Ok(response.choices[0].message.content.to_string())
+        Ok(response.text())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::stakai::StakAIClient;
+    use crate::local::storage::LocalStorage;
+    use futures_util::stream;
+    use stakai::provider::Provider;
+    use stakai::{
+        FinishReason, GenerateRequest, GenerateResponse, GenerateStream, Headers, MessageContent,
+        ProviderRegistry, Role, Usage,
+    };
+    use stakpak_shared::hooks::HookContext;
+    use std::sync::Arc;
+
+    #[derive(Clone)]
+    struct FakeProvider {
+        events: Vec<StreamEvent>,
+        response: GenerateResponse,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for FakeProvider {
+        fn provider_id(&self) -> &str {
+            "fake"
+        }
+
+        fn build_headers(&self, _custom_headers: Option<&Headers>) -> Headers {
+            Headers::new()
+        }
+
+        async fn generate(&self, _request: GenerateRequest) -> stakai::Result<GenerateResponse> {
+            Ok(self.response.clone())
+        }
+
+        async fn stream(&self, _request: GenerateRequest) -> stakai::Result<GenerateStream> {
+            let events = self.events.clone().into_iter().map(Ok::<_, stakai::Error>);
+            Ok(GenerateStream::new(Box::pin(stream::iter(events))))
+        }
+    }
+
+    fn generate_response(content: Vec<ResponseContent>) -> GenerateResponse {
+        GenerateResponse {
+            content,
+            usage: Usage::default(),
+            finish_reason: FinishReason::stop(),
+            metadata: None,
+            warnings: None,
+        }
+    }
+
+    async fn agent_client_with_fake_provider(
+        events: Vec<StreamEvent>,
+        response: GenerateResponse,
+    ) -> AgentClient {
+        let registry = ProviderRegistry::new().register("fake", FakeProvider { events, response });
+        let stakai = StakAIClient::with_registry(registry).expect("fake stakai client");
+        let session_storage = Arc::new(
+            LocalStorage::new(":memory:")
+                .await
+                .expect("in-memory local storage"),
+        );
+
+        AgentClient {
+            stakai,
+            stakpak_api: None,
+            session_storage,
+            hook_registry: Arc::new(stakpak_shared::hooks::HookRegistry::<AgentState>::default()),
+            stakpak: None,
+        }
+    }
+
+    async fn run_completion_with_stream_events(
+        events: Vec<StreamEvent>,
+    ) -> Result<Message, String> {
+        let client = agent_client_with_fake_provider(events, generate_response(Vec::new())).await;
+        let model = Model::custom("fake-model", "fake");
+        let messages = vec![Message::new(Role::User, "hello")];
+        let mut state = AgentState::new(model.clone(), messages.clone(), None, None);
+        state.set_llm_input(Some(GenerateRequest::new(model, messages)));
+        let mut ctx = HookContext::new(None, state);
+        let (tx, _rx) = mpsc::channel(16);
+
+        client.run_agent_completion(&mut ctx, Some(tx)).await
+    }
+
+    #[test]
+    fn response_to_message_drops_reasoning_content() {
+        let response = generate_response(vec![
+            ResponseContent::Text {
+                text: "visible".to_string(),
+            },
+            ResponseContent::Reasoning {
+                reasoning: "hidden chain of thought".to_string(),
+            },
+        ]);
+
+        let message = response_to_message(&response);
+
+        assert_eq!(message.text().as_deref(), Some("visible"));
+    }
+
+    #[test]
+    fn response_to_message_drops_reasoning_only_content() {
+        let response = generate_response(vec![ResponseContent::Reasoning {
+            reasoning: "hidden chain of thought".to_string(),
+        }]);
+
+        let message = response_to_message(&response);
+
+        assert_eq!(message.text().as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn streaming_completion_treats_stream_error_event_as_failure() {
+        let result = run_completion_with_stream_events(vec![StreamEvent::Error {
+            message: "provider overloaded".to_string(),
+        }])
+        .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .err()
+                .is_some_and(|err| err.contains("provider overloaded"))
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_completion_omits_empty_text_part_for_tool_only_messages() {
+        let message = run_completion_with_stream_events(vec![StreamEvent::ToolCallEnd {
+            id: "tc_1".to_string(),
+            name: "test_tool".to_string(),
+            arguments: serde_json::json!({"path": "README.md"}),
+            metadata: None,
+        }])
+        .await
+        .expect("stream completion");
+
+        let MessageContent::Parts(parts) = message.content else {
+            panic!("expected parts content");
+        };
+
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(parts[0], ContentPart::ToolCall { .. }));
     }
 }

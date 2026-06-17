@@ -1,7 +1,5 @@
 use stakpak_shared::define_hook;
 use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleEvent};
-use stakpak_shared::models::integrations::openai::Role;
-use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
 use crate::local::context_managers::task_board_context_manager::{
     TaskBoardContextManager, TaskBoardContextManagerOptions,
@@ -49,20 +47,15 @@ define_hook!(
         // only the space actually available for chat messages.
         // - System prompt: added after trimming (line 67+), not in message list
         // - max_output_tokens: reserved for the model's response
-        let system_prompt_tokens = TaskBoardContextManager::estimate_tokens(&[LLMMessage {
-            role: Role::System.to_string(),
-            content: LLMMessageContent::String(SYSTEM_PROMPT.to_string()),
-        }]);
+        let system_prompt_tokens =
+            TaskBoardContextManager::estimate_tokens(&[stakai::Message::new(
+                stakai::Role::System,
+                SYSTEM_PROMPT,
+            )]);
         let context_window = model
             .limit
             .context
             .saturating_sub(system_prompt_tokens + max_output_tokens);
-
-        let llm_tools: Option<Vec<_>> = ctx
-            .state
-            .tools
-            .clone()
-            .map(|t| t.into_iter().map(Into::into).collect());
 
         // Use budget-aware trimming with metadata from checkpoint.
         // Tool definitions are passed in so the context manager can account
@@ -71,26 +64,26 @@ define_hook!(
             ctx.state.messages.clone(),
             context_window,
             ctx.state.metadata.clone(),
-            llm_tools.as_deref(),
+            ctx.state.tools.as_deref(),
         );
 
         // Write updated metadata back to state for checkpoint persistence
         ctx.state.metadata = updated_metadata;
 
         let mut messages = Vec::new();
-        messages.push(LLMMessage {
-            role: Role::System.to_string(),
-            content: LLMMessageContent::String(SYSTEM_PROMPT.to_string()),
-        });
+        messages.push(stakai::Message::new(stakai::Role::System, SYSTEM_PROMPT));
         messages.extend(reduced_messages);
 
-        ctx.state.llm_input = Some(LLMInput {
+        ctx.state.llm_input = Some(stakai::GenerateRequest {
             model,
             messages,
-            max_tokens: max_output_tokens as u32,
-            tools: llm_tools,
+            options: stakai::GenerateOptions {
+                max_tokens: Some(max_output_tokens as u32),
+                tools: ctx.state.tools.clone(),
+                ..Default::default()
+            },
             provider_options: None,
-            headers: None,
+            telemetry_metadata: None,
         });
 
         Ok(HookAction::Continue)
