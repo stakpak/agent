@@ -18,6 +18,7 @@ use stakai::{
     StreamEvent, ThinkingOptions, Tool, ToolFunction, Usage,
     providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
     providers::openai::OpenAIConfig as StakaiOpenAIConfig, providers::openrouter::OpenRouterConfig,
+    providers::requesty::RequestyConfig,
     registry::ProviderRegistry,
 };
 
@@ -486,6 +487,17 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                     inference_config = inference_config.openrouter_config(openrouter_config);
                 }
             }
+            ProviderConfig::Requesty { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut requesty_config = RequestyConfig::new(api_key.to_string());
+                    requesty_config = requesty_config.with_http_referer("https://stakpak.dev/");
+                    requesty_config = requesty_config.with_site_title("Stakpak");
+                    if let Some(endpoint) = api_endpoint {
+                        requesty_config = requesty_config.with_base_url(endpoint.clone());
+                    }
+                    inference_config = inference_config.requesty_config(requesty_config);
+                }
+            }
             ProviderConfig::GitHubCopilot { .. } => {
                 tracing::debug!(
                     provider = %name,
@@ -534,6 +546,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
     use stakai::providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
+    use stakai::providers::requesty::{RequestyConfig, RequestyProvider};
     use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
 
     let mut registry = ProviderRegistry::new();
@@ -609,6 +622,22 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                         },
                     )?;
                     registry = registry.register("openrouter", provider);
+                }
+            }
+            ProviderConfig::Requesty { api_endpoint, .. } => {
+                if let Some(api_key) = provider_config.api_key() {
+                    let mut requesty_config = RequestyConfig::new(api_key.to_string());
+                    requesty_config = requesty_config.with_http_referer("https://stakpak.dev/");
+                    requesty_config = requesty_config.with_site_title("Stakpak");
+                    if let Some(endpoint) = api_endpoint {
+                        requesty_config = requesty_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = RequestyProvider::new(requesty_config).map_err(
+                        |e: stakai::prelude::Error| {
+                            format!("Failed to create Requesty provider: {}", e)
+                        },
+                    )?;
+                    registry = registry.register("requesty", provider);
                 }
             }
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => {
