@@ -259,6 +259,36 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<ProviderAuth>,
     },
+
+    /// Requesty provider configuration
+    ///
+    /// OpenAI-compatible router. Uses an API key with `Authorization: Bearer`
+    /// and the `provider/model` naming convention (e.g. `openai/gpt-4o-mini`).
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.requesty]
+    /// type = "requesty"
+    ///
+    /// [profiles.myprofile.providers.requesty.auth]
+    /// type = "api"
+    /// key = "sk-..."
+    ///
+    /// # Then use models as:
+    /// model = "requesty/anthropic/claude-sonnet-4"
+    /// ```
+    #[serde(rename = "requesty")]
+    Requesty {
+        /// Legacy API key field (prefer `auth` field)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_key: Option<String>,
+        /// Optional custom API endpoint (defaults to https://router.requesty.ai/v1)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+        /// Authentication credentials (preferred over api_key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth: Option<ProviderAuth>,
+    },
 }
 
 impl ProviderConfig {
@@ -273,6 +303,7 @@ impl ProviderConfig {
             ProviderConfig::Bedrock { .. } => "amazon-bedrock",
             ProviderConfig::GitHubCopilot { .. } => "github-copilot",
             ProviderConfig::OpenRouter { .. } => "openrouter",
+            ProviderConfig::Requesty { .. } => "requesty",
         }
     }
 
@@ -292,6 +323,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Stakpak { api_key, .. } => api_key.as_deref(),
             ProviderConfig::OpenRouter { api_key, .. } => api_key.as_deref(),
+            ProviderConfig::Requesty { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // AWS credential chain, no API key
             ProviderConfig::GitHubCopilot { .. } => None, // OAuth only, no API key
         }
@@ -308,6 +340,7 @@ impl ProviderConfig {
             ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::GitHubCopilot { auth, .. } => auth.as_ref(),
             ProviderConfig::OpenRouter { auth, .. } => auth.as_ref(),
+            ProviderConfig::Requesty { auth, .. } => auth.as_ref(),
         }
     }
 
@@ -329,7 +362,8 @@ impl ProviderConfig {
             | ProviderConfig::Gemini { api_key, .. }
             | ProviderConfig::Custom { api_key, .. }
             | ProviderConfig::Stakpak { api_key, .. }
-            | ProviderConfig::OpenRouter { api_key, .. } => {
+            | ProviderConfig::OpenRouter { api_key, .. }
+            | ProviderConfig::Requesty { api_key, .. } => {
                 api_key.as_ref().map(ProviderAuth::api_key)
             }
             ProviderConfig::Anthropic {
@@ -389,6 +423,14 @@ impl ProviderConfig {
                 *auth_field = Some(auth);
                 *api_key = None;
             }
+            ProviderConfig::Requesty {
+                auth: auth_field,
+                api_key,
+                ..
+            } => {
+                *auth_field = Some(auth);
+                *api_key = None;
+            }
             ProviderConfig::Anthropic {
                 auth: auth_field,
                 api_key,
@@ -440,6 +482,11 @@ impl ProviderConfig {
                 auth: auth_field,
                 api_key,
                 ..
+            }
+            | ProviderConfig::Requesty {
+                auth: auth_field,
+                api_key,
+                ..
             } => {
                 *auth_field = None;
                 *api_key = None;
@@ -474,6 +521,7 @@ impl ProviderConfig {
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
             ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::OpenRouter { api_endpoint, .. } => api_endpoint.as_deref(),
+            ProviderConfig::Requesty { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Bedrock { .. } => None, // No custom endpoint in config
             ProviderConfig::GitHubCopilot { api_endpoint, .. } => api_endpoint.as_deref(),
         }
@@ -490,7 +538,8 @@ impl ProviderConfig {
             | ProviderConfig::Gemini { api_endpoint, .. }
             | ProviderConfig::Stakpak { api_endpoint, .. }
             | ProviderConfig::GitHubCopilot { api_endpoint, .. }
-            | ProviderConfig::OpenRouter { api_endpoint, .. } => {
+            | ProviderConfig::OpenRouter { api_endpoint, .. }
+            | ProviderConfig::Requesty { api_endpoint, .. } => {
                 *api_endpoint = endpoint;
             }
             ProviderConfig::Custom { api_endpoint, .. } => {
@@ -630,6 +679,24 @@ impl ProviderConfig {
         }
     }
 
+    /// Create a Requesty provider config (legacy, uses api_key field)
+    pub fn requesty(api_key: Option<String>, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::Requesty {
+            api_key,
+            api_endpoint,
+            auth: None,
+        }
+    }
+
+    /// Create a Requesty provider config with auth
+    pub fn requesty_with_auth(auth: ProviderAuth, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::Requesty {
+            api_key: None,
+            api_endpoint,
+            auth: Some(auth),
+        }
+    }
+
     /// Create a GitHub Copilot provider config with auth (OAuth token from device flow)
     pub fn github_copilot_with_auth(auth: ProviderAuth) -> Self {
         ProviderConfig::GitHubCopilot {
@@ -694,6 +761,11 @@ impl ProviderConfig {
                 auth: None,
             }),
             "openrouter" => Some(ProviderConfig::OpenRouter {
+                api_key: None,
+                api_endpoint: None,
+                auth: None,
+            }),
+            "requesty" => Some(ProviderConfig::Requesty {
                 api_key: None,
                 api_endpoint: None,
                 auth: None,

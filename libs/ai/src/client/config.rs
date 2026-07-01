@@ -2,7 +2,7 @@
 
 use crate::providers::{
     anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig,
-    openrouter::OpenRouterConfig, stakpak::StakpakProviderConfig,
+    openrouter::OpenRouterConfig, requesty::RequestyConfig, stakpak::StakpakProviderConfig,
 };
 
 #[cfg(feature = "bedrock")]
@@ -68,6 +68,7 @@ pub struct InferenceConfig {
     pub(crate) gemini_config: Option<GeminiConfig>,
     pub(crate) stakpak_config: Option<StakpakProviderConfig>,
     pub(crate) openrouter_config: Option<OpenRouterConfig>,
+    pub(crate) requesty_config: Option<RequestyConfig>,
     #[cfg(feature = "bedrock")]
     pub(crate) bedrock_config: Option<BedrockConfig>,
     pub(crate) client_config: ClientConfig,
@@ -296,6 +297,47 @@ impl InferenceConfig {
     /// ```
     pub fn openrouter_config(mut self, config: OpenRouterConfig) -> Self {
         self.openrouter_config = Some(config);
+        self
+    }
+
+    /// Configure Requesty provider with API key and optional base URL
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .requesty("sk-...", None);
+    ///
+    /// // With custom base URL
+    /// let config = InferenceConfig::new()
+    ///     .requesty("sk-...", Some("https://custom.requesty.ai/v1".to_string()));
+    /// ```
+    pub fn requesty(mut self, api_key: impl Into<String>, base_url: Option<String>) -> Self {
+        let mut config = RequestyConfig::new(api_key);
+        if let Some(url) = base_url {
+            config = config.with_base_url(url);
+        }
+        self.requesty_config = Some(config);
+        self
+    }
+
+    /// Configure Requesty provider with full RequestyConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::{InferenceConfig, providers::requesty::RequestyConfig};
+    /// let requesty_config = RequestyConfig::new("sk-...")
+    ///     .with_base_url("https://custom.requesty.ai/v1")
+    ///     .with_http_referer("https://example.com")
+    ///     .with_site_title("My App");
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .requesty_config(requesty_config);
+    /// ```
+    pub fn requesty_config(mut self, config: RequestyConfig) -> Self {
+        self.requesty_config = Some(config);
         self
     }
 

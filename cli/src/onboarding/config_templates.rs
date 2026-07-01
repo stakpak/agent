@@ -150,6 +150,24 @@ pub fn generate_openrouter_profile() -> ProfileConfig {
     profile
 }
 
+/// Generate Requesty profile configuration (credentials stored separately in config.toml auth field)
+pub fn generate_requesty_profile() -> ProfileConfig {
+    let mut profile = ProfileConfig {
+        provider: Some(ProviderType::Local),
+        model: Some("requesty/anthropic/claude-sonnet-4".to_string()),
+        ..ProfileConfig::default()
+    };
+    profile.providers.insert(
+        "requesty".to_string(),
+        ProviderConfig::Requesty {
+            api_key: None,
+            api_endpoint: None,
+            auth: None,
+        },
+    );
+    profile
+}
+
 /// Generate custom provider profile configuration
 ///
 /// This creates a profile with a custom OpenAI-compatible provider (e.g., LiteLLM, Ollama).
@@ -200,6 +218,7 @@ pub enum BuiltinProvider {
     Gemini,
     Anthropic,
     OpenRouter,
+    Requesty,
 }
 
 impl BuiltinProvider {
@@ -209,6 +228,7 @@ impl BuiltinProvider {
             BuiltinProvider::Gemini => "Gemini",
             BuiltinProvider::Anthropic => "Anthropic",
             BuiltinProvider::OpenRouter => "OpenRouter",
+            BuiltinProvider::Requesty => "Requesty",
         }
     }
 
@@ -218,6 +238,7 @@ impl BuiltinProvider {
             BuiltinProvider::Gemini => "gemini-2.5-pro",
             BuiltinProvider::Anthropic => DEFAULT_MODEL,
             BuiltinProvider::OpenRouter => "openrouter/anthropic/claude-sonnet-4",
+            BuiltinProvider::Requesty => "requesty/anthropic/claude-sonnet-4",
         }
     }
 }
@@ -284,6 +305,16 @@ pub fn generate_multi_provider_profile(
                 profile.providers.insert(
                     "openrouter".to_string(),
                     ProviderConfig::OpenRouter {
+                        api_key: Some(setup.api_key),
+                        api_endpoint: None,
+                        auth: None,
+                    },
+                );
+            }
+            BuiltinProvider::Requesty => {
+                profile.providers.insert(
+                    "requesty".to_string(),
+                    ProviderConfig::Requesty {
                         api_key: Some(setup.api_key),
                         api_endpoint: None,
                         auth: None,
@@ -432,6 +463,22 @@ pub fn config_to_toml_preview(profile: &ProfileConfig, profile_name: &str) -> St
                 ..
             } => {
                 toml.push_str("type = \"openrouter\"\n");
+                if let Some(endpoint) = api_endpoint {
+                    toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
+                }
+                if let Some(key) = api_key {
+                    toml.push_str(&format!(
+                        "api_key = \"{}\"\n",
+                        if key.is_empty() { "" } else { "***" }
+                    ));
+                }
+            }
+            ProviderConfig::Requesty {
+                api_key,
+                api_endpoint,
+                ..
+            } => {
+                toml.push_str("type = \"requesty\"\n");
                 if let Some(endpoint) = api_endpoint {
                     toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
                 }

@@ -7,6 +7,7 @@ pub mod copilot;
 pub mod gemini;
 pub mod openai;
 pub mod openrouter;
+pub mod requesty;
 pub mod stakpak;
 pub(crate) mod tls;
 
@@ -18,4 +19,5 @@ pub use copilot::{CopilotConfig, CopilotProvider};
 pub use gemini::GeminiProvider;
 pub use openai::OpenAIProvider;
 pub use openrouter::{OpenRouterConfig, OpenRouterProvider};
+pub use requesty::{RequestyConfig, RequestyProvider};
 pub use stakpak::StakpakProvider;
