@@ -207,11 +207,18 @@ async fn run_session_actor(
     let mut baseline_messages = initial_messages.clone();
     baseline_messages.push(user_message.clone());
 
+    // Apply context_window override if configured, so the budget-aware context
+    // reducer uses the user-specified window instead of the model's built-in limit.
+    let mut model = run_config.model.clone();
+    if let Some(context_window) = run_config.context_window {
+        model.limit.context = context_window;
+    }
+
     let checkpoint_runtime = Arc::new(CheckpointRuntime::new(
         state.clone(),
         session_id,
         run_id,
-        run_config.model.clone(),
+        model.clone(),
         parent_checkpoint_id,
         baseline_messages,
         initial_metadata.clone(),
@@ -251,9 +258,10 @@ async fn run_session_actor(
     // Use the model's maximum output capacity as the output budget for context
     // window calculations. This is conservative — the actual response may be shorter,
     // but reserving the full limit avoids mid-response context truncation.
-    let max_output_tokens = run_config.model.limit.output as u32;
+    let max_output_tokens = model.limit.output as u32;
+
     let agent_config = AgentConfig {
-        model: run_config.model.clone(),
+        model,
         system_prompt: session_context.system_prompt,
         max_turns: run_config.max_turns,
         max_output_tokens,
@@ -269,7 +277,14 @@ async fn run_session_actor(
     })];
 
     let compactor = PassthroughCompactionEngine;
-    let context_reducer = BudgetAwareContextReducer::new(5, 0.8);
+    let context_reducer = BudgetAwareContextReducer::new(
+        run_config
+            .keep_last_n_assistant_messages
+            .unwrap_or(5),
+        run_config
+            .context_budget_threshold
+            .unwrap_or(0.8),
+    );
     let run_context = build_run_context(session_id, run_id);
 
     let run_result = run_agent(

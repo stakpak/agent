@@ -206,6 +206,12 @@ pub struct RunOverridesDoc {
     pub auto_approve: Option<AutoApproveOverrideDoc>,
     pub system_prompt: Option<String>,
     pub max_turns: Option<usize>,
+    /// Override the model's context window size in tokens (1000–2000000)
+    pub context_window: Option<u64>,
+    /// Fraction of the context window at which trimming triggers (0.1–1.0)
+    pub context_budget_threshold: Option<f32>,
+    /// Number of recent assistant messages to keep untrimmed during trimming
+    pub keep_last_n_assistant_messages: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

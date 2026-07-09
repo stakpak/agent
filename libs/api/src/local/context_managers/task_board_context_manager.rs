@@ -8,6 +8,7 @@ use stakpak_shared::models::{
 pub struct TaskBoardContextManager {
     keep_last_n_assistant_messages: usize,
     context_budget_threshold: f32,
+    context_window: Option<u64>,
 }
 
 impl super::ContextManager for TaskBoardContextManager {
@@ -466,6 +467,7 @@ mod tests {
         TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2, // Only keep last 2 assistant messages untrimmed
             context_budget_threshold: 0.8,
+            context_window: None,
         })
     }
 
@@ -1306,6 +1308,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Build: user, assistant, user, assistant, user, user, assistant
@@ -1410,6 +1413,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Build 10 turns of user/assistant
@@ -1514,6 +1518,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 1,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Realistic agent flow:
@@ -1618,6 +1623,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 10,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Only 3 assistant messages but keep_last_n = 10
@@ -1682,6 +1688,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 0,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         let messages = vec![
@@ -1735,6 +1742,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 1,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Use large assistant messages and small user messages so that trimming
@@ -1812,6 +1820,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // 10 turns → 20 messages, small window → establishes a trim index
@@ -1848,6 +1857,7 @@ mod tests {
         let cm_generous = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 8,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         let (_, metadata2) = cm_generous.reduce_context_with_budget(messages, 100, metadata1, None);
@@ -1870,6 +1880,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Build a conversation that's just under threshold without tools
@@ -1974,6 +1985,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 3,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // 5 turns of: user → assistant(tool_call) → tool(result) → assistant(follow-up)
@@ -2080,6 +2092,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 50,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Simulate a 200k context window model (like Claude)
@@ -2362,6 +2375,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 50,
             context_budget_threshold: 0.3,
+            context_window: None,
         });
 
         // Simulate a session with 10 turns (20 messages) — well under 50
@@ -2435,6 +2449,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 3,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // 6 turns: user + assistant with large content.
@@ -2519,6 +2534,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 20,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Simulate a session with 30 turns of tool-heavy interaction.
@@ -2651,6 +2667,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 2,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         // Build conversation that exceeds threshold
@@ -2742,6 +2759,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 10,
             context_budget_threshold: 0.8,
+            context_window: None,
         });
 
         let messages = vec![
@@ -2790,6 +2808,7 @@ mod tests {
         let cm = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             keep_last_n_assistant_messages: 50, // high keep_last_n, like production
             context_budget_threshold: 0.3,
+            context_window: None,
         });
 
         // 5 turns with large assistant responses
@@ -2882,6 +2901,11 @@ pub struct TaskBoardContextManagerOptions {
     pub keep_last_n_assistant_messages: usize,
     /// Fraction of context window at which trimming triggers (e.g., 0.8 = 80%)
     pub context_budget_threshold: f32,
+    /// Override the model's context window size (in tokens).
+    /// When set, replaces the model's built-in `context_window` for budget
+    /// calculations. Useful for local/custom models where the window may
+    /// not be auto-detected correctly.
+    pub context_window: Option<u64>,
 }
 
 impl TaskBoardContextManager {
@@ -2889,6 +2913,7 @@ impl TaskBoardContextManager {
         Self {
             keep_last_n_assistant_messages: options.keep_last_n_assistant_messages,
             context_budget_threshold: options.context_budget_threshold,
+            context_window: options.context_window,
         }
     }
 }

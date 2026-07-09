@@ -33,6 +33,15 @@ pub struct RunConfig {
     pub tool_approval_policy: ToolApprovalPolicy,
     pub system_prompt: Option<String>,
     pub max_turns: usize,
+    /// Override the model's context window size (in tokens).
+    /// When set, replaces the model's default `limit.context` for budget calculations.
+    pub context_window: Option<u64>,
+    /// Fraction of the context window at which context trimming triggers (0.0–1.0).
+    /// Default when not set: 0.8.
+    pub context_budget_threshold: Option<f32>,
+    /// Number of most recent assistant messages to keep untrimmed during trimming.
+    /// Default when not set: 5.
+    pub keep_last_n_assistant_messages: Option<usize>,
 }
 
 impl std::fmt::Debug for RunConfig {
@@ -42,6 +51,12 @@ impl std::fmt::Debug for RunConfig {
             .field("tool_approval_policy", &self.tool_approval_policy)
             .field("system_prompt", &self.system_prompt)
             .field("max_turns", &self.max_turns)
+            .field("context_window", &self.context_window)
+            .field("context_budget_threshold", &self.context_budget_threshold)
+            .field(
+                "keep_last_n_assistant_messages",
+                &self.keep_last_n_assistant_messages,
+            )
             .field("inference", &"<opaque>")
             .finish()
     }

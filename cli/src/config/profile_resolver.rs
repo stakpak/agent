@@ -4,13 +4,16 @@ use stakpak_shared::utils::normalize_optional_string;
 
 use super::AppConfig;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ResolvedProfileOverrides {
     pub model: Option<String>,
     pub auto_approve: Option<Vec<String>>,
     pub allowed_tools: Option<Vec<String>>,
     pub system_prompt: Option<String>,
     pub max_turns: Option<usize>,
+    pub context_window: Option<u64>,
+    pub context_budget_threshold: Option<f32>,
+    pub keep_last_n_assistant_messages: Option<usize>,
 }
 
 pub(crate) fn resolve_profile_run_overrides(
@@ -24,12 +27,18 @@ pub(crate) fn resolve_profile_run_overrides(
     let allowed_tools = normalize_tool_list(config.allowed_tools);
     let system_prompt = normalize_optional_string(config.system_prompt);
     let max_turns = config.max_turns;
+    let context_window = config.context_window;
+    let context_budget_threshold = config.context_budget_threshold;
+    let keep_last_n_assistant_messages = config.keep_last_n_assistant_messages;
 
     if model.is_none()
         && auto_approve.is_none()
         && allowed_tools.is_none()
         && system_prompt.is_none()
         && max_turns.is_none()
+        && context_window.is_none()
+        && context_budget_threshold.is_none()
+        && keep_last_n_assistant_messages.is_none()
     {
         return None;
     }
@@ -40,6 +49,9 @@ pub(crate) fn resolve_profile_run_overrides(
         allowed_tools,
         system_prompt,
         max_turns,
+        context_window,
+        context_budget_threshold,
+        keep_last_n_assistant_messages,
     })
 }
 
