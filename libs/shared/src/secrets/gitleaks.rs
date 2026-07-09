@@ -687,6 +687,53 @@ mod tests {
     }
 
     #[test]
+    fn test_telegram_bot_token_standalone_detection() {
+        // Bare token with no surrounding context — the original gitleaks rule
+        // requires "telegr" + assignment operator, so it misses this.
+        let bare_token = "8797664862:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4";
+        let secrets = detect_secrets(bare_token, None, false);
+        let tg = secrets
+            .iter()
+            .find(|s| s.rule_id == "telegram-bot-token-standalone");
+        assert!(
+            tg.is_some(),
+            "Should detect bare Telegram bot token without context. Detected: {:?}",
+            secrets
+        );
+        assert_eq!(tg.unwrap().value, bare_token);
+
+        // Token inside a sentence (still no "telegram" keyword)
+        let in_sentence = "Use 8797664862:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4 as the bot cred";
+        let secrets2 = detect_secrets(in_sentence, None, false);
+        assert!(
+            secrets2
+                .iter()
+                .any(|s| s.rule_id == "telegram-bot-token-standalone"),
+            "Should detect Telegram bot token embedded in text"
+        );
+
+        // Should NOT match a short numeric prefix (< 5 digits)
+        let too_short = "1234:AAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4";
+        let secrets3 = detect_secrets(too_short, None, false);
+        assert!(
+            !secrets3
+                .iter()
+                .any(|s| s.rule_id == "telegram-bot-token-standalone"),
+            "Should not match token with fewer than 5 digit bot ID"
+        );
+
+        // Should NOT match when the secret part doesn't start with A
+        let bad_prefix = "8797664862:BAFXV3ySwPk-k7mq-2MPLOwKAQ2QKv791v4";
+        let secrets4 = detect_secrets(bad_prefix, None, false);
+        assert!(
+            !secrets4
+                .iter()
+                .any(|s| s.rule_id == "telegram-bot-token-standalone"),
+            "Should not match token whose secret doesn't start with A"
+        );
+    }
+
+    #[test]
     fn test_privacy_mode_aws_account_id() {
         let test_input = "AWS_ACCOUNT_ID=987654321098";
 
