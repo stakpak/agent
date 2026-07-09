@@ -12,10 +12,11 @@ use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
-    GenerateRequest, GenerateResponse, GenerateStream, Headers, Model, OpenAIApiConfig,
-    ProviderOptions,
+    FinishReason, GenerateRequest, GenerateResponse, GenerateStream, Headers, Model,
+    OpenAIApiConfig, ProviderOptions, ResponseContent, StreamEvent, ToolCall, Usage,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
 use serde::Deserialize;
@@ -455,6 +456,64 @@ impl OpenAIProvider {
         }
     }
 
+    async fn generate_codex_streaming_response(
+        &self,
+        request: GenerateRequest,
+    ) -> Result<GenerateResponse> {
+        let mut stream = <Self as Provider>::stream(self, request).await?;
+        let mut text = String::new();
+        let mut reasoning = String::new();
+        let mut tool_calls = Vec::new();
+        let mut usage = Usage::default();
+        let mut finish_reason = FinishReason::default();
+
+        while let Some(event) = stream.next().await {
+            match event? {
+                StreamEvent::TextDelta { delta, .. } => text.push_str(&delta),
+                StreamEvent::ReasoningDelta { delta, .. } => reasoning.push_str(&delta),
+                StreamEvent::ToolCallEnd {
+                    id,
+                    name,
+                    arguments,
+                    metadata,
+                } => tool_calls.push(ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    metadata,
+                }),
+                StreamEvent::Finish {
+                    usage: event_usage,
+                    reason,
+                } => {
+                    usage = event_usage;
+                    finish_reason = reason;
+                }
+                StreamEvent::Error { message } => return Err(Error::provider_error(message)),
+                StreamEvent::Start { .. }
+                | StreamEvent::ToolCallStart { .. }
+                | StreamEvent::ToolCallDelta { .. } => {}
+            }
+        }
+
+        let mut content = Vec::new();
+        if !reasoning.is_empty() {
+            content.push(ResponseContent::Reasoning { reasoning });
+        }
+        if !text.is_empty() {
+            content.push(ResponseContent::Text { text });
+        }
+        content.extend(tool_calls.into_iter().map(ResponseContent::ToolCall));
+
+        Ok(GenerateResponse {
+            content,
+            usage,
+            finish_reason,
+            metadata: None,
+            warnings: None,
+        })
+    }
+
     /// Create provider from environment
     pub fn from_env() -> Result<Self> {
         Self::new(OpenAIConfig::default())
@@ -487,6 +546,10 @@ impl Provider for OpenAIProvider {
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
+        if matches!(self.backend, OpenAIBackend::Codex(_)) {
+            return self.generate_codex_streaming_response(request).await;
+        }
+
         let headers = self.build_headers(request.options.headers.as_ref());
 
         if matches!(self.effective_api_mode(&request), ApiMode::Responses) {
@@ -818,6 +881,47 @@ mod tests {
         let responses_req = provider.build_responses_request(&req, false);
 
         assert!(responses_req.max_output_tokens.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_codex_generate_uses_streaming_responses_request() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/backend-api/codex/responses")
+            .match_header("authorization", "Bearer test-key")
+            .match_header("chatgpt-account-id", "acct_test_123")
+            .match_header("accept", "text/event-stream")
+            .match_header("openai-beta", "responses=experimental")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_body(concat!(
+                "event: response.output_item.added\n",
+                "data: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\"}}\n\n",
+                "event: response.output_text.delta\n",
+                "data: {\"delta\":\"OK\"}\n\n",
+                "event: response.completed\n",
+                "data: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+            ))
+            .expect(1)
+            .create();
+
+        let provider = OpenAIProvider::new(
+            OpenAIConfig::new("test-key")
+                .with_base_url(format!("{}/backend-api/codex", server.url()))
+                .with_custom_header("ChatGPT-Account-Id", "acct_test_123"),
+        )
+        .expect("provider");
+        let req = GenerateRequest::new(
+            Model::custom("codex-mini-latest", "openai"),
+            vec![Message::new(Role::User, "Hello")],
+        );
+
+        let response = provider.generate(req).await.expect("codex response");
+
+        assert_eq!(response.text(), "OK");
+        assert_eq!(response.usage.prompt_tokens, 1);
+        assert_eq!(response.usage.completion_tokens, 1);
+        mock.assert();
     }
 
     #[tokio::test]
