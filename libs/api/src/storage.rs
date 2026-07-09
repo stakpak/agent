@@ -6,7 +6,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stakpak_shared::models::integrations::openai::ChatMessage;
 use uuid::Uuid;
 
 // Re-export implementations
@@ -284,8 +283,11 @@ pub struct CheckpointSummary {
 /// Checkpoint state containing messages
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CheckpointState {
-    #[serde(default)]
-    pub messages: Vec<ChatMessage>,
+    #[serde(
+        default,
+        deserialize_with = "crate::message_compat::deserialize_messages"
+    )]
+    pub messages: Vec<stakai::Message>,
     /// Optional metadata for context trimming state, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -305,7 +307,7 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
-    pub fn new(title: impl Into<String>, messages: Vec<ChatMessage>) -> Self {
+    pub fn new(title: impl Into<String>, messages: Vec<stakai::Message>) -> Self {
         Self {
             title: title.into(),
             visibility: SessionVisibility::Private,
@@ -359,7 +361,7 @@ pub struct CreateCheckpointRequest {
 }
 
 impl CreateCheckpointRequest {
-    pub fn new(messages: Vec<ChatMessage>) -> Self {
+    pub fn new(messages: Vec<stakai::Message>) -> Self {
         Self {
             state: CheckpointState {
                 messages,
@@ -494,4 +496,83 @@ pub struct ToolUsageCounts {
     pub successful: u32,
     pub failed: u32,
     pub aborted: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn checkpoint_state_deserializes_legacy_assistant_tool_calls() {
+        let state: CheckpointState = serde_json::from_value(json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "I will inspect the file.",
+                    "tool_calls": [
+                        {
+                            "id": "tc_1",
+                            "type": "function",
+                            "function": {
+                                "name": "view",
+                                "arguments": "{\"path\":\"README.md\"}"
+                            },
+                            "metadata": {
+                                "thought_signature": "sig-123"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }))
+        .expect("legacy checkpoint state should deserialize");
+
+        let parts = state.messages[0].parts();
+        assert!(
+            parts
+                .iter()
+                .any(|part| matches!(part, stakai::ContentPart::Text { text, .. } if text == "I will inspect the file."))
+        );
+        assert!(parts.iter().any(|part| {
+            matches!(
+                part,
+                stakai::ContentPart::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    metadata,
+                    ..
+                } if id == "tc_1"
+                    && name == "view"
+                    && arguments == &json!({"path": "README.md"})
+                    && metadata.as_ref() == Some(&json!({"thought_signature": "sig-123"}))
+            )
+        }));
+    }
+
+    #[test]
+    fn checkpoint_state_deserializes_legacy_tool_result_messages() {
+        let state: CheckpointState = serde_json::from_value(json!({
+            "messages": [
+                {
+                    "role": "tool",
+                    "content": "file contents",
+                    "tool_call_id": "tc_1"
+                }
+            ]
+        }))
+        .expect("legacy checkpoint state should deserialize");
+
+        let parts = state.messages[0].parts();
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0],
+            stakai::ContentPart::ToolResult {
+                tool_call_id,
+                content,
+                ..
+            } if tool_call_id == "tc_1" && content == "file contents"
+        ));
+    }
 }

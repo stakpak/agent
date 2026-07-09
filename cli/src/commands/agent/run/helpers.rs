@@ -1,6 +1,5 @@
-use stakpak_shared::models::integrations::openai::{
-    ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
-};
+use stakai::{ContentPart, Message, MessageContent, Role, Tool};
+use stakpak_shared::models::agent_runtime::ToolCallResult;
 use uuid::Uuid;
 
 /// Resolve a short model name against the provider's model catalog.
@@ -71,22 +70,25 @@ pub fn build_resume_command(
 }
 
 /// Extract the checkpoint ID from the last assistant message that contains one.
-pub fn extract_last_checkpoint_id(messages: &[ChatMessage]) -> Option<Uuid> {
+pub fn extract_last_checkpoint_id(messages: &[Message]) -> Option<Uuid> {
     messages
         .iter()
         .rev()
         .filter(|m| m.role == Role::Assistant)
-        .find_map(|m| {
-            m.content
-                .as_ref()
-                .and_then(MessageContent::extract_checkpoint_id)
+        .filter_map(|m| m.content.text())
+        .find_map(|content| {
+            content
+                .split("<checkpoint_id>")
+                .nth(1)
+                .and_then(|s| s.split("</checkpoint_id>").next())
+                .and_then(|id| Uuid::parse_str(id.trim()).ok())
         })
 }
 
 /// Returns true when there are no user/assistant/tool turns yet.
 ///
 /// System messages (e.g. injected prompts) do not count as conversation turns.
-pub fn is_first_non_system_message(messages: &[ChatMessage]) -> bool {
+pub fn is_first_non_system_message(messages: &[Message]) -> bool {
     messages.iter().all(|message| message.role == Role::System)
 }
 
@@ -107,52 +109,36 @@ pub fn convert_tools_with_filter(
                 return None;
             }
 
-            Some(Tool {
-                r#type: "function".to_string(),
-                function: FunctionDefinition {
-                    name: tool_name.to_owned(),
-                    description: tool.description.clone().map(|d| d.to_string()),
-                    parameters: serde_json::Value::Object((*tool.input_schema).clone()),
-                },
-            })
+            Some(
+                Tool::function(
+                    tool_name.to_owned(),
+                    tool.description
+                        .clone()
+                        .map(|d| d.to_string())
+                        .unwrap_or_default(),
+                )
+                .parameters(serde_json::Value::Object((*tool.input_schema).clone())),
+            )
         })
         .collect()
 }
 
-pub fn user_message(user_input: String) -> ChatMessage {
-    ChatMessage {
-        role: Role::User,
-        content: Some(MessageContent::String(user_input)),
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-        usage: None,
-        ..Default::default()
-    }
+pub fn user_message(user_input: String) -> Message {
+    Message::new(Role::User, user_input)
 }
 
-pub fn system_message(system_prompt: String) -> ChatMessage {
-    ChatMessage {
-        role: Role::System,
-        content: Some(MessageContent::String(system_prompt)),
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-        usage: None,
-        ..Default::default()
-    }
+pub fn system_message(system_prompt: String) -> Message {
+    Message::new(Role::System, system_prompt)
 }
 
-pub fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
-    ChatMessage {
-        role: Role::Tool,
-        content: Some(MessageContent::String(result)),
-        name: None,
-        tool_calls: None,
-        tool_call_id: Some(tool_call_id),
-        usage: None,
-        ..Default::default()
-    }
+pub fn tool_result(tool_call_id: String, result: String) -> Message {
+    Message::new(
+        Role::Tool,
+        MessageContent::Parts(vec![ContentPart::tool_result(
+            tool_call_id,
+            serde_json::Value::String(result),
+        )]),
+    )
 }
 
 pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String> {
@@ -162,16 +148,13 @@ pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String>
     let history = tool_calls
         .iter()
         .map(|tc| {
-            let command = if let Ok(json) =
-                serde_json::from_str::<serde_json::Value>(&tc.call.function.arguments)
-            {
-                json.get("command")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&tc.call.function.arguments)
-                    .to_string()
-            } else {
-                tc.call.function.arguments.clone()
-            };
+            let command = tc
+                .call
+                .arguments
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| tc.call.arguments.to_string());
 
             let output = if tc.result.trim().is_empty() {
                 "No output".to_string()

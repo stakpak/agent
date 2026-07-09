@@ -3,9 +3,9 @@
 //! These types represent the JSON output produced by async agent runs
 //! and provide formatting for human/LLM consumption.
 
-use crate::models::integrations::openai::ToolCall;
 use crate::models::llm::LLMTokenUsage;
 use serde::{Deserialize, Serialize};
+use stakai::ToolCall;
 
 /// Why an async agent paused execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,12 +32,10 @@ pub struct PendingToolCall {
 
 impl From<&ToolCall> for PendingToolCall {
     fn from(tc: &ToolCall) -> Self {
-        let arguments = serde_json::from_str(&tc.function.arguments)
-            .unwrap_or(serde_json::Value::String(tc.function.arguments.clone()));
         PendingToolCall {
             id: tc.id.clone(),
-            name: tc.function.name.clone(),
-            arguments,
+            name: tc.name.clone(),
+            arguments: tc.arguments.clone(),
         }
     }
 }

@@ -21,7 +21,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakai::ToolCall;
 use stakpak_shared::utils::strip_tool_name;
 
 /// Approval status for a tool call
@@ -42,12 +42,11 @@ pub struct ApprovalAction {
 
 impl ApprovalAction {
     pub fn new(tool_call: ToolCall) -> Self {
-        let tool_name = strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.name);
 
         let label = if tool_name == "dynamic_subagent_task" {
             // Parse description and sandbox flag from arguments for a meaningful label
-            let args =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
+            let args = Some(&tool_call.arguments);
             let desc = args
                 .as_ref()
                 .and_then(|a| a.get("description").and_then(|v| v.as_str()))
@@ -578,16 +577,12 @@ impl ApprovalBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stakpak_shared::models::integrations::openai::FunctionCall;
-
     fn make_tool_call(name: &str, args: &str) -> ToolCall {
         ToolCall {
             id: format!("call_{}", name),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: name.to_string(),
-                arguments: args.to_string(),
-            },
+            name: name.to_string(),
+            arguments: serde_json::from_str(args)
+                .unwrap_or_else(|_| serde_json::Value::String(args.to_string())),
             metadata: None,
         }
     }

@@ -1,6 +1,5 @@
 use crate::{
     context::{ContextFile, EnvironmentContext, ProjectContext, SessionContextBuilder},
-    message_bridge,
     sandbox::{SandboxConfig, SandboxMode, SandboxedMcpServer},
     state::AppState,
     types::{RunConfig, SessionHandle},
@@ -104,9 +103,7 @@ async fn run_session_actor(
             Ok(None) => {
                 let messages = active_checkpoint
                     .as_ref()
-                    .map(|checkpoint| {
-                        message_bridge::chat_to_stakai(checkpoint.state.messages.clone())
-                    })
+                    .map(|checkpoint| checkpoint.state.messages.clone())
                     .unwrap_or_default();
                 let metadata = active_checkpoint
                     .as_ref()
@@ -718,10 +715,8 @@ async fn persist_checkpoint(
     messages: &[Message],
     metadata: &serde_json::Value,
 ) -> Result<Uuid, String> {
-    // TODO(ahmed): Migrate server/session checkpoint storage to `Vec<stakai::Message>` directly
-    // and remove the ChatMessage adapter conversion (`message_bridge::stakai_to_chat`).
-    let mut request = CreateCheckpointRequest::new(message_bridge::stakai_to_chat(messages))
-        .with_metadata(metadata.clone());
+    let mut request =
+        CreateCheckpointRequest::new(messages.to_vec()).with_metadata(metadata.clone());
 
     if let Some(parent_id) = parent_id {
         request = request.with_parent(parent_id);

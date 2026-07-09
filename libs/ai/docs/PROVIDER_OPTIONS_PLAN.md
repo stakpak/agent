@@ -138,30 +138,21 @@ pub enum HarmBlockThreshold {
 
 | File | Changes |
 |------|---------|
-| `openai/types.rs` | Add new fields to ChatCompletionRequest |
+| `openai/types.rs` | Add new fields to the provider request payload |
 | `openai/convert.rs` | Use new options in request conversion |
 | `gemini/types.rs` | Add safety_settings and cached_content to GeminiRequest |
 | `gemini/convert.rs` | Use safety_settings in conversion |
-
-### Adapter Layer (`libs/shared/src/models/`)
-
-| File | Changes |
-|------|---------|
-| `stakai_adapter.rs` | Update option conversion (set new fields to None initially) |
-
----
 
 ## Implementation Order
 
 1. **Add types to `request.rs`** - Define all new structs and enums
 2. **Export from `mod.rs`** - Make types publicly available
-3. **Update OpenAI types** - Add fields to ChatCompletionRequest
+3. **Update OpenAI types** - Add fields to the provider request payload
 4. **Update OpenAI convert** - Use options in to_openai_request()
 5. **Update Gemini types** - Add fields to GeminiRequest
 6. **Update Gemini convert** - Use options in to_gemini_request()
-7. **Update stakai_adapter** - Handle new options in conversion
-8. **Run tests** - Ensure all existing tests pass
-9. **Add new tests** - Test new option handling
+7. **Run tests** - Ensure all existing tests pass
+8. **Add new tests** - Test new option handling
 
 ---
 

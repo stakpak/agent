@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod local_storage_tests {
     use crate::storage::*;
-    use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
+    use stakai::{ContentPart, Message, MessageContent, Role};
     use uuid::Uuid;
 
     /// Helper: create an in-memory LocalStorage
@@ -12,25 +12,32 @@ mod local_storage_tests {
     }
 
     /// Helper: build a simple CreateSessionRequest
-    fn session_request(title: &str, messages: Vec<ChatMessage>) -> CreateSessionRequest {
+    fn session_request(title: &str, messages: Vec<Message>) -> CreateSessionRequest {
         CreateSessionRequest::new(title, messages)
     }
 
-    /// Helper: build a user ChatMessage
-    fn user_msg(text: &str) -> ChatMessage {
-        ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::String(text.to_string())),
-            ..Default::default()
-        }
+    /// Helper: build a user message
+    fn user_msg(text: &str) -> Message {
+        Message::new(Role::User, text.to_string())
     }
 
-    /// Helper: build an assistant ChatMessage
-    fn assistant_msg(text: &str) -> ChatMessage {
-        ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(text.to_string())),
-            ..Default::default()
+    /// Helper: build an assistant message
+    fn assistant_msg(text: &str) -> Message {
+        Message::new(Role::Assistant, text.to_string())
+    }
+
+    fn message_text(message: &Message) -> Option<String> {
+        message.content.text()
+    }
+
+    fn is_trimmed_message(message: &Message) -> bool {
+        match &message.content {
+            MessageContent::Text(text) => text == "[trimmed]",
+            MessageContent::Parts(parts) => parts.iter().all(|part| match part {
+                ContentPart::Text { text, .. } => text == "[trimmed]",
+                ContentPart::ToolResult { content, .. } => content.as_str() == Some("[trimmed]"),
+                ContentPart::ToolCall { .. } | ContentPart::Image { .. } => true,
+            }),
         }
     }
 
@@ -53,11 +60,7 @@ mod local_storage_tests {
         assert!(result.checkpoint.parent_id.is_none());
         assert_eq!(result.checkpoint.state.messages.len(), 1);
         assert_eq!(
-            result.checkpoint.state.messages[0]
-                .content
-                .as_ref()
-                .unwrap()
-                .to_string(),
+            result.checkpoint.state.messages[0].content.text().unwrap(),
             "hello"
         );
     }
@@ -562,12 +565,13 @@ mod local_storage_tests {
         let msgs = vec![
             user_msg("question"),
             assistant_msg("answer"),
-            ChatMessage {
-                role: Role::Tool,
-                content: Some(MessageContent::String("tool result".to_string())),
-                tool_call_id: Some("tc_123".to_string()),
-                ..Default::default()
-            },
+            Message::new(
+                Role::Tool,
+                MessageContent::Parts(vec![ContentPart::tool_result(
+                    "tc_123",
+                    serde_json::Value::String("tool result".to_string()),
+                )]),
+            ),
         ];
         let session = storage
             .create_session(&session_request("Test", msgs))
@@ -579,10 +583,12 @@ mod local_storage_tests {
         assert_eq!(fetched.state.messages[0].role, Role::User);
         assert_eq!(fetched.state.messages[1].role, Role::Assistant);
         assert_eq!(fetched.state.messages[2].role, Role::Tool);
-        assert_eq!(
-            fetched.state.messages[2].tool_call_id,
-            Some("tc_123".to_string())
-        );
+        assert!(fetched.state.messages[2].parts().iter().any(|part| {
+            matches!(
+                part,
+                ContentPart::ToolResult { tool_call_id, .. } if tool_call_id == "tc_123"
+            )
+        }));
     }
 
     // =========================================================================
@@ -1068,29 +1074,16 @@ mod local_storage_tests {
     // =========================================================================
 
     /// Helper: build a large user message to inflate token count
-    fn large_user_msg(turn: usize) -> ChatMessage {
-        ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::String(format!(
-                "Turn {}: {}",
-                turn,
-                "x".repeat(200)
-            ))),
-            ..Default::default()
-        }
+    fn large_user_msg(turn: usize) -> Message {
+        Message::new(Role::User, format!("Turn {}: {}", turn, "x".repeat(200)))
     }
 
     /// Helper: build a large assistant message to inflate token count
-    fn large_assistant_msg(turn: usize) -> ChatMessage {
-        ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(format!(
-                "Response {}: {}",
-                turn,
-                "y".repeat(200)
-            ))),
-            ..Default::default()
-        }
+    fn large_assistant_msg(turn: usize) -> Message {
+        Message::new(
+            Role::Assistant,
+            format!("Response {}: {}", turn, "y".repeat(200)),
+        )
     }
 
     /// Simulates the async mode flow: trimming should NOT trigger when
@@ -1154,7 +1147,7 @@ mod local_storage_tests {
         );
         // All content should be preserved
         for msg in &result {
-            if let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content {
+            if let Some(s) = message_text(msg) {
                 assert_ne!(s, "[trimmed]", "No messages should be trimmed");
             }
         }
@@ -1240,18 +1233,16 @@ mod local_storage_tests {
 
         // Verify early assistant messages are trimmed (user messages preserved)
         // result[0] is user (NOT trimmed), result[1] is assistant (trimmed)
-        match &result[0].content {
-            stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                assert_ne!(s, "[trimmed]", "First user message should NOT be trimmed");
-            }
-            _ => panic!("Expected string content"),
-        }
-        match &result[1].content {
-            stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                assert_eq!(s, "[trimmed]", "First assistant message should be trimmed");
-            }
-            _ => panic!("Expected string content"),
-        }
+        assert_ne!(
+            message_text(&result[0]).expect("Expected text content"),
+            "[trimmed]",
+            "First user message should NOT be trimmed"
+        );
+        assert_eq!(
+            message_text(&result[1]).expect("Expected text content"),
+            "[trimmed]",
+            "First assistant message should be trimmed"
+        );
 
         // Budget is the hard constraint: the trimmer trims all assistant/tool
         // messages it can. With a 200-token window, user messages alone (~700
@@ -1260,8 +1251,8 @@ mod local_storage_tests {
         // Verify all assistant messages before the trim boundary are trimmed.
         for (i, msg) in result.iter().enumerate() {
             if i < trimmed_idx
-                && msg.role == "assistant"
-                && let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content
+                && msg.role == Role::Assistant
+                && let Some(s) = message_text(msg)
             {
                 assert_eq!(
                     s, "[trimmed]",
@@ -1273,8 +1264,8 @@ mod local_storage_tests {
 
         // User messages are never trimmed regardless of budget pressure
         for msg in &result {
-            if msg.role == "user"
-                && let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content
+            if msg.role == Role::User
+                && let Some(s) = message_text(msg)
             {
                 assert_ne!(s, "[trimmed]", "User messages should never be trimmed");
             }
@@ -1352,29 +1343,15 @@ mod local_storage_tests {
         // Budget is the hard constraint — keep_last_n is best-effort, so the
         // last 4 messages may also be trimmed if budget demands it.
         for (i, msg) in result1.iter().enumerate() {
-            let is_trimmed = match &msg.content {
-                stakpak_shared::models::llm::LLMMessageContent::String(s) => s == "[trimmed]",
-                stakpak_shared::models::llm::LLMMessageContent::List(parts) => {
-                    parts.iter().all(|p| match p {
-                        stakpak_shared::models::llm::LLMMessageTypedContent::Text { text } => {
-                            text == "[trimmed]"
-                        }
-                        stakpak_shared::models::llm::LLMMessageTypedContent::ToolResult {
-                            content,
-                            ..
-                        } => content == "[trimmed]",
-                        _ => true,
-                    })
-                }
-            };
-            if i < trimmed_idx_1 && msg.role != "user" {
+            let is_trimmed = is_trimmed_message(msg);
+            if i < trimmed_idx_1 && msg.role != Role::User {
                 assert!(
                     is_trimmed,
                     "Phase 1: non-user message {} should be trimmed",
                     i
                 );
             }
-            if msg.role == "user" {
+            if msg.role == Role::User {
                 assert!(
                     !is_trimmed,
                     "Phase 1: user message {} should NOT be trimmed",
@@ -1387,11 +1364,8 @@ mod local_storage_tests {
         // so the trimmer can't get fully under budget — but all trimmable
         // messages before the boundary must be trimmed.
         for (i, msg) in result1.iter().enumerate() {
-            if i < trimmed_idx_1 && msg.role == "assistant" {
-                let is_trimmed = match &msg.content {
-                    stakpak_shared::models::llm::LLMMessageContent::String(s) => s == "[trimmed]",
-                    _ => true,
-                };
+            if i < trimmed_idx_1 && msg.role == Role::Assistant {
+                let is_trimmed = is_trimmed_message(msg);
                 assert!(
                     is_trimmed,
                     "Phase 1: assistant at {} before boundary should be trimmed",
@@ -1467,19 +1441,17 @@ mod local_storage_tests {
         // Verify: budget overrides keep_last_n — all trimmable messages before
         // the boundary are trimmed, user messages are always preserved.
         for (i, msg) in result2.iter().enumerate() {
-            if msg.role == "user"
-                && let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content
+            if msg.role == Role::User
+                && let Some(s) = message_text(msg)
             {
                 assert_ne!(
                     s, "[trimmed]",
                     "Phase 2: user message {} should NOT be trimmed",
                     i
                 );
-            } else if i < trimmed_idx_2
-                && let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content
-            {
-                assert_eq!(
-                    s, "[trimmed]",
+            } else if i < trimmed_idx_2 {
+                assert!(
+                    is_trimmed_message(msg),
                     "Phase 2: non-user message {} before boundary should be trimmed",
                     i
                 );
@@ -1578,18 +1550,16 @@ mod local_storage_tests {
         assert!(trimmed_idx > 0, "Should have trimmed messages");
 
         // Verify trimming is correct — user messages preserved, assistant messages trimmed
-        match &result[0].content {
-            stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                assert_ne!(s, "[trimmed]", "First user message should NOT be trimmed");
-            }
-            _ => panic!("Expected string content"),
-        }
-        match &result[1].content {
-            stakpak_shared::models::llm::LLMMessageContent::String(s) => {
-                assert_eq!(s, "[trimmed]", "First assistant message should be trimmed");
-            }
-            _ => panic!("Expected string content"),
-        }
+        assert_ne!(
+            message_text(&result[0]).expect("Expected text content"),
+            "[trimmed]",
+            "First user message should NOT be trimmed"
+        );
+        assert_eq!(
+            message_text(&result[1]).expect("Expected text content"),
+            "[trimmed]",
+            "First assistant message should be trimmed"
+        );
     }
 
     /// Verify that metadata is correctly persisted and loaded through multiple
@@ -1745,7 +1715,7 @@ mod local_storage_tests {
         // Should return the empty metadata as-is (no trimming triggered)
         // The function returns metadata unchanged when under threshold and prev_trimmed_up_to == 0
         for msg in &result {
-            if let stakpak_shared::models::llm::LLMMessageContent::String(s) = &msg.content {
+            if let Some(s) = message_text(msg) {
                 assert_ne!(s, "[trimmed]", "No messages should be trimmed");
             }
         }
@@ -1828,11 +1798,7 @@ mod local_storage_tests {
                 barrier.wait().await;
                 let request = CreateSessionRequest::new(
                     format!("concurrent-session-{}", i),
-                    vec![ChatMessage {
-                        role: Role::User,
-                        content: Some(MessageContent::String(format!("msg {}", i))),
-                        ..Default::default()
-                    }],
+                    vec![Message::new(Role::User, format!("msg {}", i))],
                 );
                 storage.create_session(&request).await
             }));
@@ -1883,11 +1849,7 @@ mod local_storage_tests {
         let writer = tokio::spawn(async move {
             let request = CreateSessionRequest::new(
                 "contended-session",
-                vec![ChatMessage {
-                    role: Role::User,
-                    content: Some(MessageContent::String("contended".to_string())),
-                    ..Default::default()
-                }],
+                vec![Message::new(Role::User, "contended".to_string())],
             );
             storage2.create_session(&request).await
         });

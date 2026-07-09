@@ -2,7 +2,6 @@ use crate::{
     auth::{AuthConfig, require_bearer},
     context::{ContextFile, ContextPriority},
     idempotency::{IdempotencyRequest, LookupResult, StoredResponse},
-    message_bridge,
     session_actor::{ACTIVE_MODEL_METADATA_KEY, spawn_session_actor},
     state::AppState,
     types::{AutoApproveOverride, RunConfig, RunOverrides, SessionRuntimeState},
@@ -663,7 +662,7 @@ async fn get_session_messages_handler(
                 .get_active_checkpoint(session_id)
                 .await
                 .map_err(storage_error)?;
-            message_bridge::chat_to_stakai(checkpoint.state.messages)
+            checkpoint.state.messages
         }
         Err(error) => {
             return Err(api_error(

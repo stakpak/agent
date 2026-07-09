@@ -1,7 +1,5 @@
-use stakpak_shared::models::{integrations::openai::ChatMessage, llm::LLMMessage};
-
 pub trait ContextManager: Send + Sync {
-    fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage>;
+    fn reduce_context(&self, messages: Vec<stakai::Message>) -> Vec<stakai::Message>;
 }
 
 pub mod common;

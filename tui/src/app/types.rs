@@ -13,11 +13,9 @@ use crate::services::shell_mode::ShellCommand;
 use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::text::Line;
-use stakai::Model;
+use stakai::{ContentPart, Model, ToolCall};
 use stakpak_api::models::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{
-    ContentPart, TaskPauseInfo, ToolCall, ToolCallResult,
-};
+use stakpak_shared::models::agent_runtime::{TaskPauseInfo, ToolCallResult};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
@@ -153,7 +151,7 @@ pub struct AttachedImage {
     pub end_pos: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PendingUserMessage {
     pub final_input: String,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
@@ -690,9 +688,9 @@ pub struct AskUserState {
     /// Whether the ask user interaction is active
     pub is_visible: bool,
     /// Questions to display in the inline block
-    pub questions: Vec<stakpak_shared::models::integrations::openai::AskUserQuestion>,
+    pub questions: Vec<stakpak_shared::models::agent_runtime::AskUserQuestion>,
     /// User's answers (question label -> answer)
-    pub answers: HashMap<String, stakpak_shared::models::integrations::openai::AskUserAnswer>,
+    pub answers: HashMap<String, stakpak_shared::models::agent_runtime::AskUserAnswer>,
     /// Currently selected tab index (question index, or questions.len() for Submit)
     pub current_tab: usize,
     /// Currently selected option index within the current question
@@ -926,19 +924,15 @@ impl LoadingStateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stakpak_shared::models::integrations::openai::{
-        FunctionCall, ToolCall, ToolCallResultStatus,
-    };
+    use stakai::ToolCall;
+    use stakpak_shared::models::agent_runtime::ToolCallResultStatus;
 
     fn tool_result(id: &str) -> ToolCallResult {
         ToolCallResult {
             call: ToolCall {
                 id: id.to_string(),
-                r#type: "function".to_string(),
-                function: FunctionCall {
-                    name: "run_command".to_string(),
-                    arguments: "{}".to_string(),
-                },
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({}),
                 metadata: None,
             },
             result: format!("result-{id}"),
@@ -951,22 +945,14 @@ mod tests {
         let mut first = PendingUserMessage::new(
             "first".to_string(),
             Some(vec![tool_result("t1")]),
-            vec![ContentPart {
-                r#type: "text".to_string(),
-                text: Some("img-1".to_string()),
-                image_url: None,
-            }],
+            vec![ContentPart::text("img-1")],
             "first".to_string(),
         );
 
         let second = PendingUserMessage::new(
             "second".to_string(),
             Some(vec![tool_result("t2")]),
-            vec![ContentPart {
-                r#type: "text".to_string(),
-                text: Some("img-2".to_string()),
-                image_url: None,
-            }],
+            vec![ContentPart::text("img-2")],
             "second".to_string(),
         );
 
@@ -992,11 +978,7 @@ mod tests {
         let second = PendingUserMessage::new(
             "second".to_string(),
             None,
-            vec![ContentPart {
-                r#type: "text".to_string(),
-                text: Some("img-2".to_string()),
-                image_url: None,
-            }],
+            vec![ContentPart::text("img-2")],
             "second".to_string(),
         );
 

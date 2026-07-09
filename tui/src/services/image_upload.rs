@@ -7,7 +7,7 @@
 //! - Creating ContentParts for API communication
 
 use regex::Regex;
-use stakpak_shared::models::integrations::openai::{ContentPart, ImageUrl};
+use stakai::ContentPart;
 use std::path::{Path, PathBuf};
 
 /// Supported image file extensions
@@ -56,14 +56,7 @@ pub fn extract_image_urls(text: &str) -> Vec<String> {
 /// Extract local file paths from text (handles quoted and unquoted paths)
 /// Create an image content part from a URL (sends URL directly, no download)
 pub fn create_image_part_from_url(url: &str) -> ContentPart {
-    ContentPart {
-        r#type: "input_image".to_string(),
-        text: None,
-        image_url: Some(ImageUrl {
-            url: url.to_string(),
-            detail: None,
-        }),
-    }
+    ContentPart::image(url)
 }
 
 /// Create an image content part from a file path
@@ -98,14 +91,7 @@ pub fn create_image_part_from_path(path: &Path) -> Option<ContentPart> {
     let base64_data = general_purpose::STANDARD.encode(&image_data);
     let data_url = format!("data:{};base64,{}", mime_type, base64_data);
 
-    Some(ContentPart {
-        r#type: "input_image".to_string(),
-        text: None,
-        image_url: Some(ImageUrl {
-            url: data_url,
-            detail: None,
-        }),
-    })
+    Some(ContentPart::image(data_url))
 }
 
 fn detect_mime_type_from_content(data: &[u8], path: &Path) -> &'static str {

@@ -794,7 +794,8 @@ pub fn update(
                         let is_approved = state
                             .dialog_approval_state
                             .message_approved_tools
-                            .contains(tool_call);
+                            .iter()
+                            .any(|approved| approved.id == tool_call.id);
                         let status = if is_approved {
                             crate::app::ToolCallStatus::Approved
                         } else {
@@ -822,7 +823,8 @@ pub fn update(
                         let is_approved = state
                             .dialog_approval_state
                             .message_approved_tools
-                            .contains(first_tool);
+                            .iter()
+                            .any(|approved| approved.id == first_tool.id);
 
                         // Update the pending display to show the first tool (which is being executed)
                         dialog::update_pending_tool_to_first(state, first_tool, is_approved);
@@ -1618,10 +1620,8 @@ mod tests {
     use crate::app::{AppStateOptions, LoadingOperation};
     use crate::services::message::MessageContent;
     use ratatui::layout::Size;
-    use stakai::Model;
-    use stakpak_shared::models::integrations::openai::{
-        ContentPart, FunctionCall, ToolCall, ToolCallResult, ToolCallResultStatus,
-    };
+    use stakai::{ContentPart, Model, ToolCall};
+    use stakpak_shared::models::agent_runtime::{ToolCallResult, ToolCallResultStatus};
     use tokio::sync::mpsc;
 
     fn build_state() -> AppState {
@@ -1647,11 +1647,8 @@ mod tests {
         ToolCallResult {
             call: ToolCall {
                 id: id.to_string(),
-                r#type: "function".to_string(),
-                function: FunctionCall {
-                    name: "run_command".to_string(),
-                    arguments: "{}".to_string(),
-                },
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({}),
                 metadata: None,
             },
             result: format!("result-{id}"),
@@ -1660,11 +1657,7 @@ mod tests {
     }
 
     fn make_image_part(label: &str) -> ContentPart {
-        ContentPart {
-            r#type: "text".to_string(),
-            text: Some(label.to_string()),
-            image_url: None,
-        }
+        ContentPart::text(label)
     }
 
     #[tokio::test]
@@ -1879,7 +1872,7 @@ mod tests {
 
     #[tokio::test]
     async fn ask_user_arrows_navigate_options_via_update() {
-        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+        use stakpak_shared::models::agent_runtime::{AskUserOption, AskUserQuestion};
 
         let mut state = build_state();
         let (input_tx, _input_rx) = mpsc::channel(8);
@@ -1915,11 +1908,8 @@ mod tests {
         }];
         let tool_call = ToolCall {
             id: "tc_1".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "ask_user".to_string(),
-                arguments: "{}".to_string(),
-            },
+            name: "ask_user".to_string(),
+            arguments: serde_json::json!({}),
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
@@ -1980,7 +1970,7 @@ mod tests {
 
     #[tokio::test]
     async fn ask_user_left_right_navigate_tabs_via_update() {
-        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+        use stakpak_shared::models::agent_runtime::{AskUserOption, AskUserQuestion};
 
         let mut state = build_state();
         let (input_tx, _input_rx) = mpsc::channel(8);
@@ -2016,11 +2006,8 @@ mod tests {
         ];
         let tool_call = ToolCall {
             id: "tc_2".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "ask_user".to_string(),
-                arguments: "{}".to_string(),
-            },
+            name: "ask_user".to_string(),
+            arguments: serde_json::json!({}),
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);
@@ -2063,7 +2050,7 @@ mod tests {
 
     #[tokio::test]
     async fn ask_user_arrows_always_navigate_options() {
-        use stakpak_shared::models::integrations::openai::{AskUserOption, AskUserQuestion};
+        use stakpak_shared::models::agent_runtime::{AskUserOption, AskUserQuestion};
 
         let mut state = build_state();
         let (input_tx, _input_rx) = mpsc::channel(8);
@@ -2092,11 +2079,8 @@ mod tests {
         }];
         let tool_call = ToolCall {
             id: "tc_3".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "ask_user".to_string(),
-                arguments: "{}".to_string(),
-            },
+            name: "ask_user".to_string(),
+            arguments: serde_json::json!({}),
             metadata: None,
         };
         ask_user::handle_show_ask_user_popup(&mut state, tool_call, questions);

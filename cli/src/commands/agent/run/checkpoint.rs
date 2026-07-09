@@ -1,17 +1,24 @@
 use crate::commands::agent::run::tui::send_input_event;
-use rmcp::model::CallToolResult;
+use crate::utils::agent_context::strip_injected_context_blocks;
+use stakai::{ContentPart, Message, MessageContent, Role, ToolCall};
 use stakpak_api::AgentProvider;
-use stakpak_shared::models::integrations::{
-    mcp::CallToolResultExt,
-    openai::{ChatMessage, MessageContent, Role, ToolCall, ToolCallResult},
-};
+use stakpak_shared::models::agent_runtime::{ToolCallResult, ToolCallResultStatus};
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
+
+const CANCELLED_TOOL_RESULT_MARKER: &str = "TOOL_CALL_CANCELLED";
+const ERROR_TOOL_RESULT_MARKERS: [&str; 5] = [
+    "TOOL_CALL_REJECTED",
+    "INVALID_ARGUMENTS",
+    "MCP_TOOL_CALL_ERROR",
+    "MCP_ERROR",
+    "UNEXPECTED_RESPONSE",
+];
 
 pub async fn get_checkpoint_messages(
     client: &dyn AgentProvider,
     checkpoint_id: &str,
-) -> Result<(Vec<ChatMessage>, Option<serde_json::Value>), String> {
+) -> Result<(Vec<Message>, Option<serde_json::Value>), String> {
     let checkpoint_uuid = Uuid::parse_str(checkpoint_id).map_err(|_| {
         format!(
             "Invalid checkpoint ID '{}' - must be a valid UUID",
@@ -30,8 +37,8 @@ pub async fn get_checkpoint_messages(
 pub async fn extract_checkpoint_messages_and_tool_calls(
     checkpoint_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-    messages: Vec<ChatMessage>,
-) -> Result<(Vec<ChatMessage>, Vec<ToolCall>), String> {
+    messages: Vec<Message>,
+) -> Result<(Vec<Message>, Vec<ToolCall>), String> {
     let mut checkpoint_messages = messages;
     // Append checkpoint_id to the last assistant message if present
     if let Some(last_message) = checkpoint_messages
@@ -40,71 +47,61 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         .find(|message| message.role != Role::User && message.role != Role::Tool)
         && last_message.role == Role::Assistant
     {
-        last_message.content = Some(MessageContent::String(format!(
-            "{}\n<checkpoint_id>{}</checkpoint_id>",
-            last_message
-                .content
-                .as_ref()
-                .unwrap_or(&MessageContent::String(String::new())),
-            checkpoint_id
-        )));
+        append_checkpoint_id_to_message(last_message, checkpoint_id);
     }
 
     for message in &checkpoint_messages {
         match message.role {
             Role::Assistant => {
-                if let Some(content) = &message.content {
+                if let Some(content) = message.content.text() {
                     let _ = input_tx
-                        .send(InputEvent::StreamAssistantMessage(
-                            Uuid::new_v4(),
-                            content.to_string(),
-                        ))
+                        .send(InputEvent::StreamAssistantMessage(Uuid::new_v4(), content))
                         .await;
                 }
             }
             Role::User => {
-                if let Some(content) = &message.content {
-                    let _ = input_tx
-                        .send(InputEvent::AddUserMessage(content.to_string()))
-                        .await;
+                if let Some(content) = message.content.text() {
+                    let content = strip_injected_context_blocks(&content);
+                    let _ = input_tx.send(InputEvent::AddUserMessage(content)).await;
                 }
             }
             Role::Tool => {
-                let tool_call = checkpoint_messages
-                    .iter()
-                    .find(|checkpoint_message| {
-                        checkpoint_message
-                            .tool_calls
-                            .as_ref()
-                            .is_some_and(|tool_calls| {
-                                message.tool_call_id.as_ref().is_some_and(|tool_call_id| {
-                                    tool_calls
-                                        .iter()
-                                        .any(|tool_call| tool_call.id == *tool_call_id)
-                                })
-                            })
-                    })
-                    .and_then(|chat_message| {
-                        chat_message.tool_calls.as_ref().and_then(|tool_calls| {
-                            message.tool_call_id.as_ref().and_then(|tool_call_id| {
-                                tool_calls
-                                    .iter()
-                                    .find(|tool_call| tool_call.id == *tool_call_id)
-                            })
-                        })
-                    });
-
-                if let Some(tool_call) = tool_call {
+                for part in message.parts() {
+                    let ContentPart::ToolResult {
+                        tool_call_id,
+                        content,
+                        ..
+                    } = part
+                    else {
+                        continue;
+                    };
+                    let tool_call = checkpoint_messages
+                        .iter()
+                        .flat_map(|checkpoint_message| checkpoint_message.parts())
+                        .find_map(|part| match part {
+                            ContentPart::ToolCall {
+                                id,
+                                name,
+                                arguments,
+                                metadata,
+                                ..
+                            } if id == tool_call_id => Some(ToolCall {
+                                id,
+                                name,
+                                arguments,
+                                metadata,
+                            }),
+                            _ => None,
+                        });
+                    let Some(tool_call) = tool_call else {
+                        continue;
+                    };
                     let _ = send_input_event(
                         input_tx,
                         InputEvent::ToolResult(ToolCallResult {
-                            call: tool_call.clone(),
-                            result: message
-                                .content
-                                .as_ref()
-                                .unwrap_or(&MessageContent::String(String::new()))
-                                .to_string(),
-                            status: CallToolResult::get_status_from_chat_message(message),
+                            call: tool_call,
+                            result: tool_result_content_string(&content),
+                            status: tool_result_status_from_content(&content),
                         }),
                     )
                     .await;
@@ -118,21 +115,49 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
     let tool_calls = checkpoint_messages
         .iter()
         .rev()
-        .find(|msg| msg.role == Role::Assistant && msg.tool_calls.is_some())
-        .and_then(|msg| msg.tool_calls.as_ref());
+        .find(|msg| {
+            msg.role == Role::Assistant
+                && msg
+                    .parts()
+                    .iter()
+                    .any(|part| matches!(part, ContentPart::ToolCall { .. }))
+        })
+        .map(|msg| {
+            msg.parts()
+                .into_iter()
+                .filter_map(|part| match part {
+                    ContentPart::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                        metadata,
+                        ..
+                    } => Some(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                        metadata,
+                    }),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
 
     // Filter out tool calls that already have results (Role::Tool messages)
     let executed_tool_ids: std::collections::HashSet<String> = checkpoint_messages
         .iter()
         .filter(|msg| msg.role == Role::Tool)
-        .filter_map(|msg| msg.tool_call_id.clone())
+        .flat_map(|msg| msg.parts())
+        .filter_map(|part| match part {
+            ContentPart::ToolResult { tool_call_id, .. } => Some(tool_call_id),
+            _ => None,
+        })
         .collect();
 
     let pending_tool_calls: Vec<ToolCall> = tool_calls
         .map(|tcs| {
-            tcs.iter()
+            tcs.into_iter()
                 .filter(|tc| !executed_tool_ids.contains(&tc.id))
-                .cloned()
                 .collect()
         })
         .unwrap_or_default();
@@ -140,37 +165,92 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
     Ok((checkpoint_messages, pending_tool_calls))
 }
 
-pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
+fn append_checkpoint_id_to_message(message: &mut Message, checkpoint_id: &str) {
+    let checkpoint_tag = format!("<checkpoint_id>{checkpoint_id}</checkpoint_id>");
+
+    match &mut message.content {
+        MessageContent::Text(text) => {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&checkpoint_tag);
+        }
+        MessageContent::Parts(parts) => {
+            parts.push(ContentPart::text(format!("\n{checkpoint_tag}")));
+        }
+    }
+}
+
+pub fn extract_checkpoint_id_from_messages(messages: &[Message]) -> Option<String> {
     messages
         .last()
-        .and_then(|msg| msg.content.as_ref())
-        .as_ref()
-        .and_then(|content| match content {
-            MessageContent::String(text) => {
-                if let Some(start) = text.find("<checkpoint_id>") {
-                    if let Some(end) = text.find("</checkpoint_id>") {
-                        let start_pos = start + "<checkpoint_id>".len();
-                        Some(text[start_pos..end].to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            MessageContent::Array(items) => {
-                for item in items {
-                    if let Some(text) = &item.text
-                        && let Some(start) = text.find("<checkpoint_id>")
-                        && let Some(end) = text.find("</checkpoint_id>")
-                    {
-                        let start_pos = start + "<checkpoint_id>".len();
-                        return Some(text[start_pos..end].to_string());
-                    }
-                }
-                None
-            }
+        .and_then(|msg| msg.content.text())
+        .and_then(|text| {
+            let start = text.find("<checkpoint_id>")?;
+            let end = text.find("</checkpoint_id>")?;
+            let start_pos = start + "<checkpoint_id>".len();
+            Some(text[start_pos..end].to_string())
         })
+}
+
+fn tool_result_content_string(content: &serde_json::Value) -> String {
+    content
+        .as_str()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| content.to_string())
+}
+
+fn tool_result_status_from_content(content: &serde_json::Value) -> ToolCallResultStatus {
+    if value_contains_marker(content, CANCELLED_TOOL_RESULT_MARKER) {
+        return ToolCallResultStatus::Cancelled;
+    }
+
+    if ERROR_TOOL_RESULT_MARKERS
+        .iter()
+        .any(|marker| value_contains_marker(content, marker))
+    {
+        return ToolCallResultStatus::Error;
+    }
+
+    let serde_json::Value::Object(obj) = content else {
+        return ToolCallResultStatus::Success;
+    };
+
+    if obj
+        .get("is_error")
+        .or_else(|| obj.get("isError"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        || obj.contains_key("error")
+        || obj.contains_key("errors")
+    {
+        return ToolCallResultStatus::Error;
+    }
+
+    match obj.get("status").and_then(serde_json::Value::as_str) {
+        Some(status) if status.eq_ignore_ascii_case("cancelled") => ToolCallResultStatus::Cancelled,
+        Some(status)
+            if status.eq_ignore_ascii_case("error")
+                || status.eq_ignore_ascii_case("failed")
+                || status.eq_ignore_ascii_case("rejected") =>
+        {
+            ToolCallResultStatus::Error
+        }
+        _ => ToolCallResultStatus::Success,
+    }
+}
+
+fn value_contains_marker(value: &serde_json::Value, marker: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => text.contains(marker),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| value_contains_marker(value, marker)),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|value| value_contains_marker(value, marker)),
+        _ => false,
+    }
 }
 
 /// Resumes a session from a checkpoint, loading messages and tool calls
@@ -178,15 +258,7 @@ pub async fn resume_session_from_checkpoint(
     client: &dyn AgentProvider,
     session_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-) -> Result<
-    (
-        Vec<ChatMessage>,
-        Vec<ToolCall>,
-        Uuid,
-        Option<serde_json::Value>,
-    ),
-    String,
-> {
+) -> Result<(Vec<Message>, Vec<ToolCall>, Uuid, Option<serde_json::Value>), String> {
     let session_uuid = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
 
     match client.get_active_checkpoint(session_uuid).await {
@@ -209,6 +281,169 @@ pub async fn resume_session_from_checkpoint(
             .await?;
             send_input_event(input_tx, InputEvent::Error(e.to_string())).await?;
             Err("Failed to get session checkpoint".to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tokio::sync::mpsc;
+
+    fn assistant_tool_call_message(tool_call_id: &str) -> Message {
+        Message::new(
+            Role::Assistant,
+            MessageContent::Parts(vec![ContentPart::tool_call(
+                tool_call_id,
+                "test_tool",
+                json!({"path": "README.md"}),
+            )]),
+        )
+    }
+
+    fn tool_result_message(tool_call_id: &str, content: serde_json::Value) -> Message {
+        Message::new(
+            Role::Tool,
+            MessageContent::Parts(vec![ContentPart::tool_result(tool_call_id, content)]),
+        )
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_user_text_without_injected_context_blocks() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![Message::new(
+            Role::User,
+            "fix tests\n<available_skills>\n# Available Skills:\n- very long\n</available_skills>\n<agents_md>\nrepo instructions\n</agents_md>"
+                .to_string(),
+        )];
+
+        let (checkpoint_messages, pending_tool_calls) = extract_checkpoint_messages_and_tool_calls(
+            "checkpoint-id",
+            &input_tx,
+            messages.clone(),
+        )
+        .await
+        .expect("checkpoint extraction");
+
+        assert_eq!(checkpoint_messages.len(), 1);
+        assert!(
+            checkpoint_messages[0]
+                .content
+                .text()
+                .expect("checkpoint text")
+                .contains("<available_skills>")
+        );
+        assert!(pending_tool_calls.is_empty());
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::AddUserMessage(content) => assert_eq!(content, "fix tests"),
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_preserves_pending_tool_calls_when_injecting_checkpoint_id()
+    {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![Message::new(
+            Role::Assistant,
+            MessageContent::Parts(vec![
+                ContentPart::text("I need to inspect the file."),
+                ContentPart::tool_call("tc_1", "test_tool", json!({"path": "README.md"})),
+            ]),
+        )];
+
+        let (checkpoint_messages, pending_tool_calls) =
+            extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+                .await
+                .expect("checkpoint extraction");
+
+        assert_eq!(pending_tool_calls.len(), 1);
+        assert_eq!(pending_tool_calls[0].id, "tc_1");
+
+        let parts = checkpoint_messages[0].parts();
+        assert!(
+            parts
+                .iter()
+                .any(|part| matches!(part, ContentPart::ToolCall { id, .. } if id == "tc_1"))
+        );
+        assert!(checkpoint_messages[0].text().is_some_and(|text| {
+            text.contains("I need to inspect the file.")
+                && text.contains("<checkpoint_id>checkpoint-id</checkpoint_id>")
+        }));
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::StreamAssistantMessage(_, content) => {
+                assert!(content.contains("I need to inspect the file."));
+                assert!(content.contains("<checkpoint_id>checkpoint-id</checkpoint_id>"));
+            }
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_cancelled_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!("TOOL_CALL_CANCELLED")),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Cancelled);
+                assert_eq!(result.result, "TOOL_CALL_CANCELLED");
+            }
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_rejected_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!("TOOL_CALL_REJECTED")),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Error);
+                assert_eq!(result.result, "TOOL_CALL_REJECTED");
+            }
+            event => panic!("unexpected input event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_checkpoint_messages_replays_structured_error_tool_result_status() {
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let messages = vec![
+            assistant_tool_call_message("tc_1"),
+            tool_result_message("tc_1", json!({"isError": true, "message": "bad args"})),
+            Message::new(Role::Assistant, "done".to_string()),
+        ];
+
+        extract_checkpoint_messages_and_tool_calls("checkpoint-id", &input_tx, messages)
+            .await
+            .expect("checkpoint extraction");
+
+        match input_rx.recv().await.expect("input event") {
+            InputEvent::ToolResult(result) => {
+                assert_eq!(result.status, ToolCallResultStatus::Error);
+            }
+            event => panic!("unexpected input event: {event:?}"),
         }
     }
 }

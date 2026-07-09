@@ -1,3 +1,4 @@
+pub mod agent_runtime;
 pub mod async_manifest;
 pub mod auth;
 pub mod billing;
@@ -9,5 +10,4 @@ pub mod llm;
 pub mod model_pricing;
 pub mod openai_runtime;
 pub mod overrides;
-pub mod stakai_adapter;
 pub mod tools;

@@ -1,7 +1,5 @@
 use stakpak_shared::define_hook;
 use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleEvent};
-use stakpak_shared::models::integrations::openai::Role;
-use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
 use crate::local::context_managers::ContextManager;
 use crate::local::context_managers::scratchpad_context_manager::{
@@ -48,29 +46,23 @@ define_hook!(
 
         let model = ctx.state.active_model.clone();
 
-        let tools = ctx
-            .state
-            .tools
-            .clone()
-            .map(|t| t.into_iter().map(Into::into).collect());
-
         let mut messages = Vec::new();
-        messages.push(LLMMessage {
-            role: Role::System.to_string(),
-            content: LLMMessageContent::String(SYSTEM_PROMPT.to_string()),
-        });
+        messages.push(stakai::Message::new(stakai::Role::System, SYSTEM_PROMPT));
         messages.extend(
             self.context_manager
                 .reduce_context(ctx.state.messages.clone()),
         );
 
-        ctx.state.llm_input = Some(LLMInput {
+        ctx.state.llm_input = Some(stakai::GenerateRequest {
             model,
             messages,
-            max_tokens: 16000,
-            tools,
+            options: stakai::GenerateOptions {
+                max_tokens: Some(16000),
+                tools: ctx.state.tools.clone(),
+                ..Default::default()
+            },
             provider_options: None,
-            headers: None,
+            telemetry_metadata: None,
         });
 
         Ok(HookAction::Continue)

@@ -465,8 +465,7 @@ mod tests {
     #[test]
     fn test_convert_messages_resolves_tool_result_names() {
         // Simulate the real-world flow: model proposes a tool call, then the
-        // tool result comes back as a separate message with string content
-        // (the way stakai_adapter.rs actually produces tool results).
+        // tool result comes back as a separate message with string content.
         let messages = vec![
             Message::new(Role::User, "List files"),
             Message {

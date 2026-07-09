@@ -19,7 +19,7 @@ use stakpak_mcp_server::{
     EnabledToolsConfig, MCPServerConfig, SubagentConfig, ToolMode, start_server,
 };
 use stakpak_shared::cert_utils::CertificateChain;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::models::agent_runtime::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskManagerHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -73,8 +73,8 @@ pub struct McpInitResult {
     pub client: Arc<McpClient>,
     /// Raw MCP tools from the server
     pub mcp_tools: Vec<rmcp::model::Tool>,
-    /// Converted tools for OpenAI format
-    pub tools: Vec<stakpak_shared::models::integrations::openai::Tool>,
+    /// Tools in StakAI format
+    pub tools: Vec<stakai::Tool>,
     /// Shutdown handle for the MCP server
     pub server_shutdown_tx: broadcast::Sender<()>,
     /// Shutdown handle for the proxy server

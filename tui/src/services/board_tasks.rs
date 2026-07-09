@@ -239,16 +239,16 @@ pub fn extract_board_agent_id_from_messages(
     for message in messages.iter().rev() {
         let text_to_search = match &message.content {
             // Tool call results contain the output
-            MessageContent::RenderResultBorderBlock(result) => Some(result.result.as_str()),
-            MessageContent::RenderFullContentMessage(result) => Some(result.result.as_str()),
-            MessageContent::RenderCommandCollapsedResult(result) => Some(result.result.as_str()),
+            MessageContent::RenderResultBorderBlock(result) => Some(result.result.clone()),
+            MessageContent::RenderFullContentMessage(result) => Some(result.result.clone()),
+            MessageContent::RenderCommandCollapsedResult(result) => Some(result.result.clone()),
 
             // Tool call arguments (for run_command, the command might set the env var)
             MessageContent::RenderPendingBorderBlock(tool_call, _) => {
-                Some(tool_call.function.arguments.as_str())
+                Some(tool_call.arguments.to_string())
             }
             MessageContent::RenderCollapsedMessage(tool_call) => {
-                Some(tool_call.function.arguments.as_str())
+                Some(tool_call.arguments.to_string())
             }
 
             // Run command blocks contain command and result
@@ -257,18 +257,21 @@ pub fn extract_board_agent_id_from_messages(
                 if let Some(cap) = agent_id_pattern.find(command) {
                     return Some(cap.as_str().to_string());
                 }
-                result.as_deref()
+                result.clone()
             }
 
             // Plain text and assistant messages might contain agent IDs
-            MessageContent::Plain(text, _) => Some(text.as_str()),
-            MessageContent::AssistantMD(text, _) => Some(text.as_str()),
-            MessageContent::PlainText(text) => Some(text.as_str()),
+            MessageContent::Plain(text, _) => Some(text.clone()),
+            MessageContent::AssistantMD(text, _) => Some(text.clone()),
+            MessageContent::PlainText(text) => Some(text.clone()),
 
             _ => None,
         };
 
-        if let Some(cap) = text_to_search.and_then(|text| agent_id_pattern.find(text)) {
+        if let Some(cap) = text_to_search
+            .as_deref()
+            .and_then(|text| agent_id_pattern.find(text))
+        {
             return Some(cap.as_str().to_string());
         }
     }
@@ -646,7 +649,7 @@ mod tests {
         };
 
         // Progress: all 4 should count as completed
-        let progress = calculate_progress(&[card.clone()]);
+        let progress = calculate_progress(std::slice::from_ref(&card));
         assert_eq!(progress.completed, 4);
         assert_eq!(progress.total, 4);
 

@@ -8,8 +8,9 @@ use console::strip_ansi_codes;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
-use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
+use stakai::ToolCall;
+use stakpak_shared::models::agent_runtime::{
+    ToolCallResult, ToolCallResultStatus, ToolCallStreamInfo,
 };
 use stakpak_shared::utils::strip_tool_name;
 use std::sync::OnceLock;
@@ -587,7 +588,7 @@ pub fn extract_bash_block_info(
     };
     let outside_title = get_command_type_name(tool_call);
     let bubble_title = extract_command_purpose(&command, &outside_title);
-    let colors = match strip_tool_name(&tool_call.function.name) {
+    let colors = match strip_tool_name(&tool_call.name) {
         "create_file" => BubbleColors {
             border_color: ThemeColors::success(),
             title_color: tool_muted_color(),
@@ -625,11 +626,11 @@ pub fn extract_bash_block_info(
             tool_type: "Delete File".to_string(),
         },
         "dynamic_subagent_task" => {
-            let is_sandbox =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-                    .ok()
-                    .and_then(|a| a.get("enable_sandbox").and_then(|v| v.as_bool()))
-                    .unwrap_or(false);
+            let is_sandbox = tool_call
+                .arguments
+                .get("enable_sandbox")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if is_sandbox {
                 BubbleColors {
                     border_color: ThemeColors::success(),
@@ -990,7 +991,7 @@ pub fn render_file_diff_full(
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
     if tool_name == "str_replace" || tool_name == "create" {
         // Use full diff (not truncated) for pending approval blocks
         let (_, mut diff_lines) = render_file_diff_block(tool_call, terminal_width);
@@ -1047,7 +1048,7 @@ pub fn render_bash_block(
         &bubble_title,
         Some(colors.clone()),
         terminal_width,
-        strip_tool_name(&tool_call.function.name),
+        strip_tool_name(&tool_call.name),
         None,
     )
 }
@@ -1120,7 +1121,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
 
     // Handle str_replace/create with diff-only content
     // If render_diff_result_block returns None (no diff), fall through to standard rendering
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
     if tool_name == "str_replace" || tool_name == "create" {
         // Check for rejected/cancelled in result text
         if result.contains("TOOL_CALL_REJECTED") {
@@ -1723,7 +1724,7 @@ pub fn render_refreshed_terminal_bubble(
 }
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
     if matches!(tool_name, "run_command_task" | "run_remote_command_task") {
         return false;
     }
@@ -2323,10 +2324,10 @@ pub fn render_run_command_block(
 /// Render an ask_user tool block inline, similar to render_run_command_block.
 /// Shows a bordered block with tab bar, question content or review, and help text.
 pub fn render_ask_user_block(
-    questions: &[stakpak_shared::models::integrations::openai::AskUserQuestion],
+    questions: &[stakpak_shared::models::agent_runtime::AskUserQuestion],
     answers: &std::collections::HashMap<
         String,
-        stakpak_shared::models::integrations::openai::AskUserAnswer,
+        stakpak_shared::models::agent_runtime::AskUserAnswer,
     >,
     current_tab: usize,
     selected_option: usize,
@@ -3027,7 +3028,7 @@ pub fn render_ask_user_block(
 /// Render a task wait block showing progress of background tasks
 /// Displays a bordered box with task statuses and overall progress
 pub fn render_task_wait_block(
-    task_updates: &[stakpak_shared::models::integrations::openai::TaskUpdate],
+    task_updates: &[stakpak_shared::models::agent_runtime::TaskUpdate],
     progress: f64,
     target_task_ids: &[String],
     terminal_width: usize,
@@ -3352,7 +3353,7 @@ pub fn render_task_wait_block(
 pub fn render_subagent_resume_pending_block<'a>(
     tool_call: &ToolCall,
     is_auto_approved: bool,
-    pause_info: Option<&stakpak_shared::models::integrations::openai::TaskPauseInfo>,
+    pause_info: Option<&stakpak_shared::models::agent_runtime::TaskPauseInfo>,
     width: usize,
 ) -> Vec<Line<'a>> {
     let mut formatted_lines: Vec<Line<'a>> = Vec::new();
@@ -3365,22 +3366,25 @@ pub fn render_subagent_resume_pending_block<'a>(
     let inner_width = width.saturating_sub(4);
 
     // Parse arguments to determine resume type
-    let args = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).ok();
-
     // Extract task_id from arguments
-    let task_id = args
-        .as_ref()
-        .and_then(|a| a.get("task_id").and_then(|v| v.as_str()).map(String::from))
+    let task_id = tool_call
+        .arguments
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
         .unwrap_or_else(|| "unknown".to_string());
 
     // Check if this is an input-based resume (for completed agents) or tool approval resume
-    let input_text = args
-        .as_ref()
-        .and_then(|a| a.get("input").and_then(|v| v.as_str()).map(String::from));
+    let input_text = tool_call
+        .arguments
+        .get("input")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
-    let has_approve_all = args
-        .as_ref()
-        .and_then(|a| a.get("approve_all").and_then(|v| v.as_bool()))
+    let has_approve_all = tool_call
+        .arguments
+        .get("approve_all")
+        .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
     // Title
@@ -3934,7 +3938,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_stream_block_border_alignment() {
-        use stakpak_shared::models::integrations::openai::ToolCallStreamInfo;
+        use stakpak_shared::models::agent_runtime::ToolCallStreamInfo;
 
         let infos = vec![
             ToolCallStreamInfo {
@@ -3974,7 +3978,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_stream_block_overflow_summary() {
-        use stakpak_shared::models::integrations::openai::ToolCallStreamInfo;
+        use stakpak_shared::models::agent_runtime::ToolCallStreamInfo;
 
         let infos: Vec<ToolCallStreamInfo> = (0..8)
             .map(|i| ToolCallStreamInfo {

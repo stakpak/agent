@@ -13,7 +13,7 @@ use crate::services::message::{
 use crate::services::text_selection::SelectionState;
 use ratatui::layout::Size;
 use ratatui::style::Color;
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakai::ToolCall;
 use stakpak_shared::utils::strip_tool_name;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -28,7 +28,7 @@ fn is_foreground_command_tool(tool_name: &str) -> bool {
 /// Update a run_command block from Pending to Running state
 /// This should be called when a run_command tool is approved and starts executing
 pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall) {
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
     if !is_foreground_command_tool(tool_name) {
         return;
     }
@@ -70,7 +70,7 @@ pub fn update_pending_tool_to_first(
             .retain(|m| m.id != pending_id);
     }
 
-    let tool_name = strip_tool_name(&first_tool.function.name);
+    let tool_name = strip_tool_name(&first_tool.name);
 
     // Create the appropriate pending block based on tool type
     if is_foreground_command_tool(tool_name) {
@@ -137,7 +137,7 @@ pub fn handle_esc_event(
         .clear();
     // Store the latest tool call for potential retry (only for command tools)
     if let Some(tool_call) = &state.dialog_approval_state.dialog_command
-        && is_foreground_command_tool(strip_tool_name(&tool_call.function.name))
+        && is_foreground_command_tool(strip_tool_name(&tool_call.name))
     {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
@@ -191,7 +191,7 @@ pub fn handle_esc(
                 .output_tx
                 .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
 
-            let tool_name = strip_tool_name(&tool_call.function.name);
+            let tool_name = strip_tool_name(&tool_call.name);
             if is_foreground_command_tool(tool_name) {
                 // For command tools, remove the pending unified block and add rejected unified block
                 // Remove pending message by tool_call_id
@@ -345,7 +345,7 @@ pub fn handle_esc(
 /// Handle show confirmation dialog event
 pub fn handle_show_confirmation_dialog(
     state: &mut AppState,
-    tool_call: stakpak_shared::models::integrations::openai::ToolCall,
+    tool_call: stakai::ToolCall,
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
     _terminal_size: Size,
@@ -360,7 +360,7 @@ pub fn handle_show_confirmation_dialog(
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
     {
-        let tool_name = strip_tool_name(&tool_call.function.name);
+        let tool_name = strip_tool_name(&tool_call.name);
         if is_foreground_command_tool(tool_name) {
             // Use unified block for command tools
             let command =
@@ -396,7 +396,7 @@ pub fn handle_show_confirmation_dialog(
     }
 
     state.dialog_approval_state.dialog_command = Some(tool_call.clone());
-    let tool_name = strip_tool_name(&tool_call.function.name);
+    let tool_name = strip_tool_name(&tool_call.name);
     if is_foreground_command_tool(tool_name) {
         state.tool_call_state.latest_tool_call = Some(tool_call.clone());
     }
@@ -435,13 +435,11 @@ pub fn handle_show_confirmation_dialog(
     } else if tool_name == "resume_subagent_task" {
         // For resume_subagent_task, use the special subagent pending block
         // Try to get pause info from cached subagent state
-        let pause_info = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-            .ok()
-            .and_then(|args| {
-                args.get("task_id")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
+        let pause_info = tool_call
+            .arguments
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .map(String::from)
             .and_then(|task_id| {
                 state
                     .tool_call_state

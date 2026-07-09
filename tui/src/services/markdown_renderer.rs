@@ -1908,9 +1908,9 @@ mod tests {
         let style = MarkdownStyle::adaptive();
 
         // Verify that the style has proper colors set
-        assert!(matches!(style.text_style.fg, Some(_)));
-        assert!(matches!(style.h1_style.fg, Some(_)));
-        assert!(matches!(style.code_style.fg, Some(_)));
+        assert!(style.text_style.fg.is_some());
+        assert!(style.h1_style.fg.is_some());
+        assert!(style.code_style.fg.is_some());
     }
 
     #[test]
@@ -2004,6 +2004,6 @@ mod tests {
         assert!(!lines.is_empty());
 
         // Should not panic and should produce some output
-        assert!(lines.len() > 0);
+        assert!(!lines.is_empty());
     }
 }

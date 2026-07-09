@@ -7,6 +7,7 @@
 //! - Integrates with hooks for lifecycle events
 
 mod provider;
+mod stakai;
 
 use crate::local::hooks::task_board_context::{TaskBoardContextHook, TaskBoardContextHookOptions};
 use crate::local::storage::LocalStorage;
@@ -15,9 +16,9 @@ use crate::stakpak::storage::StakpakStorage;
 use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use crate::storage::SessionStorage;
 
+use self::stakai::StakAIClient;
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
 use stakpak_shared::models::llm::{LLMProviderConfig, ProviderConfig};
-use stakpak_shared::models::stakai_adapter::StakAIClient;
 use std::sync::Arc;
 
 // =============================================================================

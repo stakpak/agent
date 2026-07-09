@@ -1,5 +1,4 @@
 use regex::Regex;
-use stakpak_shared::models::integrations::openai::{ChatMessage, Role};
 use std::fmt::Display;
 
 /// Options for history processing shared by context managers
@@ -13,80 +12,88 @@ pub struct HistoryProcessingOptions {
 
 /// Convert chat messages to history items with the given processing options
 pub fn messages_to_history(
-    messages: &[ChatMessage],
+    messages: &[stakai::Message],
     options: &HistoryProcessingOptions,
 ) -> Vec<HistoryItem> {
     let mut history_items: Vec<HistoryItem> = Vec::new();
     let mut index = 0;
 
     for message in messages.iter() {
-        match &message.role {
-            Role::Assistant | Role::User if message.tool_calls.is_none() => {
-                // clean content from checkpoint_id tag
-                let content = remove_xml_tag(
-                    "checkpoint_id",
-                    &message.content.clone().unwrap_or_default().to_string(),
-                );
+        let parts = message.parts();
+        let tool_calls: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                stakai::ContentPart::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => Some((id.clone(), name.clone(), arguments.clone())),
+                _ => None,
+            })
+            .collect();
+
+        match message.role {
+            stakai::Role::Assistant | stakai::Role::User if tool_calls.is_empty() => {
+                let content = remove_xml_tag("checkpoint_id", &message.text().unwrap_or_default());
                 history_items.push(HistoryItem {
                     index,
                     content: HistoryItemContent::Message {
-                        role: message.role.clone(),
+                        role: role_label(message.role).to_string(),
                         content,
                     },
                 });
                 index += 1;
             }
-            Role::Assistant | Role::User if message.tool_calls.is_some() => {
-                // clean content from checkpoint_id tag
+            stakai::Role::Assistant | stakai::Role::User => {
                 let content = message
-                    .content
-                    .clone()
-                    .map(|c| remove_xml_tag("checkpoint_id", &c.to_string()));
-                for tool_call in message.tool_calls.clone().unwrap_or_default() {
+                    .text()
+                    .map(|text| remove_xml_tag("checkpoint_id", &text));
+                for (id, name, arguments) in tool_calls {
                     history_items.push(HistoryItem {
                         index,
                         content: HistoryItemContent::Action {
-                            role: message.role.clone(),
-                            id: tool_call.id.clone(),
-                            name: tool_call.function.name.clone(),
+                            role: role_label(message.role).to_string(),
+                            id,
+                            name,
                             status: HistoryItemActionStatus::Pending,
                             message: content.clone(),
-                            arguments: serde_json::from_str(&tool_call.function.arguments)
-                                .unwrap_or_default(),
+                            arguments,
                             result: None,
                         },
                     });
                     index += 1;
                 }
             }
-            Role::Tool => {
-                // Find the corresponding tool call item and update it with the result
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    // Look for the matching tool call in history items
+            stakai::Role::Tool => {
+                for part in parts {
+                    let stakai::ContentPart::ToolResult {
+                        tool_call_id,
+                        content,
+                        ..
+                    } = part
+                    else {
+                        continue;
+                    };
+
                     if let Some(history_item) = history_items.iter_mut().find(|item| {
                         if let HistoryItemContent::Action { id, .. } = &item.content {
-                            *id == *tool_call_id
+                            *id == tool_call_id
                         } else {
                             false
                         }
-                    }) {
-                        // Update the tool call with the result
-                        if let HistoryItemContent::Action { status, result, .. } =
-                            &mut history_item.content
-                        {
-                            let result_content =
-                                message.content.clone().unwrap_or_default().to_string();
-                            *result = serde_json::from_str(&result_content)
-                                .unwrap_or(Some(serde_json::Value::String(result_content)));
+                    }) && let HistoryItemContent::Action { status, result, .. } =
+                        &mut history_item.content
+                    {
+                        *result = Some(content.clone());
 
-                            if let Some(result) = result
-                                && result.as_str().unwrap_or_default() == "TOOL_CALL_CANCELLED"
-                            {
-                                *status = HistoryItemActionStatus::Aborted;
-                                continue;
-                            }
-                            *status = HistoryItemActionStatus::Completed;
+                        if let Some(result) = result
+                            && result.as_str().unwrap_or_default() == "TOOL_CALL_CANCELLED"
+                        {
+                            *status = HistoryItemActionStatus::Aborted;
+                            continue;
                         }
+                        *status = HistoryItemActionStatus::Completed;
                     }
                 }
             }
@@ -250,11 +257,11 @@ impl Display for HistoryItem {
 
 pub enum HistoryItemContent {
     Message {
-        role: Role,
+        role: String,
         content: String,
     },
     Action {
-        role: Role,
+        role: String,
         id: String,
         name: String,
         status: HistoryItemActionStatus,
@@ -262,6 +269,15 @@ pub enum HistoryItemContent {
         arguments: serde_json::Value,
         result: Option<serde_json::Value>,
     },
+}
+
+pub fn role_label(role: stakai::Role) -> &'static str {
+    match role {
+        stakai::Role::System => "system",
+        stakai::Role::User => "user",
+        stakai::Role::Assistant => "assistant",
+        stakai::Role::Tool => "tool",
+    }
 }
 
 impl HistoryItemContent {
@@ -294,7 +310,7 @@ mod tests {
         HistoryItem {
             index,
             content: HistoryItemContent::Action {
-                role: Role::Assistant,
+                role: "assistant".to_string(),
                 id: format!("action_{}", index),
                 name: "test_action".to_string(),
                 status: HistoryItemActionStatus::Completed,
@@ -309,7 +325,7 @@ mod tests {
         HistoryItem {
             index,
             content: HistoryItemContent::Message {
-                role: Role::User,
+                role: "user".to_string(),
                 content: "test message".to_string(),
             },
         }

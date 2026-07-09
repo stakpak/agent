@@ -180,7 +180,8 @@ pub fn handle_input_submitted_event(
                 let is_approved = state
                     .dialog_approval_state
                     .message_approved_tools
-                    .contains(tool_call);
+                    .iter()
+                    .any(|approved| approved.id == tool_call.id);
                 let status = if is_approved {
                     ToolCallStatus::Approved
                 } else {
@@ -209,7 +210,8 @@ pub fn handle_input_submitted_event(
                 let is_approved = state
                     .dialog_approval_state
                     .message_approved_tools
-                    .contains(first_tool);
+                    .iter()
+                    .any(|approved| approved.id == first_tool.id);
 
                 // Update the pending display to show the first tool (which is being executed)
                 // This ensures the UI shows the correct tool as "running", not the selected one

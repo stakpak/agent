@@ -1,12 +1,11 @@
 use rmcp::model::{Annotated, CallToolResult, Content, RawContent};
 
-use crate::models::integrations::openai::{ChatMessage, MessageContent, ToolCallResultStatus};
+use crate::models::agent_runtime::ToolCallResultStatus;
 
 pub trait CallToolResultExt {
     /// Create a success result with a simple text message
     fn cancel(content: Option<&Vec<Annotated<RawContent>>>) -> Self;
     fn get_status(&self) -> ToolCallResultStatus;
-    fn get_status_from_chat_message(message: &ChatMessage) -> ToolCallResultStatus;
 }
 
 impl CallToolResultExt for CallToolResult {
@@ -43,25 +42,6 @@ impl CallToolResultExt for CallToolResult {
             }
         } else {
             ToolCallResultStatus::Success
-        }
-    }
-
-    fn get_status_from_chat_message(message: &ChatMessage) -> ToolCallResultStatus {
-        match message
-            .content
-            .as_ref()
-            .unwrap_or(&MessageContent::String(String::new()))
-            .to_string()
-            .contains("TOOL_CALL_CANCELLED")
-            || message
-                .content
-                .as_ref()
-                .unwrap_or(&MessageContent::String(String::new()))
-                .to_string()
-                .contains("cancelled")
-        {
-            true => ToolCallResultStatus::Cancelled,
-            false => ToolCallResultStatus::Success,
         }
     }
 }

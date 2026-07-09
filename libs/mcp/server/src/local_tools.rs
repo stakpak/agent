@@ -17,11 +17,11 @@ use ignore::WalkBuilder;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
-use stakpak_shared::models::async_manifest::{AsyncManifest, PendingToolCall};
-use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_shared::models::integrations::openai::{
+use stakpak_shared::models::agent_runtime::{
     ProgressType, TaskPauseInfo, TaskUpdate, ToolCallResultProgress,
 };
+use stakpak_shared::models::async_manifest::{AsyncManifest, PendingToolCall};
+use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::task_manager::{StartTaskOptions, TaskInfo};
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{

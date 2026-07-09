@@ -2,7 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use similar::TextDiff;
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakai::ToolCall;
 use stakpak_shared::utils::strip_tool_name;
 use unicode_width::UnicodeWidthStr;
 
@@ -499,11 +499,10 @@ pub fn render_file_diff_block_from_args(
     terminal_width: usize,
     result: Option<&str>,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let args = &tool_call.arguments;
 
     let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-    let new_str = if strip_tool_name(&tool_call.function.name) == "create" {
+    let new_str = if strip_tool_name(&tool_call.name) == "create" {
         args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
     } else {
         args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")

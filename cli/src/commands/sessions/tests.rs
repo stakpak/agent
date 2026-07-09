@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
+use stakai::{ContentPart, Message, MessageContent, Role};
 use stakpak_api::{
     BackendInfo, Checkpoint, CheckpointState, ListSessionsQuery, LocalStorage, Session,
     SessionStatus, SessionStorage, SessionVisibility,
     StorageCreateSessionRequest as CreateSessionRequest, StorageError,
 };
-use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use uuid::Uuid;
 
 use super::classify_storage_error;
@@ -22,47 +22,36 @@ async fn in_memory_storage() -> LocalStorage {
         .expect("in-memory storage")
 }
 
-fn msg(role: Role, text: &str) -> ChatMessage {
-    ChatMessage {
-        role,
-        content: Some(MessageContent::String(text.to_string())),
-        ..Default::default()
-    }
+fn msg(role: Role, text: &str) -> Message {
+    Message::new(role, text.to_string())
 }
 
-fn assistant_tool_call_msg(name: &str, tool_call_id: &str) -> ChatMessage {
+fn assistant_tool_call_msg(name: &str, tool_call_id: &str) -> Message {
     assistant_tool_call_msg_with_args(name, tool_call_id, "{}")
 }
 
-fn assistant_tool_call_msg_with_args(
-    name: &str,
-    tool_call_id: &str,
-    arguments: &str,
-) -> ChatMessage {
-    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
-    ChatMessage {
-        role: Role::Assistant,
-        content: Some(MessageContent::String("calling a tool".to_string())),
-        tool_calls: Some(vec![ToolCall {
-            id: tool_call_id.to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: name.to_string(),
-                arguments: arguments.to_string(),
-            },
-            metadata: None,
-        }]),
-        ..Default::default()
-    }
+fn assistant_tool_call_msg_with_args(name: &str, tool_call_id: &str, arguments: &str) -> Message {
+    Message::new(
+        Role::Assistant,
+        MessageContent::Parts(vec![
+            ContentPart::text("calling a tool"),
+            ContentPart::tool_call(
+                tool_call_id,
+                name,
+                serde_json::from_str(arguments)
+                    .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string())),
+            ),
+        ]),
+    )
 }
 
-fn numbered_messages(count: u32) -> Vec<ChatMessage> {
+fn numbered_messages(count: u32) -> Vec<Message> {
     (1..=count)
         .map(|index| msg(Role::User, &format!("m{index}")))
         .collect()
 }
 
-fn alternating_assistant_user_messages(assistant_count: u32) -> Vec<ChatMessage> {
+fn alternating_assistant_user_messages(assistant_count: u32) -> Vec<Message> {
     let mut messages = Vec::with_capacity((assistant_count * 2) as usize);
     for index in 1..=assistant_count {
         messages.push(msg(Role::User, &format!("u{index}")));
@@ -85,7 +74,7 @@ fn render_list(sessions: &[stakpak_api::SessionSummary], mode: OutputMode) -> St
 
 fn render_show(
     session: &Session,
-    messages: &[ChatMessage],
+    messages: &[Message],
     message_count: u32,
     limit: Option<u32>,
     offset: u32,
@@ -438,13 +427,13 @@ async fn sessions_show_json_roundtrip_preserves_tool_calls() {
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
     let messages = value["messages"].as_array().unwrap();
     let assistant = messages.iter().find(|m| m["role"] == "assistant").unwrap();
-    let tool_calls = assistant["tool_calls"].as_array().unwrap();
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0]["id"].as_str().unwrap(), "tc_1");
-    assert_eq!(
-        tool_calls[0]["function"]["name"].as_str().unwrap(),
-        "run_command"
-    );
+    let content = assistant["content"].as_array().unwrap();
+    let tool_call = content
+        .iter()
+        .find(|part| part["type"] == "tool_call")
+        .unwrap();
+    assert_eq!(tool_call["id"].as_str().unwrap(), "tc_1");
+    assert_eq!(tool_call["name"].as_str().unwrap(), "run_command");
 }
 
 #[tokio::test]
@@ -869,12 +858,13 @@ fn render_show_human_with_empty_messages_and_checkpoint_shows_no_messages_marker
 #[test]
 fn render_show_human_renders_tool_call_id_line_for_tool_messages() {
     let session = fake_session(Uuid::new_v4(), true);
-    let tool_msg = ChatMessage {
-        role: Role::Tool,
-        content: Some(MessageContent::String("tool output".to_string())),
-        tool_call_id: Some("tc_42".to_string()),
-        ..Default::default()
-    };
+    let tool_msg = Message::new(
+        Role::Tool,
+        MessageContent::Parts(vec![ContentPart::tool_result(
+            "tc_42",
+            serde_json::Value::String("tool output".to_string()),
+        )]),
+    );
     let rendered = render_show(&session, &[tool_msg], 1, None, 0, None, OutputMode::Human);
     assert!(rendered.contains("[tool_call_id] tc_42"));
     assert!(rendered.contains("tool output"));
@@ -912,7 +902,7 @@ fn render_show_human_renders_raw_non_json_tool_call_arguments() {
     let rendered = render_show(&session, &[asst], 1, Some(1), 0, None, OutputMode::Human);
     assert!(rendered.contains("[tool_call] run_cmd (tc_7)"));
     assert!(rendered.contains("      arguments:"));
-    assert!(rendered.contains("        not-json --flag raw"));
+    assert!(rendered.contains("        \"not-json --flag raw\""));
 }
 
 // =============================================================================
@@ -921,29 +911,17 @@ fn render_show_human_renders_raw_non_json_tool_call_arguments() {
 
 #[test]
 fn render_show_human_strips_terminal_escape_sequences() {
-    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
-
     let mut session = fake_session(Uuid::new_v4(), true);
     session.title = "evil\x1b[2Jtitle\x1b]52;c;YmFkYm95\x07".to_string();
     session.cwd = Some("/tmp/\x1b[31mred\x1b[0m".to_string());
 
-    let tool_msg = ChatMessage {
-        role: Role::Assistant,
-        content: Some(MessageContent::String(
-            "hi\x1b[2Jhidden\x1b]8;;https://evil.example/\x07click\x1b]8;;\x07".to_string(),
-        )),
-        tool_calls: Some(vec![ToolCall {
-            id: "tc_\x1b[Kx".to_string(),
-            r#type: "function".to_string(),
-            function: FunctionCall {
-                name: "run_\x1b[31mcmd".to_string(),
-                arguments: "{}".to_string(),
-            },
-            metadata: None,
-        }]),
-        tool_call_id: None,
-        ..Default::default()
-    };
+    let tool_msg = Message::new(
+        Role::Assistant,
+        MessageContent::Parts(vec![
+            ContentPart::text("hi\x1b[2Jhidden\x1b]8;;https://evil.example/\x07click\x1b]8;;\x07"),
+            ContentPart::tool_call("tc_\x1b[Kx", "run_\x1b[31mcmd", serde_json::json!({})),
+        ]),
+    );
 
     let rendered = render_show(&session, &[tool_msg], 1, None, 0, None, OutputMode::Human);
     assert!(
@@ -984,11 +962,7 @@ async fn render_list_human_strips_terminal_escape_sequences_from_title() {
 #[test]
 fn render_show_json_preserves_raw_content_including_escapes() {
     let session = fake_session(Uuid::new_v4(), true);
-    let m = ChatMessage {
-        role: Role::User,
-        content: Some(MessageContent::String("hi\x1b[2Jhidden".to_string())),
-        ..Default::default()
-    };
+    let m = Message::new(Role::User, "hi\x1b[2Jhidden".to_string());
     let rendered = render_show(&session, &[m], 1, None, 0, None, OutputMode::Json);
     let v: serde_json::Value = serde_json::from_str(&rendered).unwrap();
     assert_eq!(

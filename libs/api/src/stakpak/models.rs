@@ -4,7 +4,6 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stakpak_shared::models::integrations::openai::ChatMessage;
 use uuid::Uuid;
 
 // =============================================================================
@@ -89,8 +88,11 @@ pub struct CheckpointSummary {
 /// Checkpoint state containing messages
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CheckpointState {
-    #[serde(default)]
-    pub messages: Vec<ChatMessage>,
+    #[serde(
+        default,
+        deserialize_with = "crate::message_compat::deserialize_messages"
+    )]
+    pub messages: Vec<stakai::Message>,
     /// Optional metadata for context trimming state, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,

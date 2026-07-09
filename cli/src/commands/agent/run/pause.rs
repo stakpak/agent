@@ -1,6 +1,6 @@
+use stakai::{ContentPart, Message, Role, ToolCall};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::async_manifest::{AsyncManifest, PauseReason};
-use stakpak_shared::models::integrations::openai::{ChatMessage, Role, ToolCall};
 use std::collections::HashSet;
 
 /// Exit code indicating the agent has paused and needs input or approval to resume.
@@ -67,13 +67,38 @@ impl ResumeInput {
 
 /// Detect pending tool calls from checkpoint messages.
 /// Returns tool calls from the last assistant message that don't have corresponding tool results.
-pub fn detect_pending_tool_calls(messages: &[ChatMessage]) -> Vec<ToolCall> {
+pub fn detect_pending_tool_calls(messages: &[Message]) -> Vec<ToolCall> {
     // Find the last assistant message with tool_calls
     let tool_calls = messages
         .iter()
         .rev()
-        .find(|msg| msg.role == Role::Assistant && msg.tool_calls.is_some())
-        .and_then(|msg| msg.tool_calls.as_ref());
+        .find(|msg| {
+            msg.role == Role::Assistant
+                && msg
+                    .parts()
+                    .iter()
+                    .any(|part| matches!(part, ContentPart::ToolCall { .. }))
+        })
+        .map(|msg| {
+            msg.parts()
+                .into_iter()
+                .filter_map(|part| match part {
+                    ContentPart::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                        metadata,
+                        ..
+                    } => Some(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                        metadata,
+                    }),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
 
     let Some(tool_calls) = tool_calls else {
         return Vec::new();
@@ -83,14 +108,17 @@ pub fn detect_pending_tool_calls(messages: &[ChatMessage]) -> Vec<ToolCall> {
     let executed_ids: HashSet<String> = messages
         .iter()
         .filter(|msg| msg.role == Role::Tool)
-        .filter_map(|msg| msg.tool_call_id.clone())
+        .flat_map(|msg| msg.parts())
+        .filter_map(|part| match part {
+            ContentPart::ToolResult { tool_call_id, .. } => Some(tool_call_id),
+            _ => None,
+        })
         .collect();
 
     // Return tool calls without results
     tool_calls
-        .iter()
+        .into_iter()
         .filter(|tc| !executed_ids.contains(&tc.id))
-        .cloned()
         .collect()
 }
 
