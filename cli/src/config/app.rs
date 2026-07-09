@@ -455,6 +455,7 @@ impl AppConfig {
             "openai" => "OPENAI_API_KEY",
             "gemini" => "GEMINI_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
+            "requesty" => "REQUESTY_API_KEY",
             _ => return None,
         };
 
@@ -856,7 +857,7 @@ impl AppConfig {
         }
 
         let config_provider = Some("Local".to_string());
-        let builtin_providers = ["anthropic", "openai", "gemini", "openrouter"];
+        let builtin_providers = ["anthropic", "openai", "gemini", "openrouter", "requesty"];
 
         for provider_name in builtin_providers {
             if let Some(auth) = self.resolve_provider_auth(provider_name) {
@@ -865,6 +866,7 @@ impl AppConfig {
                     "openai" => "OpenAI",
                     "gemini" => "Gemini",
                     "openrouter" => "OpenRouter",
+                    "requesty" => "Requesty",
                     _ => provider_name,
                 };
 

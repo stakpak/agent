@@ -306,6 +306,15 @@ impl ProfileConfig {
                         }
                     }
                 }
+                ProviderConfig::Requesty { api_endpoint, .. } => {
+                    if let Some(ep) = api_endpoint {
+                        let clean = Self::clean_api_endpoint(Some(ep.clone()));
+                        if clean.as_ref() != Some(ep) {
+                            *api_endpoint = clean;
+                            cleaned = true;
+                        }
+                    }
+                }
             }
         }
 
