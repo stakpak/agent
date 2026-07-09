@@ -17,13 +17,19 @@ fn map_knowledge_err(path: &str, err: KnowledgeApiError) -> Error {
     match err {
         KnowledgeApiError::NotFound { .. } => Error::NotFound(PathBuf::from(path)),
         KnowledgeApiError::Conflict { .. } => Error::AlreadyExists(PathBuf::from(path)),
+        KnowledgeApiError::PreconditionFailed { .. } => Error::Conflict(PathBuf::from(path)),
         other => Error::Parse(other.to_string()),
     }
 }
 
 pub trait StorageBackend {
     fn create(&self, path: &str, content: &[u8]) -> Result<(), Error>;
-    fn overwrite(&self, path: &str, content: &[u8]) -> Result<(), Error>;
+    fn overwrite(
+        &self,
+        path: &str,
+        content: &[u8],
+        expected_hash: Option<&str>,
+    ) -> Result<(), Error>;
     fn read(&self, path: &str) -> Result<Vec<u8>, Error>;
     fn read_prefix(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, Error>;
     fn remove(&self, path: &str) -> Result<(), Error>;
@@ -276,7 +282,12 @@ impl StorageBackend for LocalFsBackend {
         Ok(())
     }
 
-    fn overwrite(&self, path: &str, content: &[u8]) -> Result<(), Error> {
+    fn overwrite(
+        &self,
+        path: &str,
+        content: &[u8],
+        _expected_hash: Option<&str>,
+    ) -> Result<(), Error> {
         self.ensure_store()?;
         let target = self.resolve_path(path)?;
         self.ensure_no_symlinks_below_root(&target)?;
@@ -497,10 +508,18 @@ impl StorageBackend for RemoteBackend {
         .map_err(|e| map_knowledge_err(path, e))
     }
 
-    fn overwrite(&self, path: &str, content: &[u8]) -> Result<(), Error> {
+    fn overwrite(
+        &self,
+        path: &str,
+        content: &[u8],
+        expected_hash: Option<&str>,
+    ) -> Result<(), Error> {
         tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.client.overwrite_knowledge_file(path, content).await })
+            tokio::runtime::Handle::current().block_on(async {
+                self.client
+                    .overwrite_knowledge_file(path, content, expected_hash)
+                    .await
+            })
         })
         .map(|_| ())
         .map_err(|e| map_knowledge_err(path, e))
@@ -779,7 +798,7 @@ mod tests {
             .expect("create initial summary");
 
         backend
-            .overwrite("summaries/auth.md", b"new")
+            .overwrite("summaries/auth.md", b"new", None)
             .expect("overwrite file");
 
         let content = backend

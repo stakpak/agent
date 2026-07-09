@@ -268,7 +268,7 @@ fn run_write(
     if force {
         backend
             .as_ref()
-            .overwrite(&path, &content)
+            .overwrite(&path, &content, None)
             .map_err(|error| error.to_string())?;
     } else {
         backend.as_ref().create(&path, &content).map_err(|error| match error {
