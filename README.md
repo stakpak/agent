@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Fcli%2Fstakpak.svg)](https://mcptoplist.com/server/mcp.so%2Fcli%2Fstakpak)
+
 
 
 <p align="center">
