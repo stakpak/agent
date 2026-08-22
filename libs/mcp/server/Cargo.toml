@@ -37,6 +37,11 @@ globset = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.8"
+stakpak-mcp-client = { workspace = true }
+stakpak-shared = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
 
 [lints]
 workspace = true
