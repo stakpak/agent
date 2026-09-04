@@ -1,7 +1,8 @@
 //! Bring Your Own Model (BYOM) / Custom Provider configuration
 //!
 //! This module provides configuration for custom OpenAI-compatible providers
-//! such as Ollama, vLLM, or any other provider that implements the OpenAI API.
+//! such as Ollama, llmman (<https://github.com/llmmanorg/llmman>, port 17434),
+//! vLLM, or any other provider that implements the OpenAI API.
 //!
 //! # Configuration Format
 //!
@@ -17,6 +18,7 @@
 //! type = "custom"
 //! api_endpoint = "http://localhost:11434/v1"
 //! # api_key is optional for local providers like Ollama
+//! # For llmman use api_endpoint = "http://localhost:17434/v1"
 //! ```
 //!
 //! # Model Prefix Routing
@@ -75,7 +77,7 @@ pub fn configure_byom(
 
     // Step 1: Provider name
     styled_output::render_info(
-        "Configure your custom OpenAI-compatible provider (e.g., LiteLLM, Ollama).",
+        "Configure your custom OpenAI-compatible provider (e.g., LiteLLM, Ollama, llmman).",
     );
     println!();
 

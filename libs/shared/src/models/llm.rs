@@ -135,7 +135,7 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<ProviderAuth>,
     },
-    /// Custom OpenAI-compatible provider (Ollama, vLLM, etc.)
+    /// Custom OpenAI-compatible provider (Ollama, llmman, vLLM, etc.)
     ///
     /// The provider key in the config becomes the model prefix.
     /// For example, if configured as `providers.offline`, use models as:

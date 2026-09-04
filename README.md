@@ -277,7 +277,7 @@ api_key = "..."
 [settings]
 ```
 
-**Option 2: Bring Your Own LLM** - Use a local OpenAI-compatible endpoint (e.g. Ollama, LM Studio):
+**Option 2: Bring Your Own LLM** - Use a local OpenAI-compatible endpoint (e.g. Ollama, llmman, LM Studio):
 ```toml
 [profiles.offline]
 provider = "local"
@@ -292,6 +292,13 @@ api_endpoint = "http://localhost:11434/v1"
 # api_key is optional for local providers
 
 [settings]
+```
+
+[llmman](https://github.com/llmmanorg/llmman) serves the same Ollama and OpenAI-compatible APIs on port 17434, so only the endpoint differs:
+```toml
+[profiles.offline.providers.offline]
+type = "custom"
+api_endpoint = "http://localhost:17434/v1"
 ```
 
 **Option 3: Mix Built-in and Custom Providers**:
