@@ -1,3 +1,4 @@
+use crate::foreground_command::ForegroundCommand;
 use crate::tool_container::ToolContainer;
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool};
@@ -1351,7 +1352,7 @@ SAFETY NOTES:
             cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
+        let child = cmd.spawn().map_err(|e| {
             error!("Failed to run command: {}", e);
             CallToolResult::error(vec![
                 Content::text("COMMAND_ERROR"),
@@ -1359,14 +1360,17 @@ SAFETY NOTES:
             ])
         })?;
 
+        let mut child = ForegroundCommand::new(child);
         #[allow(clippy::unwrap_used)]
-        let stdout = child.stdout.take().unwrap();
+        let stdout = child.child_mut().stdout.take().unwrap();
         #[allow(clippy::unwrap_used)]
-        let stderr = child.stderr.take().unwrap();
-        let mut stdout_reader = BufReader::new(stdout);
-        let mut stderr_reader = BufReader::new(stderr);
-        let mut stdout_buf = String::new();
-        let mut stderr_buf = String::new();
+        let stderr = child.child_mut().stderr.take().unwrap();
+        // Lines::next_line is cancellation-safe in select!: read_line can
+        // discard a partial final line when the other pipe or timer wins.
+        let mut stdout_reader = BufReader::new(stdout).lines();
+        let mut stderr_reader = BufReader::new(stderr).lines();
+        let mut stdout_done = false;
+        let mut stderr_done = false;
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
 
@@ -1382,14 +1386,12 @@ SAFETY NOTES:
             stall_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             macro_rules! handle_output {
-                ($read_result:expr, $buf:expr) => {
+                ($read_result:expr, $done:expr) => {
                     match $read_result {
-                        Ok(Ok(0)) => break, // EOF
-                        Ok(Ok(_)) => {
+                        Ok(None) => $done = true, // Drain the other pipe before waiting
+                        Ok(Some(line)) => {
                             last_output_time = std::time::Instant::now();
                             stall_start_time = None; // Reset stall tracking on output
-                            let line = $buf.trim_end_matches('\n').to_string();
-                            $buf.clear();
                             result.push_str(&format!("{}\n", line));
                             let _ = ctx
                                 .peer
@@ -1410,8 +1412,7 @@ SAFETY NOTES:
                                 })
                                 .await;
                         }
-                        Ok(Err(_)) => break, // Read error
-                        Err(_) => {}         // Timeout - continue loop
+                        Err(error) => return Err(error),
                     }
                 };
             }
@@ -1452,17 +1453,16 @@ SAFETY NOTES:
                         }
                     }
 
-                    read_result = tokio::time::timeout(Duration::from_millis(100), stderr_reader.read_line(&mut stderr_buf)) => {
-                        handle_output!(read_result, stderr_buf);
+                    read_result = stderr_reader.next_line(), if !stderr_done => {
+                        handle_output!(read_result, stderr_done);
                     }
 
-                    read_result = tokio::time::timeout(Duration::from_millis(100), stdout_reader.read_line(&mut stdout_buf)) => {
-                        handle_output!(read_result, stdout_buf);
+                    read_result = stdout_reader.next_line(), if !stdout_done => {
+                        handle_output!(read_result, stdout_done);
                     }
                 }
 
-                // Check if process has exited
-                if let Ok(Some(_)) = child.try_wait() {
+                if stdout_done && stderr_done {
                     break;
                 }
             }
@@ -1479,7 +1479,11 @@ SAFETY NOTES:
                 result = tokio::time::timeout(timeout_duration, stream_and_wait) => result,
                 _ = ctx.ct.cancelled() => {
                     // Cancellation occurred, kill the process
-                    let _ = child.kill().await;
+                    if let Err(error) = child.terminate().await {
+                        return Err(CallToolResult::error(vec![Content::text(format!(
+                            "Foreground command cleanup failed: {error}"
+                        ))]));
+                    }
                     return Err(CallToolResult::cancel(Some(&vec![
                         Content::text("COMMAND_CANCELLED"),
                         Content::text("Command execution was cancelled"),
@@ -1490,7 +1494,11 @@ SAFETY NOTES:
             tokio::select! {
                 result = stream_and_wait => Ok(result),
                 _ = ctx.ct.cancelled() => {
-                    let _ = child.kill().await;
+                    if let Err(error) = child.terminate().await {
+                        return Err(CallToolResult::error(vec![Content::text(format!(
+                            "Foreground command cleanup failed: {error}"
+                        ))]));
+                    }
                     return Err(CallToolResult::cancel(Some(&vec![
                         Content::text("COMMAND_CANCELLED"),
                         Content::text("Command execution was cancelled"),
@@ -1509,7 +1517,11 @@ SAFETY NOTES:
             }
             Err(_) => {
                 // Timeout occurred, kill the process
-                let _ = child.kill().await;
+                if let Err(error) = child.terminate().await {
+                    return Err(CallToolResult::error(vec![Content::text(format!(
+                        "Foreground command cleanup failed: {error}"
+                    ))]));
+                }
                 result.push_str(&format!(
                     "Command timed out after {} seconds\n",
                     timeout.unwrap_or_default()
@@ -3370,7 +3382,7 @@ mod tests {
         );
     }
 
-    fn local_container_with_profile(profile_name: Option<&str>) -> ToolContainer {
+    pub(super) fn local_container_with_profile(profile_name: Option<&str>) -> ToolContainer {
         let task_manager = stakpak_shared::task_manager::TaskManager::new();
         ToolContainer::new(
             None,
@@ -4096,3 +4108,7 @@ mod tests {
         assert_eq!(result, Some(("a***b***c".to_string(), 2)));
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "foreground_tests.rs"]
+mod foreground_tests;

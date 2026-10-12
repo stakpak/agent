@@ -17,6 +17,7 @@ use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
+mod foreground_command;
 pub mod integrations;
 pub mod local_tools;
 pub mod remote_tools;

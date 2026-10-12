@@ -1,0 +1,98 @@
+name: Foreground cancellation qualification
+on:
+  push:
+    branches: [fix/foreground-command-cancellation]
+  pull_request:
+    paths:
+      - 'libs/mcp/server/**'
+      - '.github/workflows/foreground-cancellation.yml'
+permissions:
+  contents: read
+jobs:
+  linux-qualification:
+    timeout-minutes: 30
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.94.1'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Generate formatting receipt
+        run: |
+          cargo fmt --all
+          git diff > formatting.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formatting-${{ github.sha }}
+          path: formatting.patch
+      - run: cargo test --locked -p stakpak-mcp-server foreground_ -- --nocapture
+      - name: Stock executor must fail the cancellation regression
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          git show FETCH_HEAD:libs/mcp/server/src/local_tools.rs > libs/mcp/server/src/local_tools.rs
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          p = Path('libs/mcp/server/src/local_tools.rs')
+          s = p.read_text().replace('    fn local_container_with_profile(', '    pub(super) fn local_container_with_profile(')
+          s += '\n#[cfg(all(test, target_os = "linux"))]\n#[path = "foreground_tests.rs"]\nmod foreground_tests;\n'
+          p.write_text(s)
+          PYTHON
+          cargo test --locked -p stakpak-mcp-server --no-run
+          if cargo test --locked -p stakpak-mcp-server foreground_cancel_without_timeout -- --nocapture; then
+            echo 'Stock executor unexpectedly passed; regression does not demonstrate the defect'
+            exit 1
+          fi
+          git restore libs/mcp/server/src/local_tools.rs
+          cargo fmt --all
+      - run: cargo clippy --locked -p stakpak-mcp-server --all-targets -- -D warnings
+      - run: cargo build --locked --release -p stakpak
+      - run: git diff --exit-code
+      - name: Record prerelease artifact provenance
+        run: |
+          git rev-parse HEAD > target/release/source-commit.txt
+          rustc --version > target/release/rust-version.txt
+          sha256sum target/release/stakpak > target/release/stakpak.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stakpak-linux-prerelease-${{ github.sha }}
+          path: |
+            target/release/stakpak
+            target/release/stakpak.sha256
+            target/release/source-commit.txt
+            target/release/rust-version.txt
+
+  upstream-suites:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    env:
+      # Keep assertions/debug behavior; omit symbols to bound linker memory.
+      CARGO_BUILD_JOBS: '1'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.94.1'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Complete workspace suite
+        timeout-minutes: 20
+        run: cargo test --locked --workspace --verbose
+      - name: Complete feature suites
+        timeout-minutes: 15
+        run: |
+          cargo test --locked -p stakpak-shared --features sqlite --verbose
+          cargo test --locked -p stakpak --features libsql-test --verbose
+          cargo test --locked -p stakpak-gateway --features libsql-test --verbose
+          cargo test --locked -p stakai --features network-tests --verbose
+      - run: cargo build --locked --verbose
