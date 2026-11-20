@@ -1262,7 +1262,7 @@ impl StakpakAcpAgent {
                             .await;
 
                         // Only send non-empty content after filtering
-                        if !filtered_content.trim().is_empty() {
+                        if !filtered_content.is_empty() {
                             // Send streaming chunk to ACP client
                             let (tx, rx) = oneshot::channel();
                             self.session_update_tx
@@ -1297,7 +1297,7 @@ impl StakpakAcpAgent {
 
         // Flush any remaining content from the buffer at the end of the stream
         let flushed_content = self.flush_streaming_buffer().await;
-        if !flushed_content.trim().is_empty() {
+        if !flushed_content.is_empty() {
             // Send the flushed content
             let (tx, rx) = oneshot::channel();
             self.session_update_tx
@@ -2221,8 +2221,110 @@ fn get_tool_kind(tool_name: &str) -> acp::ToolKind {
 mod tests {
     use super::*;
     use crate::commands::acp::tool_names;
+    use crate::config::{ProfileConfig, Settings};
     use stakpak_api::ModelLimit;
     use test_case::test_case;
+
+    #[tokio::test]
+    async fn test_streaming_preserves_whitespace_chunks() {
+        let temp = tempfile::tempdir().unwrap();
+        let client = AgentClient::new(AgentClientConfig {
+            store_path: Some(
+                temp.path()
+                    .join("session.db")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let (session_update_tx, mut rx) = mpsc::unbounded_channel();
+        let agent = StakpakAcpAgent {
+            config: Arc::new(tokio::sync::RwLock::new(AppConfig::build(
+                "test",
+                temp.path().join("config.toml"),
+                Settings {
+                    machine_name: None,
+                    auto_append_gitignore: None,
+                    anonymous_id: None,
+                    collect_telemetry: Some(false),
+                    editor: None,
+                },
+                ProfileConfig::default(),
+            ))),
+            client: Arc::new(tokio::sync::RwLock::new(Arc::new(client))),
+            model: Arc::new(tokio::sync::RwLock::new(Model::custom("test", "test"))),
+            session_update_tx,
+            next_session_id: Cell::new(0),
+            mcp_client: None,
+            mcp_tools: Vec::new(),
+            tools: None,
+            current_session_id: Cell::new(None),
+            progress_tx: None,
+            messages: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            permission_request_tx: None,
+            stream_cancel_tx: None,
+            tool_cancel_tx: None,
+            active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
+            streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
+            fs_operation_tx: None,
+            client_capabilities: Arc::new(tokio::sync::Mutex::new(
+                acp::ClientCapabilities::default(),
+            )),
+        };
+        let chunks = [
+            "1",
+            " ",
+            "2",
+            "\n",
+            "\t",
+            "3",
+            "",
+            "<checkpoint_id>hidden</checkpoint_id>",
+            "\n",
+            "<",
+        ];
+        let responses = chunks.iter().map(|content| Ok(serde_json::from_value::<ChatCompletionStreamResponse>(
+            serde_json::json!({
+                "id": "test", "object": "chat.completion.chunk", "created": 0,
+                "model": "test", "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": null}]
+            })
+        ).unwrap()));
+        let session_id = acp::SessionId::new("test");
+        let process = agent.process_acp_streaming_response_with_cancellation(
+            futures_util::stream::iter(responses),
+            &session_id,
+        );
+        let collect = async {
+            let mut text = String::new();
+            loop {
+                let (notification, ack) = rx.recv().await.unwrap();
+                if let acp::SessionUpdate::AgentMessageChunk(chunk) = notification.update
+                    && let acp::ContentBlock::Text(content) = chunk.content
+                {
+                    assert!(!content.text.is_empty());
+                    text.push_str(&content.text);
+                }
+                ack.send(()).unwrap();
+                if text.ends_with('<') {
+                    break;
+                }
+            }
+            text
+        };
+        let (response, text) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(process, collect)
+        })
+        .await
+        .unwrap();
+        assert_eq!(text, "1 2\n\t3\n<");
+        assert_eq!(
+            response.unwrap().choices[0].message.content,
+            Some(MessageContent::String(chunks.concat()))
+        );
+    }
 
     // Per ACP spec, agents MUST check client capabilities before delegating fs operations.
     // Both readTextFile and writeTextFile default to false - delegation requires explicit opt-in.
